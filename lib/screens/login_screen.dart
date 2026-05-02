@@ -167,45 +167,159 @@ class LoginScreen extends GetView<AuthController> {
                   ),
                 ],
               ),
-              const SizedBox(height: 28),
-              // ── Continue button ──────────────────────────────
-              Obx(() => SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton(
-                      onPressed: controller.isLoading.value
-                          ? null
-                          : controller.sendOtp,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.brand,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor:
-                            AppTheme.brand.withValues(alpha: 0.6),
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
+              const SizedBox(height: 24),
+              // ── Password section (shown only when phone matched an admin)
+              Obx(() {
+                if (!controller.awaitingAdminPassword.value) {
+                  return const SizedBox.shrink();
+                }
+                final adminName = controller.pendingAdmin.value?.name ?? '';
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'PASSWORD',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: colorScheme.onSurface,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 54,
+                      child: TextField(
+                        controller: controller.passwordController,
+                        obscureText: true,
+                        autofocus: true,
+                        onSubmitted: (_) => controller.verifyAdminPassword(),
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: colorScheme.onSurface,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Admin password',
+                          hintStyle: GoogleFonts.inter(
+                            fontSize: 15,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          filled: true,
+                          fillColor: isDark
+                              ? colorScheme.surfaceContainerHighest
+                              : Colors.white,
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 16),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                            borderSide:
+                                BorderSide(color: colorScheme.outline),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(6),
+                            borderSide: const BorderSide(
+                                color: AppTheme.brand, width: 1.5),
+                          ),
                         ),
                       ),
-                      child: controller.isLoading.value
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Text(
-                              'Continue',
-                              style: GoogleFonts.inter(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
                     ),
-                  )),
+                    if (adminName.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Signing in as $adminName',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                  ],
+                );
+              }),
+              // ── Continue / Sign-in button ───────────────────
+              Obx(() {
+                final showPasswordStep =
+                    controller.awaitingAdminPassword.value;
+                final loading = controller.isLoading.value;
+                return SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: loading
+                        ? null
+                        : (showPasswordStep
+                            ? controller.verifyAdminPassword
+                            : controller.submitPhone),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.brand,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor:
+                          AppTheme.brand.withValues(alpha: 0.6),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    child: loading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.white,
+                            ),
+                          )
+                        : Text(
+                            showPasswordStep ? 'Sign in' : 'Continue',
+                            style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                  ),
+                );
+              }),
+              // ── Cancel password step ─────────────────────────
+              Obx(() {
+                if (!controller.awaitingAdminPassword.value) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Center(
+                    child: TextButton(
+                      onPressed: controller.cancelAdminPassword,
+                      child: Text(
+                        'Use a different number',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
               const SizedBox(height: 16),
+              // ── First-time admin setup link ──────────────────
+              Center(
+                child: TextButton(
+                  onPressed: () => Get.toNamed('/admin-setup'),
+                  child: Text(
+                    'First-time setup — create admin account',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.brand,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
               // ── Appwrite connection ping ─────────────────────
               Center(
                 child: OutlinedButton.icon(

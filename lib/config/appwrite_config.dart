@@ -14,23 +14,24 @@ class AppwriteConfig {
   static const String passengersCollection = '69e5f8df001bfdbea1dd';
   static const String busDetailsCollection = '69e5f9e90001e4966697';
 
-  // ── Admin phones ───────────────────────────────────────────
-  /// Admin phone numbers (without country code).
-  /// These users see the full admin dashboard.
-  /// Everyone else enters as a passenger and sees only their bookings.
-  static const List<String> adminPhones = ['9327148044'];
+  /// Admin login records — `{phone, name, passwordHash, salt, whatsappNumber}`.
+  /// Required schema (create manually in the Appwrite console under the
+  /// project's database):
+  ///   phone           — string, required, unique
+  ///   name            — string, required
+  ///   passwordHash    — string, required (hex SHA-256 of salt+password)
+  ///   salt            — string, required (16-byte hex)
+  ///   whatsappNumber  — string, optional (E.164 — used for the Phase 4
+  ///                     customer booking handoff; falls back to `phone`
+  ///                     if blank)
+  static const String adminsCollection = 'admins';
 
-  /// Check if a phone number belongs to an admin.
-  static bool isAdminPhone(String phone) {
+  /// Last-10-digit normaliser used when looking up admin records by phone.
+  static String normalisePhone(String phone) {
     final cleaned = phone.replaceAll(RegExp(r'[^\d]'), '');
-    final last10 = cleaned.length >= 10
+    return cleaned.length >= 10
         ? cleaned.substring(cleaned.length - 10)
         : cleaned;
-    return adminPhones.any((admin) {
-      final adminLast10 =
-          admin.length >= 10 ? admin.substring(admin.length - 10) : admin;
-      return adminLast10 == last10;
-    });
   }
 
   AppwriteConfig._();

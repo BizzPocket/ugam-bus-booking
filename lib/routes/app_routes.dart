@@ -2,7 +2,7 @@ import 'package:get/get.dart';
 import '../screens/main_shell.dart';
 import '../screens/splash_screen.dart';
 import '../screens/login_screen.dart';
-import '../screens/otp_screen.dart';
+import '../screens/admin_setup_screen.dart';
 import '../screens/create_tour_screen.dart';
 import '../screens/seat_assignment_screen.dart';
 import '../screens/bus_list_screen.dart';
@@ -16,7 +16,7 @@ import '../screens/search_screen.dart';
 class AppRoutes {
   static const String splash = '/splash';
   static const String login = '/login';
-  static const String otp = '/otp';
+  static const String adminSetup = '/admin-setup';
   static const String home = '/';
   static const String createTour = '/create-tour';
   static const String seatAssignment = '/seat-assignment';
@@ -37,8 +37,8 @@ class AppRoutes {
       page: () => const LoginScreen(),
     ),
     GetPage(
-      name: otp,
-      page: () => const OtpScreen(),
+      name: adminSetup,
+      page: () => const AdminSetupScreen(),
     ),
     GetPage(
       name: home,

@@ -2,32 +2,38 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../config/appwrite_config.dart';
+import '../models/admin.dart';
 import '../models/profile.dart';
+import '../services/admin_auth_service.dart';
 import '../utils/app_snackbar.dart';
 
-/// Local-only auth controller.
-/// No backend auth — admin phones are checked against [AppwriteConfig.adminPhones],
-/// everyone else is treated as a passenger. Session is persisted to SharedPreferences.
+/// Phone+password admin auth backed by the Appwrite `admins` collection.
+/// Non-admin phones still drop straight through into a passenger session
+/// (no auth) so first-time customers can browse without friction.
 class AuthController extends GetxController {
   static const _keyPhone = 'auth_phone';
   static const _keyRole = 'auth_role';
   static const _keyName = 'auth_name';
 
   final phoneController = TextEditingController();
-  final otpControllers = List.generate(4, (_) => TextEditingController());
-  final focusNodes = List.generate(4, (_) => FocusNode());
+  final passwordController = TextEditingController();
 
   final isLoading = false.obs;
   final phoneNumber = ''.obs;
-  final isOtpSent = false.obs;
-  final resendTimer = 42.obs;
-  final isResendEnabled = false.obs;
+
+  /// True after a successful phone lookup that matched an admin record —
+  /// the login screen swaps to the password field.
+  final awaitingAdminPassword = false.obs;
+  final Rxn<Admin> pendingAdmin = Rxn<Admin>();
+
   final isLoggedIn = false.obs;
   final userName = ''.obs;
   final userPhone = ''.obs;
   final userRole = UserRole.passenger.obs;
   final Rxn<Profile> currentProfile = Rxn<Profile>();
+  final Rxn<Admin> currentAdmin = Rxn<Admin>();
+
+  AdminAuthService get _adminAuth => AdminAuthService();
 
   /// Whether the current user is an admin (full dashboard access).
   bool get isAdmin => userRole.value == UserRole.admin;
@@ -74,8 +80,6 @@ class AuthController extends GetxController {
     return '+91 $phone';
   }
 
-  String get otpValue => otpControllers.map((c) => c.text).join();
-
   String get initials {
     final name = userName.value;
     if (name.isEmpty) return '?';
@@ -86,57 +90,96 @@ class AuthController extends GetxController {
     return name[0].toUpperCase();
   }
 
-  void startResendTimer() {
-    resendTimer.value = 42;
-    isResendEnabled.value = false;
-    _countDown();
-  }
+  // ── Login flow ───────────────────────────────────────────────
 
-  void _countDown() async {
-    while (resendTimer.value > 0) {
-      await Future.delayed(const Duration(seconds: 1));
-      resendTimer.value--;
-    }
-    isResendEnabled.value = true;
-  }
-
-  String get timerDisplay {
-    final mins = (resendTimer.value ~/ 60).toString().padLeft(2, '0');
-    final secs = (resendTimer.value % 60).toString().padLeft(2, '0');
-    return '$mins:$secs';
-  }
-
-  // ── Login ──────────────────────────────────────────────────
-
-  Future<void> sendOtp() async {
+  /// Step 1 — submit phone number. Looks the number up in the admins
+  /// collection. If it matches, transitions to the password step. If it
+  /// doesn't, logs in immediately as a passenger.
+  Future<void> submitPhone() async {
     final phone = phoneController.text.trim();
     if (phone.length < 10) {
       AppSnackBar.error('Please enter a valid 10-digit phone number');
       return;
     }
 
-    // ── Admin flow: no OTP, straight to admin dashboard ────────
-    if (AppwriteConfig.isAdminPhone(phone)) {
-      await _loginAsAdmin(phone);
+    isLoading.value = true;
+    try {
+      final admin = await _adminAuth.findByPhone(phone);
+      if (admin != null) {
+        pendingAdmin.value = admin;
+        awaitingAdminPassword.value = true;
+        passwordController.clear();
+      } else {
+        await _loginAsPassenger(phone);
+      }
+    } catch (e) {
+      AppSnackBar.error(
+        'Could not verify the phone number with Appwrite.\n$e',
+        title: 'Connection error',
+      );
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  /// Legacy entry point kept so existing buttons still work.
+  Future<void> sendOtp() => submitPhone();
+
+  /// Step 2 — verify the admin's password and log them in on success.
+  Future<void> verifyAdminPassword() async {
+    final admin = pendingAdmin.value;
+    if (admin == null) {
+      awaitingAdminPassword.value = false;
+      return;
+    }
+    final password = passwordController.text;
+    if (password.isEmpty) {
+      AppSnackBar.error('Enter your admin password to continue');
       return;
     }
 
-    // ── Passenger flow: no OTP, straight to passenger view ────
-    await _loginAsPassenger(phone);
+    isLoading.value = true;
+    try {
+      if (!_adminAuth.verifyPassword(admin, password)) {
+        AppSnackBar.error('Incorrect password');
+        return;
+      }
+      await _loginAsAdmin(admin);
+    } finally {
+      isLoading.value = false;
+    }
   }
 
-  /// Admin enters without OTP — set phone, role, and go to admin dashboard.
-  Future<void> _loginAsAdmin(String phone) async {
+  /// Legacy entry point — old OTP flow no longer exists in production.
+  Future<void> verifyOtp() async {
+    if (awaitingAdminPassword.value) {
+      await verifyAdminPassword();
+    } else {
+      Get.offAllNamed('/');
+    }
+  }
+
+  /// Cancel the password step and return to phone entry.
+  void cancelAdminPassword() {
+    pendingAdmin.value = null;
+    awaitingAdminPassword.value = false;
+    passwordController.clear();
+  }
+
+  Future<void> _loginAsAdmin(Admin admin) async {
     isLoggedIn.value = true;
-    userPhone.value = phone;
-    phoneNumber.value = phone;
+    currentAdmin.value = admin;
+    userPhone.value = admin.phone;
+    phoneNumber.value = admin.phone;
     userRole.value = UserRole.admin;
-    userName.value = 'Admin';
+    userName.value = admin.name;
+    awaitingAdminPassword.value = false;
+    pendingAdmin.value = null;
+    passwordController.clear();
     await _persistSession();
     Get.offAllNamed('/');
   }
 
-  /// Passenger enters without OTP — just set phone and go to passenger view.
   Future<void> _loginAsPassenger(String phone) async {
     isLoggedIn.value = true;
     userPhone.value = phone;
@@ -145,19 +188,6 @@ class AuthController extends GetxController {
     userName.value = '';
     await _persistSession();
     Get.offAllNamed('/');
-  }
-
-  /// Kept for route compatibility. OTP flow is unused in production.
-  Future<void> verifyOtp() async {
-    Get.offAllNamed('/');
-  }
-
-  void resendOtp() {
-    if (!isResendEnabled.value) return;
-    for (final c in otpControllers) {
-      c.clear();
-    }
-    sendOtp();
   }
 
   Future<void> updateUserName(String name) async {
@@ -173,25 +203,21 @@ class AuthController extends GetxController {
 
     isLoggedIn.value = false;
     currentProfile.value = null;
+    currentAdmin.value = null;
     userRole.value = UserRole.passenger;
     userName.value = '';
     userPhone.value = '';
     phoneController.clear();
-    for (final c in otpControllers) {
-      c.clear();
-    }
+    passwordController.clear();
+    awaitingAdminPassword.value = false;
+    pendingAdmin.value = null;
     Get.offAllNamed('/splash');
   }
 
   @override
   void onClose() {
     phoneController.dispose();
-    for (final c in otpControllers) {
-      c.dispose();
-    }
-    for (final f in focusNodes) {
-      f.dispose();
-    }
+    passwordController.dispose();
     super.onClose();
   }
 }
