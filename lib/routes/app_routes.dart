@@ -3,6 +3,7 @@ import '../screens/main_shell.dart';
 import '../screens/splash_screen.dart';
 import '../screens/login_screen.dart';
 import '../screens/admin_setup_screen.dart';
+import '../screens/customer_tour_list_screen.dart';
 import '../screens/create_tour_screen.dart';
 import '../screens/seat_assignment_screen.dart';
 import '../screens/bus_list_screen.dart';
@@ -17,6 +18,7 @@ class AppRoutes {
   static const String splash = '/splash';
   static const String login = '/login';
   static const String adminSetup = '/admin-setup';
+  static const String customerHome = '/customer-home';
   static const String home = '/';
   static const String createTour = '/create-tour';
   static const String seatAssignment = '/seat-assignment';
@@ -39,6 +41,10 @@ class AppRoutes {
     GetPage(
       name: adminSetup,
       page: () => const AdminSetupScreen(),
+    ),
+    GetPage(
+      name: customerHome,
+      page: () => const CustomerTourListScreen(),
     ),
     GetPage(
       name: home,

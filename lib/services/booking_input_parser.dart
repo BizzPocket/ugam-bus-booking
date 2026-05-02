@@ -3,6 +3,78 @@ import '../models/seat_type.dart';
 import '../models/age_group.dart';
 
 class BookingInputParser {
+  /// Recognises the standardized booking-request message produced by
+  /// `WhatsAppService.buildBookingRequestMessage` (Phase 4). When the
+  /// input matches the template, returns the structured request;
+  /// otherwise falls back to the legacy short-form parser via
+  /// [parse]. The standardized format is identified by the
+  /// `[Tour ID: UGM-XXXXXX]` footer.
+  ParsedBookingInput parseAny(String input) {
+    final tourCodeMatch =
+        RegExp(r'\[Tour ID:\s*(UGM-[A-Z0-9]+)\]').firstMatch(input);
+    if (tourCodeMatch != null) {
+      return _parseStandardisedRequest(input, tourCodeMatch.group(1)!);
+    }
+    return parse(input);
+  }
+
+  ParsedBookingInput _parseStandardisedRequest(String input, String tourCode) {
+    // Strip Markdown bold (*…*) so the regexes match whether the
+    // customer's WhatsApp app preserved it or not.
+    final cleaned = input.replaceAll('*', '');
+
+    String? extract(RegExp re) {
+      final m = re.firstMatch(cleaned);
+      if (m == null) return null;
+      return m.group(1)?.trim();
+    }
+
+    final name = extract(RegExp(r'Name:\s*(.+)', multiLine: true)) ?? '';
+    final seatLine = extract(RegExp(r'Seats:\s*(.+)', multiLine: true));
+    final note = extract(RegExp(r'^📝\s*(.+)', multiLine: true));
+
+    if (name.isEmpty || seatLine == null) {
+      throw ParseException(
+        'Booking request was missing the Name or Seats line.',
+        ParseErrorType.invalidFormat,
+      );
+    }
+
+    final seatTypes = <SeatType>[];
+    for (final part in seatLine.split('+')) {
+      final m = RegExp(r'(\d+)\s*(Single|Double)\s*Sofa',
+              caseSensitive: false)
+          .firstMatch(part.trim());
+      if (m == null) continue;
+      final count = int.parse(m.group(1)!);
+      final type = m.group(2)!.toLowerCase() == 'single'
+          ? SeatType.singleSofa
+          : SeatType.doubleSofa;
+      for (var i = 0; i < count; i++) {
+        seatTypes.add(type);
+      }
+    }
+
+    if (seatTypes.isEmpty) {
+      throw ParseException(
+        'Could not read any seat counts from the request.',
+        ParseErrorType.invalidSeatType,
+      );
+    }
+
+    // Use the cleaned-up name (drop trailing punctuation, take first
+    // line only — customer phones sometimes append a signature).
+    final firstLineName = name.split('\n').first.trim();
+
+    return ParsedBookingInput(
+      customerName: firstLineName,
+      seatCount: seatTypes.length,
+      seatTypes: seatTypes,
+      tourCode: tourCode,
+      note: note,
+    );
+  }
+
   ParsedBookingInput parse(String input) {
     final trimmed = input.trim();
     if (trimmed.isEmpty) {

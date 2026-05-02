@@ -125,6 +125,91 @@ class WhatsAppService {
     return passenger;
   }
 
+  // ── Customer booking request (Phase 4) ────────────────────
+
+  /// Short tour reference shown in customer→admin request messages.
+  /// `UGM-` prefix + last 6 chars of the tour id, upper-cased.
+  static String tourCode(String tourId) {
+    final tail = tourId.length >= 6
+        ? tourId.substring(tourId.length - 6)
+        : tourId;
+    return 'UGM-${tail.toUpperCase()}';
+  }
+
+  /// Builds the standardized booking-request message that the customer
+  /// will send back to the admin via WhatsApp.
+  ///
+  /// The format is fixed so the admin's parser can recognise it
+  /// regardless of which customer sent it.
+  String buildBookingRequestMessage({
+    required Tour tour,
+    required String customerName,
+    required int singleSofaCount,
+    required int doubleSofaCount,
+    String? note,
+  }) {
+    final totalSeats = singleSofaCount + doubleSofaCount;
+    final total = tour.pricePerSeat * totalSeats;
+
+    final seatParts = <String>[];
+    if (doubleSofaCount > 0) {
+      seatParts.add('$doubleSofaCount Double Sofa');
+    }
+    if (singleSofaCount > 0) {
+      seatParts.add('$singleSofaCount Single Sofa');
+    }
+
+    final lines = <String>[
+      '🪷 *Booking Request — Ugam Booking*',
+      '',
+      '🙏 Jai Gurudev',
+      '',
+      '🗺 *Tour:* ${tour.title}',
+      '📍 ${tour.fromCity} → ${tour.toCity}',
+      '📅 ${_formatDate(tour.departureDate)}'
+          '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      '',
+      '👤 *Name:* $customerName',
+      '💺 *Seats:* ${seatParts.join(' + ')}',
+    ];
+
+    if (total > 0) {
+      lines.add('💰 *Estimated total:* ₹${total.toStringAsFixed(0)}');
+    }
+
+    if (note != null && note.trim().isNotEmpty) {
+      lines.addAll(['', '📝 ${note.trim()}']);
+    }
+
+    lines.addAll([
+      '',
+      '[Tour ID: ${tourCode(tour.id)}]',
+    ]);
+
+    return lines.join('\n');
+  }
+
+  /// Opens WhatsApp on the customer's device with the booking request
+  /// pre-filled, addressed to [adminPhone]. Returns true if WhatsApp
+  /// opened successfully.
+  Future<bool> sendBookingRequest({
+    required String adminPhone,
+    required Tour tour,
+    required String customerName,
+    required int singleSofaCount,
+    required int doubleSofaCount,
+    String? note,
+  }) async {
+    final msg = buildBookingRequestMessage(
+      tour: tour,
+      customerName: customerName,
+      singleSofaCount: singleSofaCount,
+      doubleSofaCount: doubleSofaCount,
+      note: note,
+    );
+    return _openWhatsApp(adminPhone, msg);
+  }
+
   // ── Message Builders ──────────────────────────────────────
 
   String buildTicketMessage({

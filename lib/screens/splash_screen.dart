@@ -36,10 +36,13 @@ class _SplashScreenState extends State<SplashScreen>
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
         final auth = Get.find<AuthController>();
-        if (auth.isLoggedIn.value) {
+        if (auth.isLoggedIn.value && auth.isAdmin) {
+          // Admin session restored — go straight to the dashboard.
           Get.offAllNamed('/');
         } else {
-          Get.offAllNamed('/login');
+          // Anyone else (anonymous customer or stale passenger session) lands
+          // on the public tour list. Admins can sign in via the link there.
+          Get.offAllNamed('/customer-home');
         }
       }
     });

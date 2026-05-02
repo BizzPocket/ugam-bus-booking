@@ -17,6 +17,11 @@ class Tour {
   final List<Passenger> passengers;
   final String? handlerId;
   final String? createdBy;
+  /// When true, the tour is visible to anonymous customers in the
+  /// customer-mode tour list. Defaults to true so admins don't have to
+  /// flip a toggle on every tour they create. Set to false in the
+  /// Appwrite console (or via a future admin UI) to hide a tour.
+  final bool isPublic;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -34,6 +39,7 @@ class Tour {
     this.passengers = const [],
     this.handlerId,
     this.createdBy,
+    this.isPublic = true,
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : id = id ?? const Uuid().v4(),
@@ -79,6 +85,7 @@ class Tour {
       'status': status.name,
       'handlerId': handlerId,
       'createdBy': createdBy,
+      'isPublic': isPublic,
     };
   }
 
@@ -120,6 +127,7 @@ class Tour {
       passengers: passengers,
       handlerId: map['handlerId'] as String?,
       createdBy: map['createdBy'] as String?,
+      isPublic: map['isPublic'] is bool ? map['isPublic'] as bool : true,
       createdAt: _parseDate(map[r'$createdAt'] ?? map['createdAt']),
       updatedAt: _parseDate(map[r'$updatedAt'] ?? map['updatedAt']),
     );
@@ -145,6 +153,7 @@ class Tour {
     List<Passenger>? passengers,
     String? handlerId,
     String? createdBy,
+    bool? isPublic,
     DateTime? createdAt,
     DateTime? updatedAt,
   }) {
@@ -162,6 +171,7 @@ class Tour {
       passengers: passengers ?? this.passengers,
       handlerId: handlerId ?? this.handlerId,
       createdBy: createdBy ?? this.createdBy,
+      isPublic: isPublic ?? this.isPublic,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );

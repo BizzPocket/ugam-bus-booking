@@ -7,6 +7,12 @@ class ParsedBookingInput {
   final List<SeatType> seatTypes;
   final AgeGroup? ageGroup;
   final String? mobileNumber;
+  /// Set when the input came from the standardized customer-mode
+  /// WhatsApp booking message (Phase 4) — `UGM-XXXXXX`. Lets the admin
+  /// match the request back to the right tour automatically.
+  final String? tourCode;
+  /// Optional free-text note included in the booking-request message.
+  final String? note;
 
   ParsedBookingInput({
     required this.customerName,
@@ -14,6 +20,8 @@ class ParsedBookingInput {
     required this.seatTypes,
     this.ageGroup,
     this.mobileNumber,
+    this.tourCode,
+    this.note,
   });
 
   bool validate() {
