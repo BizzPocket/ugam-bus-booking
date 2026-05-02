@@ -1,0 +1,134 @@
+import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+import '../config/theme.dart';
+
+/// Production-ready dialog utilities.
+class AppDialogs {
+  AppDialogs._();
+
+  /// Shows a confirmation dialog for destructive or important actions.
+  /// Returns `true` if confirmed, `false` if cancelled.
+  static Future<bool> confirm({
+    required String title,
+    required String message,
+    String confirmText = 'Confirm',
+    String cancelText = 'Cancel',
+    bool isDestructive = false,
+  }) async {
+    final result = await Get.dialog<bool>(
+      Builder(
+        builder: (context) {
+          final theme = Theme.of(context);
+          final isDark = theme.brightness == Brightness.dark;
+          final colorScheme = theme.colorScheme;
+
+          return AlertDialog(
+            backgroundColor: isDark ? AppTheme.cardDark : Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            title: Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                color: colorScheme.onSurface,
+              ),
+            ),
+            content: Text(
+              message,
+              style: TextStyle(
+                fontSize: 14,
+                color: colorScheme.onSurfaceVariant,
+                height: 1.5,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Get.back(result: false),
+                child: Text(
+                  cancelText,
+                  style: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Get.back(result: true),
+                style: TextButton.styleFrom(
+                  foregroundColor: isDestructive
+                      ? AppTheme.danger
+                      : colorScheme.primary,
+                ),
+                child: Text(
+                  confirmText,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+      barrierDismissible: true,
+    );
+    return result ?? false;
+  }
+
+  /// Shows an error dialog for critical errors that need acknowledgment.
+  static Future<void> error({
+    required String title,
+    required String message,
+  }) async {
+    await Get.dialog(
+      Builder(
+        builder: (context) {
+          final theme = Theme.of(context);
+          final isDark = theme.brightness == Brightness.dark;
+          final colorScheme = theme.colorScheme;
+
+          return AlertDialog(
+            backgroundColor: isDark ? AppTheme.cardDark : Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            icon: const Icon(
+              Icons.error_outline_rounded,
+              color: AppTheme.danger,
+              size: 40,
+            ),
+            title: Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                color: colorScheme.onSurface,
+              ),
+            ),
+            content: Text(
+              message,
+              style: TextStyle(
+                fontSize: 14,
+                color: colorScheme.onSurfaceVariant,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            actions: [
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Get.back(),
+                  child: const Text(
+                    'OK',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
