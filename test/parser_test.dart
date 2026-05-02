@@ -7,8 +7,12 @@ void main() {
   group('BookingInputParser Tests', () {
     final parser = BookingInputParser();
 
+    // Parser format: `Name [ageGroup] seatCount seatType seatType ...`
+    // ageGroup (when supplied) sits between the name and the count, and
+    // the number of seat-type tokens must equal seatCount.
+
     test('Parses complex valid input correctly', () {
-      final input = 'Ramesh 4 singleSofa 2 doubleSofa 2 elder';
+      final input = 'Ramesh elder 4 singleSofa singleSofa doubleSofa doubleSofa';
       final parsed = parser.parse(input);
 
       expect(parsed.customerName, 'Ramesh');
@@ -20,7 +24,7 @@ void main() {
     });
 
     test('Parses input with mixed casing and extra spaces', () {
-      final input = '  jOhn   2  SingleSofa  2  Young  ';
+      final input = '  jOhn  young  2  SingleSofa  SingleSofa  ';
       final parsed = parser.parse(input);
 
       expect(parsed.customerName, 'jOhn');
@@ -29,9 +33,15 @@ void main() {
       expect(parsed.ageGroup, AgeGroup.young);
     });
 
-    test('Throws FormatException on invalid input', () {
-      expect(() => parser.parse('Just Name'), throwsFormatException);
-      expect(() => parser.parse('Name 2 invalidType'), throwsFormatException);
+    test('Throws ParseException on invalid input', () {
+      expect(
+        () => parser.parse('Just Name'),
+        throwsA(isA<ParseException>()),
+      );
+      expect(
+        () => parser.parse('Name 2 invalidType'),
+        throwsA(isA<ParseException>()),
+      );
     });
 
     test('Handles optional age group', () {

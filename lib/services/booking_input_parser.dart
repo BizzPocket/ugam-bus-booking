@@ -40,12 +40,14 @@ class BookingInputParser {
       );
     }
 
-    // Parse seat types
+    // Parse seat types — case-insensitive match against the enum names
+    // (`singleSofa`, `doubleSofa`).
     final seatTypes = <SeatType>[];
     for (int i = nameEndIndex + 1; i < tokens.length; i++) {
       final typeStr = tokens[i].toLowerCase();
       try {
-        final type = SeatType.values.firstWhere((e) => e.name == typeStr);
+        final type = SeatType.values
+            .firstWhere((e) => e.name.toLowerCase() == typeStr);
         seatTypes.add(type);
       } catch (e) {
         throw ParseException(

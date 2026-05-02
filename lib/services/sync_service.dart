@@ -4,6 +4,7 @@ import 'package:appwrite/models.dart' as aw;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:get/get.dart';
 import '../config/appwrite_config.dart';
+import '../utils/app_snackbar.dart';
 import 'appwrite_service.dart';
 import 'offline_database.dart';
 
@@ -304,7 +305,14 @@ class SyncService extends GetxService {
         final retries = op['retries'] as int;
 
         if (retries >= 5) {
+          // Op has failed 5 times — drop it but tell the user so they can
+          // reconcile manually instead of losing data silently.
           await _cache.removePendingOp(id);
+          AppSnackBar.error(
+            'A $operation on $collection could not be saved after 5 retries. '
+            'Please re-enter or check your connection.',
+            title: 'Sync abandoned',
+          );
           continue;
         }
 

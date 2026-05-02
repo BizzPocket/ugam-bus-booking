@@ -7,6 +7,7 @@ import '../models/passenger.dart';
 import '../models/bus_details.dart';
 import '../models/payment_status.dart';
 import '../services/sync_service.dart';
+import '../utils/app_snackbar.dart';
 import 'auth_controller.dart';
 
 class TourController extends GetxController {
@@ -50,6 +51,13 @@ class TourController extends GetxController {
       if (tours.isEmpty) {
         hasError.value = true;
         errorMessage.value = 'Could not load tours. Check your connection.';
+      } else {
+        // Refresh failed but cached tours are still on screen — let the user
+        // know the data they're looking at may be stale instead of failing
+        // silently.
+        AppSnackBar.warning(
+          'Showing cached tours — refresh failed. Check your connection.',
+        );
       }
     }
     isLoading.value = false;

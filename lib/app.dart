@@ -7,7 +7,6 @@ import 'controllers/tour_controller.dart';
 import 'controllers/theme_controller.dart';
 import 'controllers/auth_controller.dart';
 import 'controllers/bus_controller.dart';
-// search_controller.dart is no longer registered here — SearchScreen uses TourController directly
 import 'services/sync_service.dart';
 
 class MyApp extends StatelessWidget {
@@ -44,6 +43,5 @@ class AppBinding extends Bindings {
     Get.lazyPut<TourController>(() => TourController(), fenix: true);
     Get.lazyPut<ThemeController>(() => ThemeController(), fenix: true);
     Get.lazyPut<BusController>(() => BusController(), fenix: true);
-    // AppSearchController removed — SearchScreen uses TourController directly
   }
 }
