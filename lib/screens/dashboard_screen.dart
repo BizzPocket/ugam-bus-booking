@@ -8,326 +8,310 @@ import '../controllers/auth_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
-import '../utils/responsive.dart';
-import 'main_shell.dart';
 import 'create_tour_screen.dart';
+import 'main_shell.dart';
+import 'tour_detail_screen.dart';
 
+/// Admin home screen. Mirrors the Pencil "Admin Home" layout:
+/// greeting + avatar, 2x2 stat grid, "Upcoming Tours" list with status
+/// pills, and a floating "+" CTA that opens Create Tour.
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
-    final shell = Get.find<ShellController>();
     final authCtrl = Get.find<AuthController>();
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shell = Get.find<ShellController>();
+    final theme = Theme.of(context);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
         bottom: false,
-        child: Obx(() {
-          if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
+        child: Stack(
+          children: [
+            Obx(() {
+              if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
+                return _ErrorState(
+                  message: tourCtrl.errorMessage.value,
+                  onRetry: tourCtrl.refreshTours,
+                );
+              }
 
-          if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.cloud_off_rounded,
-                        size: 48,
-                        color: isDark ? Colors.white38 : AppTheme.textMuted),
-                    const SizedBox(height: 16),
-                    Text(
-                      tourCtrl.errorMessage.value,
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        color: isDark ? Colors.white70 : AppTheme.textSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    OutlinedButton.icon(
-                      onPressed: tourCtrl.refreshTours,
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
-                      label: const Text('Retry'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
+              final tours = tourCtrl.tours;
+              final activeTours = tourCtrl.activeTours;
+              final pendingRequests =
+                  tourCtrl.toursByStatus(TourStatus.collecting).length;
+              final totalPassengers =
+                  tours.fold<int>(0, (s, t) => s + t.passengerCount);
+              final revenue = tours.fold<double>(
+                0,
+                (s, t) => s + (t.pricePerSeat * t.totalSeatsRequested),
+              );
 
-          final tours = tourCtrl.tours;
-          final activeTours = tourCtrl.activeTours;
-          final activeCount = activeTours.length;
-          final pendingRequests = tourCtrl
-              .toursByStatus(TourStatus.collecting)
-              .length;
-          final totalPassengers =
-              tours.fold<int>(0, (sum, t) => sum + t.passengerCount);
-          final revenue = tours.fold<double>(
-              0, (sum, t) => sum + (t.pricePerSeat * t.totalSeatsRequested));
-
-          return Stack(
-            children: [
-              SingleChildScrollView(
+              return ListView(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 20),
-
-                    // ── Header (greetRow) ──────────────────────────
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _greeting(),
-                                style: GoogleFonts.inter(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                  color: isDark ? const Color(0xFFCBD5E1) : AppTheme.textSecondary,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                authCtrl.userName.value.isNotEmpty
-                                    ? authCtrl.userName.value
-                                    : 'User',
-                                style: GoogleFonts.inter(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w700,
-                                  color: isDark ? Colors.white : AppTheme.textPrimary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: const BoxDecoration(
-                            color: AppTheme.brand,
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            authCtrl.initials,
-                            style: GoogleFonts.inter(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    // ── QUICK OVERVIEW label ───────────────────────
-                    Text(
-                      'QUICK OVERVIEW',
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                        color: isDark ? const Color(0xFF94A3B8) : AppTheme.textMuted,
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // ── 2x2 stat grid ──────────────────────────────
-                    GridView.count(
-                      crossAxisCount: Responsive.gridColumns(context),
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: Responsive.statCardAspectRatio(context),
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      children: [
-                        _StatCard(
-                          icon: Icons.map_rounded,
-                          iconBgColor: AppTheme.brandLight,
-                          iconColor: AppTheme.brand,
-                          value: '$activeCount',
-                          label: 'Active Tours',
-                        ),
-                        _StatCard(
-                          icon: Icons.access_time_rounded,
-                          iconBgColor: AppTheme.warningLight,
-                          iconColor: AppTheme.warning,
-                          value: '$pendingRequests',
-                          label: 'Pending Requests',
-                        ),
-                        _StatCard(
-                          icon: Icons.people_rounded,
-                          iconBgColor: AppTheme.successLight,
-                          iconColor: AppTheme.success,
-                          value: '$totalPassengers',
-                          label: 'Total Passengers',
-                        ),
-                        _StatCard(
-                          icon: Icons.currency_rupee_rounded,
-                          iconBgColor: AppTheme.infoLight,
-                          iconColor: AppTheme.info,
-                          value: _formatRevenue(revenue),
-                          label: 'Revenue',
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    // ── Upcoming Tours header ──────────────────────
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Upcoming Tours',
-                          style: GoogleFonts.inter(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textPrimary,
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => shell.switchTab(1),
-                          child: Text(
-                            'See All',
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: AppTheme.brand,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // ── Tour list ──────────────────────────────────
-                    if (activeTours.isEmpty)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 40),
-                        decoration: BoxDecoration(
-                          color: isDark ? AppTheme.cardDark : Colors.white,
-                          borderRadius: BorderRadius.circular(6),
-                          boxShadow: isDark ? null : AppTheme.cardShadow,
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(Icons.map_outlined,
-                                size: 40, color: AppTheme.textMuted),
-                            const SizedBox(height: 8),
-                            Text(
-                              'No upcoming tours',
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                color: AppTheme.textMuted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      ...activeTours.map((tour) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _UpcomingTourCard(tour: tour),
-                          )),
-
-                    // Bottom spacing for nav bar + FAB
-                    const SizedBox(height: 120),
-                  ],
-                ),
-              ),
-
-              // ── FAB ────────────────────────────────────────────
-              Positioned(
-                bottom: 100,
-                right: 20,
-                child: Semantics(
-                  button: true,
-                  label: 'Create new tour',
-                  child: GestureDetector(
-                    onTap: () => Get.to(() => const CreateTourScreen()),
-                    child: Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: AppTheme.brand,
-                        borderRadius: BorderRadius.circular(28),
-                        boxShadow: AppTheme.brandShadow,
-                      ),
-                      alignment: Alignment.center,
-                      child: const Icon(
-                        Icons.add,
-                        size: 24,
-                        color: Colors.white,
-                      ),
-                    ),
+                padding: const EdgeInsets.fromLTRB(20, 24, 20, 140),
+                children: [
+                  _Greeting(
+                    name: authCtrl.userName.value,
+                    initials: authCtrl.initials,
                   ),
-                ),
+                  const SizedBox(height: 28),
+                  _SectionLabel('QUICK OVERVIEW'),
+                  const SizedBox(height: 12),
+                  _StatGrid(
+                    activeCount: activeTours.length,
+                    pendingRequests: pendingRequests,
+                    totalPassengers: totalPassengers,
+                    revenue: revenue,
+                  ),
+                  const SizedBox(height: 28),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Upcoming Tours',
+                        style: GoogleFonts.inter(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () => shell.switchTab(1),
+                        child: Text(
+                          'See All',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.brand,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  if (activeTours.isEmpty)
+                    const _EmptyTours()
+                  else
+                    ...activeTours.map(
+                      (tour) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _TourCard(
+                          tour: tour,
+                          onTap: () => Get.to(
+                            () => TourDetailScreen(tourId: tour.id),
+                            transition: Transition.cupertino,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            }),
+
+            // Floating "+" — sits clear of the pill bottom nav (~104px tall).
+            Positioned(
+              right: 20,
+              bottom: 110,
+              child: _Fab(
+                onTap: () => Get.to(() => const CreateTourScreen()),
               ),
-            ],
-          );
-        }),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
 
-  String _greeting() {
-    final hour = DateTime.now().hour;
+class _Greeting extends StatelessWidget {
+  final String name;
+  final String initials;
+
+  const _Greeting({required this.name, required this.initials});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final greeting = _greetingForHour(DateTime.now().hour);
+    final displayName = name.isNotEmpty ? name : 'Welcome';
+    final displayInitials = initials.isNotEmpty ? initials : '👋';
+
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                greeting,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                displayName,
+                style: GoogleFonts.inter(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.onSurface,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        Container(
+          width: 44,
+          height: 44,
+          decoration: const BoxDecoration(
+            color: AppTheme.brand,
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            displayInitials,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _greetingForHour(int hour) {
     if (hour < 12) return 'Good Morning';
     if (hour < 17) return 'Good Afternoon';
     return 'Good Evening';
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: GoogleFonts.inter(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        letterSpacing: 1.2,
+        color: AppTheme.textMuted,
+      ),
+    );
+  }
+}
+
+class _StatGrid extends StatelessWidget {
+  final int activeCount;
+  final int pendingRequests;
+  final int totalPassengers;
+  final double revenue;
+
+  const _StatGrid({
+    required this.activeCount,
+    required this.pendingRequests,
+    required this.totalPassengers,
+    required this.revenue,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                icon: Icons.map_rounded,
+                iconBg: AppTheme.brandLight,
+                iconColor: AppTheme.brand,
+                value: '$activeCount',
+                label: 'Active Tours',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.access_time_rounded,
+                iconBg: AppTheme.warningLight,
+                iconColor: AppTheme.warning,
+                value: '$pendingRequests',
+                label: 'Pending Requests',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                icon: Icons.people_rounded,
+                iconBg: AppTheme.successLight,
+                iconColor: AppTheme.success,
+                value: '$totalPassengers',
+                label: 'Total Passengers',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _StatCard(
+                icon: Icons.currency_rupee_rounded,
+                iconBg: AppTheme.infoLight,
+                iconColor: AppTheme.info,
+                value: _formatRevenue(revenue),
+                label: 'Revenue',
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   String _formatRevenue(double amount) {
     if (amount >= 100000) {
       final lakhs = amount / 100000;
       return lakhs == lakhs.roundToDouble()
-          ? '\u20B9${lakhs.toInt()}L'
-          : '\u20B9${lakhs.toStringAsFixed(1)}L';
-    } else if (amount >= 1000) {
+          ? '₹${lakhs.toInt()}L'
+          : '₹${lakhs.toStringAsFixed(1)}L';
+    }
+    if (amount >= 1000) {
       final k = amount / 1000;
       return k == k.roundToDouble()
-          ? '\u20B9${k.toInt()}K'
-          : '\u20B9${k.toStringAsFixed(1)}K';
+          ? '₹${k.toInt()}K'
+          : '₹${k.toStringAsFixed(1)}K';
     }
-    return '\u20B9${amount.toInt()}';
+    return '₹${amount.toInt()}';
   }
 }
 
-// ── Stat Card ─────────────────────────────────────────────────────
-
 class _StatCard extends StatelessWidget {
   final IconData icon;
-  final Color iconBgColor;
+  final Color iconBg;
   final Color iconColor;
   final String value;
   final String label;
 
   const _StatCard({
     required this.icon,
-    required this.iconBgColor,
+    required this.iconBg,
     required this.iconColor,
     required this.value,
     required this.label,
@@ -335,13 +319,15 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isDark ? AppTheme.cardDark : Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: isDark ? null : AppTheme.cardShadow,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderLight),
+        boxShadow: isDark ? null : AppTheme.subtleShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -350,19 +336,19 @@ class _StatCard extends StatelessWidget {
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              color: iconBgColor,
-              borderRadius: BorderRadius.circular(6),
+              color: iconBg,
+              borderRadius: BorderRadius.circular(8),
             ),
             alignment: Alignment.center,
             child: Icon(icon, size: 16, color: iconColor),
           ),
-          const Spacer(),
+          const SizedBox(height: 14),
           Text(
             value,
             style: GoogleFonts.inter(
               fontSize: 26,
               fontWeight: FontWeight.w700,
-              color: isDark ? Colors.white : AppTheme.textPrimary,
+              color: theme.colorScheme.onSurface,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -373,7 +359,7 @@ class _StatCard extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 11,
               fontWeight: FontWeight.w500,
-              color: isDark ? const Color(0xFF94A3B8) : AppTheme.textMuted,
+              color: AppTheme.textMuted,
             ),
           ),
         ],
@@ -382,101 +368,107 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ── Upcoming Tour Card ────────────────────────────────────────────
-
-class _UpcomingTourCard extends StatelessWidget {
+class _TourCard extends StatelessWidget {
   final Tour tour;
+  final VoidCallback onTap;
 
-  const _UpcomingTourCard({required this.tour});
+  const _TourCard({required this.tour, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final dateStr = _formatDate(tour.departureDate, tour.returnDate);
-    final paxStr = '${tour.passengerCount} pax';
-    final statusLabel = tour.status.displayName;
-    final statusColors = _statusColors(tour.status);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final colors = _statusColors(tour.status);
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.cardDark : Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        boxShadow: isDark ? null : AppTheme.cardShadow,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  tour.title,
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : AppTheme.textPrimary,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.cardDark : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppTheme.borderLight),
+          boxShadow: isDark ? null : AppTheme.subtleShadow,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tour.title,
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Icon(Icons.calendar_today_outlined,
-                        size: 12, color: AppTheme.textSecondary),
-                    const SizedBox(width: 4),
-                    Text(
-                      dateStr,
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w400,
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_today_outlined,
+                        size: 12,
                         color: AppTheme.textSecondary,
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Text(
-                        '\u00B7',
+                      const SizedBox(width: 4),
+                      Text(
+                        _formatDate(tour.departureDate, tour.returnDate),
                         style: GoogleFonts.inter(
                           fontSize: 11,
-                          color: AppTheme.textMuted,
+                          color: AppTheme.textSecondary,
                         ),
                       ),
-                    ),
-                    Icon(Icons.people_outline_rounded,
-                        size: 12, color: AppTheme.textSecondary),
-                    const SizedBox(width: 4),
-                    Text(
-                      paxStr,
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w400,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                          '·',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppTheme.textMuted,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.people_outline_rounded,
+                        size: 12,
                         color: AppTheme.textSecondary,
                       ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: statusColors.$1,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              statusLabel,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: statusColors.$2,
+                      const SizedBox(width: 4),
+                      Text(
+                        '${tour.passengerCount} pax',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: colors.$1,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                tour.status.displayName,
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: colors.$2,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -484,12 +476,11 @@ class _UpcomingTourCard extends StatelessWidget {
   String _formatDate(DateTime departure, DateTime? returnDate) {
     final fmt = DateFormat('MMM d');
     if (returnDate != null) {
-      return '${fmt.format(departure)} \u2013 ${fmt.format(returnDate)}';
+      return '${fmt.format(departure)} – ${fmt.format(returnDate)}';
     }
     return fmt.format(departure);
   }
 
-  /// Returns (bgColor, textColor) for the status badge.
   (Color, Color) _statusColors(TourStatus status) {
     switch (status) {
       case TourStatus.planning:
@@ -497,7 +488,7 @@ class _UpcomingTourCard extends StatelessWidget {
       case TourStatus.collecting:
         return (AppTheme.warningLight, AppTheme.warning);
       case TourStatus.busBooked:
-        return (AppTheme.successLight, AppTheme.success);
+        return (AppTheme.brandLight, AppTheme.brand);
       case TourStatus.assigning:
         return (AppTheme.brandLight, AppTheme.brand);
       case TourStatus.locked:
@@ -505,5 +496,109 @@ class _UpcomingTourCard extends StatelessWidget {
       case TourStatus.completed:
         return (const Color(0xFFF1F5F9), AppTheme.textSecondary);
     }
+  }
+}
+
+class _Fab extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _Fab({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 56,
+        height: 56,
+        decoration: BoxDecoration(
+          color: AppTheme.brand,
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.brand.withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        alignment: Alignment.center,
+        child: const Icon(Icons.add, size: 24, color: Colors.white),
+      ),
+    );
+  }
+}
+
+class _EmptyTours extends StatelessWidget {
+  const _EmptyTours();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.cardDark : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppTheme.borderLight),
+        boxShadow: isDark ? null : AppTheme.subtleShadow,
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.map_outlined, size: 40, color: AppTheme.textMuted),
+          const SizedBox(height: 8),
+          Text(
+            'No upcoming tours',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: AppTheme.textMuted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+
+  const _ErrorState({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.cloud_off_rounded,
+              size: 48,
+              color: AppTheme.textMuted,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
