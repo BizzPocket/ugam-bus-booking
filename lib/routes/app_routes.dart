@@ -5,6 +5,7 @@ import '../screens/login_screen.dart';
 import '../screens/admin_setup_screen.dart';
 import '../screens/customer_tour_list_screen.dart';
 import '../screens/create_tour_screen.dart';
+import '../screens/tour_seat_assignment_screen.dart';
 
 class AppRoutes {
   static const String splash = '/splash';
@@ -13,6 +14,7 @@ class AppRoutes {
   static const String customerHome = '/customer-home';
   static const String home = '/';
   static const String createTour = '/create-tour';
+  static const String seatAssignment = '/seat-assignment';
 
   static final routes = [
     GetPage(name: splash, page: () => const SplashScreen()),
@@ -21,5 +23,14 @@ class AppRoutes {
     GetPage(name: customerHome, page: () => const CustomerTourListScreen()),
     GetPage(name: home, page: () => const MainShell()),
     GetPage(name: createTour, page: () => const CreateTourScreen()),
+    GetPage(
+      name: seatAssignment,
+      page: () {
+        final args = Get.arguments as Map<String, dynamic>?;
+        return TourSeatAssignmentScreen(
+          tourId: (args?['tourId'] as String?) ?? '',
+        );
+      },
+    ),
   ];
 }
