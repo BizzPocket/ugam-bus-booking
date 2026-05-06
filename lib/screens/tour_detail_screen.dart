@@ -215,6 +215,37 @@ class TourDetailScreen extends StatelessWidget {
                       ),
               ),
 
+              const SizedBox(height: 12),
+
+              // ── Manage Buses CTA ──────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    onPressed: () => Get.to(
+                      () => ManageBusesScreen(tourId: tourId),
+                      transition: Transition.cupertino,
+                    ),
+                    icon: const Icon(Icons.directions_bus_rounded, size: 18),
+                    label: Text(
+                      tour.buses.isEmpty
+                          ? 'Add Bus'
+                          : 'Manage Buses (${tour.buses.length})',
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.brand,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
               const SizedBox(height: 32),
             ],
           ),
