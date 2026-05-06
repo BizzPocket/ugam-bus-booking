@@ -3,6 +3,10 @@ import 'tour_status.dart';
 import 'bus_details.dart';
 import 'passenger.dart';
 
+/// A tour planned and managed by the agent.
+///
+/// Buses and Passengers are stored as separate collections linked by tourId.
+/// The sync layer embeds them into the Tour object when fetching.
 class Tour {
   final String id;
   final String title;
@@ -13,17 +17,15 @@ class Tour {
   final double pricePerSeat;
   final String? description;
   final TourStatus status;
-  final BusDetails? busDetails;
-  final List<Passenger> passengers;
-  final String? handlerId;
-  final String? createdBy;
-  /// When true, the tour is visible to anonymous customers in the
-  /// customer-mode tour list. Defaults to true so admins don't have to
-  /// flip a toggle on every tour they create. Set to false in the
-  /// Appwrite console (or via a future admin UI) to hide a tour.
+  final String? handlerId; // FK → Passenger.id
+  final String? createdBy; // admin phone
   final bool isPublic;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  // ── Embedded by sync layer (not stored in Tour document) ──
+  final List<BusDetails> buses;
+  final List<Passenger> passengers;
 
   Tour({
     String? id,
@@ -35,44 +37,59 @@ class Tour {
     required this.pricePerSeat,
     this.description,
     this.status = TourStatus.planning,
-    this.busDetails,
-    this.passengers = const [],
     this.handlerId,
     this.createdBy,
     this.isPublic = true,
+    this.buses = const [],
+    this.passengers = const [],
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : id = id ?? const Uuid().v4(),
-        createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
+  }) : id = id ?? const Uuid().v4(),
+       createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? DateTime.now();
 
-  int get totalSeatsRequested =>
-      passengers.fold(0, (sum, p) => sum + p.requestedSeats);
-
-  int get totalSeatsAssigned =>
-      passengers.fold(0, (sum, p) => sum + p.assignedSeats.length);
-
-  int get passengerCount => passengers.length;
-
-  int get paidCount =>
-      passengers.where((p) => p.paymentStatus.name == 'paid').length;
+  // ── Computed properties ───────────────────────────────────
 
   String get route => '$fromCity → $toCity';
 
+  int get passengerCount => passengers.length;
+
+  /// Total seats requested across all passengers.
+  int get totalSeatsRequested =>
+      passengers.fold(0, (sum, p) => sum + p.totalSeatsRequested);
+
+  /// Total seats assigned across all passengers.
+  int get totalSeatsAssigned =>
+      passengers.fold(0, (sum, p) => sum + p.totalSeatsAssigned);
+
+  /// Total seats available across all buses (uses visual layout when present,
+  /// falls back to the legacy `totalSeats` count).
+  int get totalBusSeats =>
+      buses.fold(0, (sum, b) => sum + b.effectiveCapacity);
+
+  /// Passengers who have paid.
+  int get paidCount =>
+      passengers.where((p) => p.paymentStatus.name == 'paid').length;
+
+  /// The handler passenger, if one is set.
   Passenger? get handler => handlerId != null
       ? passengers.cast<Passenger?>().firstWhere(
-            (p) => p?.id == handlerId,
-            orElse: () => null,
-          )
+          (p) => p?.id == handlerId,
+          orElse: () => null,
+        )
       : null;
 
+  /// Whether all passengers' request lines are fully assigned.
   bool get allSeatsAssigned =>
-      passengers.isNotEmpty &&
-      passengers.every((p) => p.assignedSeats.length >= p.requestedSeats);
+      passengers.isNotEmpty && passengers.every((p) => p.isFullyAssigned);
 
-  // ── Appwrite serialization (camelCase, no id) ─────────────
-  /// Convert this tour to an Appwrite document data map.
-  /// The document ID is passed separately to `createDocument`.
+  /// Backward compat: returns first bus or null. Used by screens that
+  /// haven't been updated to multi-bus yet.
+  @Deprecated('Use tour.buses instead')
+  BusDetails? get busDetails => buses.isNotEmpty ? buses.first : null;
+
+  // ── Appwrite serialization (only Tour's own fields) ───────
+
   Map<String, dynamic> toAppwrite() {
     return {
       'title': title,
@@ -90,10 +107,9 @@ class Tour {
   }
 
   /// Build a Tour from an Appwrite document.
-  /// The sync layer embeds `passengers` (List) and `busDetails` (Map) in the
-  /// map, since Appwrite doesn't support joins.
+  /// The sync layer embeds `passengers` and `buses` in the map.
   factory Tour.fromAppwrite(Map<String, dynamic> map) {
-    // Parse nested passengers if embedded by sync layer
+    // Parse nested passengers
     List<Passenger> passengers = [];
     if (map['passengers'] is List) {
       passengers = (map['passengers'] as List)
@@ -101,11 +117,19 @@ class Tour {
           .toList();
     }
 
-    // Parse nested bus details
-    BusDetails? busDetails;
-    if (map['busDetails'] is Map) {
-      busDetails = BusDetails.fromAppwrite(
-          Map<String, dynamic>.from(map['busDetails'] as Map));
+    // Parse nested buses (embedded by sync layer).
+    List<BusDetails> buses = [];
+    if (map['buses'] is List) {
+      buses = (map['buses'] as List)
+          .map((b) => BusDetails.fromAppwrite(Map<String, dynamic>.from(b)))
+          .toList();
+    } else if (map['busDetails'] is Map) {
+      // Backward compat: legacy single bus shape, wrap in list.
+      buses = [
+        BusDetails.fromAppwrite(
+          Map<String, dynamic>.from(map['busDetails'] as Map),
+        ),
+      ];
     }
 
     return Tour(
@@ -123,11 +147,11 @@ class Tour {
         (s) => s.name == map['status'],
         orElse: () => TourStatus.planning,
       ),
-      busDetails: busDetails,
-      passengers: passengers,
       handlerId: map['handlerId'] as String?,
       createdBy: map['createdBy'] as String?,
       isPublic: map['isPublic'] is bool ? map['isPublic'] as bool : true,
+      buses: buses,
+      passengers: passengers,
       createdAt: _parseDate(map[r'$createdAt'] ?? map['createdAt']),
       updatedAt: _parseDate(map[r'$updatedAt'] ?? map['updatedAt']),
     );
@@ -140,7 +164,6 @@ class Tour {
   }
 
   Tour copyWith({
-    String? id,
     String? title,
     String? fromCity,
     String? toCity,
@@ -149,16 +172,15 @@ class Tour {
     double? pricePerSeat,
     String? description,
     TourStatus? status,
-    BusDetails? busDetails,
-    List<Passenger>? passengers,
     String? handlerId,
     String? createdBy,
     bool? isPublic,
-    DateTime? createdAt,
+    List<BusDetails>? buses,
+    List<Passenger>? passengers,
     DateTime? updatedAt,
   }) {
     return Tour(
-      id: id ?? this.id,
+      id: id,
       title: title ?? this.title,
       fromCity: fromCity ?? this.fromCity,
       toCity: toCity ?? this.toCity,
@@ -167,12 +189,12 @@ class Tour {
       pricePerSeat: pricePerSeat ?? this.pricePerSeat,
       description: description ?? this.description,
       status: status ?? this.status,
-      busDetails: busDetails ?? this.busDetails,
-      passengers: passengers ?? this.passengers,
       handlerId: handlerId ?? this.handlerId,
       createdBy: createdBy ?? this.createdBy,
       isPublic: isPublic ?? this.isPublic,
-      createdAt: createdAt ?? this.createdAt,
+      buses: buses ?? this.buses,
+      passengers: passengers ?? this.passengers,
+      createdAt: createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );
   }

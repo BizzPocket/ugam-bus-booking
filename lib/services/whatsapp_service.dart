@@ -222,9 +222,9 @@ class WhatsAppService {
     String? handlerPhone,
   }) {
     final seats = passenger.assignedSeats.isNotEmpty
-        ? passenger.assignedSeats.join(', ')
+        ? passenger.assignedSeats.map((a) => a.seatId).join(', ')
         : 'To be assigned';
-    final total = tour.pricePerSeat * passenger.requestedSeats;
+    final total = tour.pricePerSeat * passenger.totalSeatsRequested;
 
     final lines = <String>[
       '🎫 *Ticket Confirmed!*',

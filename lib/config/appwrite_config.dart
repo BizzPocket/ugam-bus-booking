@@ -12,7 +12,7 @@ class AppwriteConfig {
   // ── Collection IDs ─────────────────────────────────────────
   static const String toursCollection = '69e5eaa9003cf0176299';
   static const String passengersCollection = '69e5f8df001bfdbea1dd';
-  static const String busDetailsCollection = '69e5f9e90001e4966697';
+  static const String busesCollection = '69e5f9e90001e4966697'; // Replaces busDetailsCollection
 
   /// Admin login records — `{phone, name, passwordHash, salt, whatsappNumber}`.
   /// Required schema (create manually in the Appwrite console under the

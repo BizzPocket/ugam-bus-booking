@@ -4,16 +4,12 @@ import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
-import '../controllers/auth_controller.dart';
-import '../models/profile.dart';
 import 'dashboard_screen.dart';
 import 'tours_screen.dart';
 import 'requests_screen.dart';
-import 'assign_screen.dart';
+import 'seat_assignment_screen.dart';
 import 'notify_screen.dart';
-import 'passenger_home_screen.dart';
 
-/// Lightweight controller so any descendant can switch tabs.
 class ShellController extends GetxController {
   final currentIndex = 0.obs;
   void switchTab(int i) => currentIndex.value = i;
@@ -26,13 +22,12 @@ class MainShell extends StatelessWidget {
     DashboardScreen(),
     ToursScreen(),
     RequestsScreen(),
-    AssignScreen(),
+    SeatAssignmentScreen(),
     NotifyScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
-    final auth = Get.find<AuthController>();
     final shell = Get.find<ShellController>();
 
     SystemChrome.setSystemUIOverlayStyle(
@@ -42,12 +37,6 @@ class MainShell extends StatelessWidget {
     );
 
     return Obx(() {
-      // Passenger view — no bottom nav, just their bookings
-      if (auth.userRole.value == UserRole.passenger) {
-        return const PassengerHomeScreen();
-      }
-
-      // Admin view — full dashboard with bottom nav
       return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         extendBody: true,
@@ -63,8 +52,6 @@ class MainShell extends StatelessWidget {
     });
   }
 }
-
-// ── Pill-style Bottom Navigation ────────────────────────────────────
 
 class _PillBottomNav extends StatelessWidget {
   final int currentIndex;

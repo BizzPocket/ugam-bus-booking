@@ -180,13 +180,13 @@ class SyncService extends GetxService {
       queries: [Query.equal('tourId', tourIds), Query.limit(2000)],
     );
 
-    final busDetailsResult = await _db.listDocuments(
+    final busesResult = await _db.listDocuments(
       databaseId: AppwriteConfig.databaseId,
-      collectionId: AppwriteConfig.busDetailsCollection,
+      collectionId: AppwriteConfig.busesCollection,
       queries: [Query.equal('tourId', tourIds), Query.limit(500)],
     );
 
-    // Group passengers and bus details by tourId
+    // Group passengers and buses by tourId
     final passengersByTour = <String, List<Map<String, dynamic>>>{};
     for (final doc in passengersResult.documents) {
       final m = _documentToMap(doc);
@@ -196,12 +196,12 @@ class SyncService extends GetxService {
       }
     }
 
-    final busDetailsByTour = <String, Map<String, dynamic>>{};
-    for (final doc in busDetailsResult.documents) {
+    final busesByTour = <String, List<Map<String, dynamic>>>{};
+    for (final doc in busesResult.documents) {
       final m = _documentToMap(doc);
       final tId = m['tourId'] as String?;
       if (tId != null) {
-        busDetailsByTour[tId] = m;
+        busesByTour.putIfAbsent(tId, () => []).add(m);
       }
     }
 
@@ -209,9 +209,7 @@ class SyncService extends GetxService {
     return toursResult.documents.map((doc) {
       final tourMap = _documentToMap(doc);
       tourMap['passengers'] = passengersByTour[doc.$id] ?? [];
-      if (busDetailsByTour[doc.$id] != null) {
-        tourMap['busDetails'] = busDetailsByTour[doc.$id];
-      }
+      tourMap['buses'] = busesByTour[doc.$id] ?? [];
       return tourMap;
     }).toList();
   }

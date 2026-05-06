@@ -131,14 +131,16 @@ class PassengerTile extends StatelessWidget {
                           color: theme.colorScheme.onSurface.withAlpha(100)),
                       const SizedBox(width: 3),
                       Text(
-                        passenger.isSeatsAssigned
-                            ? passenger.assignedSeats.join(', ')
-                            : '${passenger.requestedSeats} requested',
+                        passenger.assignedSeats.isNotEmpty
+                            ? passenger.assignedSeats
+                                .map((a) => a.seatId)
+                                .join(', ')
+                            : passenger.requestSummary,
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: passenger.isSeatsAssigned
+                          color: passenger.assignedSeats.isNotEmpty
                               ? AppTheme.success
                               : theme.colorScheme.onSurface.withAlpha(100),
-                          fontWeight: passenger.isSeatsAssigned
+                          fontWeight: passenger.assignedSeats.isNotEmpty
                               ? FontWeight.w600
                               : FontWeight.w400,
                         ),

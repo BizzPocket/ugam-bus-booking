@@ -14,8 +14,8 @@ class Customer {
     this.mobileNumber,
     required this.ageGroup,
     DateTime? createdAt,
-  })  : id = id ?? const Uuid().v4(),
-        createdAt = createdAt ?? DateTime.now();
+  }) : id = id ?? const Uuid().v4(),
+       createdAt = createdAt ?? DateTime.now();
 
   bool validate() {
     return name.trim().isNotEmpty;

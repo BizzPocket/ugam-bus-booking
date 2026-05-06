@@ -263,26 +263,19 @@ class TourDetailScreen extends StatelessWidget {
                               ),
                               const SizedBox(width: 14),
                               Expanded(
-                                child: tour.busDetails != null
+                                child: tour.buses.isNotEmpty
                                     ? Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            tour.busDetails!.busNumber,
+                                            tour.buses.map((b) => b.name).join(', '),
                                             style: textTheme.titleMedium,
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            '${tour.busDetails!.busType} \u2022 ${tour.busDetails!.totalSeats} seats \u2022 ${tour.busDetails!.isAC ? "AC" : "Non-AC"}',
+                                            '${tour.buses.length} bus${tour.buses.length > 1 ? "es" : ""} \u2022 ${tour.totalBusSeats} seats',
                                             style: textTheme.bodySmall,
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            'Driver: ${tour.busDetails!.driverName} \u2022 ${tour.busDetails!.driverPhone}',
-                                            style: textTheme.bodySmall?.copyWith(
-                                              color: AppTheme.textMuted,
-                                            ),
                                           ),
                                         ],
                                       )

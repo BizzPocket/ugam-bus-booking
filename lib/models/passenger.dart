@@ -1,20 +1,34 @@
 import 'package:uuid/uuid.dart';
-import 'payment_status.dart';
 import 'age_group.dart';
-import 'seat_type.dart';
+import 'payment_status.dart';
+import 'request_line.dart';
+import 'seat_assignment.dart';
 
+/// A passenger (customer) who has requested seats on a tour.
+///
+/// One Passenger = one WhatsApp contact = one app submission.
+/// A single passenger can request multiple seat types via [requestLines],
+/// e.g. "1 Double Lower + 1 Single Upper + 2 Seater".
+///
+/// Idempotency key: `(tourId, phone)` — resubmitting from the app updates
+/// the existing record rather than creating a duplicate.
 class Passenger {
   final String id;
   final String tourId;
-  final String? userId;
+  final String? userId; // set if customer-app user, null if manual
   final String name;
   final String phone;
-  final int requestedSeats;
-  final SeatType seatPreference;
   final AgeGroup ageGroup;
-  final List<String> assignedSeats;
+
+  /// What the passenger asked for — replaces the old single seatPreference + requestedSeats.
+  final List<RequestLine> requestLines;
+
+  /// Which seats have been assigned — each entry ties to a specific bus + seat.
+  final List<SeatAssignment> assignedSeats;
+
   final PaymentStatus paymentStatus;
   final bool isHandler;
+  final String? note; // optional note from customer
   final DateTime createdAt;
 
   Passenger({
@@ -23,98 +37,139 @@ class Passenger {
     this.userId,
     required this.name,
     required this.phone,
-    this.requestedSeats = 1,
-    this.seatPreference = SeatType.singleSofa,
-    this.ageGroup = AgeGroup.other,
+    this.ageGroup = AgeGroup.adult,
+    this.requestLines = const [],
     this.assignedSeats = const [],
     this.paymentStatus = PaymentStatus.notPaid,
     this.isHandler = false,
+    this.note,
     DateTime? createdAt,
-  })  : id = id ?? const Uuid().v4(),
-        createdAt = createdAt ?? DateTime.now();
+  }) : id = id ?? const Uuid().v4(),
+       createdAt = createdAt ?? DateTime.now();
 
-  bool get isSeatsAssigned => assignedSeats.isNotEmpty;
+  /// Total number of seats requested across all request lines.
+  int get totalSeatsRequested =>
+      requestLines.fold(0, (sum, line) => sum + line.qty);
 
-  int get pendingSeats => requestedSeats - assignedSeats.length;
+  /// Total number of seats actually assigned.
+  int get totalSeatsAssigned => assignedSeats.length;
 
-  // ── Appwrite serialization (camelCase, no id) ─────────────
+  /// Whether all requested seats have been assigned.
+  bool get isFullyAssigned => totalSeatsAssigned >= totalSeatsRequested;
+
+  /// Whether at least one seat is assigned but not all.
+  bool get isPartiallyAssigned => totalSeatsAssigned > 0 && !isFullyAssigned;
+
+  /// Short summary of request lines for chips, e.g. "1 DL + 1 SU + 2 ST".
+  String get requestSummary {
+    if (requestLines.isEmpty) return 'No seats';
+    return requestLines.map((l) => l.shortLabel).join(' + ');
+  }
+
+  /// Progress string like "2/4" or "✓ 4/4".
+  String get progressLabel {
+    final total = totalSeatsRequested;
+    final assigned = totalSeatsAssigned;
+    if (assigned >= total && total > 0) return '✓ $total/$total';
+    return '$assigned/$total';
+  }
+
+  // ── Appwrite serialization ────────────────────────────────
+
   Map<String, dynamic> toAppwrite() {
     return {
       'tourId': tourId,
       'userId': userId,
       'name': name,
       'phone': phone,
-      'requestedSeats': requestedSeats,
-      'seatPreference': seatPreference.name,
       'ageGroup': ageGroup.name,
-      'assignedSeats': assignedSeats,
+      'requestLines': requestLines.map((l) => l.toMap()).toList(),
+      'assignedSeats': assignedSeats.map((a) => a.toMap()).toList(),
       'paymentStatus': paymentStatus.name,
       'isHandler': isHandler,
+      'note': note,
     };
   }
 
   factory Passenger.fromAppwrite(Map<String, dynamic> map) {
-    List<String> seats = [];
-    if (map['assignedSeats'] is List) {
-      seats = (map['assignedSeats'] as List).map((e) => e.toString()).toList();
-    }
-
     return Passenger(
       id: (map[r'$id'] ?? map['id']) as String,
       tourId: map['tourId'] as String,
       userId: map['userId'] as String?,
-      name: map['name'] as String,
-      phone: map['phone'] as String,
-      requestedSeats: map['requestedSeats'] as int? ?? 1,
-      seatPreference: SeatType.values.firstWhere(
-        (s) => s.name == map['seatPreference'],
-        orElse: () => SeatType.singleSofa,
-      ),
-      ageGroup: AgeGroup.values.firstWhere(
-        (a) => a.name == map['ageGroup'],
-        orElse: () => AgeGroup.other,
-      ),
-      assignedSeats: seats,
+      name: map['name'] as String? ?? '',
+      phone: map['phone'] as String? ?? '',
+      ageGroup: AgeGroup.fromString(map['ageGroup'] as String?),
+      requestLines: _parseRequestLines(map['requestLines']),
+      assignedSeats: _parseAssignedSeats(map['assignedSeats']),
       paymentStatus: PaymentStatus.values.firstWhere(
-        (p) => p.name == map['paymentStatus'],
+        (s) => s.name == map['paymentStatus'],
         orElse: () => PaymentStatus.notPaid,
       ),
       isHandler: map['isHandler'] as bool? ?? false,
-      createdAt: (map[r'$createdAt'] ?? map['createdAt']) != null
-          ? DateTime.tryParse(
-                  (map[r'$createdAt'] ?? map['createdAt']).toString()) ??
-              DateTime.now()
-          : DateTime.now(),
+      note: map['note'] as String?,
+      createdAt: _parseDate(map[r'$createdAt'] ?? map['createdAt']),
     );
   }
 
+  static List<RequestLine> _parseRequestLines(dynamic value) {
+    if (value == null) return [];
+    if (value is List) {
+      return value
+          .map((e) => RequestLine.fromMap(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    }
+    // Backward compat: old format had seatPreference + requestedSeats
+    return [];
+  }
+
+  static List<SeatAssignment> _parseAssignedSeats(dynamic value) {
+    if (value == null) return [];
+    if (value is List) {
+      // Check if it's the new format (list of maps) or old format (list of strings)
+      if (value.isNotEmpty && value.first is String) {
+        // Old format: ["L1", "L2"] — can't recover busId, return empty
+        return [];
+      }
+      return value
+          .map(
+            (e) => SeatAssignment.fromMap(Map<String, dynamic>.from(e as Map)),
+          )
+          .toList();
+    }
+    return [];
+  }
+
+  static DateTime _parseDate(dynamic v) {
+    if (v == null) return DateTime.now();
+    if (v is DateTime) return v;
+    return DateTime.tryParse(v.toString()) ?? DateTime.now();
+  }
+
   Passenger copyWith({
-    String? id,
     String? tourId,
     String? userId,
     String? name,
     String? phone,
-    int? requestedSeats,
-    SeatType? seatPreference,
     AgeGroup? ageGroup,
-    List<String>? assignedSeats,
+    List<RequestLine>? requestLines,
+    List<SeatAssignment>? assignedSeats,
     PaymentStatus? paymentStatus,
     bool? isHandler,
-    DateTime? createdAt,
+    String? note,
   }) {
     return Passenger(
-      id: id ?? this.id,
+      id: id,
       tourId: tourId ?? this.tourId,
       userId: userId ?? this.userId,
       name: name ?? this.name,
       phone: phone ?? this.phone,
-      requestedSeats: requestedSeats ?? this.requestedSeats,
-      seatPreference: seatPreference ?? this.seatPreference,
       ageGroup: ageGroup ?? this.ageGroup,
+      requestLines: requestLines ?? this.requestLines,
       assignedSeats: assignedSeats ?? this.assignedSeats,
       paymentStatus: paymentStatus ?? this.paymentStatus,
       isHandler: isHandler ?? this.isHandler,
-      createdAt: createdAt ?? this.createdAt,
+      note: note ?? this.note,
+      createdAt: createdAt,
     );
   }
 

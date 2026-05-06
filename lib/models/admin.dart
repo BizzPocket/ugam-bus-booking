@@ -24,8 +24,8 @@ class Admin {
   /// not configured on the admin record.
   String get effectiveWhatsappNumber =>
       (whatsappNumber == null || whatsappNumber!.isEmpty)
-          ? phone
-          : whatsappNumber!;
+      ? phone
+      : whatsappNumber!;
 
   factory Admin.fromAppwrite(Map<String, dynamic> doc) {
     return Admin(
@@ -42,11 +42,11 @@ class Admin {
   }
 
   Map<String, dynamic> toAppwrite() => {
-        'phone': phone,
-        'name': name,
-        'passwordHash': passwordHash,
-        'salt': salt,
-        if (whatsappNumber != null && whatsappNumber!.isNotEmpty)
-          'whatsappNumber': whatsappNumber,
-      };
+    'phone': phone,
+    'name': name,
+    'passwordHash': passwordHash,
+    'salt': salt,
+    if (whatsappNumber != null && whatsappNumber!.isNotEmpty)
+      'whatsappNumber': whatsappNumber,
+  };
 }

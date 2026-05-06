@@ -60,9 +60,22 @@ class NotifyScreen extends StatelessWidget {
           }
 
           final tourName = tour.title;
-          final busNo = tour.busDetails?.busNumber ?? 'Not assigned';
-          final totalSeats = tour.busDetails?.totalSeats.toString() ?? '-';
-          final driverName = tour.busDetails?.driverName ?? 'Not assigned';
+          final String busNo;
+          final String totalSeats;
+          final String driverName;
+          final String? driverPhone;
+          
+          if (tour.buses.isNotEmpty) {
+            busNo = tour.buses.map((b) => b.busNumber).join(', ');
+            totalSeats = tour.totalBusSeats.toString();
+            driverName = tour.buses.map((b) => b.driverName).join(', ');
+            driverPhone = tour.buses.first.driverPhone; // Simplified for broadcast
+          } else {
+            busNo = 'Not assigned';
+            totalSeats = '-';
+            driverName = 'Not assigned';
+            driverPhone = null;
+          }
           final handlerPhone = tour.handler?.phone ?? 'Not assigned';
 
           // Format date range
@@ -184,7 +197,7 @@ class NotifyScreen extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            'Seat ${p.assignedSeats.join(', ')}',
+                            'Seat ${p.assignedSeats.map((a) => a.seatId).join(', ')}',
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               fontWeight: FontWeight.w500,
@@ -245,7 +258,7 @@ class NotifyScreen extends StatelessWidget {
                         'Dates: $tourDate\n'
                         'Bus: $busNo\n'
                         'Driver: $driverName\n'
-                        'Seat: ${assignedPassengers.isNotEmpty ? assignedPassengers.first.assignedSeats.join(', ') : '-'}\n'
+                        'Seat: ${assignedPassengers.isNotEmpty ? assignedPassengers.first.assignedSeats.map((a) => a.seatId).join(', ') : '-'}\n'
                         'Handler: $handlerPhone\n\n'
                         'Have a wonderful trip!',
                         style: GoogleFonts.inter(
@@ -275,18 +288,18 @@ class NotifyScreen extends StatelessWidget {
                       // Copy broadcast message to clipboard for WhatsApp Business
                       await wa.copyBroadcastToClipboard(
                         tour: tour,
-                        busNumber: tour.busDetails?.busNumber,
-                        driverName: tour.busDetails?.driverName,
-                        driverPhone: tour.busDetails?.driverPhone,
+                        busNumber: busNo,
+                        driverName: driverName,
+                        driverPhone: driverPhone,
                         handlerPhone: tour.handler?.phone,
                       );
                       // Also open WhatsApp for the first passenger
                       final sent = await wa.sendToPassenger(
                         passenger: assignedPassengers.first,
                         tour: tour,
-                        busNumber: tour.busDetails?.busNumber,
-                        driverName: tour.busDetails?.driverName,
-                        driverPhone: tour.busDetails?.driverPhone,
+                        busNumber: busNo,
+                        driverName: driverName,
+                        driverPhone: driverPhone,
                         handlerPhone: tour.handler?.phone,
                       );
                       if (sent) {

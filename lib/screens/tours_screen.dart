@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../controllers/tour_controller.dart';
-import '../controllers/theme_controller.dart';
 import '../models/tour_status.dart';
 import '../components/tour_card.dart';
 import '../config/theme.dart';
 import 'tour_detail_screen.dart';
-import 'main_shell.dart';
 
 class ToursScreen extends StatelessWidget {
   const ToursScreen({super.key});
@@ -15,177 +13,152 @@ class ToursScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
-    final themeCtrl = Get.find<ThemeController>();
-    final shell = Get.find<ShellController>();
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return SafeArea(
-      bottom: false,
-      child: Column(
-        children: [
-          // ── Header ──────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Text(
-                  'My Tours',
-                  style: GoogleFonts.inter(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : AppTheme.textPrimary,
-                  ),
-                ),
-                Obx(() {
-                  final dark = themeCtrl.isDarkMode.value;
-                  return Semantics(
-                    button: true,
-                    label: dark ? 'Switch to light mode' : 'Switch to dark mode',
-                    child: GestureDetector(
-                      onTap: themeCtrl.toggleTheme,
-                    child: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: isDark ? AppTheme.surfaceDark : Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isDark
-                              ? AppTheme.borderDark
-                              : AppTheme.borderLight,
-                        ),
-                      ),
-                      child: Icon(
-                        dark
-                            ? Icons.light_mode_rounded
-                            : Icons.dark_mode_rounded,
-                        size: 20,
-                        color: isDark ? Colors.white : AppTheme.textPrimary,
-                      ),
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => Get.toNamed('/create-tour'),
+        child: const Icon(Icons.add),
+      ),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            // ── Header ──────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    'My Tours',
+                    style: GoogleFonts.inter(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : AppTheme.textPrimary,
                     ),
                   ),
-                  );
-                }),
-              ],
+                ],
+              ),
             ),
-          ),
 
-          const SizedBox(height: 20),
+            const SizedBox(height: 20),
 
-          // ── Quick Stats Row ─────────────────────────────────────
-          Obx(() => Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Row(
-                  children: [
-                    _StatChip(
-                      label: 'Active',
-                      count: tourCtrl.activeTours.length,
-                      color: AppTheme.brand,
-                      isDark: isDark,
-                    ),
-                    const SizedBox(width: 8),
-                    _StatChip(
-                      label: 'Collecting',
-                      count: tourCtrl
-                          .toursByStatus(TourStatus.collecting)
-                          .length,
-                      color: AppTheme.warning,
-                      isDark: isDark,
-                    ),
-                    const SizedBox(width: 8),
-                    _StatChip(
-                      label: 'Locked',
-                      count:
-                          tourCtrl.toursByStatus(TourStatus.locked).length,
-                      color: AppTheme.success,
-                      isDark: isDark,
-                    ),
-                    const SizedBox(width: 8),
-                    _StatChip(
-                      label: 'Completed',
-                      count: tourCtrl.completedTours.length,
-                      color: const Color(0xFF6B7280),
-                      isDark: isDark,
-                    ),
-                  ],
-                ),
-              )),
-
-          const SizedBox(height: 20),
-
-          // ── Tour List / Empty State ─────────────────────────────
-          Expanded(
-            child: Obx(() {
-              if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
-                return const Center(
-                  child: CircularProgressIndicator(),
-                );
-              }
-
-              if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.cloud_off_rounded,
-                            size: 48,
-                            color: isDark ? Colors.white38 : AppTheme.textMuted),
-                        const SizedBox(height: 16),
-                        Text(
-                          tourCtrl.errorMessage.value,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.inter(
-                            fontSize: 15,
-                            color: isDark ? Colors.white70 : AppTheme.textSecondary,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: tourCtrl.refreshTours,
-                          icon: const Icon(Icons.refresh_rounded, size: 18),
-                          label: const Text('Retry'),
-                        ),
-                      ],
-                    ),
+            // ── Quick Stats Row ─────────────────────────────────────
+            Obx(() => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Row(
+                    children: [
+                      _StatChip(
+                        label: 'Active',
+                        count: tourCtrl.activeTours.length,
+                        color: AppTheme.brand,
+                        isDark: isDark,
+                      ),
+                      const SizedBox(width: 8),
+                      _StatChip(
+                        label: 'Collecting',
+                        count: tourCtrl
+                            .toursByStatus(TourStatus.collecting)
+                            .length,
+                        color: AppTheme.warning,
+                        isDark: isDark,
+                      ),
+                      const SizedBox(width: 8),
+                      _StatChip(
+                        label: 'Locked',
+                        count:
+                            tourCtrl.toursByStatus(TourStatus.locked).length,
+                        color: AppTheme.success,
+                        isDark: isDark,
+                      ),
+                      const SizedBox(width: 8),
+                      _StatChip(
+                        label: 'Completed',
+                        count: tourCtrl.completedTours.length,
+                        color: const Color(0xFF6B7280),
+                        isDark: isDark,
+                      ),
+                    ],
                   ),
-                );
-              }
+                )),
 
-              final tours = tourCtrl.tours;
+            const SizedBox(height: 20),
 
-              if (tours.isEmpty) {
-                return _EmptyState(
-                  onCreateTour: () => shell.switchTab(1),
-                  isDark: isDark,
-                );
-              }
+            // ── Tour List / Empty State ─────────────────────────────
+            Expanded(
+              child: Obx(() {
+                if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                }
 
-              return ListView.builder(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
-                physics: const BouncingScrollPhysics(),
-                itemCount: tours.length,
-                itemBuilder: (ctx, i) {
-                  final tour = tours[tours.length - 1 - i]; // newest first
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: TourCard(
-                      tour: tour,
-                      onTap: () => Get.to(
-                        () => TourDetailScreen(tourId: tour.id),
-                        transition: Transition.cupertino,
+                if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.cloud_off_rounded,
+                              size: 48,
+                              color: isDark ? Colors.white38 : AppTheme.textMuted),
+                          const SizedBox(height: 16),
+                          Text(
+                            tourCtrl.errorMessage.value,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              color: isDark ? Colors.white70 : AppTheme.textSecondary,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            onPressed: tourCtrl.refreshTours,
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('Retry'),
+                          ),
+                        ],
                       ),
                     ),
                   );
-                },
-              );
-            }),
-          ),
-        ],
+                }
+
+                final tours = tourCtrl.tours;
+
+                if (tours.isEmpty) {
+                  return _EmptyState(
+                    onCreateTour: () => Get.toNamed('/create-tour'),
+                    isDark: isDark,
+                  );
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: tours.length,
+                  itemBuilder: (ctx, i) {
+                    final tour = tours[tours.length - 1 - i]; // newest first
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: TourCard(
+                        tour: tour,
+                        onTap: () => Get.to(
+                          () => TourDetailScreen(tourId: tour.id),
+                          transition: Transition.cupertino,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              }),
+            ),
+          ],
+        ),
       ),
     );
   }

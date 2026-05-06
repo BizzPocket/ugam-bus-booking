@@ -496,7 +496,7 @@ class _UpcomingTourCard extends StatelessWidget {
         return (AppTheme.infoLight, AppTheme.info);
       case TourStatus.collecting:
         return (AppTheme.warningLight, AppTheme.warning);
-      case TourStatus.booked:
+      case TourStatus.busBooked:
         return (AppTheme.successLight, AppTheme.success);
       case TourStatus.assigning:
         return (AppTheme.brandLight, AppTheme.brand);
