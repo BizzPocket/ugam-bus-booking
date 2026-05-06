@@ -189,6 +189,22 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     }
   }
 
+  Future<void> _toggleHandler(Tour tour, String passengerId) async {
+    if (tour.handlerId == passengerId) {
+      await _ctrl.removeHandler(tour.id);
+      AppSnackBar.success('Handler removed.');
+    } else {
+      await _ctrl.setHandler(tour.id, passengerId);
+      final p = tour.passengers
+          .where((x) => x.id == passengerId)
+          .toList()
+          .firstOrNull;
+      AppSnackBar.success(
+        '${p?.name ?? 'Passenger'} is now the trip handler.',
+      );
+    }
+  }
+
   Future<void> _lockTour(Tour tour) async {
     if (!tour.allSeatsAssigned) {
       AppSnackBar.error('All passengers must be fully assigned first.');
@@ -281,10 +297,13 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                   passenger: passenger,
                   pending: _pendingLines(passenger),
                   allPassengers: tour.passengers,
+                  handlerId: tour.handlerId,
                   onChange: (id) =>
                       setState(() => _selectedPassengerId = id),
+                  onToggleHandler: (id) => _toggleHandler(tour, id),
                   onLockTour: tour.status == TourStatus.assigning &&
-                          tour.allSeatsAssigned
+                          tour.allSeatsAssigned &&
+                          tour.handlerId != null
                       ? () => _lockTour(tour)
                       : null,
                 ),
@@ -816,14 +835,18 @@ class _PassengerCard extends StatelessWidget {
   final Passenger passenger;
   final List<_PendingLine> pending;
   final List<Passenger> allPassengers;
+  final String? handlerId;
   final ValueChanged<String> onChange;
+  final ValueChanged<String> onToggleHandler;
   final VoidCallback? onLockTour;
 
   const _PassengerCard({
     required this.passenger,
     required this.pending,
     required this.allPassengers,
+    required this.handlerId,
     required this.onChange,
+    required this.onToggleHandler,
     required this.onLockTour,
   });
 
@@ -926,13 +949,44 @@ class _PassengerCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      passenger.name,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onSurface,
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            passenger.name,
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.onSurface,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (handlerId == passenger.id) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                                  AppTheme.brandAccent.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'HANDLER',
+                              style: GoogleFonts.inter(
+                                fontSize: 8,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.6,
+                                color: AppTheme.brandAccent,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     if (passenger.phone.isNotEmpty)
                       Text(
@@ -943,6 +997,22 @@ class _PassengerCard extends StatelessWidget {
                         ),
                       ),
                   ],
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: handlerId == passenger.id
+                    ? 'Remove as handler'
+                    : 'Set as handler',
+                onPressed: () => onToggleHandler(passenger.id),
+                icon: Icon(
+                  handlerId == passenger.id
+                      ? Icons.star_rounded
+                      : Icons.star_outline_rounded,
+                  size: 22,
+                  color: handlerId == passenger.id
+                      ? AppTheme.brandAccent
+                      : AppTheme.textMuted,
                 ),
               ),
               Text(
@@ -1006,6 +1076,39 @@ class _PassengerCard extends StatelessWidget {
                 ),
             ],
           ),
+          if (handlerId == null && stillNeeded == 0) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: AppTheme.warningLight,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.star_outline_rounded,
+                    size: 14,
+                    color: AppTheme.warning,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Tap the star next to a passenger to mark them as the '
+                      'trip handler before locking.',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: AppTheme.warning,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (onLockTour != null) ...[
             const SizedBox(height: 12),
             SizedBox(
