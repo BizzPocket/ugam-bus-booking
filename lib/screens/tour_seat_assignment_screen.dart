@@ -414,7 +414,7 @@ class _BusTabs extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
         itemCount: buses.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
         itemBuilder: (ctx, i) {
           final bus = buses[i];
           final selected = bus.id == selectedBusId;
@@ -853,7 +853,7 @@ class _PassengerCard extends StatelessWidget {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: allPassengers.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
               itemBuilder: (ctx, i) {
                 final p = allPassengers[i];
                 final selected = p.id == passenger.id;

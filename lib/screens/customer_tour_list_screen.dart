@@ -205,9 +205,9 @@ class _CustomerTourCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    tour.busDetails == null
+                    tour.buses.isEmpty
                         ? 'Bus to be confirmed'
-                        : tour.busDetails!.busNumber,
+                        : tour.buses.first.busNumber,
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       color: colorScheme.onSurfaceVariant,

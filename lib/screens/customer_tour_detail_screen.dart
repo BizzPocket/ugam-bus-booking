@@ -73,7 +73,7 @@ class CustomerTourDetailScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
                   _DetailGrid(tour: tour, colorScheme: colorScheme),
-                  if (tour.busDetails != null) ...[
+                  if (tour.buses.isNotEmpty) ...[
                     const SizedBox(height: 20),
                     _BusCard(tour: tour, colorScheme: colorScheme),
                   ],
@@ -250,7 +250,7 @@ class _BusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bus = tour.busDetails!;
+    final bus = tour.buses.first;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(

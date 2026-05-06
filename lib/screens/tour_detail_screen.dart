@@ -8,7 +8,6 @@ import '../controllers/tour_controller.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/payment_status.dart';
-import '../components/passenger_tile.dart';
 import 'manage_buses_screen.dart';
 import 'tour_seat_assignment_screen.dart';
 
@@ -19,9 +18,6 @@ class TourDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final colorScheme = theme.colorScheme;
 
     return Obx(() {
       final tour = tourCtrl.getTour(tourId);

@@ -44,10 +44,13 @@ class DashboardScreen extends StatelessWidget {
 
               final tours = tourCtrl.tours;
               final activeTours = tourCtrl.activeTours;
-              final pendingRequests =
-                  tourCtrl.toursByStatus(TourStatus.collecting).length;
-              final totalPassengers =
-                  tours.fold<int>(0, (s, t) => s + t.passengerCount);
+              final pendingRequests = tourCtrl
+                  .toursByStatus(TourStatus.collecting)
+                  .length;
+              final totalPassengers = tours.fold<int>(
+                0,
+                (s, t) => s + t.passengerCount,
+              );
               final revenue = tours.fold<double>(
                 0,
                 (s, t) => s + (t.pricePerSeat * t.totalSeatsRequested),
@@ -119,9 +122,7 @@ class DashboardScreen extends StatelessWidget {
             Positioned(
               right: 20,
               bottom: 110,
-              child: _Fab(
-                onTap: () => Get.to(() => const CreateTourScreen()),
-              ),
+              child: _Fab(onTap: () => Get.to(() => const CreateTourScreen())),
             ),
           ],
         ),
@@ -551,10 +552,7 @@ class _EmptyTours extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'No upcoming tours',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: AppTheme.textMuted,
-            ),
+            style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted),
           ),
         ],
       ),

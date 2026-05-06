@@ -2,12 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+/// Design tokens extracted from busbooking.pen
+/// Brand: Deep blue (#1746A2) — accent-primary
+/// Warm accent: Amber (#F59E0B) — used for status badges, chips
 class AppTheme {
-  // ── Core Palette (Ugam Booking — saffron/gold) ────────────────
-  static const Color brand = Color(0xFFD97706);       // saffron 600
-  static const Color brandDark = Color(0xFF7C2D12);    // deep red-brown
-  static const Color brandLight = Color(0xFFFFF7ED);   // cream
-  static const Color brandAccent = Color(0xFFFFC107);  // gold
+  // ── Brand ────────────────────────────────────────────────────
+  static const Color brand = Color(0xFF1746A2);         // accent-primary
+  static const Color brandHover = Color(0xFF123B8A);     // accent-primary-hover
+  static const Color brandLight = Color(0xFFEFF6FF);     // accent-light
+  static const Color brandLightSolid = Color(0xFFDBEAFE);// accent-light-solid
+  static const Color brandDark = Color(0xFF0B1120);      // surface-inverse
+  static const Color brandAccent = Color(0xFFF59E0B);    // accent-warm (amber)
 
   // ── Status Colors ──────────────────────────────────────────
   static const Color success = Color(0xFF059669);
@@ -20,12 +25,12 @@ class AppTheme {
   static const Color infoLight = Color(0xFFF0F9FF);
 
   // ── Surface ───────────────────────────────────────────────────
-  static const Color bgLight = Color(0xFFF7F8FB);
-  static const Color surfaceLight = Color(0xFFFFFFFF);
-  static const Color cardLight = Color(0xFFFFFFFF);
-  static const Color borderLight = Color(0xFFE2E8F0);
-  static const Color borderDefault = Color(0xFFCBD5E1);
-  static const Color hoverLight = Color(0xFFF1F5F9);
+  static const Color bgLight = Color(0xFFF7F8FB);       // surface-primary
+  static const Color surfaceLight = Color(0xFFFFFFFF);   // surface-card
+  static const Color cardLight = Color(0xFFFFFFFF);      // surface-card
+  static const Color borderLight = Color(0xFFE2E8F0);   // border-light
+  static const Color borderDefault = Color(0xFFCBD5E1); // border-default
+  static const Color hoverLight = Color(0xFFEEF1F7);    // surface-hover
 
   static const Color bgDark = Color(0xFF0B1120);
   static const Color surfaceDark = Color(0xFF111827);
@@ -33,18 +38,14 @@ class AppTheme {
   static const Color borderDark = Color(0xFF334155);
 
   // ── Text Colors ───────────────────────────────────────────────
-  static const Color textPrimary = Color(0xFF0B1120);
-  static const Color textSecondary = Color(0xFF475569);
-  static const Color textMuted = Color(0xFF94A3B8);
-  static const Color textInverse = Color(0xFFFFFFFF);
-
-  // ── Accent Warm ─────────────────────────────────────────────
-  static const Color accentWarm = Color(0xFFF59E0B);
-  static const Color accentWarmLight = Color(0xFFFFF7ED);
+  static const Color textPrimary = Color(0xFF0B1120);    // foreground-primary
+  static const Color textSecondary = Color(0xFF475569);  // foreground-secondary
+  static const Color textMuted = Color(0xFF94A3B8);      // foreground-muted
+  static const Color textInverse = Color(0xFFFFFFFF);    // foreground-inverse
 
   // ── Gradient helpers ─────────────────────────────────────────
   static const brandGradient = LinearGradient(
-    colors: [brand, Color(0xFFB45309)], // saffron 600 → 700
+    colors: [brand, brandHover],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -85,12 +86,12 @@ class AppTheme {
 
   static List<BoxShadow> get brandShadow => [
     const BoxShadow(
-      color: Color(0x30D97706),
+      color: Color(0x301746A2),
       offset: Offset(0, 4),
       blurRadius: 16,
     ),
     const BoxShadow(
-      color: Color(0x18D97706),
+      color: Color(0x181746A2),
       offset: Offset(0, 8),
       blurRadius: 32,
     ),
@@ -99,8 +100,8 @@ class AppTheme {
   static List<BoxShadow> get navShadow => [
     const BoxShadow(
       color: Color(0x0A000000),
-      offset: Offset(0, 4),
-      blurRadius: 12,
+      offset: Offset(0, -2),
+      blurRadius: 8,
     ),
   ];
 
@@ -113,7 +114,7 @@ class AppTheme {
         onPrimary: Colors.white,
         secondary: success,
         onSecondary: Colors.white,
-        tertiary: warning,
+        tertiary: brandAccent,
         surface: surfaceLight,
         onSurface: textPrimary,
         surfaceContainerHighest: bgLight,
@@ -202,7 +203,7 @@ class AppTheme {
           elevation: 0,
           shadowColor: Colors.transparent,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
         ),
       ),
@@ -211,7 +212,7 @@ class AppTheme {
           foregroundColor: brand,
           side: const BorderSide(color: brand, width: 1.5),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15),
         ),
       ),
@@ -226,23 +227,23 @@ class AppTheme {
         fillColor: Colors.white,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: borderDefault),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: borderDefault),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: brand, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: danger, width: 1.5),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: danger, width: 2),
         ),
         hintStyle: GoogleFonts.inter(color: textMuted, fontSize: 15),
@@ -253,14 +254,14 @@ class AppTheme {
         color: cardLight,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           side: const BorderSide(color: borderLight, width: 1),
         ),
         margin: EdgeInsets.zero,
       ),
       chipTheme: ChipThemeData(
         backgroundColor: bgLight,
-        selectedColor: brandLight,
+        selectedColor: brandLightSolid,
         labelStyle: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w500),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         shape: const StadiumBorder(),
@@ -277,6 +278,14 @@ class AppTheme {
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
       ),
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: bgLight,
+        selectedItemColor: brand,
+        unselectedItemColor: textMuted,
+        type: BottomNavigationBarType.fixed,
+        selectedLabelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w500),
+      ),
     );
   }
 
@@ -285,7 +294,7 @@ class AppTheme {
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: const ColorScheme.dark(
-        primary: Color(0xFFFBBF24),
+        primary: Color(0xFF5B8DEF),
         onPrimary: Color(0xFF0F172A),
         secondary: Color(0xFF34D399),
         onSecondary: Color(0xFF0F172A),
@@ -345,7 +354,7 @@ class AppTheme {
         color: cardDark,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           side: const BorderSide(color: borderDark, width: 1),
         ),
         margin: EdgeInsets.zero,
@@ -355,26 +364,26 @@ class AppTheme {
         fillColor: cardDark,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: borderDark),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: borderDark),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide(color: const Color(0xFFFBBF24), width: 1.5),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: const Color(0xFF5B8DEF), width: 1.5),
         ),
         hintStyle: GoogleFonts.inter(color: const Color(0xFF475569), fontSize: 15),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFFBBF24),
-          foregroundColor: const Color(0xFF0F172A),
+          backgroundColor: const Color(0xFF5B8DEF),
+          foregroundColor: Colors.white,
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
         ),
       ),
@@ -384,10 +393,18 @@ class AppTheme {
         space: 0,
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: const Color(0xFFFBBF24),
-        foregroundColor: const Color(0xFF0F172A),
+        backgroundColor: const Color(0xFF5B8DEF),
+        foregroundColor: Colors.white,
         elevation: 0,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9999)),
+      ),
+      bottomNavigationBarTheme: BottomNavigationBarThemeData(
+        backgroundColor: surfaceDark,
+        selectedItemColor: const Color(0xFF5B8DEF),
+        unselectedItemColor: const Color(0xFF64748B),
+        type: BottomNavigationBarType.fixed,
+        selectedLabelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w500),
       ),
     );
   }
