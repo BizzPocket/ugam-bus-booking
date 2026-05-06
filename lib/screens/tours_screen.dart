@@ -18,9 +18,14 @@ class ToursScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => Get.toNamed('/create-tour'),
-        child: const Icon(Icons.add),
+      // Lift the FAB above MainShell's floating pill bottom nav (~104px tall
+      // with extendBody: true). Without this it disappears behind the nav.
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 90),
+        child: FloatingActionButton(
+          onPressed: () => Get.toNamed('/create-tour'),
+          child: const Icon(Icons.add),
+        ),
       ),
       body: SafeArea(
         bottom: false,

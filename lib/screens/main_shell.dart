@@ -15,6 +15,12 @@ class ShellController extends GetxController {
   void switchTab(int i) => currentIndex.value = i;
 }
 
+/// Max body width for the admin shell. The app is designed phone-first, so
+/// on wide screens (tablet, desktop, web) we cap and center the content
+/// rather than letting it sprawl. Keeps the FAB and pill nav within reach
+/// of the touch target.
+const double _kAdminMaxWidth = 540;
+
 class MainShell extends StatelessWidget {
   const MainShell({super.key});
 
@@ -40,13 +46,23 @@ class MainShell extends StatelessWidget {
       return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         extendBody: true,
-        body: IndexedStack(
-          index: shell.currentIndex.value,
-          children: _adminPages,
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
+            child: IndexedStack(
+              index: shell.currentIndex.value,
+              children: _adminPages,
+            ),
+          ),
         ),
-        bottomNavigationBar: _PillBottomNav(
-          currentIndex: shell.currentIndex.value,
-          onTap: shell.switchTab,
+        bottomNavigationBar: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
+            child: _PillBottomNav(
+              currentIndex: shell.currentIndex.value,
+              onTap: shell.switchTab,
+            ),
+          ),
         ),
       );
     });
