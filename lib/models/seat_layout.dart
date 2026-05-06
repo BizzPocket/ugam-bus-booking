@@ -1,3 +1,4 @@
+import 'bus_type.dart';
 import 'seat_type.dart';
 
 /// A single cell in the bus seat grid.
@@ -106,6 +107,87 @@ class BusLayout {
       cols: cols,
       lowerDeck: lower,
       upperDeck: upper,
+    );
+  }
+
+  /// Generate a layout from a [busType] and total seat count, plus an
+  /// optional [seaterCount] used only for `mixed`. Lays cells out 4 columns
+  /// wide. Sleepers split half lower / half upper as `doubleSofa`. Seaters
+  /// live on the lower deck only with `null` position.
+  factory BusLayout.generate({
+    required BusType busType,
+    required int totalSeats,
+    int seaterCount = 0,
+  }) {
+    const cols = 4;
+
+    int sleeperTotal;
+    int seaterTotal;
+    switch (busType) {
+      case BusType.sleeper:
+        sleeperTotal = totalSeats;
+        seaterTotal = 0;
+        break;
+      case BusType.seater:
+        sleeperTotal = 0;
+        seaterTotal = totalSeats;
+        break;
+      case BusType.mixed:
+        seaterTotal = seaterCount.clamp(0, totalSeats);
+        sleeperTotal = totalSeats - seaterTotal;
+        break;
+    }
+
+    final sleeperLower = (sleeperTotal / 2).ceil();
+    final sleeperUpper = sleeperTotal - sleeperLower;
+
+    final lowerCells = <SeatCell>[];
+    final upperCells = <SeatCell>[];
+
+    var idCounter = 0;
+    for (var i = 0; i < sleeperLower; i++) {
+      idCounter++;
+      lowerCells.add(SeatCell(
+        row: i ~/ cols,
+        col: i % cols,
+        seatType: SeatType.doubleSofa,
+        position: SeatPosition.lower,
+        seatId: 'L$idCounter',
+      ));
+    }
+    for (var i = 0; i < seaterTotal; i++) {
+      idCounter++;
+      final seq = sleeperLower + i;
+      lowerCells.add(SeatCell(
+        row: seq ~/ cols,
+        col: seq % cols,
+        seatType: SeatType.seater,
+        position: null,
+        seatId: 'L$idCounter',
+      ));
+    }
+    for (var i = 0; i < sleeperUpper; i++) {
+      upperCells.add(SeatCell(
+        row: i ~/ cols,
+        col: i % cols,
+        seatType: SeatType.doubleSofa,
+        position: SeatPosition.upper,
+        seatId: 'U${i + 1}',
+      ));
+    }
+
+    final lowerRows = sleeperLower + seaterTotal == 0
+        ? 1
+        : ((sleeperLower + seaterTotal - 1) ~/ cols) + 1;
+    final upperRows =
+        sleeperUpper == 0 ? 0 : ((sleeperUpper - 1) ~/ cols) + 1;
+    final maxRows = lowerRows > upperRows ? lowerRows : upperRows;
+
+    return BusLayout(
+      rows: maxRows,
+      cols: cols,
+      lowerDeck: lowerCells,
+      upperDeck: upperCells,
     );
   }
 
