@@ -1,6 +1,6 @@
 import 'package:uuid/uuid.dart';
 import 'tour_status.dart';
-import 'bus.dart';
+import 'bus_details.dart';
 import 'passenger.dart';
 
 /// A tour planned and managed by the agent.
@@ -17,13 +17,13 @@ class Tour {
   final double pricePerSeat;
   final String? description;
   final TourStatus status;
-  final String? handlerId; // FK → Passenger.id
-  final String? createdBy; // admin phone
+  final String? handlerId;
+  final String? createdBy;
   final bool isPublic;
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  // ── Embedded by sync layer (not stored in Tour document) ──
+  // Embedded by sync layer (not stored in Tour document)
   final List<Bus> buses;
   final List<Passenger> passengers;
 
@@ -48,28 +48,20 @@ class Tour {
         createdAt = createdAt ?? DateTime.now(),
         updatedAt = updatedAt ?? DateTime.now();
 
-  // ── Computed properties ───────────────────────────────────
-
   String get route => '$fromCity → $toCity';
-
   int get passengerCount => passengers.length;
 
-  /// Total seats requested across all passengers.
   int get totalSeatsRequested =>
       passengers.fold(0, (sum, p) => sum + p.totalSeatsRequested);
 
-  /// Total seats assigned across all passengers.
   int get totalSeatsAssigned =>
       passengers.fold(0, (sum, p) => sum + p.totalSeatsAssigned);
 
-  /// Total seats available across all buses.
   int get totalBusSeats => buses.fold(0, (sum, b) => sum + b.totalSeats);
 
-  /// Passengers who have paid.
   int get paidCount =>
       passengers.where((p) => p.paymentStatus.name == 'paid').length;
 
-  /// The handler passenger, if one is set.
   Passenger? get handler => handlerId != null
       ? passengers.cast<Passenger?>().firstWhere(
             (p) => p?.id == handlerId,
@@ -77,16 +69,8 @@ class Tour {
           )
       : null;
 
-  /// Whether all passengers' request lines are fully assigned.
   bool get allSeatsAssigned =>
       passengers.isNotEmpty && passengers.every((p) => p.isFullyAssigned);
-
-  /// Backward compat: returns first bus or null. Used by screens that
-  /// haven't been updated to multi-bus yet.
-  @Deprecated('Use tour.buses instead')
-  Bus? get busDetails => buses.isNotEmpty ? buses.first : null;
-
-  // ── Appwrite serialization (only Tour's own fields) ───────
 
   Map<String, dynamic> toAppwrite() {
     return {
@@ -104,10 +88,7 @@ class Tour {
     };
   }
 
-  /// Build a Tour from an Appwrite document.
-  /// The sync layer embeds `passengers` and `buses` in the map.
   factory Tour.fromAppwrite(Map<String, dynamic> map) {
-    // Parse nested passengers
     List<Passenger> passengers = [];
     if (map['passengers'] is List) {
       passengers = (map['passengers'] as List)
@@ -115,7 +96,6 @@ class Tour {
           .toList();
     }
 
-    // Parse nested buses (embedded by sync layer).
     List<Bus> buses = [];
     if (map['buses'] is List) {
       buses = (map['buses'] as List)
