@@ -63,20 +63,7 @@ class TourDetailScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Hero Image ────────────────────────────
-              Container(
-                margin: const EdgeInsets.all(16),
-                width: double.infinity,
-                height: 200,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  image: const DecorationImage(
-                    image: NetworkImage(
-                        'https://images.unsplash.com/photo-1596422846543-75c6fc18a5ce?q=80&w=2070&auto=format&fit=crop'),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
+              const SizedBox(height: 16),
 
               // ── Tour Title & Basic Info ──────────────────────────
               Padding(
@@ -222,7 +209,7 @@ class TourDetailScreen extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: SizedBox(
                   width: double.infinity,
-                  height: 48,
+                  height: 52,
                   child: ElevatedButton.icon(
                     onPressed: () => Get.to(
                       () => ManageBusesScreen(tourId: tourId),
@@ -233,6 +220,12 @@ class TourDetailScreen extends StatelessWidget {
                       tour.buses.isEmpty
                           ? 'Add Bus'
                           : 'Manage Buses (${tour.buses.length})',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                        height: 1.2,
+                      ),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.brand,

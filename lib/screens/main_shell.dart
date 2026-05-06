@@ -55,7 +55,13 @@ class MainShell extends StatelessWidget {
             ),
           ),
         ),
-        bottomNavigationBar: Center(
+        // Align with heightFactor: 1.0 sizes the slot to the pill's
+        // natural height (Center would expand to fill the Scaffold), while
+        // passing parent width constraints through to the child (Row would
+        // hand it unbounded width and overflow on phones < 540px wide).
+        bottomNavigationBar: Align(
+          alignment: Alignment.center,
+          heightFactor: 1.0,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
             child: _PillBottomNav(
