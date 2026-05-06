@@ -28,13 +28,11 @@ class TourController extends GetxController {
   }
 
   void _subscribeToChanges() {
-    // When coming back online, refresh
     ever(_sync.isOnline, (online) {
       if (online) _loadTours();
     });
   }
 
-  /// Load tours — offline-first (cache → network → cache update)
   Future<void> _loadTours() async {
     isLoading.value = true;
     hasError.value = false;
@@ -43,9 +41,8 @@ class TourController extends GetxController {
         table: AppwriteConfig.toursCollection,
         cacheKey: 'all_tours',
         orderBy: r'$createdAt',
-        maxAge: 120000, // 2 min cache for tours
+        maxAge: 120000,
       );
-
       final loaded = data.map((item) => Tour.fromAppwrite(item)).toList();
       tours.assignAll(loaded);
     } catch (_) {
@@ -54,18 +51,16 @@ class TourController extends GetxController {
         errorMessage.value = 'Could not load tours. Check your connection.';
       } else {
         AppSnackBar.warning(
-          'Showing cached tours — refresh failed. Check your connection.',
+          'Showing cached tours — refresh failed.',
         );
       }
     }
     isLoading.value = false;
   }
 
-  /// Manual refresh
   Future<void> refreshTours() => _loadTours();
 
-  // ── Tour CRUD ─────────────────────────────────────────────
-
+  // Tour CRUD
   Future<Tour> createTour({
     required String title,
     required String fromCity,
@@ -85,17 +80,13 @@ class TourController extends GetxController {
       description: description,
       createdBy: _auth.userPhone.value,
     );
-
-    // Optimistic local update
     tours.add(tour);
     tours.refresh();
-
     await _sync.smartInsert(
       table: AppwriteConfig.toursCollection,
       entityId: tour.id,
       data: tour.toAppwrite(),
     );
-
     return tour;
   }
 
@@ -112,8 +103,7 @@ class TourController extends GetxController {
     );
   }
 
-  // ── Status Transitions ────────────────────────────────────
-
+  // Status Transitions
   Future<void> updateStatus(String tourId, TourStatus status) async {
     await _updateTour(tourId, (t) => t.copyWith(status: status));
   }
@@ -133,21 +123,17 @@ class TourController extends GetxController {
   Future<void> completeTour(String tourId) =>
       updateStatus(tourId, TourStatus.completed);
 
-  // ── Passenger Management ──────────────────────────────────
-
+  // Passenger Management
   Future<void> addPassenger(String tourId, Passenger passenger) async {
     _updateTourLocal(tourId, (t) {
       final list = List<Passenger>.from(t.passengers)..add(passenger);
       return t.copyWith(passengers: list);
     });
-
     await _sync.smartInsert(
       table: AppwriteConfig.passengersCollection,
       entityId: passenger.id,
       data: passenger.toAppwrite(),
     );
-
-    // Auto transition: planning → collecting on first passenger
     final tour = getTour(tourId);
     if (tour != null && tour.status == TourStatus.planning) {
       await updateStatus(tourId, TourStatus.collecting);
@@ -159,7 +145,6 @@ class TourController extends GetxController {
       final list = t.passengers.where((p) => p.id != passengerId).toList();
       return t.copyWith(passengers: list);
     });
-
     await _sync.smartDelete(
       table: AppwriteConfig.passengersCollection,
       entityId: passengerId,
@@ -191,8 +176,7 @@ class TourController extends GetxController {
     }
   }
 
-  // ── Seat Assignment ───────────────────────────────────────
-
+  // Seat Assignment
   Future<void> assignSeats(
       String tourId, String passengerId, List<SeatAssignment> assignments) async {
     Passenger? updated;
@@ -224,8 +208,7 @@ class TourController extends GetxController {
     }
   }
 
-  // ── Handler ───────────────────────────────────────────────
-
+  // Handler
   Future<void> setHandler(String tourId, String passengerId) async {
     _updateTourLocal(tourId, (t) {
       final updatedPassengers = t.passengers.map((p) {
@@ -235,7 +218,6 @@ class TourController extends GetxController {
       }).toList();
       return t.copyWith(handlerId: passengerId, passengers: updatedPassengers);
     });
-
     final tour = getTour(tourId);
     if (tour != null) {
       await _sync.smartUpdate(
@@ -260,7 +242,6 @@ class TourController extends GetxController {
           .toList();
       return t.copyWith(handlerId: null, passengers: updatedPassengers);
     });
-
     final tour = getTour(tourId);
     if (tour != null) {
       await _sync.smartUpdate(
@@ -271,27 +252,24 @@ class TourController extends GetxController {
     }
   }
 
-  // ── Bus Management ──────────────────────────────────────────
-
-  Future<void> addBus(String tourId, BusDetails bus) async {
+  // Bus Management
+  Future<void> addBus(String tourId, Bus bus) async {
     _updateTourLocal(tourId, (t) {
-      final list = List<BusDetails>.from(t.buses)..add(bus);
+      final list = List<Bus>.from(t.buses)..add(bus);
       return t.copyWith(buses: list);
     });
     await _sync.smartInsert(
       table: AppwriteConfig.busesCollection,
       entityId: bus.id,
-      data: bus.toAppwrite(tourId),
+      data: bus.toAppwrite(),
     );
-
-    // Auto transition to busBooked if we were in collecting
     final tour = getTour(tourId);
     if (tour != null && tour.status == TourStatus.collecting) {
       await updateStatus(tourId, TourStatus.busBooked);
     }
   }
 
-  Future<void> updateBus(String tourId, BusDetails bus) async {
+  Future<void> updateBus(String tourId, Bus bus) async {
     _updateTourLocal(tourId, (t) {
       final list = t.buses.map((b) => b.id == bus.id ? bus : b).toList();
       return t.copyWith(buses: list);
@@ -299,7 +277,7 @@ class TourController extends GetxController {
     await _sync.smartUpdate(
       table: AppwriteConfig.busesCollection,
       entityId: bus.id,
-      data: bus.toAppwrite(tourId),
+      data: bus.toAppwrite(),
     );
   }
 
@@ -314,8 +292,7 @@ class TourController extends GetxController {
     );
   }
 
-  // ── Queries ───────────────────────────────────────────────
-
+  // Queries
   List<Tour> toursByStatus(TourStatus status) =>
       tours.where((t) => t.status == status).toList();
 
@@ -325,15 +302,13 @@ class TourController extends GetxController {
   List<Tour> get completedTours =>
       tours.where((t) => t.status == TourStatus.completed).toList();
 
-  // ── Internals ─────────────────────────────────────────────
-
+  // Internals
   Future<void> _updateTour(String tourId, Tour Function(Tour) updater) async {
     final idx = tours.indexWhere((t) => t.id == tourId);
     if (idx >= 0) {
       final updated = updater(tours[idx]);
       tours[idx] = updated;
       tours.refresh();
-
       await _sync.smartUpdate(
         table: AppwriteConfig.toursCollection,
         entityId: tourId,

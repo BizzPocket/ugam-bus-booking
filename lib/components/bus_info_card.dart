@@ -3,7 +3,7 @@ import '../models/bus_details.dart';
 import '../config/theme.dart';
 
 class BusInfoCard extends StatelessWidget {
-  final BusDetails details;
+  final Bus details;
   final VoidCallback? onEdit;
 
   const BusInfoCard({super.key, required this.details, this.onEdit});

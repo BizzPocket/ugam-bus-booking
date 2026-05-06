@@ -72,6 +72,11 @@ class Tour {
   bool get allSeatsAssigned =>
       passengers.isNotEmpty && passengers.every((p) => p.isFullyAssigned);
 
+  /// Backward compat for screens still using single-bus access. Returns
+  /// the first bus or null. Prefer `tour.buses` directly.
+  @Deprecated('Use tour.buses')
+  Bus? get busDetails => buses.isNotEmpty ? buses.first : null;
+
   Map<String, dynamic> toAppwrite() {
     return {
       'title': title,
