@@ -10,6 +10,7 @@ import '../models/tour_status.dart';
 import '../models/payment_status.dart';
 import '../components/passenger_tile.dart';
 import 'manage_buses_screen.dart';
+import 'tour_seat_assignment_screen.dart';
 
 class TourDetailScreen extends StatelessWidget {
   final String tourId;
@@ -238,6 +239,45 @@ class TourDetailScreen extends StatelessWidget {
                   ),
                 ),
               ),
+
+              if (tour.buses.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: OutlinedButton.icon(
+                      onPressed: () => Get.to(
+                        () => TourSeatAssignmentScreen(tourId: tourId),
+                        transition: Transition.cupertino,
+                      ),
+                      icon: const Icon(
+                        Icons.grid_view_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        'Assign Seats (${tour.totalSeatsAssigned}/${tour.totalSeatsRequested})',
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.brand,
+                          height: 1.2,
+                        ),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(
+                          color: AppTheme.brand,
+                          width: 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 32),
             ],
