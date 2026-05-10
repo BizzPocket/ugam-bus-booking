@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:get/get.dart';
-import '../config/appwrite_config.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/passenger.dart';
@@ -38,12 +37,12 @@ class TourController extends GetxController {
     hasError.value = false;
     try {
       final data = await _sync.smartFetch(
-        table: AppwriteConfig.toursCollection,
+        table: 'tours',
         cacheKey: 'all_tours',
         orderBy: r'$createdAt',
         maxAge: 120000,
       );
-      final loaded = data.map((item) => Tour.fromAppwrite(item)).toList();
+      final loaded = data.map((item) => Tour.fromMap(item)).toList();
       tours.assignAll(loaded);
     } catch (_) {
       if (tours.isEmpty) {
@@ -82,10 +81,14 @@ class TourController extends GetxController {
     );
     tours.add(tour);
     tours.refresh();
+    final tourData = {
+      ...tour.toMap(),
+      'owner_id': _auth.currentAdmin.value?.id,
+    };
     await _sync.smartInsert(
-      table: AppwriteConfig.toursCollection,
+      table: 'tours',
       entityId: tour.id,
-      data: tour.toAppwrite(),
+      data: tourData,
     );
     await _sync.invalidateCache('all_tours');
     return tour;
@@ -129,7 +132,7 @@ class TourController extends GetxController {
   Future<void> deleteTour(String id) async {
     tours.removeWhere((t) => t.id == id);
     await _sync.smartDelete(
-      table: AppwriteConfig.toursCollection,
+      table: 'tours',
       entityId: id,
     );
     await _sync.invalidateCache('all_tours');
@@ -162,9 +165,9 @@ class TourController extends GetxController {
       return t.copyWith(passengers: list);
     });
     await _sync.smartInsert(
-      table: AppwriteConfig.passengersCollection,
+      table: 'passengers',
       entityId: passenger.id,
-      data: passenger.toAppwrite(),
+      data: passenger.toMap(),
     );
     await _sync.invalidateCache('all_tours');
     final tour = getTour(tourId);
@@ -179,7 +182,7 @@ class TourController extends GetxController {
       return t.copyWith(passengers: list);
     });
     await _sync.smartDelete(
-      table: AppwriteConfig.passengersCollection,
+      table: 'passengers',
       entityId: passengerId,
     );
     await _sync.invalidateCache('all_tours');
@@ -188,9 +191,9 @@ class TourController extends GetxController {
   Future<void> updatePassenger(String tourId, Passenger passenger) async {
     _updatePassengerLocal(tourId, passenger.id, (p) => passenger);
     await _sync.smartUpdate(
-      table: AppwriteConfig.passengersCollection,
+      table: 'passengers',
       entityId: passenger.id,
-      data: passenger.toAppwrite(),
+      data: passenger.toMap(),
     );
     await _sync.invalidateCache('all_tours');
   }
@@ -204,9 +207,9 @@ class TourController extends GetxController {
     });
     if (updated != null) {
       await _sync.smartUpdate(
-        table: AppwriteConfig.passengersCollection,
+        table: 'passengers',
         entityId: passengerId,
-        data: updated!.toAppwrite(),
+        data: updated!.toMap(),
       );
     }
   }
@@ -221,9 +224,9 @@ class TourController extends GetxController {
     });
     if (updated != null) {
       await _sync.smartUpdate(
-        table: AppwriteConfig.passengersCollection,
+        table: 'passengers',
         entityId: passengerId,
-        data: updated!.toAppwrite(),
+        data: updated!.toMap(),
       );
     }
   }
@@ -236,9 +239,9 @@ class TourController extends GetxController {
     });
     if (updated != null) {
       await _sync.smartUpdate(
-        table: AppwriteConfig.passengersCollection,
+        table: 'passengers',
         entityId: passengerId,
-        data: updated!.toAppwrite(),
+        data: updated!.toMap(),
       );
     }
   }
@@ -256,15 +259,15 @@ class TourController extends GetxController {
     final tour = getTour(tourId);
     if (tour != null) {
       await _sync.smartUpdate(
-        table: AppwriteConfig.toursCollection,
+        table: 'tours',
         entityId: tourId,
-        data: tour.toAppwrite(),
+        data: tour.toMap(),
       );
       for (final p in tour.passengers) {
         await _sync.smartUpdate(
-          table: AppwriteConfig.passengersCollection,
+          table: 'passengers',
           entityId: p.id,
-          data: p.toAppwrite(),
+          data: p.toMap(),
         );
       }
     }
@@ -280,9 +283,9 @@ class TourController extends GetxController {
     final tour = getTour(tourId);
     if (tour != null) {
       await _sync.smartUpdate(
-        table: AppwriteConfig.toursCollection,
+        table: 'tours',
         entityId: tourId,
-        data: tour.toAppwrite(),
+        data: tour.toMap(),
       );
     }
   }
@@ -291,18 +294,30 @@ class TourController extends GetxController {
   Future<void> addBus(String tourId, Bus bus) async {
     _updateTourLocal(tourId, (t) {
       final list = List<Bus>.from(t.buses)..add(bus);
-      return t.copyWith(buses: list);
+      return t.copyWith(buses: list, busId: bus.id);
     });
+    final busData = {
+      ...bus.toMap(),
+      'owner_id': _auth.currentAdmin.value?.id,
+    };
     await _sync.smartInsert(
-      table: AppwriteConfig.busesCollection,
+      table: 'buses',
       entityId: bus.id,
-      data: bus.toAppwrite(),
+      data: busData,
     );
-    await _sync.invalidateCache('all_tours');
+    // Persist tour.busId so the FK is stored in Supabase
     final tour = getTour(tourId);
-    if (tour != null && tour.status == TourStatus.collecting) {
-      await updateStatus(tourId, TourStatus.busBooked);
+    if (tour != null) {
+      await _sync.smartUpdate(
+        table: 'tours',
+        entityId: tourId,
+        data: tour.toMap(),
+      );
+      if (tour.status == TourStatus.collecting) {
+        await updateStatus(tourId, TourStatus.busBooked);
+      }
     }
+    await _sync.invalidateCache('all_tours');
   }
 
   Future<void> updateBus(String tourId, Bus bus) async {
@@ -311,9 +326,9 @@ class TourController extends GetxController {
       return t.copyWith(buses: list);
     });
     await _sync.smartUpdate(
-      table: AppwriteConfig.busesCollection,
+      table: 'buses',
       entityId: bus.id,
-      data: bus.toAppwrite(),
+      data: bus.toMap(),
     );
     await _sync.invalidateCache('all_tours');
   }
@@ -321,12 +336,22 @@ class TourController extends GetxController {
   Future<void> removeBus(String tourId, String busId) async {
     _updateTourLocal(tourId, (t) {
       final list = t.buses.where((b) => b.id != busId).toList();
-      return t.copyWith(buses: list);
+      // Clear busId on tour if it pointed to the removed bus
+      return t.copyWith(buses: list, busId: t.busId == busId ? null : t.busId);
     });
     await _sync.smartDelete(
-      table: AppwriteConfig.busesCollection,
+      table: 'buses',
       entityId: busId,
     );
+    // Persist updated tour.busId
+    final tour = getTour(tourId);
+    if (tour != null) {
+      await _sync.smartUpdate(
+        table: 'tours',
+        entityId: tourId,
+        data: tour.toMap(),
+      );
+    }
     await _sync.invalidateCache('all_tours');
   }
 
@@ -348,9 +373,9 @@ class TourController extends GetxController {
       tours[idx] = updated;
       tours.refresh();
       await _sync.smartUpdate(
-        table: AppwriteConfig.toursCollection,
+        table: 'tours',
         entityId: tourId,
-        data: updated.toAppwrite(),
+        data: updated.toMap(),
       );
       await _sync.invalidateCache('all_tours');
     }
