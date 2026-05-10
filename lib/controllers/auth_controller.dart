@@ -1,16 +1,19 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/admin.dart';
 import '../models/profile.dart';
 import '../services/admin_auth_service.dart';
 import '../utils/app_snackbar.dart';
 import 'user_controller.dart';
 
-/// Phone+password admin auth backed by the Appwrite `admins` collection.
-/// Non-admin phones still drop straight through into a passenger session
-/// (no auth) so first-time customers can browse without friction.
+/// Phone+password admin auth backed by Supabase Auth (synthetic-email mapping).
+/// Non-admin phones drop straight into a passenger session (no auth) so
+/// first-time customers can browse without friction.
 class AuthController extends GetxController {
   static const _keyPhone = 'auth_phone';
   static const _keyRole = 'auth_role';
@@ -22,8 +25,6 @@ class AuthController extends GetxController {
   final isLoading = false.obs;
   final phoneNumber = ''.obs;
 
-  /// True after a successful phone lookup that matched an admin record —
-  /// the login screen swaps to the password field.
   final awaitingAdminPassword = false.obs;
   final Rxn<Admin> pendingAdmin = Rxn<Admin>();
 
@@ -35,11 +36,9 @@ class AuthController extends GetxController {
   final Rxn<Admin> currentAdmin = Rxn<Admin>();
 
   AdminAuthService get _adminAuth => AdminAuthService();
+  SupabaseClient get _client => Supabase.instance.client;
 
-  /// Whether the current user is an admin (full dashboard access).
   bool get isAdmin => userRole.value == UserRole.admin;
-
-  /// Whether the current user is a passenger (view-only booking status).
   bool get isPassenger => userRole.value == UserRole.passenger;
 
   @override
@@ -65,7 +64,7 @@ class AuthController extends GetxController {
     );
     isLoggedIn.value = true;
 
-    if (userRole.value == UserRole.admin) {
+    if (userRole.value == UserRole.admin && _client.auth.currentSession != null) {
       try {
         final admin = await _adminAuth.findByPhone(phone);
         if (admin != null) {
@@ -76,7 +75,7 @@ class AuthController extends GetxController {
           }
         }
       } catch (_) {
-        // Offline or transient — admin id will hydrate on next online login.
+        // Offline or transient — admin will hydrate on next online action.
       }
     }
   }
@@ -106,11 +105,7 @@ class AuthController extends GetxController {
     return name[0].toUpperCase();
   }
 
-  // ── Login flow ───────────────────────────────────────────────
-
-  /// Step 1 — submit phone number. Looks the number up in the admins
-  /// collection. If it matches, transitions to the password step. If it
-  /// doesn't, logs in immediately as a passenger.
+  /// Step 1 — phone lookup. Falls through to passenger session on no match.
   Future<void> submitPhone() async {
     final phone = phoneController.text.trim();
     if (phone.length < 10) {
@@ -130,7 +125,7 @@ class AuthController extends GetxController {
       }
     } catch (e) {
       AppSnackBar.error(
-        'Could not verify the phone number with Appwrite.\n$e',
+        'Could not verify the phone number with Supabase.\n$e',
         title: 'Connection error',
       );
     } finally {
@@ -138,13 +133,12 @@ class AuthController extends GetxController {
     }
   }
 
-  /// Legacy entry point kept so existing buttons still work.
   Future<void> sendOtp() => submitPhone();
 
-  /// Step 2 — verify the admin's password and log them in on success.
+  /// Step 2 — Supabase Auth sign-in.
   Future<void> verifyAdminPassword() async {
-    final admin = pendingAdmin.value;
-    if (admin == null) {
+    final pending = pendingAdmin.value;
+    if (pending == null) {
       awaitingAdminPassword.value = false;
       return;
     }
@@ -156,17 +150,20 @@ class AuthController extends GetxController {
 
     isLoading.value = true;
     try {
-      if (!_adminAuth.verifyPassword(admin, password)) {
-        AppSnackBar.error('Incorrect password');
-        return;
-      }
+      final admin = await _adminAuth.signIn(
+        phone: pending.phone,
+        password: password,
+      );
       await _loginAsAdmin(admin);
+    } on AuthException catch (e) {
+      AppSnackBar.error(e.message, title: 'Sign in failed');
+    } catch (e) {
+      AppSnackBar.error('Could not sign in.\n$e', title: 'Connection error');
     } finally {
       isLoading.value = false;
     }
   }
 
-  /// Legacy entry point — old OTP flow no longer exists in production.
   Future<void> verifyOtp() async {
     if (awaitingAdminPassword.value) {
       await verifyAdminPassword();
@@ -175,7 +172,6 @@ class AuthController extends GetxController {
     }
   }
 
-  /// Cancel the password step and return to phone entry.
   void cancelAdminPassword() {
     pendingAdmin.value = null;
     awaitingAdminPassword.value = false;
@@ -216,6 +212,8 @@ class AuthController extends GetxController {
   }
 
   Future<void> logout() async {
+    await _adminAuth.signOut();
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyPhone);
     await prefs.remove(_keyRole);
