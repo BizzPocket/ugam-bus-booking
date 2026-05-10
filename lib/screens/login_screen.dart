@@ -4,7 +4,7 @@ import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../controllers/auth_controller.dart';
-import '../services/appwrite_service.dart';
+import '../services/supabase_service.dart';
 import '../utils/app_snackbar.dart';
 
 class LoginScreen extends GetView<AuthController> {
@@ -320,7 +320,7 @@ class LoginScreen extends GetView<AuthController> {
                 ),
               ),
               const SizedBox(height: 4),
-              // ── Appwrite connection ping ─────────────────────
+              // ── Supabase connection ping ──────────────────────
               Center(
                 child: OutlinedButton.icon(
                   onPressed: () => _sendPing(context),
@@ -396,18 +396,18 @@ class LoginScreen extends GetView<AuthController> {
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      final result = await AppwriteService().ping();
+      final result = await SupabaseService.instance.ping();
       if (!context.mounted) return;
       Navigator.of(context).pop(); // dismiss loader
       AppSnackBar.success(
-        'Connection to Appwrite successful.\n${result.length > 100 ? "${result.substring(0, 100)}..." : result}',
+        'Connection to Supabase successful.\n${result.length > 100 ? "${result.substring(0, 100)}..." : result}',
         title: 'Ping Success',
       );
     } catch (e) {
       if (!context.mounted) return;
       Navigator.of(context).pop();
       AppSnackBar.error(
-        'Could not reach Appwrite:\n$e',
+        'Could not reach Supabase:\n$e',
         title: 'Ping Failed',
       );
     }
