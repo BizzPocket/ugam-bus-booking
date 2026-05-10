@@ -4,7 +4,6 @@ import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
-import '../services/admin_auth_service.dart';
 import '../utils/app_snackbar.dart';
 
 /// Reachable from the login screen via a "First-time setup" link, or pushed
@@ -39,27 +38,14 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _busy = true);
-    try {
-      await AdminAuthService().createAdmin(
-        phone: _phone.text.trim(),
-        name: _name.text.trim(),
-        password: _password.text,
-        whatsappNumber: _whatsapp.text.trim().isEmpty
-            ? null
-            : _whatsapp.text.trim(),
-      );
-      AppSnackBar.success(
-        'Admin "${_name.text.trim()}" created. You can now sign in.',
-        title: 'Setup complete',
-      );
-      Get.offAllNamed('/login');
-    } catch (e) {
-      AppSnackBar.error('Could not create admin:\n$e', title: 'Setup failed');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    // Post-Supabase migration: admin accounts are provisioned via the
+    // Supabase dashboard (Auth → Users), not from the app. Keeping this
+    // screen reachable but inert avoids breaking existing routes.
+    AppSnackBar.error(
+      'Admin accounts are created in the Supabase dashboard. '
+      'Ask your project owner to add you under Authentication → Users.',
+      title: 'Setup not available',
+    );
   }
 
   @override

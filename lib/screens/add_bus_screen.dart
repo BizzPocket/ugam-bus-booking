@@ -96,7 +96,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
     );
 
     final bus = Bus(
-      tourId: widget.tourId,
       name: 'Bus ${tour.buses.length + 1}',
       busNumber: busNumber,
       driverName: driverName,
