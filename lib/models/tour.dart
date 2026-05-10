@@ -17,6 +17,8 @@ class Tour {
   final double pricePerSeat;
   final String? description;
   final TourStatus status;
+  final String? ownerId;
+  final String? busId;
   final String? handlerId;
   final String? createdBy;
   final bool isPublic;
@@ -37,6 +39,8 @@ class Tour {
     required this.pricePerSeat,
     this.description,
     this.status = TourStatus.planning,
+    this.ownerId,
+    this.busId,
     this.handlerId,
     this.createdBy,
     this.isPublic = true,
@@ -77,59 +81,66 @@ class Tour {
   @Deprecated('Use tour.buses')
   Bus? get busDetails => buses.isNotEmpty ? buses.first : null;
 
-  Map<String, dynamic> toAppwrite() {
-    return {
-      'title': title,
-      'fromCity': fromCity,
-      'toCity': toCity,
-      'departureDate': departureDate.toIso8601String(),
-      'returnDate': returnDate?.toIso8601String(),
-      'pricePerSeat': pricePerSeat,
-      'description': description,
-      'status': status.name,
-      'handlerId': handlerId,
-      'createdBy': createdBy,
-      'isPublic': isPublic,
-    };
-  }
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        if (ownerId != null) 'owner_id': ownerId,
+        'title': title,
+        'from_city': fromCity,
+        'to_city': toCity,
+        'departure_date': departureDate.toIso8601String().split('T').first,
+        'return_date': returnDate?.toIso8601String().split('T').first,
+        'price_per_seat': pricePerSeat,
+        if (description != null) 'description': description,
+        'status': status.name,
+        if (busId != null) 'bus_id': busId,
+        if (handlerId != null) 'handler_id': handlerId,
+        if (createdBy != null) 'created_by': createdBy,
+        'is_public': isPublic,
+      };
 
-  factory Tour.fromAppwrite(Map<String, dynamic> map) {
-    List<Passenger> passengers = [];
-    if (map['passengers'] is List) {
-      passengers = (map['passengers'] as List)
-          .map((p) => Passenger.fromAppwrite(Map<String, dynamic>.from(p)))
+  factory Tour.fromMap(Map<String, dynamic> map) {
+    List<Bus> buses = const [];
+    if (map['buses'] is List) {
+      buses = (map['buses'] as List)
+          .whereType<Map>()
+          .map((b) => Bus.fromMap(Map<String, dynamic>.from(b)))
           .toList();
     }
 
-    List<Bus> buses = [];
-    if (map['buses'] is List) {
-      buses = (map['buses'] as List)
-          .map((b) => Bus.fromAppwrite(Map<String, dynamic>.from(b)))
+    List<Passenger> passengers = const [];
+    if (map['passengers'] is List) {
+      passengers = (map['passengers'] as List)
+          .whereType<Map>()
+          .map((p) => Passenger.fromMap(Map<String, dynamic>.from(p)))
           .toList();
     }
 
     return Tour(
-      id: (map[r'$id'] ?? map['id']) as String,
-      title: map['title'] as String,
-      fromCity: map['fromCity'] as String,
-      toCity: map['toCity'] as String,
-      departureDate: DateTime.parse(map['departureDate'] as String),
-      returnDate: map['returnDate'] != null
-          ? DateTime.parse(map['returnDate'] as String)
+      id: (map['id'] ?? '').toString(),
+      ownerId: map['owner_id']?.toString(),
+      title: (map['title'] ?? '').toString(),
+      fromCity: (map['from_city'] ?? '').toString(),
+      toCity: (map['to_city'] ?? '').toString(),
+      departureDate: map['departure_date'] != null
+          ? _parseDate(map['departure_date'])
+          : DateTime.now(),
+      returnDate: map['return_date'] != null
+          ? _parseDate(map['return_date'])
           : null,
-      pricePerSeat: (map['pricePerSeat'] as num).toDouble(),
-      description: map['description'] as String?,
+      pricePerSeat: (map['price_per_seat'] as num?)?.toDouble() ?? 0.0,
+      description: map['description']?.toString(),
       status: TourStatus.values.firstWhere(
-        (s) => s.name == map['status'],
+        (s) => s.name == (map['status'] ?? 'planning'),
         orElse: () => TourStatus.planning,
       ),
-      handlerId: map['handlerId'] as String?,
-      createdBy: map['createdBy'] as String?,
-      isPublic: map['isPublic'] is bool ? map['isPublic'] as bool : true,
+      busId: map['bus_id']?.toString(),
+      handlerId: map['handler_id']?.toString(),
+      createdBy: map['created_by']?.toString(),
+      isPublic: map['is_public'] is bool ? map['is_public'] as bool : true,
       buses: buses,
       passengers: passengers,
-      createdAt: _parseDate(map[r'$createdAt'] ?? map['createdAt']),
-      updatedAt: _parseDate(map[r'$updatedAt'] ?? map['updatedAt']),
+      createdAt: _parseDate(map['created_at']),
+      updatedAt: _parseDate(map['updated_at']),
     );
   }
 
@@ -148,6 +159,8 @@ class Tour {
     double? pricePerSeat,
     String? description,
     TourStatus? status,
+    String? ownerId,
+    String? busId,
     String? handlerId,
     String? createdBy,
     bool? isPublic,
@@ -165,6 +178,8 @@ class Tour {
       pricePerSeat: pricePerSeat ?? this.pricePerSeat,
       description: description ?? this.description,
       status: status ?? this.status,
+      ownerId: ownerId ?? this.ownerId,
+      busId: busId ?? this.busId,
       handlerId: handlerId ?? this.handlerId,
       createdBy: createdBy ?? this.createdBy,
       isPublic: isPublic ?? this.isPublic,
