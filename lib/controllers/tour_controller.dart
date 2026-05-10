@@ -87,7 +87,38 @@ class TourController extends GetxController {
       entityId: tour.id,
       data: tour.toAppwrite(),
     );
+    await _sync.invalidateCache('all_tours');
     return tour;
+  }
+
+  Future<void> editTour({
+    required String tourId,
+    required String title,
+    required String fromCity,
+    required String toCity,
+    required DateTime departureDate,
+    DateTime? returnDate,
+    required double pricePerSeat,
+    String? description,
+  }) async {
+    await _updateTour(tourId, (t) => Tour(
+          id: t.id,
+          title: title,
+          fromCity: fromCity,
+          toCity: toCity,
+          departureDate: departureDate,
+          returnDate: returnDate,
+          pricePerSeat: pricePerSeat,
+          description: description,
+          status: t.status,
+          handlerId: t.handlerId,
+          createdBy: t.createdBy,
+          isPublic: t.isPublic,
+          buses: t.buses,
+          passengers: t.passengers,
+          createdAt: t.createdAt,
+          updatedAt: DateTime.now(),
+        ));
   }
 
   Tour? getTour(String id) {
@@ -101,6 +132,7 @@ class TourController extends GetxController {
       table: AppwriteConfig.toursCollection,
       entityId: id,
     );
+    await _sync.invalidateCache('all_tours');
   }
 
   // Status Transitions
@@ -134,6 +166,7 @@ class TourController extends GetxController {
       entityId: passenger.id,
       data: passenger.toAppwrite(),
     );
+    await _sync.invalidateCache('all_tours');
     final tour = getTour(tourId);
     if (tour != null && tour.status == TourStatus.planning) {
       await updateStatus(tourId, TourStatus.collecting);
@@ -149,6 +182,7 @@ class TourController extends GetxController {
       table: AppwriteConfig.passengersCollection,
       entityId: passengerId,
     );
+    await _sync.invalidateCache('all_tours');
   }
 
   Future<void> updatePassenger(String tourId, Passenger passenger) async {
@@ -158,6 +192,7 @@ class TourController extends GetxController {
       entityId: passenger.id,
       data: passenger.toAppwrite(),
     );
+    await _sync.invalidateCache('all_tours');
   }
 
   Future<void> updatePassengerPayment(
@@ -263,6 +298,7 @@ class TourController extends GetxController {
       entityId: bus.id,
       data: bus.toAppwrite(),
     );
+    await _sync.invalidateCache('all_tours');
     final tour = getTour(tourId);
     if (tour != null && tour.status == TourStatus.collecting) {
       await updateStatus(tourId, TourStatus.busBooked);
@@ -279,6 +315,7 @@ class TourController extends GetxController {
       entityId: bus.id,
       data: bus.toAppwrite(),
     );
+    await _sync.invalidateCache('all_tours');
   }
 
   Future<void> removeBus(String tourId, String busId) async {
@@ -290,6 +327,7 @@ class TourController extends GetxController {
       table: AppwriteConfig.busesCollection,
       entityId: busId,
     );
+    await _sync.invalidateCache('all_tours');
   }
 
   // Queries
@@ -314,6 +352,7 @@ class TourController extends GetxController {
         entityId: tourId,
         data: updated.toAppwrite(),
       );
+      await _sync.invalidateCache('all_tours');
     }
   }
 

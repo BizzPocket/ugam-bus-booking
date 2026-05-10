@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="#FFF7ED"/>
+
+  <!-- Rays radiating from the sun centre (which sits on the horizon) -->
+  <g fill="#FFC107">
+    <polygon points="188.5,617.6 186.0,645.5 53.8,619.9" />
+    <polygon points="208.7,539.7 199.5,566.2 77.5,509.0" />
+    <polygon points="247.3,469.2 231.9,492.6 127.7,407.2" />
+    <polygon points="302.1,410.2 281.4,429.1 201.2,320.9" />
+    <polygon points="369.6,366.4 345.0,379.7 293.7,255.1" />
+    <polygon points="445.8,340.5 418.6,347.3 399.4,214.0" />
+    <polygon points="526.0,334.0 498.0,334.0 512.0,200.0" />
+    <polygon points="605.4,347.3 578.2,340.5 624.6,214.0" />
+    <polygon points="679.0,379.7 654.4,366.4 730.3,255.1" />
+    <polygon points="742.6,429.1 721.9,410.2 822.8,320.9" />
+    <polygon points="792.1,492.6 776.7,469.2 896.3,407.2" />
+    <polygon points="824.5,566.2 815.3,539.7 946.5,509.0" />
+    <polygon points="838.0,645.5 835.5,617.6 970.2,619.9" />
+  </g>
+
+  <!-- Sun dome — half circle resting on horizon at y=660 -->
+  <path d="M 192 660 A 320 320 0 0 1 832 660 Z" fill="#FFB800"/>
+
+  <!-- ઉગમ — Gujarati word-mark on the sun dome -->
+  <text x="512" y="600"
+        text-anchor="middle"
+        font-family="Kohinoor Gujarati, Gujarati Sangam MN, GujaratiMT, Noto Sans Gujarati, sans-serif"
+        font-weight="700"
+        font-size="240"
+        fill="#A91C1C">ઉગમ</text>
+
+  <!-- Bus on the horizon (front-on silhouette) -->
+  <g transform="translate(512 660)">
+    <!-- body -->
+    <rect x="-128" y="0" width="256" height="140"
+          rx="22" ry="22" fill="#A91C1C"/>
+    <!-- two windows -->
+    <rect x="-90" y="40" width="70" height="50" rx="6" ry="6" fill="#FFF7ED"/>
+    <rect x="20"  y="40" width="70" height="50" rx="6" ry="6" fill="#FFF7ED"/>
+    <!-- wheels -->
+    <circle cx="-80" cy="146" r="22" fill="#A91C1C"/>
+    <circle cx="80"  cy="146" r="22" fill="#A91C1C"/>
+  </g>
+</svg>

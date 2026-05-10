@@ -8,6 +8,7 @@ import '../models/passenger.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
 import '../models/tour.dart';
+import '../utils/passenger_display.dart';
 
 class SeatAssignmentScreen extends StatefulWidget {
   const SeatAssignmentScreen({super.key});
@@ -65,7 +66,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
           for (final p in passengers) {
             for (final a in p.assignedSeats) {
               if (a.busId == bus.id) {
-                bookedSeatMap[a.seatId] = p.name;
+                bookedSeatMap[a.seatId] = p.displayName;
               }
             }
           }
@@ -73,15 +74,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
           final assignedCount = bookedSeatMap.length;
           final totalSeats = bus.totalSeats;
           final pct = totalSeats > 0 ? (assignedCount * 100 ~/ totalSeats) : 0;
-
-          // Selected passenger
-          Passenger? selectedPax;
-          if (_selectedPassengerId != null) {
-            selectedPax = passengers.cast<Passenger?>().firstWhere(
-                  (p) => p!.id == _selectedPassengerId,
-                  orElse: () => null,
-                );
-          }
 
           return Column(
             children: [
@@ -416,7 +408,8 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                         tourId: tour.id,
                         onPassengerSelected: (id) {
                           setState(() {
-                            _selectedPassengerId = id;
+                            _selectedPassengerId =
+                                id.isEmpty ? null : id;
                             _selectedSeatIds.clear();
                           });
                         },
@@ -1167,7 +1160,7 @@ class _PassengerPicker extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              p.name,
+                              p.displayName,
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,

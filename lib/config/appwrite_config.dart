@@ -24,7 +24,22 @@ class AppwriteConfig {
   ///   whatsappNumber  — string, optional (E.164 — used for the Phase 4
   ///                     customer booking handoff; falls back to `phone`
   ///                     if blank)
-  static const String adminsCollection = 'admins';
+  static const String adminsCollection = '69fb3903000f8d629594';
+
+  /// Per-admin contact directory. Powers booking-side enrichment ("who is
+  /// +91 98XXX XXXXX?" → the name this admin has saved them as).
+  ///
+  /// Required schema:
+  ///   phone           — string(10), required (last-10 normalised)
+  ///   name            — string(100), required
+  ///   source          — string(16), required (`device` / `booking` / `manual`)
+  ///   addedByAdminId  — string(64), required (admin document `$id`)
+  ///   note            — string(500), optional
+  ///
+  /// Indexes:
+  ///   admin_phone_unique — compound unique on (addedByAdminId, phone)
+  ///   phone_lookup       — key on phone
+  static const String usersCollection = '69fb3829001533423094';
 
   /// Last-10-digit normaliser used when looking up admin records by phone.
   static String normalisePhone(String phone) {

@@ -12,6 +12,7 @@ import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/passenger_display.dart';
 import 'manage_buses_screen.dart';
 
 /// Tour-scoped seat assignment. Mirrors the Pencil "Seat Assignment" screen:
@@ -161,7 +162,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         l.remaining > 0);
     if (matchIdx < 0) {
       AppSnackBar.warning(
-        '${passenger.name} did not request a '
+        '${passenger.displayName} did not request a '
         '${seatTypeLabel(cell.seatType!, cell.position)}. '
         'Edit their request first.',
       );
@@ -910,7 +911,7 @@ class _PassengerCard extends StatelessWidget {
                             ),
                           ),
                         Text(
-                          p.name,
+                          p.displayName,
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
@@ -954,7 +955,7 @@ class _PassengerCard extends StatelessWidget {
                       children: [
                         Flexible(
                           child: Text(
-                            passenger.name,
+                            passenger.displayName,
                             style: GoogleFonts.inter(
                               fontSize: 14,
                               fontWeight: FontWeight.w700,

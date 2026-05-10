@@ -126,6 +126,11 @@ class OfflineDatabase {
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
+  Future<void> invalidateCache(String key) async {
+    final db = await database;
+    await db.delete('cache', where: 'key = ?', whereArgs: [key]);
+  }
+
   Future<void> clearCache() async {
     final db = await database;
     await db.delete('cache');

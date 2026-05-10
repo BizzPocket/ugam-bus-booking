@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as dev;
 import 'package:appwrite/appwrite.dart';
 import 'package:appwrite/models.dart' as aw;
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -293,6 +294,7 @@ class SyncService extends GetxService {
         isSyncing.value = false;
         return;
       }
+      dev.log('Syncing ${ops.length} pending ops...', name: 'SyncService');
 
       for (final op in ops) {
         final id = op['id'] as int;
@@ -383,7 +385,11 @@ class SyncService extends GetxService {
               break;
           }
           await _cache.removePendingOp(id);
-        } catch (_) {
+        } catch (e) {
+          dev.log(
+            'SYNC FAILED: $operation on $collection/$entityId — $e',
+            name: 'SyncService',
+          );
           await _cache.incrementRetry(id);
         }
       }
@@ -395,6 +401,11 @@ class SyncService extends GetxService {
 
   Future<void> _updatePendingCount() async {
     pendingCount.value = await _cache.pendingOpsCount();
+  }
+
+  /// Invalidate a specific cache key so next fetch hits Appwrite.
+  Future<void> invalidateCache(String key) async {
+    await _cache.invalidateCache(key);
   }
 
   Future<void> forceFullSync() async {

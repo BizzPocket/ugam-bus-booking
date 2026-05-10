@@ -5,8 +5,10 @@ import 'routes/app_routes.dart';
 import 'controllers/tour_controller.dart';
 import 'controllers/theme_controller.dart';
 import 'controllers/auth_controller.dart';
+import 'controllers/user_controller.dart';
 import 'screens/main_shell.dart';
 import 'services/sync_service.dart';
+import 'services/user_service.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -35,6 +37,8 @@ class AppBinding extends Bindings {
   void dependencies() {
     Get.put<SyncService>(SyncService(), permanent: true);
     Get.put<AuthController>(AuthController(), permanent: true);
+    Get.lazyPut<UserService>(() => UserService(), fenix: true);
+    Get.put<UserController>(UserController(), permanent: true);
     Get.lazyPut<ShellController>(() => ShellController(), fenix: true);
     Get.lazyPut<TourController>(() => TourController(), fenix: true);
   }

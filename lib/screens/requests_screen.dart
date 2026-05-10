@@ -6,6 +6,7 @@ import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
+import '../utils/passenger_display.dart';
 
 class RequestsScreen extends StatefulWidget {
   const RequestsScreen({super.key});
@@ -345,7 +346,7 @@ class _RequestCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      passenger.name,
+                      passenger.displayName,
                       style: GoogleFonts.inter(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -558,7 +559,7 @@ class _NewRequestActions extends StatelessWidget {
                 AlertDialog(
                   title: const Text('Decline request?'),
                   content: Text(
-                    'Remove ${passenger.name}\'s request from this tour? '
+                    'Remove ${passenger.displayName}\'s request from this tour? '
                     'They will need to resubmit if you change your mind.',
                   ),
                   actions: [
@@ -581,7 +582,7 @@ class _NewRequestActions extends StatelessWidget {
                   .removePassenger(tour.id, passenger.id);
               Get.snackbar(
                 'Declined',
-                '${passenger.name} removed from this tour.',
+                '${passenger.displayName} removed from this tour.',
                 snackPosition: SnackPosition.BOTTOM,
               );
             },

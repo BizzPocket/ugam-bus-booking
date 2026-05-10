@@ -67,6 +67,9 @@ dependencies:
   # SHA-256 + random salt for admin password hashing (Phase 3 auth)
   crypto: ^3.0.6
 
+  # Device address-book read for contacts sync (admin-side enrichment)
+  flutter_contacts: ^1.1.9+2
+
 # appwrite 12.0.4 transitively pins flutter_web_auth_2 ^3.0.0, which uses the
 # V1 Android embedding API removed in Flutter 3.29+. Force a V2-embedding
 # version so the Android build compiles.

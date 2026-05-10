@@ -5,6 +5,7 @@ import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
 import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/passenger_display.dart';
 import '../services/whatsapp_service.dart';
 
 class NotifyScreen extends StatelessWidget {
@@ -188,7 +189,7 @@ class NotifyScreen extends StatelessWidget {
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              p.name,
+                              p.displayName,
                               style: GoogleFonts.inter(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,

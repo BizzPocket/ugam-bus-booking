@@ -6,6 +6,7 @@ import '../models/admin.dart';
 import '../models/profile.dart';
 import '../services/admin_auth_service.dart';
 import '../utils/app_snackbar.dart';
+import 'user_controller.dart';
 
 /// Phone+password admin auth backed by the Appwrite `admins` collection.
 /// Non-admin phones still drop straight through into a passenger session
@@ -63,6 +64,21 @@ class AuthController extends GetxController {
       orElse: () => UserRole.passenger,
     );
     isLoggedIn.value = true;
+
+    if (userRole.value == UserRole.admin) {
+      try {
+        final admin = await _adminAuth.findByPhone(phone);
+        if (admin != null) {
+          currentAdmin.value = admin;
+          if (Get.isRegistered<UserController>()) {
+            // ignore: unawaited_futures
+            Get.find<UserController>().ensureLoadedForCurrentAdmin();
+          }
+        }
+      } catch (_) {
+        // Offline or transient — admin id will hydrate on next online login.
+      }
+    }
   }
 
   Future<void> _persistSession() async {
@@ -177,6 +193,10 @@ class AuthController extends GetxController {
     pendingAdmin.value = null;
     passwordController.clear();
     await _persistSession();
+    if (Get.isRegistered<UserController>()) {
+      // ignore: unawaited_futures
+      Get.find<UserController>().ensureLoadedForCurrentAdmin();
+    }
     Get.offAllNamed('/');
   }
 
@@ -211,6 +231,9 @@ class AuthController extends GetxController {
     passwordController.clear();
     awaitingAdminPassword.value = false;
     pendingAdmin.value = null;
+    if (Get.isRegistered<UserController>()) {
+      Get.find<UserController>().reset();
+    }
     Get.offAllNamed('/splash');
   }
 

@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../config/appwrite_config.dart';
 import '../config/theme.dart';
+import '../controllers/user_controller.dart';
 import '../models/passenger.dart';
 import '../models/request_line.dart';
 import '../models/seat_type.dart';
@@ -99,14 +100,11 @@ class _CustomerBookingRequestScreenState
       AppSnackBar.error('Pick at least one seat');
       return;
     }
+    // Organiser phone is best-effort: old tours may have null `createdBy`.
+    // We still save the request — the agent sees it in the Requests tab —
+    // and only skip the WhatsApp handoff when we don't know who to message.
     final adminPhone = widget.tour.createdBy;
-    if (adminPhone == null || adminPhone.isEmpty) {
-      AppSnackBar.error(
-        'This tour is missing the organiser contact — please reach '
-        'out directly via WhatsApp.',
-      );
-      return;
-    }
+    final hasOrganiser = adminPhone != null && adminPhone.isNotEmpty;
 
     setState(() => _saving = true);
     final sync = Get.find<SyncService>();
@@ -128,24 +126,40 @@ class _CustomerBookingRequestScreenState
         data: passenger.toAppwrite(),
       );
 
-      // Hand off to WhatsApp. Failure here is recoverable — the DB
-      // already has the request, agent will see it on their side.
-      await WhatsAppService().sendBookingRequest(
-        adminPhone: adminPhone,
-        tour: widget.tour,
-        customerName: name,
-        singleSofaCount: 0,
-        doubleSofaCount: _sleeperLower + _sleeperUpper,
-        note: _note.text.trim().isEmpty
-            ? 'Sleeper L:$_sleeperLower U:$_sleeperUpper · Seater $_seater'
-            : '${_note.text.trim()} (Sleeper L:$_sleeperLower '
-                'U:$_sleeperUpper · Seater $_seater)',
-      );
+      // Auto-grow the tour creator admin's contact directory. Best-effort:
+      // if it fails (network, permissions), the booking still went through.
+      if (hasOrganiser && Get.isRegistered<UserController>()) {
+        // ignore: unawaited_futures
+        Get.find<UserController>().autoGrowFromBooking(
+          tourCreatorPhone: adminPhone,
+          passengerPhone: phone,
+          passengerName: name,
+        );
+      }
+
+      // Hand off to WhatsApp when we know the organiser. Old tours with
+      // no `createdBy` skip this step — the agent still sees the request
+      // in the Requests tab.
+      if (hasOrganiser) {
+        await WhatsAppService().sendBookingRequest(
+          adminPhone: adminPhone,
+          tour: widget.tour,
+          customerName: name,
+          singleSofaCount: 0,
+          doubleSofaCount: _sleeperLower + _sleeperUpper,
+          note: _note.text.trim().isEmpty
+              ? 'Sleeper L:$_sleeperLower U:$_sleeperUpper · Seater $_seater'
+              : '${_note.text.trim()} (Sleeper L:$_sleeperLower '
+                  'U:$_sleeperUpper · Seater $_seater)',
+        );
+      }
 
       if (!mounted) return;
       Get.back();
       AppSnackBar.success(
-        'Request sent. Tap Send in WhatsApp to confirm.',
+        hasOrganiser
+            ? 'Request sent. Tap Send in WhatsApp to confirm.'
+            : 'Request saved. The organiser will reach out shortly.',
         title: 'Submitted',
       );
     } catch (e) {

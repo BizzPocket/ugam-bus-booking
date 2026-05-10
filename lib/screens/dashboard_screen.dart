@@ -10,6 +10,7 @@ import '../models/tour.dart';
 import '../models/tour_status.dart';
 import 'create_tour_screen.dart';
 import 'main_shell.dart';
+import 'settings_screen.dart';
 import 'tour_detail_screen.dart';
 
 /// Admin home screen. Mirrors the Pencil "Admin Home" layout:
@@ -172,20 +173,27 @@ class _Greeting extends StatelessWidget {
             ],
           ),
         ),
-        Container(
-          width: 44,
-          height: 44,
-          decoration: const BoxDecoration(
-            color: AppTheme.brand,
-            shape: BoxShape.circle,
+        GestureDetector(
+          onTap: () => Get.to(
+            () => const SettingsScreen(),
+            transition: Transition.cupertino,
           ),
-          alignment: Alignment.center,
-          child: Text(
-            displayInitials,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: const BoxDecoration(
+              color: AppTheme.brand,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              displayInitials,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
             ),
           ),
         ),

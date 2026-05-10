@@ -8,6 +8,7 @@ import '../controllers/tour_controller.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/payment_status.dart';
+import 'edit_tour_screen.dart';
 import 'manage_buses_screen.dart';
 import 'tour_seat_assignment_screen.dart';
 
@@ -54,6 +55,17 @@ class TourDetailScreen extends StatelessWidget {
             ),
           ),
           centerTitle: true,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.edit_outlined,
+                  color: AppTheme.textPrimary),
+              tooltip: 'Edit tour',
+              onPressed: () => Get.to(
+                () => EditTourScreen(tourId: tourId),
+                transition: Transition.cupertino,
+              ),
+            ),
+          ],
         ),
         body: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
