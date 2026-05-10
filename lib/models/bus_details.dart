@@ -3,13 +3,12 @@ import 'package:uuid/uuid.dart';
 import 'bus_type.dart';
 import 'seat_layout.dart';
 
-/// A bus booked for a specific tour.
+/// A bus in the admin's fleet (per-admin, not per-tour).
 ///
-/// Buses are NOT a global inventory — they exist only as children of a Tour.
 /// The agent enters details when the bus owner provides them.
 class Bus {
   final String id;
-  final String tourId;
+  final String? ownerId;
   final String name; // "Bus 1", "Bus 2", …
   final String busNumber; // GJ05HU7162
   final String driverName;
@@ -26,7 +25,7 @@ class Bus {
 
   Bus({
     String? id,
-    required this.tourId,
+    this.ownerId,
     required this.name,
     required this.busNumber,
     required this.driverName,
@@ -63,44 +62,47 @@ class Bus {
   /// Seat counts by prefix (e.g. {"DL": 8, "DU": 8, "SL": 4, "SU": 4, "ST": 6}).
   Map<String, int> get seatCounts => layout?.seatCounts ?? {};
 
-  // ── Appwrite serialization ────────────────────────────────
+  // ── Postgres serialization ────────────────────────────────
 
-  Map<String, dynamic> toAppwrite() {
+  Map<String, dynamic> toMap() {
     return {
-      'tourId': tourId,
+      'id': id,
+      'owner_id': ownerId,
       'name': name,
-      'busNumber': busNumber,
-      'driverName': driverName,
-      'driverPhone': driverPhone,
-      'ownerName': ownerName,
-      'ownerPhone': ownerPhone,
-      'isAC': isAC,
-      'busType': busType,
-      'totalSeats': totalSeatsLegacy,
+      'registration_no': busNumber,
+      'driver_name': driverName,
+      'driver_phone': driverPhone,
+      'owner_name': ownerName,
+      'owner_phone': ownerPhone,
+      'is_ac': isAC,
+      'bus_type': busType,
+      'total_seats': totalSeatsLegacy,
       'notes': notes,
-      'layout': layout != null ? jsonEncode(layout!.toMap()) : null,
+      'layout': layout?.toMap(),
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
     };
   }
 
-  factory Bus.fromAppwrite(Map<String, dynamic> map) {
+  factory Bus.fromMap(Map<String, dynamic> map) {
     return Bus(
-      id: ((map[r'$id'] ?? map['id']) as String?) ?? const Uuid().v4(),
-      tourId: map['tourId'] as String? ?? '',
+      id: ((map['id']) as String?) ?? const Uuid().v4(),
+      ownerId: map['owner_id'] as String?,
       name: (map['name'] as String?)?.trim().isNotEmpty == true
           ? map['name'] as String
           : 'Bus',
-      busNumber: map['busNumber'] as String? ?? '',
-      driverName: map['driverName'] as String? ?? '',
-      driverPhone: map['driverPhone'] as String? ?? '',
-      ownerName: map['ownerName'] as String?,
-      ownerPhone: map['ownerPhone'] as String?,
-      isAC: map['isAC'] as bool? ?? false,
-      busType: map['busType'] as String? ?? 'Semi-Sleeper',
-      totalSeatsLegacy: map['totalSeats'] as int? ?? 0,
+      busNumber: (map['registration_no'] ?? '').toString(),
+      driverName: (map['driver_name'] ?? '').toString(),
+      driverPhone: (map['driver_phone'] ?? '').toString(),
+      ownerName: map['owner_name'] as String?,
+      ownerPhone: map['owner_phone'] as String?,
+      isAC: map['is_ac'] as bool? ?? false,
+      busType: map['bus_type'] as String? ?? 'Semi-Sleeper',
+      totalSeatsLegacy: map['total_seats'] as int? ?? 0,
       notes: map['notes'] as String?,
       layout: _parseLayout(map['layout']),
-      createdAt: _parseDate(map[r'$createdAt'] ?? map['createdAt']),
-      updatedAt: _parseDate(map[r'$updatedAt'] ?? map['updatedAt']),
+      createdAt: _parseDate(map['created_at']),
+      updatedAt: _parseDate(map['updated_at']),
     );
   }
 
@@ -129,6 +131,7 @@ class Bus {
   }
 
   Bus copyWith({
+    String? ownerId,
     String? name,
     String? busNumber,
     String? driverName,
@@ -143,7 +146,7 @@ class Bus {
   }) {
     return Bus(
       id: id,
-      tourId: tourId,
+      ownerId: ownerId ?? this.ownerId,
       name: name ?? this.name,
       busNumber: busNumber ?? this.busNumber,
       driverName: driverName ?? this.driverName,

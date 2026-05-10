@@ -74,40 +74,42 @@ class Passenger {
     return '$assigned/$total';
   }
 
-  // ── Appwrite serialization ────────────────────────────────
+  // ── Postgres serialization ────────────────────────────────
 
-  Map<String, dynamic> toAppwrite() {
+  Map<String, dynamic> toMap() {
     return {
-      'tourId': tourId,
-      'userId': userId,
+      'id': id,
+      'tour_id': tourId,
+      'user_id': userId,
       'name': name,
       'phone': phone,
-      'ageGroup': ageGroup.name,
-      'requestLines': requestLines.map((l) => l.toMap()).toList(),
-      'assignedSeats': assignedSeats.map((a) => a.toMap()).toList(),
-      'paymentStatus': paymentStatus.name,
-      'isHandler': isHandler,
+      'age_group': ageGroup.name,
+      'request_lines': requestLines.map((l) => l.toMap()).toList(),
+      'assigned_seats': assignedSeats.map((a) => a.toMap()).toList(),
+      'payment_status': paymentStatus.name,
+      'is_handler': isHandler,
       'note': note,
+      'created_at': createdAt.toIso8601String(),
     };
   }
 
-  factory Passenger.fromAppwrite(Map<String, dynamic> map) {
+  factory Passenger.fromMap(Map<String, dynamic> map) {
     return Passenger(
-      id: (map[r'$id'] ?? map['id']) as String,
-      tourId: map['tourId'] as String,
-      userId: map['userId'] as String?,
-      name: map['name'] as String? ?? '',
-      phone: map['phone'] as String? ?? '',
-      ageGroup: AgeGroup.fromString(map['ageGroup'] as String?),
-      requestLines: _parseRequestLines(map['requestLines']),
-      assignedSeats: _parseAssignedSeats(map['assignedSeats']),
+      id: (map['id'] ?? '').toString(),
+      tourId: (map['tour_id'] ?? '').toString(),
+      userId: map['user_id'] as String?,
+      name: (map['name'] ?? '').toString(),
+      phone: (map['phone'] ?? '').toString(),
+      ageGroup: AgeGroup.fromString(map['age_group'] as String?),
+      requestLines: _parseRequestLines(map['request_lines']),
+      assignedSeats: _parseAssignedSeats(map['assigned_seats']),
       paymentStatus: PaymentStatus.values.firstWhere(
-        (s) => s.name == map['paymentStatus'],
+        (s) => s.name == map['payment_status'],
         orElse: () => PaymentStatus.notPaid,
       ),
-      isHandler: map['isHandler'] as bool? ?? false,
+      isHandler: map['is_handler'] as bool? ?? false,
       note: map['note'] as String?,
-      createdAt: _parseDate(map[r'$createdAt'] ?? map['createdAt']),
+      createdAt: _parseDate(map['created_at']),
     );
   }
 

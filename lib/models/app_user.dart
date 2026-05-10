@@ -24,22 +24,23 @@ class AppUser {
     this.note,
   });
 
-  factory AppUser.fromAppwrite(Map<String, dynamic> doc) {
+  factory AppUser.fromMap(Map<String, dynamic> map) {
     return AppUser(
-      id: (doc[r'$id'] ?? doc['id'] ?? '').toString(),
-      phone: (doc['phone'] ?? '').toString(),
-      name: (doc['name'] ?? '').toString(),
-      source: UserSource.fromName(doc['source']?.toString()),
-      addedByAdminId: (doc['addedByAdminId'] ?? '').toString(),
-      note: doc['note']?.toString(),
+      id: (map['id'] ?? '').toString(),
+      phone: (map['phone'] ?? '').toString(),
+      name: (map['name'] ?? '').toString(),
+      source: UserSource.fromName(map['source']?.toString()),
+      addedByAdminId: (map['owner_id'] ?? '').toString(),
+      note: map['note']?.toString(),
     );
   }
 
-  Map<String, dynamic> toAppwrite() => {
+  Map<String, dynamic> toMap() => {
+        'id': id,
         'phone': phone,
         'name': name,
         'source': source.name,
-        'addedByAdminId': addedByAdminId,
+        'owner_id': addedByAdminId,
         if (note != null && note!.isNotEmpty) 'note': note,
       };
 
