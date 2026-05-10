@@ -1,8 +1,8 @@
-import 'package:appwrite/appwrite.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 
-import '../config/appwrite_config.dart';
+import '../utils/phone_normalize.dart';
 import '../models/admin.dart';
 import '../models/app_user.dart';
 import '../services/admin_auth_service.dart';
@@ -47,7 +47,7 @@ class UserController extends GetxController {
   /// Returns the admin's saved name for [phone], or null if this admin
   /// hasn't saved this number.
   String? nameForPhone(String phone) {
-    final last10 = AppwriteConfig.normalisePhone(phone);
+    final last10 = normalisePhone(phone);
     return _byPhone[last10];
   }
 
@@ -108,8 +108,8 @@ class UserController extends GetxController {
             users.add(created);
             _byPhone[created.phone] = created.name;
           }
-        } on AppwriteException catch (err) {
-          if (err.code != 409) {
+        } on PostgrestException catch (err) {
+          if (err.code != '23505') {
             debugPrint('UserController: sync insert failed — ${err.message}');
           }
         }
@@ -149,7 +149,7 @@ class UserController extends GetxController {
   }
 
   Future<String?> _resolveAdminIdByPhone(String phone) async {
-    final last10 = AppwriteConfig.normalisePhone(phone);
+    final last10 = normalisePhone(phone);
     final cached = _adminIdByPhone[last10];
     if (cached != null) return cached;
 
