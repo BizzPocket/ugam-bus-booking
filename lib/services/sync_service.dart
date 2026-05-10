@@ -1,23 +1,20 @@
 import 'dart:async';
 import 'dart:developer' as dev;
-import 'package:appwrite/appwrite.dart';
-import 'package:appwrite/models.dart' as aw;
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:get/get.dart';
-import '../config/appwrite_config.dart';
-import '../utils/app_snackbar.dart';
-import 'appwrite_service.dart';
-import 'offline_database.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Manages offline-first sync between local SQLite cache and Appwrite.
+import '../utils/app_snackbar.dart';
+import 'offline_database.dart';
+import 'supabase_service.dart';
+
+/// Manages offline-first sync between local SQLite cache and Supabase.
 ///
 /// Strategy:
-/// - READ: Local cache first → fetch from Appwrite in background → update cache
-/// - WRITE: Write to cache immediately → queue for Appwrite → sync when online
+/// - READ: Local cache first → fetch from Supabase in background → update cache
+/// - WRITE: Write to cache immediately → queue for Supabase → sync when online
 /// - SYNC: On connectivity change, flush pending operations
-///
-/// Because Appwrite doesn't support joins, the 'tours' fetch is special-cased
-/// to assemble tours with their nested passengers and busDetails in memory.
 class SyncService extends GetxService {
   final OfflineDatabase _cache = OfflineDatabase();
   final isOnline = true.obs;
@@ -27,7 +24,7 @@ class SyncService extends GetxService {
   StreamSubscription? _connectivitySub;
   Timer? _syncTimer;
 
-  Databases get _db => AppwriteService().databases;
+  SupabaseClient get _client => SupabaseService.instance.client;
 
   @override
   void onInit() {
@@ -49,11 +46,8 @@ class SyncService extends GetxService {
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
       final connected = results.any((r) => r != ConnectivityResult.none);
       isOnline.value = connected;
-      if (connected) {
-        syncPendingOps();
-      }
+      if (connected) syncPendingOps();
     });
-
     Connectivity().checkConnectivity().then((results) {
       isOnline.value = results.any((r) => r != ConnectivityResult.none);
     });
@@ -61,13 +55,10 @@ class SyncService extends GetxService {
 
   // ── Smart Fetch (cache-first) ─────────────────────────────
 
-  /// Fetch with cache-first strategy.
-  /// For [table] = 'tours', returns tours with nested passengers/busDetails.
-  /// For other tables, returns flat document list.
   Future<List<Map<String, dynamic>>> smartFetch({
     required String table,
     required String cacheKey,
-    String? select, // unused in Appwrite — kept for API compatibility
+    String? select,
     Map<String, String>? filters,
     String? orderBy,
     int maxAge = 300000,
@@ -84,10 +75,11 @@ class SyncService extends GetxService {
 
     if (isOnline.value) {
       try {
-        final data = await _fetchFromAppwrite(table, filters, orderBy);
+        final data = await _fetchFromSupabase(table, filters, orderBy);
         await _cache.cacheData(cacheKey, data);
         return data;
-      } catch (_) {
+      } catch (e, st) {
+        dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
         if (cached != null) return _asListOfMap(cached);
         return [];
       }
@@ -110,119 +102,99 @@ class SyncService extends GetxService {
     String? orderBy,
   ) async {
     try {
-      final data = await _fetchFromAppwrite(table, filters, orderBy);
+      final data = await _fetchFromSupabase(table, filters, orderBy);
       await _cache.cacheData(cacheKey, data);
     } catch (_) {
       // Silent fail for background refresh
     }
   }
 
-  Future<List<Map<String, dynamic>>> _fetchFromAppwrite(
-    String collection,
+  Future<List<Map<String, dynamic>>> _fetchFromSupabase(
+    String table,
     Map<String, String>? filters,
     String? orderBy,
   ) async {
-    // Special case: tours needs nested passengers and busDetails.
-    if (collection == AppwriteConfig.toursCollection) {
-      return _fetchToursWithRelations(filters, orderBy);
-    }
+    if (table == 'tours') return _fetchToursWithRelations(filters, orderBy);
 
-    final queries = <String>[];
+    var query = _client.from(table).select();
     if (filters != null) {
-      for (final entry in filters.entries) {
-        queries.add(Query.equal(entry.key, entry.value));
-      }
+      filters.forEach((k, v) {
+        query = query.eq(k, v);
+      });
     }
-    if (orderBy != null) {
-      queries.add(Query.orderDesc(orderBy));
-    }
-    queries.add(Query.limit(500));
-
-    final result = await _db.listDocuments(
-      databaseId: AppwriteConfig.databaseId,
-      collectionId: collection,
-      queries: queries,
+    final transform = orderBy != null
+        ? query.order(orderBy, ascending: false).limit(500)
+        : query.limit(500);
+    final rows = await transform;
+    return List<Map<String, dynamic>>.from(
+      (rows as List).map((r) => Map<String, dynamic>.from(r)),
     );
-
-    return result.documents.map(_documentToMap).toList();
   }
 
-  /// Fetch tours and assemble nested passengers + busDetails in memory
-  /// (Appwrite does not support joins).
   Future<List<Map<String, dynamic>>> _fetchToursWithRelations(
     Map<String, String>? filters,
     String? orderBy,
   ) async {
-    final tourQueries = <String>[];
+    var tourQuery = _client.from('tours').select();
     if (filters != null) {
-      for (final entry in filters.entries) {
-        tourQueries.add(Query.equal(entry.key, entry.value));
-      }
+      filters.forEach((k, v) {
+        tourQuery = tourQuery.eq(k, v);
+      });
     }
-    if (orderBy != null) {
-      tourQueries.add(Query.orderDesc(orderBy));
-    }
-    tourQueries.add(Query.limit(500));
-
-    final toursResult = await _db.listDocuments(
-      databaseId: AppwriteConfig.databaseId,
-      collectionId: AppwriteConfig.toursCollection,
-      queries: tourQueries,
+    final transform = orderBy != null
+        ? tourQuery.order(orderBy, ascending: false).limit(500)
+        : tourQuery.limit(500);
+    final tours = List<Map<String, dynamic>>.from(
+      (await transform as List).map((r) => Map<String, dynamic>.from(r)),
     );
+    if (tours.isEmpty) return [];
 
-    if (toursResult.documents.isEmpty) return [];
+    final tourIds = tours.map((t) => t['id'] as String).toList();
+    final busIds = tours
+        .map((t) => t['bus_id'])
+        .whereType<String>()
+        .toSet()
+        .toList();
 
-    final tourIds = toursResult.documents.map((d) => d.$id).toList();
-
-    // Fetch all passengers and bus details for these tour IDs
-    final passengersResult = await _db.listDocuments(
-      databaseId: AppwriteConfig.databaseId,
-      collectionId: AppwriteConfig.passengersCollection,
-      queries: [Query.equal('tourId', tourIds), Query.limit(2000)],
-    );
-
-    final busesResult = await _db.listDocuments(
-      databaseId: AppwriteConfig.databaseId,
-      collectionId: AppwriteConfig.busesCollection,
-      queries: [Query.equal('tourId', tourIds), Query.limit(500)],
-    );
-
-    // Group passengers and buses by tourId
+    final passengersRaw = await _client
+        .from('passengers')
+        .select()
+        .inFilter('tour_id', tourIds)
+        .limit(2000);
     final passengersByTour = <String, List<Map<String, dynamic>>>{};
-    for (final doc in passengersResult.documents) {
-      final m = _documentToMap(doc);
-      final tId = m['tourId'] as String?;
-      if (tId != null) {
-        passengersByTour.putIfAbsent(tId, () => []).add(m);
-      }
+    for (final p in passengersRaw as List) {
+      final m = Map<String, dynamic>.from(p as Map);
+      final tId = m['tour_id'] as String?;
+      if (tId != null) passengersByTour.putIfAbsent(tId, () => []).add(m);
     }
 
     final busesByTour = <String, List<Map<String, dynamic>>>{};
-    for (final doc in busesResult.documents) {
-      final m = _documentToMap(doc);
-      final tId = m['tourId'] as String?;
-      if (tId != null) {
-        busesByTour.putIfAbsent(tId, () => []).add(m);
+    if (busIds.isNotEmpty) {
+      final busesRaw = await _client
+          .from('buses')
+          .select()
+          .inFilter('id', busIds)
+          .limit(500);
+      final busesById = <String, Map<String, dynamic>>{
+        for (final b in busesRaw as List)
+          (b as Map)['id'] as String: Map<String, dynamic>.from(b),
+      };
+      for (final t in tours) {
+        final bId = t['bus_id'] as String?;
+        if (bId != null && busesById.containsKey(bId)) {
+          busesByTour[t['id'] as String] = [busesById[bId]!];
+        }
       }
     }
 
-    // Assemble tours with nested data
-    return toursResult.documents.map((doc) {
-      final tourMap = _documentToMap(doc);
-      tourMap['passengers'] = passengersByTour[doc.$id] ?? [];
-      tourMap['buses'] = busesByTour[doc.$id] ?? [];
-      return tourMap;
+    return tours.map((t) {
+      final tId = t['id'] as String;
+      return {
+        ...t,
+        'passengers': passengersByTour[tId] ?? const [],
+        'buses': busesByTour[tId] ?? const [],
+      };
     }).toList();
-  }
-
-  /// Convert an Appwrite Document to a plain map, preserving $id/$createdAt/$updatedAt.
-  Map<String, dynamic> _documentToMap(aw.Document doc) {
-    return {
-      ...doc.data,
-      r'$id': doc.$id,
-      r'$createdAt': doc.$createdAt,
-      r'$updatedAt': doc.$updatedAt,
-    };
   }
 
   // ── Smart Write (queue + sync) ────────────────────────────
@@ -240,10 +212,7 @@ class SyncService extends GetxService {
       data: data,
     );
     _updatePendingCount();
-
-    if (isOnline.value) {
-      await syncPendingOps();
-    }
+    if (isOnline.value) await syncPendingOps();
   }
 
   Future<void> smartUpdate({
@@ -258,10 +227,7 @@ class SyncService extends GetxService {
       data: data,
     );
     _updatePendingCount();
-
-    if (isOnline.value) {
-      await syncPendingOps();
-    }
+    if (isOnline.value) await syncPendingOps();
   }
 
   Future<void> smartDelete({
@@ -275,41 +241,31 @@ class SyncService extends GetxService {
       data: {'id': entityId},
     );
     _updatePendingCount();
-
-    if (isOnline.value) {
-      await syncPendingOps();
-    }
+    if (isOnline.value) await syncPendingOps();
   }
 
   // ── Sync Engine ───────────────────────────────────────────
 
-  /// Flush all pending operations to Appwrite.
   Future<void> syncPendingOps() async {
     if (isSyncing.value || !isOnline.value) return;
     isSyncing.value = true;
-
     try {
       final ops = await _cache.getPendingOps();
-      if (ops.isEmpty) {
-        isSyncing.value = false;
-        return;
-      }
+      if (ops.isEmpty) return;
       dev.log('Syncing ${ops.length} pending ops...', name: 'SyncService');
 
       for (final op in ops) {
         final id = op['id'] as int;
-        final collection = op['table_name'] as String;
+        final table = op['table_name'] as String;
         final operation = op['operation'] as String;
         final entityId = op['entity_id'] as String;
         final data = Map<String, dynamic>.from(op['data'] as Map);
         final retries = op['retries'] as int;
 
         if (retries >= 5) {
-          // Op has failed 5 times — drop it but tell the user so they can
-          // reconcile manually instead of losing data silently.
           await _cache.removePendingOp(id);
           AppSnackBar.error(
-            'A $operation on $collection could not be saved after 5 retries. '
+            'A $operation on $table could not be saved after 5 retries. '
             'Please re-enter or check your connection.',
             title: 'Sync abandoned',
           );
@@ -317,77 +273,51 @@ class SyncService extends GetxService {
         }
 
         try {
-          // Strip internal id fields — Appwrite uses $id separately
-          data.remove('id');
+          // Strip stale Appwrite system fields the cache may have stored.
           data.remove(r'$id');
           data.remove(r'$createdAt');
           data.remove(r'$updatedAt');
-          data.remove(r'$collectionId');
-          data.remove(r'$databaseId');
-          data.remove(r'$permissions');
+          // Ensure the row carries `id` matching entityId for inserts.
+          data['id'] = entityId;
 
           switch (operation) {
             case 'insert':
               try {
-                await _db.createDocument(
-                  databaseId: AppwriteConfig.databaseId,
-                  collectionId: collection,
-                  documentId: entityId,
-                  data: data,
-                );
-              } on AppwriteException catch (e) {
-                // If document already exists, fall back to update (upsert-like)
-                if (e.code == 409) {
-                  await _db.updateDocument(
-                    databaseId: AppwriteConfig.databaseId,
-                    collectionId: collection,
-                    documentId: entityId,
-                    data: data,
-                  );
+                await _client.from(table).insert(data);
+              } on PostgrestException catch (e) {
+                // 23505 = unique_violation (already exists) → upsert
+                if (e.code == '23505') {
+                  final updateData = Map<String, dynamic>.from(data)
+                    ..remove('id');
+                  await _client
+                      .from(table)
+                      .update(updateData)
+                      .eq('id', entityId);
                 } else {
                   rethrow;
                 }
               }
               break;
             case 'update':
-              try {
-                await _db.updateDocument(
-                  databaseId: AppwriteConfig.databaseId,
-                  collectionId: collection,
-                  documentId: entityId,
-                  data: data,
-                );
-              } on AppwriteException catch (e) {
-                // If document doesn't exist yet, create it
-                if (e.code == 404) {
-                  await _db.createDocument(
-                    databaseId: AppwriteConfig.databaseId,
-                    collectionId: collection,
-                    documentId: entityId,
-                    data: data,
-                  );
-                } else {
-                  rethrow;
-                }
+              final updateData = Map<String, dynamic>.from(data)..remove('id');
+              final res = await _client
+                  .from(table)
+                  .update(updateData)
+                  .eq('id', entityId)
+                  .select();
+              if ((res as List).isEmpty) {
+                // Row missing — fall back to insert
+                await _client.from(table).insert(data);
               }
               break;
             case 'delete':
-              try {
-                await _db.deleteDocument(
-                  databaseId: AppwriteConfig.databaseId,
-                  collectionId: collection,
-                  documentId: entityId,
-                );
-              } on AppwriteException catch (e) {
-                // Already gone — treat as success
-                if (e.code != 404) rethrow;
-              }
+              await _client.from(table).delete().eq('id', entityId);
               break;
           }
           await _cache.removePendingOp(id);
         } catch (e) {
           dev.log(
-            'SYNC FAILED: $operation on $collection/$entityId — $e',
+            'SYNC FAILED: $operation on $table/$entityId — $e',
             name: 'SyncService',
           );
           await _cache.incrementRetry(id);
@@ -403,7 +333,6 @@ class SyncService extends GetxService {
     pendingCount.value = await _cache.pendingOpsCount();
   }
 
-  /// Invalidate a specific cache key so next fetch hits Appwrite.
   Future<void> invalidateCache(String key) async {
     await _cache.invalidateCache(key);
   }
