@@ -1,6 +1,6 @@
 import 'package:flutter_contacts/flutter_contacts.dart';
 
-import '../config/appwrite_config.dart';
+import '../utils/phone_normalize.dart';
 
 /// Reads the device address book and produces a list of `(name, phone)`
 /// pairs ready to upsert into the `users` collection.
@@ -43,7 +43,7 @@ class ContactSyncService {
       if (name.isEmpty) continue;
 
       for (final p in c.phones) {
-        final last10 = AppwriteConfig.normalisePhone(p.number);
+        final last10 = normalisePhone(p.number);
         if (last10.length != 10) continue;
         byPhone[last10] = DeviceContactEntry(phone: last10, name: name);
       }
