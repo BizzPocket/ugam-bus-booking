@@ -2,17 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
-import '../config/appwrite_config.dart';
 import '../config/theme.dart';
 import '../controllers/user_controller.dart';
-import '../models/passenger.dart';
-import '../models/request_line.dart';
-import '../models/seat_type.dart';
 import '../models/tour.dart';
-import '../services/sync_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/phone_normalize.dart';
 
 /// Customer-side seat request form.
 ///
@@ -59,31 +57,6 @@ class _CustomerBookingRequestScreenState
     super.dispose();
   }
 
-  List<RequestLine> _buildRequestLines() {
-    final lines = <RequestLine>[];
-    if (_sleeperLower > 0) {
-      lines.add(RequestLine(
-        seatType: SeatType.doubleSofa,
-        position: SeatPosition.lower,
-        qty: _sleeperLower,
-      ));
-    }
-    if (_sleeperUpper > 0) {
-      lines.add(RequestLine(
-        seatType: SeatType.doubleSofa,
-        position: SeatPosition.upper,
-        qty: _sleeperUpper,
-      ));
-    }
-    if (_seater > 0) {
-      lines.add(RequestLine(
-        seatType: SeatType.seater,
-        qty: _seater,
-      ));
-    }
-    return lines;
-  }
-
   Future<void> _submit() async {
     final name = _name.text.trim();
     final phone = _phone.text.trim();
@@ -107,24 +80,24 @@ class _CustomerBookingRequestScreenState
     final hasOrganiser = adminPhone != null && adminPhone.isNotEmpty;
 
     setState(() => _saving = true);
-    final sync = Get.find<SyncService>();
 
     try {
-      // Write/update Passenger in DB. Idempotency: same tourId + phone
-      // updates the existing record instead of creating a duplicate.
-      final passenger = Passenger(
-        tourId: widget.tour.id,
-        name: name,
-        phone: '+91$phone',
-        requestLines: _buildRequestLines(),
-        note: _note.text.trim().isEmpty ? null : _note.text.trim(),
-      );
-
-      await sync.smartInsert(
-        table: AppwriteConfig.passengersCollection,
-        entityId: passenger.id,
-        data: passenger.toAppwrite(),
-      );
+      // Write a booking_requests row. Anon insert — no auth required.
+      final requestId = const Uuid().v4();
+      final note = _note.text.trim();
+      await Supabase.instance.client.from('booking_requests').insert({
+        'id': requestId,
+        'tour_id': widget.tour.id,
+        'customer_phone': '+91${normalisePhone(phone)}',
+        'customer_name': name,
+        'party_size': _totalSeats,
+        'raw_form': {
+          'sleeper_lower': _sleeperLower,
+          'sleeper_upper': _sleeperUpper,
+          'seater': _seater,
+          if (note.isNotEmpty) 'note': note,
+        },
+      });
 
       // Auto-grow the tour creator admin's contact directory. Best-effort:
       // if it fails (network, permissions), the booking still went through.
