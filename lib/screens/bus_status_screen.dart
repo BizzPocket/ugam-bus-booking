@@ -10,6 +10,7 @@ import '../models/passenger.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../utils/passenger_display.dart';
+import '../utils/phone_dialer.dart';
 
 /// Read-only seat layout for a single bus on a tour. Renders each seat
 /// in the layout grid with the assigned passenger's initials overlaid
@@ -32,8 +33,6 @@ class BusStatusScreen extends StatefulWidget {
 }
 
 class _BusStatusScreenState extends State<BusStatusScreen> {
-  int _deck = 0; // 0 = lower, 1 = upper
-
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
@@ -59,16 +58,21 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
             );
           }
 
-          // Build seatId → passenger map for this bus.
-          final assignments = <String, Passenger>{};
+          // Build seatId → passengers map. A doubleSofa cell may hold up
+          // to two passengers when the agent has split the sofa between
+          // unrelated singles; everything else has exactly one.
+          final assignments = <String, List<Passenger>>{};
           for (final p in tour.passengers) {
             for (final a in p.assignedSeats) {
-              if (a.busId == bus.id) assignments[a.seatId] = p;
+              if (a.busId == bus.id) {
+                (assignments[a.seatId] ??= <Passenger>[]).add(p);
+              }
             }
           }
 
           final totalSeats = layout.totalSeats;
-          final assignedCount = assignments.length;
+          final assignedCount = assignments.values
+              .fold<int>(0, (sum, list) => sum + list.length);
 
           return Column(
             children: [
@@ -80,11 +84,6 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                   total: totalSeats,
                 ),
               ),
-              _DeckTabs(
-                deck: _deck,
-                hasUpper: layout.upperDeck.any((c) => c.hasSeat),
-                onChanged: (v) => setState(() => _deck = v),
-              ),
               const SizedBox(height: 8),
               Expanded(
                 child: SingleChildScrollView(
@@ -92,9 +91,11 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: BouncingScrollPhysics(),
                   ),
+                  // Handler-friendly chart: both decks rendered side by side
+                  // so the full bus is visible without a deck toggle. Falls
+                  // back to a single-deck render when no upper deck exists.
                   child: _SeatGrid(
                     layout: layout,
-                    isUpper: _deck == 1,
                     assignments: assignments,
                     onSeatTap: (passenger) =>
                         _showPassengerSheet(context, passenger, bus, tour.id),
@@ -144,21 +145,59 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                 ),
               ),
             ),
-            Text(
-              passenger.displayName,
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              passenger.phone,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppTheme.textSecondary,
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        passenger.displayName,
+                        style: GoogleFonts.inter(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      if (passenger.phone.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          passenger.phone,
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                // Quick-call CTA — handler taps to dial the passenger
+                // directly when something's wrong with their booking.
+                if (passenger.phone.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  InkResponse(
+                    onTap: () => PhoneDialer.call(passenger.phone),
+                    radius: 24,
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.brandLight,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.phone_rounded,
+                        size: 18,
+                        color: AppTheme.brand,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(height: 14),
             _SheetRow(label: tr('bus_status.sheet_bus'), value: bus.name),
@@ -278,98 +317,38 @@ class _Tally extends StatelessWidget {
   }
 }
 
-class _DeckTabs extends StatelessWidget {
-  final int deck;
-  final bool hasUpper;
-  final ValueChanged<int> onChanged;
-
-  const _DeckTabs({
-    required this.deck,
-    required this.hasUpper,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (!hasUpper) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Container(
-        height: 38,
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          color: AppTheme.bgLight,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            _DeckChip(label: tr('bus_status.deck_lower'), isActive: deck == 0, onTap: () => onChanged(0)),
-            _DeckChip(label: tr('bus_status.deck_upper'), isActive: deck == 1, onTap: () => onChanged(1)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DeckChip extends StatelessWidget {
-  final String label;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _DeckChip({
-    required this.label,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            color: isActive ? AppTheme.brand : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-              color: isActive ? Colors.white : AppTheme.textSecondary,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _SeatGrid extends StatelessWidget {
   final BusLayout layout;
-  final bool isUpper;
-  final Map<String, Passenger> assignments;
+  final Map<String, List<Passenger>> assignments;
   final ValueChanged<Passenger> onSeatTap;
 
   const _SeatGrid({
     required this.layout,
-    required this.isUpper,
     required this.assignments,
     required this.onSeatTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final deck = isUpper ? layout.upperDeck : layout.lowerDeck;
-    final cols = layout.cols;
-    var maxRow = 0;
-    for (final c in deck) {
-      if (c.hasSeat && c.row > maxRow) maxRow = c.row;
-    }
+    final hasUpper = layout.upperDeck.any((c) => c.hasSeat);
+    // When both decks render side-by-side on a phone we have to shrink
+    // cells to fit. Single-deck buses keep the roomier 60×48.
+    final cellWidth  = hasUpper ? 38.0 : 60.0;
+    final cellHeight = hasUpper ? 42.0 : 48.0;
+    final seatGap    = hasUpper ? 4.0  : 8.0;
+    final aisleGap   = hasUpper ? 10.0 : 24.0;
+
+    final lowerPanel = _DeckPanel(
+      title: tr('bus_status.deck_lower'),
+      deck: layout.lowerDeck,
+      cols: layout.cols,
+      assignments: assignments,
+      onSeatTap: onSeatTap,
+      cellWidth: cellWidth,
+      cellHeight: cellHeight,
+      seatGap: seatGap,
+      aisleGap: aisleGap,
+    );
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -401,49 +380,154 @@ class _SeatGrid extends StatelessWidget {
           const SizedBox(height: 10),
           const Divider(height: 1, color: AppTheme.borderLight),
           const SizedBox(height: 10),
-          for (int r = 0; r <= maxRow; r++) ...[
-            _row(deck, r, cols),
-            if (r < maxRow) const SizedBox(height: 8),
-          ],
+          if (!hasUpper)
+            lowerPanel
+          else
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: lowerPanel),
+                Container(
+                  width: 1,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  // Roughly matches the panel's intrinsic height. Using a
+                  // sized divider keeps it lined up without forcing the
+                  // panels into IntrinsicHeight (which is expensive).
+                  constraints: const BoxConstraints(minHeight: 200),
+                  color: AppTheme.borderLight,
+                ),
+                Expanded(
+                  child: _DeckPanel(
+                    title: tr('bus_status.deck_upper'),
+                    deck: layout.upperDeck,
+                    cols: layout.cols,
+                    assignments: assignments,
+                    onSeatTap: onSeatTap,
+                    cellWidth: cellWidth,
+                    cellHeight: cellHeight,
+                    seatGap: seatGap,
+                    aisleGap: aisleGap,
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );
   }
+}
 
-  Widget _row(List<SeatCell> deck, int row, int cols) {
+class _DeckPanel extends StatelessWidget {
+  final String title;
+  final List<SeatCell> deck;
+  final int cols;
+  final Map<String, List<Passenger>> assignments;
+  final ValueChanged<Passenger> onSeatTap;
+  final double cellWidth;
+  final double cellHeight;
+  final double seatGap;
+  final double aisleGap;
+
+  const _DeckPanel({
+    required this.title,
+    required this.deck,
+    required this.cols,
+    required this.assignments,
+    required this.onSeatTap,
+    required this.cellWidth,
+    required this.cellHeight,
+    required this.seatGap,
+    required this.aisleGap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    var maxRow = 0;
+    for (final c in deck) {
+      if (c.hasSeat && c.row > maxRow) maxRow = c.row;
+    }
+    return Column(
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1,
+            color: AppTheme.textMuted,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (int r = 0; r <= maxRow; r++) ...[
+          _row(r),
+          if (r < maxRow) SizedBox(height: seatGap),
+        ],
+      ],
+    );
+  }
+
+  Widget _row(int row) {
     final children = <Widget>[];
     final leftCols = cols ~/ 2;
     for (int c = 0; c < cols; c++) {
       if (c == leftCols) {
-        children.add(const SizedBox(width: 24));
+        children.add(SizedBox(width: aisleGap));
       }
       final cell = deck.firstWhere(
         (s) => s.row == row && s.col == c,
         orElse: () => SeatCell(row: row, col: c),
       );
       if (cell.isEmpty) {
-        children.add(const SizedBox(width: 60, height: 48));
+        children.add(SizedBox(width: cellWidth, height: cellHeight));
       } else {
-        final passenger = assignments[cell.seatId];
-        children.add(_Cell(cell: cell, passenger: passenger, onTap: onSeatTap));
+        final occupants = assignments[cell.seatId] ?? const <Passenger>[];
+        // RepaintBoundary keeps an occupant tap from invalidating the
+        // whole chart layer — only the tapped tile repaints.
+        children.add(RepaintBoundary(
+          child: _Cell(
+            cell: cell,
+            passengers: occupants,
+            onTap: onSeatTap,
+            width: cellWidth,
+            height: cellHeight,
+          ),
+        ));
       }
       if (c < cols - 1 && c != leftCols - 1) {
-        children.add(const SizedBox(width: 8));
+        children.add(SizedBox(width: seatGap));
       }
     }
-    return Row(mainAxisAlignment: MainAxisAlignment.center, children: children);
+    // FittedBox scales the row down uniformly when the deck panel is
+    // narrower than the natural row width. Two-deck phones can hit this
+    // because each panel only gets ~half the screen — without scaleDown
+    // Flutter complains "RIGHT OVERFLOWED BY N PIXELS" in debug.
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.center,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: children,
+      ),
+    );
   }
 }
 
 class _Cell extends StatelessWidget {
   final SeatCell cell;
-  final Passenger? passenger;
+  /// Occupants of this seat. `length == 0` → empty, `length == 1` → fully
+  /// owned (current behavior), `length == 2` → shared doubleSofa rendered
+  /// as two side-by-side halves.
+  final List<Passenger> passengers;
   final ValueChanged<Passenger> onTap;
+  final double width;
+  final double height;
 
   const _Cell({
     required this.cell,
-    required this.passenger,
+    required this.passengers,
     required this.onTap,
+    this.width = 60,
+    this.height = 48,
   });
 
   Color get _typeTint {
@@ -493,16 +577,143 @@ class _Cell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = width < 50;
+
+    // Shared doubleSofa — render two halves with the two passengers'
+    // initials so the handler can see at a glance both occupants. Tap on
+    // either half opens that occupant's sheet. A single passenger
+    // holding both berths (whole-double-as-2-singles) renders as a
+    // normal "owned" tile below — split is only for two DIFFERENT
+    // passengers.
+    final uniquePassengers = <Passenger>[];
+    final seenIds = <String>{};
+    for (final p in passengers) {
+      if (seenIds.add(p.id)) uniquePassengers.add(p);
+    }
+
+    // Half-occupied doubleSofa (1 unique passenger holding 1 berth — the
+    // other berth is still up for sale). Render as split so the handler
+    // can see at a glance there's a free half.
+    final isHalfOccupiedDouble = cell.seatType == SeatType.doubleSofa &&
+        uniquePassengers.length == 1 &&
+        passengers.length == 1;
+    if (isHalfOccupiedDouble) {
+      final occupant = uniquePassengers.first;
+      return SizedBox(
+        width: width,
+        height: height,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: _typeBorder, width: 1.5),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => onTap(occupant),
+                  child: Container(
+                    color: AppTheme.brand,
+                    alignment: Alignment.center,
+                    child: Text(
+                      _initials(occupant.displayName),
+                      style: GoogleFonts.inter(
+                        fontSize: compact ? 9 : 11,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Container(width: 1, color: Colors.white),
+              Expanded(
+                child: Container(
+                  color: _typeTint,
+                  alignment: Alignment.center,
+                  child: Text(
+                    cell.seatId ?? '',
+                    style: GoogleFonts.inter(
+                      fontSize: compact ? 8 : 9,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (uniquePassengers.length >= 2) {
+      final left = uniquePassengers[0];
+      final right = uniquePassengers[1];
+      return SizedBox(
+        width: width,
+        height: height,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: AppTheme.brand, width: 1.5),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => onTap(left),
+                  child: Container(
+                    color: AppTheme.brand,
+                    alignment: Alignment.center,
+                    child: Text(
+                      _initials(left.displayName),
+                      style: GoogleFonts.inter(
+                        fontSize: compact ? 9 : 11,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Container(width: 1, color: Colors.white),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => onTap(right),
+                  child: Container(
+                    color: AppTheme.brand,
+                    alignment: Alignment.center,
+                    child: Text(
+                      _initials(right.displayName),
+                      style: GoogleFonts.inter(
+                        fontSize: compact ? 9 : 11,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final passenger = passengers.isNotEmpty ? passengers.first : null;
     final taken = passenger != null;
     final bg = taken ? AppTheme.brand : _typeTint;
     final border = taken ? AppTheme.brand : _typeBorder;
     final textColor = taken ? Colors.white : AppTheme.textPrimary;
 
     return GestureDetector(
-      onTap: taken ? () => onTap(passenger!) : null,
+      onTap: taken ? () => onTap(passenger) : null,
       child: Container(
-        width: 60,
-        height: 48,
+        width: width,
+        height: height,
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(6),
@@ -517,16 +728,16 @@ class _Cell extends StatelessWidget {
                   Text(
                     cell.seatId ?? '',
                     style: GoogleFonts.inter(
-                      fontSize: 10,
+                      fontSize: compact ? 9 : 10,
                       fontWeight: FontWeight.w600,
                       color: textColor,
                     ),
                   ),
                   if (taken)
                     Text(
-                      _initials(passenger!.displayName),
+                      _initials(passenger.displayName),
                       style: GoogleFonts.inter(
-                        fontSize: 11,
+                        fontSize: compact ? 9 : 11,
                         fontWeight: FontWeight.w800,
                         color: textColor,
                       ),
