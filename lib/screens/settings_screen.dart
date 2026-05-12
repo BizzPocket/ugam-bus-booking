@@ -16,13 +16,12 @@ class SettingsScreen extends StatelessWidget {
     final authCtrl = Get.find<AuthController>();
     final themeCtrl = Get.find<ThemeController>();
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
-    final cardColor = isDark ? AppTheme.cardDark : Colors.white;
-    final borderColor = isDark ? AppTheme.borderDark : AppTheme.borderLight;
-    final primaryText = theme.colorScheme.onSurface;
-    final mutedText = isDark ? const Color(0xFF94A3B8) : AppTheme.textMuted;
-    final secondaryText = isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569);
+    final cardColor = AppColors.surface(context);
+    final borderColor = AppColors.border(context);
+    final primaryText = AppColors.text(context);
+    final mutedText = AppColors.textMuted(context);
+    final secondaryText = AppColors.textMuted(context);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -56,7 +55,7 @@ class SettingsScreen extends StatelessWidget {
                   color: cardColor,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: borderColor),
-                  boxShadow: isDark ? null : AppTheme.cardShadow,
+                  boxShadow: theme.brightness == Brightness.dark ? null : AppTheme.cardShadow,
                 ),
                 child: Row(
                   children: [
