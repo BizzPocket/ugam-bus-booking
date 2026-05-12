@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import '../config/theme.dart';
 
 class SeatMap extends StatelessWidget {
   final int totalSeats;
@@ -16,7 +17,6 @@ class SeatMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     // 2 seats | aisle | 2 seats
     const cols = 4;
     final rows = (totalSeats / cols).ceil();
@@ -24,10 +24,10 @@ class SeatMap extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          color: AppColors.border(context),
         ),
       ),
       child: Column(
@@ -37,18 +37,16 @@ class SeatMap extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+              color: AppColors.surfaceAlt(context),
               shape: BoxShape.circle,
               border: Border.all(
-                color: isDark
-                    ? const Color(0xFF475569)
-                    : const Color(0xFFE2E8F0),
+                color: AppColors.border(context),
                 width: 2,
               ),
             ),
             child: Icon(
               Icons.drive_eta_rounded,
-              color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+              color: AppColors.textMuted(context),
               size: 22,
             ),
           ),
@@ -100,10 +98,8 @@ class SeatMap extends StatelessWidget {
               ),
               const SizedBox(width: 20),
               _LegendDot(
-                color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
-                borderColor: isDark
-                    ? const Color(0xFF64748B)
-                    : const Color(0xFF94A3B8),
+                color: AppColors.surfaceAlt(context),
+                borderColor: AppColors.textMuted(context),
                 label: tr('app.label.booked'),
                 theme: theme,
               ),
@@ -133,13 +129,13 @@ class SeatWidget extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
 
     final bgColor = isBooked
-        ? (isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1))
+        ? AppColors.surfaceAlt(context)
         : theme.colorScheme.primary.withAlpha(isDark ? 40 : 20);
     final borderColor = isBooked
-        ? (isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8))
+        ? AppColors.textMuted(context)
         : theme.colorScheme.primary;
     final textColor = isBooked
-        ? (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))
+        ? AppColors.textMuted(context)
         : theme.colorScheme.primary;
 
     return GestureDetector(
