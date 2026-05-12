@@ -1,6 +1,6 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
@@ -24,8 +24,8 @@ class TourDetailScreen extends StatelessWidget {
       final tour = tourCtrl.getTour(tourId);
       if (tour == null) {
         return Scaffold(
-          appBar: AppBar(title: const Text('Not Found')),
-          body: const Center(child: Text('Tour not found')),
+          appBar: AppBar(title: Text(tr('tour_detail.not_found_title'))),
+          body: Center(child: Text(tr('tour_detail.not_found_body'))),
         );
       }
 
@@ -47,7 +47,7 @@ class TourDetailScreen extends StatelessWidget {
             onPressed: () => Get.back(),
           ),
           title: Text(
-            'Tour Detail',
+            tr('tour_detail.title'),
             style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.w700,
@@ -59,7 +59,7 @@ class TourDetailScreen extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.edit_outlined,
                   color: AppTheme.textPrimary),
-              tooltip: 'Edit tour',
+              tooltip: tr('tour_detail.tooltip_edit'),
               onPressed: () => Get.to(
                 () => EditTourScreen(tourId: tourId),
                 transition: Transition.cupertino,
@@ -67,8 +67,13 @@ class TourDetailScreen extends StatelessWidget {
             ),
           ],
         ),
-        body: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
+        body: RefreshIndicator(
+          onRefresh: tourCtrl.refreshTours,
+          color: AppTheme.brand,
+          child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -109,14 +114,14 @@ class TourDetailScreen extends StatelessWidget {
                         children: [
                           Expanded(
                             child: _InfoItem(
-                              label: 'DATE RANGE',
+                              label: tr('tour_detail.label_date_range'),
                               value: _formatDateRange(tour),
                             ),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
                             child: _InfoItem(
-                              label: 'ROUTE',
+                              label: tr('tour_detail.label_route'),
                               value: tour.route,
                             ),
                           ),
@@ -124,8 +129,8 @@ class TourDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 16),
                       _InfoItem(
-                        label: 'PRICE',
-                        value: '₹${tour.pricePerSeat.toStringAsFixed(0)}/seat',
+                        label: tr('tour_detail.label_price'),
+                        value: tr('tour_detail.price_per_seat', namedArgs: {'price': tour.pricePerSeat.toStringAsFixed(0)}),
                       ),
                     ],
                   ),
@@ -138,7 +143,7 @@ class TourDetailScreen extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
-                  'Passenger Summary',
+                  tr('tour_detail.section_passenger_summary'),
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -157,7 +162,7 @@ class TourDetailScreen extends StatelessWidget {
                     Expanded(
                       child: _SummaryStatCard(
                         count: booked,
-                        label: 'Booked',
+                        label: tr('tour_detail.stat_booked'),
                         color: AppTheme.success,
                         bgColor: AppTheme.successLight,
                       ),
@@ -166,7 +171,7 @@ class TourDetailScreen extends StatelessWidget {
                     Expanded(
                       child: _SummaryStatCard(
                         count: pending,
-                        label: 'Pending',
+                        label: tr('tour_detail.stat_pending'),
                         color: AppTheme.warning,
                         bgColor: AppTheme.warningLight,
                       ),
@@ -175,7 +180,7 @@ class TourDetailScreen extends StatelessWidget {
                     Expanded(
                       child: _SummaryStatCard(
                         count: declined,
-                        label: 'Declined',
+                        label: tr('tour_detail.stat_declined'),
                         color: AppTheme.danger,
                         bgColor: AppTheme.dangerLight,
                       ),
@@ -190,7 +195,7 @@ class TourDetailScreen extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
-                  'Bus Information',
+                  tr('tour_detail.section_bus_information'),
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -227,8 +232,8 @@ class TourDetailScreen extends StatelessWidget {
                     icon: const Icon(Icons.directions_bus_rounded, size: 18),
                     label: Text(
                       tour.buses.isEmpty
-                          ? 'Add Bus'
-                          : 'Manage Buses (${tour.buses.length})',
+                          ? tr('tour_detail.btn_add_bus')
+                          : tr('tour_detail.btn_manage_buses', namedArgs: {'count': tour.buses.length.toString()}),
                       style: GoogleFonts.inter(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -265,7 +270,7 @@ class TourDetailScreen extends StatelessWidget {
                         size: 18,
                       ),
                       label: Text(
-                        'Assign Seats (${tour.totalSeatsAssigned}/${tour.totalSeatsRequested})',
+                        tr('tour_detail.btn_assign_seats', namedArgs: {'assigned': tour.totalSeatsAssigned.toString(), 'total': tour.totalSeatsRequested.toString()}),
                         style: GoogleFonts.inter(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
@@ -289,6 +294,7 @@ class TourDetailScreen extends StatelessWidget {
 
               const SizedBox(height: 32),
             ],
+          ),
           ),
         ),
       );
@@ -332,7 +338,7 @@ class _StatusBadge extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            isActive ? 'Active' : 'Completed',
+            isActive ? tr('tour_detail.status_active') : tr('tour_detail.status_completed'),
             style: GoogleFonts.inter(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -466,7 +472,7 @@ class _BusInfoCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Driver: ${bus.driverName ?? "Ramesh Patel"}',
+                  tr('tour_detail.driver_label', namedArgs: {'name': bus.driverName ?? ''}),
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     color: AppTheme.textSecondary,
@@ -504,7 +510,7 @@ class _EmptyBusInfo extends StatelessWidget {
           ),
           const SizedBox(width: 14),
           Text(
-            'No bus assigned yet',
+            tr('tour_detail.no_bus_assigned'),
             style: GoogleFonts.inter(
               fontSize: 14,
               color: AppTheme.textMuted,

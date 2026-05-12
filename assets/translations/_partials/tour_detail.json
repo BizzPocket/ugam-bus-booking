@@ -1,0 +1,74 @@
+{
+  "en": {
+    "tour_detail": {
+      "not_found_title": "Not Found",
+      "not_found_body": "Tour not found",
+      "title": "Tour Detail",
+      "tooltip_edit": "Edit tour",
+      "label_date_range": "DATE RANGE",
+      "label_route": "ROUTE",
+      "label_price": "PRICE",
+      "price_per_seat": "₹{price}/seat",
+      "section_passenger_summary": "Passenger Summary",
+      "stat_booked": "Booked",
+      "stat_pending": "Pending",
+      "stat_declined": "Declined",
+      "section_bus_information": "Bus Information",
+      "btn_add_bus": "Add Bus",
+      "btn_manage_buses": "Manage Buses ({count})",
+      "btn_assign_seats": "Assign Seats ({assigned}/{total})",
+      "status_active": "Active",
+      "status_completed": "Completed",
+      "driver_label": "Driver: {name}",
+      "no_bus_assigned": "No bus assigned yet"
+    }
+  },
+  "gu": {
+    "tour_detail": {
+      "not_found_title": "મળ્યું નહીં",
+      "not_found_body": "પ્રવાસ મળ્યો નહીં",
+      "title": "પ્રવાસ વિગત",
+      "tooltip_edit": "પ્રવાસ સંપાદિત કરો",
+      "label_date_range": "તારીખ શ્રેણી",
+      "label_route": "માર્ગ",
+      "label_price": "ભાવ",
+      "price_per_seat": "₹{price}/બેઠક",
+      "section_passenger_summary": "મુસાફર સારાંશ",
+      "stat_booked": "બુક્ડ",
+      "stat_pending": "બાકી",
+      "stat_declined": "નામંજૂર",
+      "section_bus_information": "બસ માહિતી",
+      "btn_add_bus": "બસ ઉમેરો",
+      "btn_manage_buses": "બસ મેનેજ કરો ({count})",
+      "btn_assign_seats": "બેઠક ફાળવો ({assigned}/{total})",
+      "status_active": "સક્રિય",
+      "status_completed": "પૂર્ણ",
+      "driver_label": "ડ્રાઇવર: {name}",
+      "no_bus_assigned": "હજી કોઈ બસ સોંપાઈ નથી"
+    }
+  },
+  "hi": {
+    "tour_detail": {
+      "not_found_title": "नहीं मिला",
+      "not_found_body": "यात्रा नहीं मिली",
+      "title": "यात्रा विवरण",
+      "tooltip_edit": "यात्रा संपादित करें",
+      "label_date_range": "तारीख सीमा",
+      "label_route": "मार्ग",
+      "label_price": "मूल्य",
+      "price_per_seat": "₹{price}/सीट",
+      "section_passenger_summary": "यात्री सारांश",
+      "stat_booked": "बुक्ड",
+      "stat_pending": "लंबित",
+      "stat_declined": "अस्वीकृत",
+      "section_bus_information": "बस जानकारी",
+      "btn_add_bus": "बस जोड़ें",
+      "btn_manage_buses": "बसें प्रबंधित करें ({count})",
+      "btn_assign_seats": "सीटें असाइन करें ({assigned}/{total})",
+      "status_active": "सक्रिय",
+      "status_completed": "पूर्ण",
+      "driver_label": "ड्राइवर: {name}",
+      "no_bus_assigned": "अभी तक कोई बस नियुक्त नहीं"
+    }
+  }
+}
