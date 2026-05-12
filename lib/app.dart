@@ -12,9 +12,25 @@ import 'screens/main_shell.dart';
 import 'services/realtime_service.dart';
 import 'services/sync_service.dart';
 import 'services/user_service.dart';
+import 'utils/update_prompt.dart';
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Fire-and-forget — the updater swallows its own errors so a network
+    // glitch can never block the app from starting.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      runStartupUpdateCheck();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

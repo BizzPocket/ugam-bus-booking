@@ -75,6 +75,12 @@ dependencies:
   # i18n — Gujarati (default), English, Hindi
   easy_localization: ^3.0.7
 
+  # In-app auto-update (checks GitHub Releases, downloads APK, triggers install)
+  package_info_plus: ^8.0.2
+  path_provider: ^2.1.4
+  open_filex: ^4.5.0
+  permission_handler: ^11.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
