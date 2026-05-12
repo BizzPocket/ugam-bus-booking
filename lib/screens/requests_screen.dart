@@ -10,6 +10,7 @@ import '../models/passenger.dart';
 import '../models/request_line.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
+import '../models/trip_type.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
@@ -42,7 +43,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bgLight,
+      backgroundColor: AppColors.bg(context),
       // Lift the FAB above MainShell's floating pill bottom nav (~104px
        // tall with extendBody: true). Without this padding the button
        // disappears behind the nav, same fix as ToursScreen.
@@ -72,23 +73,41 @@ class _RequestsScreenState extends State<RequestsScreen> {
         }),
       ),
       body: SafeArea(
-        child: Obx(() {
-          final activeTours = tourCtrl.activeTours;
-          if (activeTours.isEmpty) {
-            return _Empty(
-              icon: Icons.chat_bubble_outline_rounded,
-              title: tr('requests.empty_no_tours.title'),
-              body: tr('requests.empty_no_tours.body'),
-            );
-          }
+        // The header title is locale-only (doesn't depend on any reactive
+        // state) — hoist it above the Obx so realtime tour events don't
+        // repaint it. Same shape, lower rebuild cost.
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  tr('requests.title'),
+                  style: AppText.pageTitle.copyWith(
+                    color: AppColors.text(context),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Obx(() {
+        final activeTours = tourCtrl.activeTours;
+        if (activeTours.isEmpty) {
+          return _Empty(
+            icon: Icons.chat_bubble_outline_rounded,
+            title: tr('requests.empty_no_tours.title'),
+            body: tr('requests.empty_no_tours.body'),
+          );
+        }
 
-          // Clamp selected index
-          if (_selectedTourIndex >= activeTours.length) {
-            _selectedTourIndex = 0;
-          }
+        // Clamp selected index
+        if (_selectedTourIndex >= activeTours.length) {
+          _selectedTourIndex = 0;
+        }
 
-          final selectedTour = activeTours[_selectedTourIndex];
-          final allPassengers = selectedTour.passengers;
+        final selectedTour = activeTours[_selectedTourIndex];
+        final allPassengers = selectedTour.passengers;
 
           // "New" covers anything the admin still needs to act on — that
           // includes partially assigned passengers (e.g. customer asked
@@ -115,19 +134,6 @@ class _RequestsScreenState extends State<RequestsScreen> {
 
           return Column(
             children: [
-              // ── Header ──
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Text(
-                  tr('requests.title'),
-                  style: GoogleFonts.inter(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.text(context),
-                  ),
-                ),
-              ),
-
               // ── Tour Selector Chips ──
               SizedBox(
                 height: 40,
@@ -145,7 +151,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
-                          color: isActive ? AppTheme.brand : Colors.white,
+                          color: isActive ? AppTheme.brand : AppColors.surface(context),
                           borderRadius: BorderRadius.circular(9999),
                           border: isActive
                               ? null
@@ -154,8 +160,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                         child: Center(
                           child: Text(
                             tour.title,
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
+                            style: AppText.chipText.copyWith(
                               fontWeight: isActive
                                   ? FontWeight.w600
                                   : FontWeight.w500,
@@ -275,7 +280,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
               ),
             ],
           );
-        }),
+              }),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -319,17 +327,15 @@ class _FilterChip extends StatelessWidget {
             children: [
               Text(
                 value,
-                style: GoogleFonts.inter(
+                style: AppText.statValueLg.copyWith(
                   fontSize: 22,
-                  fontWeight: FontWeight.w700,
                   color: color,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
                 label,
-                style: GoogleFonts.inter(
-                  fontSize: 10,
+                style: AppText.cardLabel.copyWith(
                   fontWeight: FontWeight.w600,
                   letterSpacing: 1,
                   color: color,
@@ -406,7 +412,7 @@ class _RequestCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: borderColor, width: borderWidth),
         boxShadow: const [
@@ -434,11 +440,7 @@ class _RequestCard extends StatelessWidget {
                 child: Center(
                   child: Text(
                     initials,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
+                    style: AppText.chipText.copyWith(color: Colors.white),
                   ),
                 ),
               ),
@@ -450,8 +452,7 @@ class _RequestCard extends StatelessWidget {
                   children: [
                     Text(
                       passenger.displayName,
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
+                      style: AppText.cardTitleSm.copyWith(
                         fontWeight: FontWeight.w600,
                         color: AppColors.text(context),
                       ),
@@ -459,8 +460,7 @@ class _RequestCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       _timeAgo(passenger.createdAt),
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
+                      style: AppText.cardMeta.copyWith(
                         color: AppColors.textMuted(context),
                       ),
                     ),
@@ -483,14 +483,14 @@ class _RequestCard extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: AppTheme.hoverLight,
+                color: AppColors.surfaceAlt(context),
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.chat_bubble_outline_rounded,
-                      size: 16, color: AppTheme.textMuted),
+                  Icon(Icons.chat_bubble_outline_rounded,
+                      size: 16, color: AppColors.textMuted(context)),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -542,6 +542,23 @@ class _RequestCard extends StatelessWidget {
                       ? AppTheme.successLight
                       : AppTheme.brandLight,
                 ),
+                if (passenger.tripType.isOneWay)
+                  _SeatChip(
+                    icon: passenger.tripType == TripType.outboundOnly
+                        ? Icons.arrow_forward_rounded
+                        : Icons.arrow_back_rounded,
+                    label: passenger.tripType == TripType.outboundOnly
+                        ? tr('requests.chip.trip_outbound', namedArgs: {
+                            'from': tour.fromCity,
+                            'to': tour.toCity,
+                          })
+                        : tr('requests.chip.trip_return', namedArgs: {
+                            'from': tour.toCity,
+                            'to': tour.fromCity,
+                          }),
+                    color: AppTheme.warning,
+                    bgColor: AppTheme.warningLight,
+                  ),
               ],
             ),
           ],
@@ -730,11 +747,7 @@ class _CardActions extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     primaryLabel,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
+                    style: AppText.chipText.copyWith(color: Colors.white),
                   ),
                 ],
               ),
@@ -748,14 +761,14 @@ class _CardActions extends StatelessWidget {
           height: 40,
           width: 40,
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface(context),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppTheme.borderDefault),
+            border: Border.all(color: AppColors.border(context)),
           ),
           child: PopupMenuButton<_MenuItem>(
             tooltip: tr('requests.action.more_actions'),
-            icon: const Icon(Icons.more_vert_rounded,
-                size: 18, color: AppTheme.textSecondary),
+            icon: Icon(Icons.more_vert_rounded,
+                size: 18, color: AppColors.textMuted(context)),
             position: PopupMenuPosition.under,
             onSelected: (item) => item.onTap(),
             itemBuilder: (_) => [
@@ -769,7 +782,7 @@ class _CardActions extends StatelessWidget {
                         size: 16,
                         color: item.isDanger
                             ? AppTheme.danger
-                            : AppTheme.textSecondary,
+                            : AppColors.textMuted(context),
                       ),
                       const SizedBox(width: 10),
                       Text(
@@ -779,7 +792,7 @@ class _CardActions extends StatelessWidget {
                           fontWeight: FontWeight.w500,
                           color: item.isDanger
                               ? AppTheme.danger
-                              : AppTheme.textPrimary,
+                              : AppColors.text(context),
                         ),
                       ),
                     ],
@@ -881,8 +894,7 @@ class _SeatChip extends StatelessWidget {
           ],
           Text(
             label,
-            style: GoogleFonts.inter(
-              fontSize: 11,
+            style: AppText.cardMeta.copyWith(
               fontWeight: FontWeight.w600,
               color: color,
             ),
@@ -961,6 +973,7 @@ class _AddRequestSheetState extends State<_AddRequestSheet> {
   final _note = TextEditingController();
   int _doubleSofa = 0;
   int _singleSofa = 0;
+  TripType _tripType = TripType.roundTrip;
   bool _saving = false;
 
   int get _totalSeats => _doubleSofa + _singleSofa;
@@ -1003,6 +1016,7 @@ class _AddRequestSheetState extends State<_AddRequestSheet> {
         phone: '+91${normalisePhone(phone)}',
         requestLines: requestLines,
         note: note.isEmpty ? null : note,
+        tripType: _tripType,
       );
       await Get.find<TourController>().addPassenger(widget.tour.id, passenger);
       if (!mounted) return;
@@ -1027,9 +1041,9 @@ class _AddRequestSheetState extends State<_AddRequestSheet> {
     return Padding(
       padding: EdgeInsets.only(bottom: viewInsets),
       child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: AppColors.surface(context),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
         child: Column(
@@ -1042,7 +1056,7 @@ class _AddRequestSheetState extends State<_AddRequestSheet> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: AppTheme.borderDefault,
+                  color: AppColors.border(context),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1079,7 +1093,7 @@ class _AddRequestSheetState extends State<_AddRequestSheet> {
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: AppTheme.bgLight,
+                    color: AppColors.bg(context),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: AppColors.border(context)),
                   ),
@@ -1109,6 +1123,13 @@ class _AddRequestSheetState extends State<_AddRequestSheet> {
               ],
             ),
             const SizedBox(height: 16),
+            _TripTypeSegmented(
+              value: _tripType,
+              fromCity: widget.tour.fromCity,
+              toCity: widget.tour.toCity,
+              onChanged: (v) => setState(() => _tripType = v),
+            ),
+            const SizedBox(height: 12),
             _SeatCounter(
               label: tr('requests.sheet.double_sofa'),
               value: _doubleSofa,
@@ -1164,6 +1185,133 @@ class _AddRequestSheetState extends State<_AddRequestSheet> {
   }
 }
 
+class _TripTypeSegmented extends StatelessWidget {
+  final TripType value;
+  final String fromCity;
+  final String toCity;
+  final ValueChanged<TripType> onChanged;
+
+  const _TripTypeSegmented({
+    required this.value,
+    required this.fromCity,
+    required this.toCity,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          tr('requests.sheet.trip_type_label'),
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textMuted(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: _TripChip(
+                icon: Icons.sync_alt_rounded,
+                label: tr('requests.sheet.trip_round'),
+                selected: value == TripType.roundTrip,
+                onTap: () => onChanged(TripType.roundTrip),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _TripChip(
+                icon: Icons.arrow_forward_rounded,
+                label: tr('requests.sheet.trip_outbound', namedArgs: {
+                  'from': fromCity,
+                  'to': toCity,
+                }),
+                selected: value == TripType.outboundOnly,
+                onTap: () => onChanged(TripType.outboundOnly),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _TripChip(
+                icon: Icons.arrow_back_rounded,
+                label: tr('requests.sheet.trip_return', namedArgs: {
+                  'from': toCity,
+                  'to': fromCity,
+                }),
+                selected: value == TripType.returnOnly,
+                onTap: () => onChanged(TripType.returnOnly),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _TripChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _TripChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.brandLight : AppColors.bg(context),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? AppTheme.brand : AppColors.border(context),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: selected ? AppTheme.brand : AppColors.textMuted(context),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                height: 1.2,
+                fontWeight: FontWeight.w600,
+                color: selected
+                    ? AppTheme.brandDark
+                    : AppColors.text(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SeatCounter extends StatelessWidget {
   final String label;
   final int value;
@@ -1181,7 +1329,7 @@ class _SeatCounter extends StatelessWidget {
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
-        color: AppTheme.bgLight,
+        color: AppColors.bg(context),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppColors.border(context)),
       ),
