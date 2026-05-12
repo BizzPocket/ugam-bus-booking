@@ -34,7 +34,7 @@ class SettingsScreen extends StatelessWidget {
           onPressed: () => Get.back(),
         ),
         title: Text(
-          'Profile',
+          tr('settings.profile_title'),
           style: GoogleFonts.inter(
             fontSize: 20,
             fontWeight: FontWeight.w700,
@@ -89,7 +89,7 @@ class SettingsScreen extends StatelessWidget {
                           Obx(() => Text(
                                 authCtrl.userName.value.isNotEmpty
                                     ? authCtrl.userName.value
-                                    : 'Welcome',
+                                    : tr('settings.welcome'),
                                 style: GoogleFonts.inter(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w700,
@@ -113,7 +113,7 @@ class SettingsScreen extends StatelessWidget {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              'ADMIN',
+                              tr('settings.admin_badge'),
                               style: GoogleFonts.inter(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
@@ -132,7 +132,7 @@ class SettingsScreen extends StatelessWidget {
 
               // Appearance Label
               Text(
-                'Appearance',
+                tr('settings.appearance'),
                 style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -181,7 +181,7 @@ class SettingsScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Dark Mode',
+                                tr('settings.dark_mode'),
                                 style: GoogleFonts.inter(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w600,
@@ -190,7 +190,7 @@ class SettingsScreen extends StatelessWidget {
                               ),
                               const SizedBox(height: 1),
                               Text(
-                                dark ? 'Dark theme is on' : 'Light theme is on',
+                                dark ? tr('settings.dark_mode_on') : tr('settings.light_mode_on'),
                                 style: GoogleFonts.inter(
                                   fontSize: 12,
                                   color: mutedText,
@@ -213,7 +213,7 @@ class SettingsScreen extends StatelessWidget {
 
               // Settings Label
               Text(
-                'Settings',
+                tr('settings.title'),
                 style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
@@ -235,8 +235,8 @@ class SettingsScreen extends StatelessWidget {
                       icon: Icons.person_outline_rounded,
                       iconBgColor: AppTheme.brandLight,
                       iconColor: AppTheme.brand,
-                      title: 'Account Details',
-                      subtitle: 'Name, phone, business info',
+                      title: tr('settings.account_details_title'),
+                      subtitle: tr('settings.account_details_subtitle'),
                       primaryText: primaryText,
                       mutedText: mutedText,
                       onTap: () {},
@@ -246,8 +246,8 @@ class SettingsScreen extends StatelessWidget {
                       icon: Icons.chat_bubble_outline_rounded,
                       iconBgColor: AppTheme.successLight,
                       iconColor: AppTheme.success,
-                      title: 'WhatsApp Settings',
-                      subtitle: 'Broadcast, templates, auto-reply',
+                      title: tr('settings.whatsapp_title'),
+                      subtitle: tr('settings.whatsapp_subtitle'),
                       primaryText: primaryText,
                       mutedText: mutedText,
                       onTap: () {},
@@ -257,8 +257,8 @@ class SettingsScreen extends StatelessWidget {
                       icon: Icons.attach_money_rounded,
                       iconBgColor: AppTheme.warningLight,
                       iconColor: AppTheme.warning,
-                      title: 'Payment Settings',
-                      subtitle: 'Cash collection, receipts',
+                      title: tr('settings.payment_title'),
+                      subtitle: tr('settings.payment_subtitle'),
                       primaryText: primaryText,
                       mutedText: mutedText,
                       onTap: () {},
@@ -268,8 +268,8 @@ class SettingsScreen extends StatelessWidget {
                       icon: Icons.notifications_none_rounded,
                       iconBgColor: AppTheme.infoLight,
                       iconColor: AppTheme.info,
-                      title: 'Notifications',
-                      subtitle: 'Push, WhatsApp alerts',
+                      title: tr('settings.notifications_title'),
+                      subtitle: tr('settings.notifications_subtitle'),
                       primaryText: primaryText,
                       mutedText: mutedText,
                       onTap: () {},
@@ -290,18 +290,17 @@ class SettingsScreen extends StatelessWidget {
                       icon: Icons.logout_rounded,
                       iconBgColor: AppTheme.dangerLight,
                       iconColor: AppTheme.danger,
-                      title: 'Log Out',
+                      title: tr('settings.logout'),
                       titleColor: AppTheme.danger,
-                      subtitle: 'Sign out of your account',
+                      subtitle: tr('settings.logout_subtitle'),
                       showChevron: false,
                       primaryText: primaryText,
                       mutedText: mutedText,
                       onTap: () async {
                         final confirmed = await AppDialogs.confirm(
-                          title: 'Log Out',
-                          message:
-                              'Are you sure you want to sign out of your account?',
-                          confirmText: 'Log Out',
+                          title: tr('settings.logout'),
+                          message: tr('settings.logout_confirm_message'),
+                          confirmText: tr('settings.logout'),
                           isDestructive: true,
                         );
                         if (confirmed) authCtrl.logout();
@@ -326,7 +325,7 @@ class SettingsScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Made with ♥ in Gujarat',
+                      tr('settings.footer_made_in'),
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         color: mutedText,
