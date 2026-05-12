@@ -1,0 +1,140 @@
+{
+  "en": {
+    "seat_assignment": {
+      "title": "Seat Assignment",
+      "fleet_badge": "Fleet",
+      "tour_subtitle": "{title} · {busCount} Buses · {assigned}/{total} Seats Assigned",
+      "ac": "AC",
+      "non_ac": "Non-AC",
+      "driver_label": "DRIVER",
+      "driver_info": "Driver: {name} · {count} seats",
+      "pct_full": "{pct}% full",
+      "lower_deck": "Lower Deck",
+      "upper_deck": "Upper Deck",
+      "no_layout": "No seat layout configured for this bus.",
+      "no_seats_on_deck": "No seats on this deck.",
+      "legend": {
+        "available": "Available",
+        "booked": "Booked",
+        "selected": "Selected"
+      },
+      "snack": {
+        "select_passenger_title": "Select a passenger",
+        "select_passenger_body": "Choose a passenger below before selecting seats.",
+        "seat_taken_title": "Seat taken",
+        "seat_taken_body": "{seatId} is currently with {name}. Unassign from their card first.",
+        "assigned_title": "Seats Assigned",
+        "assigned_body": "{count} seat(s) assigned successfully."
+      },
+      "all_assigned": "All passengers are fully assigned!",
+      "no_passengers": "No passengers to assign. Add passengers first.",
+      "change": "Change",
+      "seats_chip": "{count} Seats",
+      "pref_label": "Pref: {note}",
+      "selected_label": "Selected:",
+      "tap_seats_hint": "Tap seats above",
+      "more_needed": "{count} more needed",
+      "assign_button": "Assign {selected} of {total} Seats",
+      "pick_passenger": "Select a passenger to assign",
+      "passenger_assigned_count": "{assigned}/{total} assigned",
+      "empty": {
+        "no_tours_title": "No active tours",
+        "no_tours_body": "Create a tour and add buses to start assigning seats.",
+        "no_buses_title": "No buses added",
+        "no_buses_body": "Add a bus to this tour before assigning seats."
+      }
+    }
+  },
+  "gu": {
+    "seat_assignment": {
+      "title": "બેઠક ફાળવણી",
+      "fleet_badge": "ફ્લીટ",
+      "tour_subtitle": "{title} · {busCount} બસ · {assigned}/{total} બેઠક ફળવાઈ",
+      "ac": "AC",
+      "non_ac": "Non-AC",
+      "driver_label": "ડ્રાઇવર",
+      "driver_info": "ડ્રાઇવર: {name} · {count} બેઠક",
+      "pct_full": "{pct}% ભરેલ",
+      "lower_deck": "નીચેનો ડેક",
+      "upper_deck": "ઉપરનો ડેક",
+      "no_layout": "આ બસ માટે બેઠક લેઆઉટ ગોઠવ્યો નથી.",
+      "no_seats_on_deck": "આ ડેક પર કોઈ બેઠક નથી.",
+      "legend": {
+        "available": "ઉપલબ્ધ",
+        "booked": "બુક",
+        "selected": "પસંદ"
+      },
+      "snack": {
+        "select_passenger_title": "મુસાફર પસંદ કરો",
+        "select_passenger_body": "બેઠક પસંદ કરતાં પહેલાં નીચે મુસાફર પસંદ કરો.",
+        "seat_taken_title": "બેઠક લેવાઈ ગઈ",
+        "seat_taken_body": "{seatId} હાલ {name} પાસે છે. પહેલાં તેમના કાર્ડ પરથી ઉઠાવો.",
+        "assigned_title": "બેઠક ફળવાઈ",
+        "assigned_body": "{count} બેઠક સફળતાપૂર્વક ફળવાઈ."
+      },
+      "all_assigned": "બધા મુસાફરોની બેઠક સંપૂર્ણ ફળવાઈ ગઈ!",
+      "no_passengers": "ફાળવવા માટે કોઈ મુસાફર નથી. પહેલાં મુસાફર ઉમેરો.",
+      "change": "બદલો",
+      "seats_chip": "{count} બેઠક",
+      "pref_label": "પસંદ: {note}",
+      "selected_label": "પસંદ:",
+      "tap_seats_hint": "ઉપર બેઠક ટૅપ કરો",
+      "more_needed": "વધુ {count} જરૂરી",
+      "assign_button": "{total} માંથી {selected} બેઠક ફળવો",
+      "pick_passenger": "ફળવવા માટે મુસાફર પસંદ કરો",
+      "passenger_assigned_count": "{assigned}/{total} ફળવ્યા",
+      "empty": {
+        "no_tours_title": "કોઈ સક્રિય પ્રવાસ નથી",
+        "no_tours_body": "બેઠક ફળવવા માટે પ્રવાસ બનાવો અને બસ ઉમેરો.",
+        "no_buses_title": "કોઈ બસ ઉમેરી નથી",
+        "no_buses_body": "બેઠક ફળવતાં પહેલાં આ પ્રવાસ માટે બસ ઉમેરો."
+      }
+    }
+  },
+  "hi": {
+    "seat_assignment": {
+      "title": "सीट आवंटन",
+      "fleet_badge": "फ्लीट",
+      "tour_subtitle": "{title} · {busCount} बसें · {assigned}/{total} सीटें आवंटित",
+      "ac": "AC",
+      "non_ac": "Non-AC",
+      "driver_label": "ड्राइवर",
+      "driver_info": "ड्राइवर: {name} · {count} सीटें",
+      "pct_full": "{pct}% भरी",
+      "lower_deck": "निचला डेक",
+      "upper_deck": "ऊपरी डेक",
+      "no_layout": "इस बस के लिए कोई सीट लेआउट कॉन्फ़िगर नहीं है।",
+      "no_seats_on_deck": "इस डेक पर कोई सीट नहीं है।",
+      "legend": {
+        "available": "उपलब्ध",
+        "booked": "बुक",
+        "selected": "चयनित"
+      },
+      "snack": {
+        "select_passenger_title": "यात्री चुनें",
+        "select_passenger_body": "सीट चुनने से पहले नीचे से यात्री चुनें।",
+        "seat_taken_title": "सीट ली गई",
+        "seat_taken_body": "{seatId} अभी {name} के पास है। पहले उनके कार्ड से हटाएं।",
+        "assigned_title": "सीटें आवंटित",
+        "assigned_body": "{count} सीट सफलतापूर्वक आवंटित।"
+      },
+      "all_assigned": "सभी यात्रियों की सीटें पूरी तरह आवंटित हो गई हैं!",
+      "no_passengers": "आवंटित करने के लिए कोई यात्री नहीं। पहले यात्री जोड़ें।",
+      "change": "बदलें",
+      "seats_chip": "{count} सीटें",
+      "pref_label": "पसंद: {note}",
+      "selected_label": "चयनित:",
+      "tap_seats_hint": "ऊपर सीट टैप करें",
+      "more_needed": "{count} और चाहिए",
+      "assign_button": "{total} में से {selected} सीटें आवंटित करें",
+      "pick_passenger": "आवंटित करने के लिए यात्री चुनें",
+      "passenger_assigned_count": "{assigned}/{total} आवंटित",
+      "empty": {
+        "no_tours_title": "कोई सक्रिय यात्रा नहीं",
+        "no_tours_body": "सीट आवंटित करने के लिए यात्रा बनाएं और बसें जोड़ें।",
+        "no_buses_title": "कोई बस नहीं जोड़ी गई",
+        "no_buses_body": "सीट आवंटित करने से पहले इस यात्रा में बस जोड़ें।"
+      }
+    }
+  }
+}

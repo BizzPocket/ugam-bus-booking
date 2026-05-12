@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +8,7 @@ import '../controllers/tour_controller.dart';
 import '../models/passenger.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
+import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../utils/passenger_display.dart';
 
@@ -33,10 +35,10 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
         child: Obx(() {
           final activeTours = tourCtrl.activeTours;
           if (activeTours.isEmpty) {
-            return const _Empty(
+            return _Empty(
               icon: Icons.grid_view_rounded,
-              title: 'No active tours',
-              body: 'Create a tour and add buses to start assigning seats.',
+              title: tr('seat_assignment.empty.no_tours_title'),
+              body: tr('seat_assignment.empty.no_tours_body'),
             );
           }
 
@@ -47,10 +49,10 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
           final tour = activeTours[_selectedTourIndex];
 
           if (tour.buses.isEmpty) {
-            return _buildTourHeader(tour, activeTours, withBody: const _Empty(
+            return _buildTourHeader(tour, activeTours, withBody: _Empty(
               icon: Icons.directions_bus_rounded,
-              title: 'No buses added',
-              body: 'Add a bus to this tour before assigning seats.',
+              title: tr('seat_assignment.empty.no_buses_title'),
+              body: tr('seat_assignment.empty.no_buses_body'),
             ));
           }
 
@@ -61,12 +63,14 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
           final bus = tour.buses[_selectedBusIndex];
           final passengers = tour.passengers;
 
-          // Build set of booked seat IDs for this bus
+          // Build maps of booked seats for this bus
           final bookedSeatMap = <String, String>{}; // seatId -> passengerName
+          final bookedByMap = <String, String>{};   // seatId -> passengerId
           for (final p in passengers) {
             for (final a in p.assignedSeats) {
               if (a.busId == bus.id) {
                 bookedSeatMap[a.seatId] = p.displayName;
+                bookedByMap[a.seatId] = p.id;
               }
             }
           }
@@ -89,7 +93,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                       Row(
                         children: [
                           Text(
-                            'Seat Assignment',
+                            tr('seat_assignment.title'),
                             style: GoogleFonts.inter(
                               fontSize: 20,
                               fontWeight: FontWeight.w700,
@@ -111,7 +115,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                                     size: 14, color: AppTheme.brand),
                                 const SizedBox(width: 4),
                                 Text(
-                                  'Fleet',
+                                  tr('seat_assignment.fleet_badge'),
                                   style: GoogleFonts.inter(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w600,
@@ -128,8 +132,12 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
 
                       // ── Tour subtitle ──
                       Text(
-                        '${tour.title} · ${tour.buses.length} Buses · '
-                        '${tour.totalSeatsAssigned}/${tour.totalBusSeats} Seats Assigned',
+                        tr('seat_assignment.tour_subtitle', namedArgs: {
+                          'title': tour.title,
+                          'busCount': '${tour.buses.length}',
+                          'assigned': '${tour.totalSeatsAssigned}',
+                          'total': '${tour.totalBusSeats}',
+                        }),
                         style: GoogleFonts.newsreader(
                           fontSize: 14,
                           color: AppTheme.textSecondary,
@@ -207,7 +215,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                                           ),
                                         ),
                                         Text(
-                                          ' · ${b.isAC ? "AC" : "Non-AC"}',
+                                          ' · ${b.isAC ? tr('seat_assignment.ac') : tr('seat_assignment.non_ac')}',
                                           style: GoogleFonts.inter(
                                             fontSize: 10,
                                             fontWeight: FontWeight.w500,
@@ -250,7 +258,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                                     CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '${bus.busNumber} · ${bus.isAC ? "AC" : "Non-AC"} ${bus.busType}',
+                                    '${bus.busNumber} · ${bus.isAC ? tr('seat_assignment.ac') : tr('seat_assignment.non_ac')} ${bus.busType}',
                                     style: GoogleFonts.inter(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -259,7 +267,10 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                                   ),
                                   const SizedBox(height: 1),
                                   Text(
-                                    'Driver: ${bus.driverName} · $totalSeats seats',
+                                    tr('seat_assignment.driver_info', namedArgs: {
+                                      'name': bus.driverName,
+                                      'count': '$totalSeats',
+                                    }),
                                     style: GoogleFonts.inter(
                                       fontSize: 10,
                                       color: AppTheme.textSecondary,
@@ -281,7 +292,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '$pct% full',
+                                  tr('seat_assignment.pct_full', namedArgs: {'pct': '$pct'}),
                                   style: GoogleFonts.inter(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w500,
@@ -310,13 +321,13 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                           child: Row(
                             children: [
                               _DeckTab(
-                                label: 'Lower Deck',
+                                label: tr('seat_assignment.lower_deck'),
                                 isActive: _selectedDeck == 0,
                                 onTap: () => setState(
                                     () => _selectedDeck = 0),
                               ),
                               _DeckTab(
-                                label: 'Upper Deck',
+                                label: tr('seat_assignment.upper_deck'),
                                 isActive: _selectedDeck == 1,
                                 onTap: () => setState(
                                     () => _selectedDeck = 1),
@@ -334,16 +345,43 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                           isUpperDeck: _selectedDeck == 1,
                           bookedSeatMap: bookedSeatMap,
                           selectedSeatIds: _selectedSeatIds,
-                          onSeatTap: (seatId) {
+                          onSeatTap: (seatId) async {
                             if (_selectedPassengerId == null) {
                               Get.snackbar(
-                                'Select a passenger',
-                                'Choose a passenger below before selecting seats.',
+                                tr('seat_assignment.snack.select_passenger_title'),
+                                tr('seat_assignment.snack.select_passenger_body'),
                                 snackPosition: SnackPosition.BOTTOM,
                               );
                               return;
                             }
-                            if (bookedSeatMap.containsKey(seatId)) return;
+                            final ownerId = bookedByMap[seatId];
+                            // Tap own seat → unassign just that seat.
+                            if (ownerId == _selectedPassengerId) {
+                              final passenger = passengers.firstWhere(
+                                (p) => p.id == _selectedPassengerId,
+                              );
+                              final next = passenger.assignedSeats
+                                  .where((a) =>
+                                      !(a.busId == bus.id &&
+                                          a.seatId == seatId))
+                                  .toList();
+                              await tourCtrl.assignSeats(
+                                  tour.id, passenger.id, next);
+                              return;
+                            }
+                            // Someone else's seat → warn, don't take it.
+                            if (ownerId != null) {
+                              Get.snackbar(
+                                tr('seat_assignment.snack.seat_taken_title'),
+                                tr('seat_assignment.snack.seat_taken_body', namedArgs: {
+                                  'seatId': seatId,
+                                  'name': bookedSeatMap[seatId] ?? '',
+                                }),
+                                snackPosition: SnackPosition.BOTTOM,
+                              );
+                              return;
+                            }
+                            // Free seat → toggle selection.
                             setState(() {
                               if (_selectedSeatIds.contains(seatId)) {
                                 _selectedSeatIds.remove(seatId);
@@ -363,7 +401,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                           ),
                           child: Center(
                             child: Text(
-                              'No seat layout configured for this bus.',
+                              tr('seat_assignment.no_layout'),
                               style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: AppTheme.textMuted,
@@ -381,17 +419,17 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                           _LegendItem(
                             color: AppTheme.brandLight,
                             border: AppTheme.borderDefault,
-                            label: 'Available',
+                            label: tr('seat_assignment.legend.available'),
                           ),
                           const SizedBox(width: 16),
                           _LegendItem(
                             color: AppTheme.brand,
-                            label: 'Booked',
+                            label: tr('seat_assignment.legend.booked'),
                           ),
                           const SizedBox(width: 16),
                           _LegendItem(
                             color: AppTheme.brandAccent,
-                            label: 'Selected',
+                            label: tr('seat_assignment.legend.selected'),
                             hasShadow: true,
                           ),
                         ],
@@ -433,7 +471,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
         Padding(
           padding: const EdgeInsets.all(20),
           child: Text(
-            'Seat Assignment',
+            tr('seat_assignment.title'),
             style: GoogleFonts.inter(
               fontSize: 20,
               fontWeight: FontWeight.w700,
@@ -463,8 +501,8 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
     });
 
     Get.snackbar(
-      'Seats Assigned',
-      '${assignments.length} seat(s) assigned successfully.',
+      tr('seat_assignment.snack.assigned_title'),
+      tr('seat_assignment.snack.assigned_body', namedArgs: {'count': '${assignments.length}'}),
       snackPosition: SnackPosition.BOTTOM,
     );
   }
@@ -539,7 +577,7 @@ class _SeatGrid extends StatelessWidget {
         ),
         child: Center(
           child: Text(
-            'No seats on this deck.',
+            tr('seat_assignment.no_seats_on_deck'),
             style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted),
           ),
         ),
@@ -573,7 +611,7 @@ class _SeatGrid extends StatelessWidget {
                   size: 28, color: AppTheme.textMuted),
               const SizedBox(width: 8),
               Text(
-                'DRIVER',
+                tr('seat_assignment.driver_label'),
                 style: GoogleFonts.inter(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
@@ -621,6 +659,8 @@ class _SeatGrid extends StatelessWidget {
             onTap: () => onSeatTap(seatId),
             child: _SeatCell(
               seatId: seatId,
+              seatType: cell.seatType,
+              position: cell.position,
               isBooked: isBooked,
               isSelected: isSelected,
             ),
@@ -643,14 +683,62 @@ class _SeatGrid extends StatelessWidget {
 // ── Single Seat Cell ──────────────────────────────────────────
 class _SeatCell extends StatelessWidget {
   final String seatId;
+  final SeatType? seatType;
+  final SeatPosition? position;
   final bool isBooked;
   final bool isSelected;
 
   const _SeatCell({
     required this.seatId,
+    required this.seatType,
+    required this.position,
     required this.isBooked,
     required this.isSelected,
   });
+
+  /// Single-letter mark for the seat type (S = Single Sofa, D = Double
+  /// Sofa, T = Seater). Position is shown by the seatId prefix (L/U).
+  String? get _typeMark {
+    switch (seatType) {
+      case SeatType.singleSofa:
+        return 'S';
+      case SeatType.doubleSofa:
+        return 'D';
+      case SeatType.seater:
+        return 'T';
+      case null:
+        return null;
+    }
+  }
+
+  /// Background tint by seat type, so the agent can see at a glance
+  /// which seats are Single Sofa vs Double Sofa vs Seater. Only used
+  /// for the unbooked / unselected state.
+  Color get _typeTint {
+    switch (seatType) {
+      case SeatType.singleSofa:
+        return const Color(0xFFE7F8EE); // pale green
+      case SeatType.doubleSofa:
+        return const Color(0xFFE0F2FE); // pale blue
+      case SeatType.seater:
+        return const Color(0xFFF1F5F9); // pale grey
+      case null:
+        return AppTheme.brandLight;
+    }
+  }
+
+  Color get _typeBorder {
+    switch (seatType) {
+      case SeatType.singleSofa:
+        return const Color(0xFF22C55E);
+      case SeatType.doubleSofa:
+        return const Color(0xFF0EA5E9);
+      case SeatType.seater:
+        return AppTheme.textMuted;
+      case null:
+        return AppTheme.borderDefault;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -680,28 +768,47 @@ class _SeatCell extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       );
     } else {
-      bgColor = AppTheme.brandLight;
-      textColor = AppTheme.textSecondary;
+      bgColor = _typeTint;
+      textColor = AppTheme.textPrimary;
       decoration = BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: AppTheme.borderDefault, width: 1.5),
+        border: Border.all(color: _typeBorder, width: 1.5),
       );
     }
+
+    final mark = _typeMark;
 
     return Container(
       width: 60,
       height: 44,
       decoration: decoration,
-      child: Center(
-        child: Text(
-          seatId,
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: textColor,
+      child: Stack(
+        children: [
+          Center(
+            child: Text(
+              seatId,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
           ),
-        ),
+          if (mark != null)
+            Positioned(
+              top: 2,
+              right: 4,
+              child: Text(
+                mark,
+                style: GoogleFonts.inter(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: textColor.withValues(alpha: 0.75),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -809,7 +916,7 @@ class _AssignPanel extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'All passengers are fully assigned!',
+                tr('seat_assignment.all_assigned'),
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -832,7 +939,7 @@ class _AssignPanel extends StatelessWidget {
         ),
         child: Center(
           child: Text(
-            'No passengers to assign. Add passengers first.',
+            tr('seat_assignment.no_passengers'),
             style: GoogleFonts.inter(
               fontSize: 13,
               color: AppTheme.textMuted,
@@ -923,7 +1030,7 @@ class _AssignPanel extends StatelessWidget {
               GestureDetector(
                 onTap: () => onPassengerSelected(''),
                 child: Text(
-                  'Change',
+                  tr('seat_assignment.change'),
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -944,7 +1051,7 @@ class _AssignPanel extends StatelessWidget {
               children: [
                 _InfoChip(
                   icon: Icons.event_seat_rounded,
-                  label: '${pax.totalSeatsRequested} Seats',
+                  label: tr('seat_assignment.seats_chip', namedArgs: {'count': '${pax.totalSeatsRequested}'}),
                 ),
                 _InfoChip(
                   label: pax.requestLines.map((l) => l.label).join(' + '),
@@ -962,7 +1069,7 @@ class _AssignPanel extends StatelessWidget {
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
-                    'Pref: ${pax.note}',
+                    tr('seat_assignment.pref_label', namedArgs: {'note': pax.note ?? ''}),
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
@@ -980,7 +1087,7 @@ class _AssignPanel extends StatelessWidget {
           Row(
             children: [
               Text(
-                'Selected:',
+                tr('seat_assignment.selected_label'),
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   color: AppTheme.textSecondary,
@@ -989,7 +1096,7 @@ class _AssignPanel extends StatelessWidget {
               const SizedBox(width: 8),
               if (selectedSeatIds.isEmpty)
                 Text(
-                  'Tap seats above',
+                  tr('seat_assignment.tap_seats_hint'),
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     fontStyle: FontStyle.italic,
@@ -1021,7 +1128,7 @@ class _AssignPanel extends StatelessWidget {
                 if (remaining - selectedSeatIds.length > 0) ...[
                   const SizedBox(width: 4),
                   Text(
-                    '${remaining - selectedSeatIds.length} more needed',
+                    tr('seat_assignment.more_needed', namedArgs: {'count': '${remaining - selectedSeatIds.length}'}),
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
@@ -1054,7 +1161,10 @@ class _AssignPanel extends StatelessWidget {
                       size: 18, color: Colors.white),
                   const SizedBox(width: 8),
                   Text(
-                    'Assign ${selectedSeatIds.length} of ${pax.totalSeatsRequested} Seats',
+                    tr('seat_assignment.assign_button', namedArgs: {
+                      'selected': '${selectedSeatIds.length}',
+                      'total': '${pax.totalSeatsRequested}',
+                    }),
                     style: GoogleFonts.inter(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -1115,7 +1225,7 @@ class _PassengerPicker extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Select a passenger to assign',
+            tr('seat_assignment.pick_passenger'),
             style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -1168,7 +1278,10 @@ class _PassengerPicker extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              '${p.totalSeatsAssigned}/${p.totalSeatsRequested} assigned',
+                              tr('seat_assignment.passenger_assigned_count', namedArgs: {
+                                'assigned': '${p.totalSeatsAssigned}',
+                                'total': '${p.totalSeatsRequested}',
+                              }),
                               style: GoogleFonts.inter(
                                 fontSize: 10,
                                 color: AppTheme.textMuted,
