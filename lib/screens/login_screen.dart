@@ -14,11 +14,10 @@ class LoginScreen extends GetView<AuthController> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: isDark ? colorScheme.surface : Colors.white,
+      backgroundColor: AppColors.bg(context),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -98,7 +97,7 @@ class LoginScreen extends GetView<AuthController> {
                     width: 90,
                     height: 54,
                     decoration: BoxDecoration(
-                      color: isDark ? colorScheme.surfaceContainerHighest : Colors.white,
+                      color: AppColors.surface(context),
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: colorScheme.outline),
                     ),
@@ -149,7 +148,7 @@ class LoginScreen extends GetView<AuthController> {
                             color: colorScheme.onSurfaceVariant,
                           ),
                           filled: true,
-                          fillColor: isDark ? colorScheme.surfaceContainerHighest : Colors.white,
+                          fillColor: AppColors.surface(context),
                           contentPadding:
                               const EdgeInsets.symmetric(horizontal: 16),
                           enabledBorder: OutlineInputBorder(
@@ -207,9 +206,7 @@ class LoginScreen extends GetView<AuthController> {
                             color: colorScheme.onSurfaceVariant,
                           ),
                           filled: true,
-                          fillColor: isDark
-                              ? colorScheme.surfaceContainerHighest
-                              : Colors.white,
+                          fillColor: AppColors.surface(context),
                           contentPadding:
                               const EdgeInsets.symmetric(horizontal: 16),
                           enabledBorder: OutlineInputBorder(
@@ -343,7 +340,7 @@ class LoginScreen extends GetView<AuthController> {
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
                     fontSize: 11,
-                    color: AppTheme.textMuted,
+                    color: AppColors.textMuted(context),
                     height: 1.5,
                   ),
                 ),
@@ -358,7 +355,7 @@ class LoginScreen extends GetView<AuthController> {
                     style: GoogleFonts.inter(
                       fontSize: 10,
                       fontWeight: FontWeight.w500,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                       letterSpacing: 1.5,
                     ),
                   ),
@@ -367,7 +364,7 @@ class LoginScreen extends GetView<AuthController> {
                     style: GoogleFonts.inter(
                       fontSize: 10,
                       fontWeight: FontWeight.w500,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                       letterSpacing: 1.5,
                     ),
                   ),
@@ -376,7 +373,7 @@ class LoginScreen extends GetView<AuthController> {
                     style: GoogleFonts.inter(
                       fontSize: 10,
                       fontWeight: FontWeight.w500,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                       letterSpacing: 1.5,
                     ),
                   ),
