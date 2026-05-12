@@ -6,7 +6,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
 import '../models/tour.dart';
+import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
+import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
 
 /// Customer-facing list of every booking request submitted from THIS
@@ -259,25 +261,84 @@ class _RequestCard extends StatelessWidget {
               ),
             ],
           ),
-          if (entry.hasSeatsAssigned) ...[
+          if (entry.tripType.isOneWay) ...[
             const SizedBox(height: 6),
             Row(
               children: [
-                Icon(Icons.confirmation_number_rounded,
-                    size: 16, color: AppTheme.brand),
+                Icon(
+                  entry.tripType == TripType.outboundOnly
+                      ? Icons.arrow_forward_rounded
+                      : Icons.arrow_back_rounded,
+                  size: 16,
+                  color: AppTheme.warning,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    tr('customer_my_requests.seats_assigned_label',
-                        namedArgs: {'seats': entry.assignedSeats.join(', ')}),
+                    entry.tripType == TripType.outboundOnly
+                        ? tr('customer_my_requests.trip_outbound',
+                            namedArgs: {
+                              'from': entry.tourFromCity,
+                              'to': entry.tourToCity,
+                            })
+                        : tr('customer_my_requests.trip_return',
+                            namedArgs: {
+                              'from': entry.tourToCity,
+                              'to': entry.tourFromCity,
+                            }),
                     style: GoogleFonts.inter(
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.brand,
+                      color: AppTheme.warning,
                     ),
                   ),
                 ),
               ],
+            ),
+          ],
+          if (entry.hasSeatsAssigned) ...[
+            const SizedBox(height: 6),
+            InkWell(
+              onTap: () => showCustomerSeatLayoutSheet(context, entry: entry),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.confirmation_number_rounded,
+                        size: 16, color: AppTheme.brand),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        tr(
+                          'customer_my_requests.seats_assigned_label',
+                          namedArgs: {
+                            'seats': entry.assignedSeats
+                                .map((s) => s.seatId)
+                                .join(', '),
+                          },
+                        ),
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.brand,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(Icons.grid_view_rounded,
+                        size: 14, color: AppTheme.brand),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              tr('customer_my_requests.layout_view_hint'),
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                color: colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
           if (entry.note != null && entry.note!.isNotEmpty) ...[
@@ -313,7 +374,7 @@ class _RequestCard extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: AppTheme.bgLight,
+                color: AppColors.bg(context),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(
@@ -437,7 +498,7 @@ class _MutedPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppTheme.bgLight,
+        color: AppColors.bg(context),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: cs.outline),
       ),
