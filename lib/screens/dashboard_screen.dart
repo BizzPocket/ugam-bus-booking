@@ -1,7 +1,7 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
 
 import '../config/theme.dart';
 import '../controllers/auth_controller.dart';
@@ -57,8 +57,13 @@ class DashboardScreen extends StatelessWidget {
                 (s, t) => s + (t.pricePerSeat * t.totalSeatsRequested),
               );
 
-              return ListView(
-                physics: const BouncingScrollPhysics(),
+              return RefreshIndicator(
+                onRefresh: tourCtrl.refreshTours,
+                color: AppTheme.brand,
+                child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
                 padding: const EdgeInsets.fromLTRB(20, 24, 20, 140),
                 children: [
                   _Greeting(
@@ -66,7 +71,7 @@ class DashboardScreen extends StatelessWidget {
                     initials: authCtrl.initials,
                   ),
                   const SizedBox(height: 28),
-                  _SectionLabel('QUICK OVERVIEW'),
+                  _SectionLabel(tr('dashboard.section_overview')),
                   const SizedBox(height: 12),
                   _StatGrid(
                     activeCount: activeTours.length,
@@ -79,7 +84,7 @@ class DashboardScreen extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Upcoming Tours',
+                        tr('dashboard.section_upcoming'),
                         style: GoogleFonts.inter(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
@@ -89,7 +94,7 @@ class DashboardScreen extends StatelessWidget {
                       GestureDetector(
                         onTap: () => shell.switchTab(1),
                         child: Text(
-                          'See All',
+                          tr('dashboard.see_all'),
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -116,6 +121,7 @@ class DashboardScreen extends StatelessWidget {
                       ),
                     ),
                 ],
+                ),
               );
             }),
 
@@ -142,7 +148,7 @@ class _Greeting extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final greeting = _greetingForHour(DateTime.now().hour);
-    final displayName = name.isNotEmpty ? name : 'Welcome';
+    final displayName = name.isNotEmpty ? name : tr('dashboard.welcome_fallback');
     final displayInitials = initials.isNotEmpty ? initials : '👋';
 
     return Row(
@@ -156,7 +162,7 @@ class _Greeting extends StatelessWidget {
                 greeting,
                 style: GoogleFonts.inter(
                   fontSize: 14,
-                  color: AppTheme.textSecondary,
+                  color: AppColors.textMuted(context),
                 ),
               ),
               const SizedBox(height: 4),
@@ -202,9 +208,9 @@ class _Greeting extends StatelessWidget {
   }
 
   String _greetingForHour(int hour) {
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
+    if (hour < 12) return tr('dashboard.greeting_morning');
+    if (hour < 17) return tr('dashboard.greeting_afternoon');
+    return tr('dashboard.greeting_evening');
   }
 }
 
@@ -220,7 +226,7 @@ class _SectionLabel extends StatelessWidget {
         fontSize: 11,
         fontWeight: FontWeight.w600,
         letterSpacing: 1.2,
-        color: AppTheme.textMuted,
+        color: AppColors.textMuted(context),
       ),
     );
   }
@@ -251,7 +257,7 @@ class _StatGrid extends StatelessWidget {
                 iconBg: AppTheme.brandLight,
                 iconColor: AppTheme.brand,
                 value: '$activeCount',
-                label: 'Active Tours',
+                label: tr('dashboard.stat_active_tours'),
               ),
             ),
             const SizedBox(width: 12),
@@ -261,7 +267,7 @@ class _StatGrid extends StatelessWidget {
                 iconBg: AppTheme.warningLight,
                 iconColor: AppTheme.warning,
                 value: '$pendingRequests',
-                label: 'Pending Requests',
+                label: tr('dashboard.stat_pending_requests'),
               ),
             ),
           ],
@@ -275,7 +281,7 @@ class _StatGrid extends StatelessWidget {
                 iconBg: AppTheme.successLight,
                 iconColor: AppTheme.success,
                 value: '$totalPassengers',
-                label: 'Total Passengers',
+                label: tr('dashboard.stat_total_passengers'),
               ),
             ),
             const SizedBox(width: 12),
@@ -285,7 +291,7 @@ class _StatGrid extends StatelessWidget {
                 iconBg: AppTheme.infoLight,
                 iconColor: AppTheme.info,
                 value: _formatRevenue(revenue),
-                label: 'Revenue',
+                label: tr('dashboard.stat_revenue'),
               ),
             ),
           ],
@@ -335,7 +341,7 @@ class _StatCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? AppTheme.cardDark : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
         boxShadow: isDark ? null : AppTheme.subtleShadow,
       ),
       child: Column(
@@ -368,7 +374,7 @@ class _StatCard extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 11,
               fontWeight: FontWeight.w500,
-              color: AppTheme.textMuted,
+              color: AppColors.textMuted(context),
             ),
           ),
         ],
@@ -387,7 +393,7 @@ class _TourCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final colors = _statusColors(tour.status);
+    final colors = _statusColors(context, tour.status);
 
     return GestureDetector(
       onTap: onTap,
@@ -396,7 +402,7 @@ class _TourCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: isDark ? AppTheme.cardDark : Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.borderLight),
+          border: Border.all(color: AppColors.border(context)),
           boxShadow: isDark ? null : AppTheme.subtleShadow,
         ),
         child: Row(
@@ -419,17 +425,17 @@ class _TourCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.calendar_today_outlined,
                         size: 12,
-                        color: AppTheme.textSecondary,
+                        color: AppColors.textMuted(context),
                       ),
                       const SizedBox(width: 4),
                       Text(
                         _formatDate(tour.departureDate, tour.returnDate),
                         style: GoogleFonts.inter(
                           fontSize: 11,
-                          color: AppTheme.textSecondary,
+                          color: AppColors.textMuted(context),
                         ),
                       ),
                       Padding(
@@ -438,21 +444,21 @@ class _TourCard extends StatelessWidget {
                           '·',
                           style: GoogleFonts.inter(
                             fontSize: 11,
-                            color: AppTheme.textMuted,
+                            color: AppColors.textMuted(context),
                           ),
                         ),
                       ),
-                      const Icon(
+                      Icon(
                         Icons.people_outline_rounded,
                         size: 12,
-                        color: AppTheme.textSecondary,
+                        color: AppColors.textMuted(context),
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        '${tour.passengerCount} pax',
+                        tr('dashboard.pax', namedArgs: {'count': '${tour.passengerCount}'}),
                         style: GoogleFonts.inter(
                           fontSize: 11,
-                          color: AppTheme.textSecondary,
+                          color: AppColors.textMuted(context),
                         ),
                       ),
                     ],
@@ -490,7 +496,7 @@ class _TourCard extends StatelessWidget {
     return fmt.format(departure);
   }
 
-  (Color, Color) _statusColors(TourStatus status) {
+  (Color, Color) _statusColors(BuildContext context, TourStatus status) {
     switch (status) {
       case TourStatus.planning:
         return (AppTheme.infoLight, AppTheme.info);
@@ -503,7 +509,7 @@ class _TourCard extends StatelessWidget {
       case TourStatus.locked:
         return (AppTheme.successLight, AppTheme.success);
       case TourStatus.completed:
-        return (const Color(0xFFF1F5F9), AppTheme.textSecondary);
+        return (const Color(0xFFF1F5F9), AppColors.textMuted(context));
     }
   }
 }
@@ -551,16 +557,16 @@ class _EmptyTours extends StatelessWidget {
       decoration: BoxDecoration(
         color: isDark ? AppTheme.cardDark : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
         boxShadow: isDark ? null : AppTheme.subtleShadow,
       ),
       child: Column(
         children: [
-          const Icon(Icons.map_outlined, size: 40, color: AppTheme.textMuted),
+          Icon(Icons.map_outlined, size: 40, color: AppColors.textMuted(context)),
           const SizedBox(height: 8),
           Text(
-            'No upcoming tours',
-            style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted),
+            tr('dashboard.empty_tours'),
+            style: GoogleFonts.inter(fontSize: 13, color: AppColors.textMuted(context)),
           ),
         ],
       ),
@@ -582,10 +588,10 @@ class _ErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.cloud_off_rounded,
               size: 48,
-              color: AppTheme.textMuted,
+              color: AppColors.textMuted(context),
             ),
             const SizedBox(height: 16),
             Text(
@@ -593,14 +599,14 @@ class _ErrorState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 14,
-                color: AppTheme.textSecondary,
+                color: AppColors.textMuted(context),
               ),
             ),
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Retry'),
+              label: Text(tr('app.action.retry')),
             ),
           ],
         ),

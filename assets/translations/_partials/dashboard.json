@@ -1,0 +1,53 @@
+{
+  "en": {
+    "dashboard": {
+      "section_overview": "QUICK OVERVIEW",
+      "section_upcoming": "Upcoming Tours",
+      "see_all": "See All",
+      "stat_active_tours": "Active Tours",
+      "stat_pending_requests": "Pending Requests",
+      "stat_total_passengers": "Total Passengers",
+      "stat_revenue": "Revenue",
+      "empty_tours": "No upcoming tours",
+      "greeting_morning": "Good Morning",
+      "greeting_afternoon": "Good Afternoon",
+      "greeting_evening": "Good Evening",
+      "welcome_fallback": "Welcome",
+      "pax": "{count} pax"
+    }
+  },
+  "gu": {
+    "dashboard": {
+      "section_overview": "ઝડપી ઝલક",
+      "section_upcoming": "આગામી પ્રવાસ",
+      "see_all": "બધા જુઓ",
+      "stat_active_tours": "સક્રિય પ્રવાસ",
+      "stat_pending_requests": "બાકી વિનંતીઓ",
+      "stat_total_passengers": "કુલ પ્રવાસીઓ",
+      "stat_revenue": "આવક",
+      "empty_tours": "કોઈ આગામી પ્રવાસ નથી",
+      "greeting_morning": "સુપ્રભાત",
+      "greeting_afternoon": "નમસ્તે",
+      "greeting_evening": "શુભ સાંજ",
+      "welcome_fallback": "સ્વાગત છે",
+      "pax": "{count} મુસાફર"
+    }
+  },
+  "hi": {
+    "dashboard": {
+      "section_overview": "संक्षिप्त अवलोकन",
+      "section_upcoming": "आगामी यात्राएँ",
+      "see_all": "सभी देखें",
+      "stat_active_tours": "सक्रिय यात्राएँ",
+      "stat_pending_requests": "लंबित अनुरोध",
+      "stat_total_passengers": "कुल यात्री",
+      "stat_revenue": "राजस्व",
+      "empty_tours": "कोई आगामी यात्रा नहीं",
+      "greeting_morning": "सुप्रभात",
+      "greeting_afternoon": "नमस्ते",
+      "greeting_evening": "शुभ संध्या",
+      "welcome_fallback": "स्वागत है",
+      "pax": "{count} यात्री"
+    }
+  }
+}
