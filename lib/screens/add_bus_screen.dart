@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -25,24 +26,51 @@ class AddBusScreen extends StatefulWidget {
 }
 
 class _AddBusScreenState extends State<AddBusScreen> {
+  final _slotLabel = TextEditingController();
   final _busNumber = TextEditingController();
   final _driverName = TextEditingController();
   final _driverPhone = TextEditingController();
+  final _price = TextEditingController();
   bool _isAC = true;
   int _totalSeats = 40;
   BusType _busType = BusType.sleeper;
   int _seaterCountForMixed = 6;
+  // How many sleeper berths should be Single Sofa (1-person). The rest of
+  // the sleeper seats become Double Sofa. 0 means "all double" — matches
+  // the pre-existing behaviour.
+  int _singleSofaCount = 0;
   bool _saving = false;
+  bool _priceInitialized = false;
+  bool _slotLabelInitialized = false;
 
   TourController get _tourCtrl => Get.find<TourController>();
 
   Tour? get _tour => _tourCtrl.getTour(widget.tourId);
 
+  /// Default slot label suggested for this bus, e.g. "Bus 1", "Bus 2".
+  /// Agents can override this in the text field — each bus in a tour can
+  /// carry whatever label is useful (e.g. "Express", "Bus A").
+  String get _defaultSlotLabel {
+    final tour = _tour;
+    if (tour == null) return 'Bus 1';
+    return 'Bus ${tour.buses.length + 1}';
+  }
+
+  /// Sleeper seats currently configured on this form. Used to clamp the
+  /// Single Sofa stepper and to gate the Mixed-mode seater split.
+  int get _sleeperSeats => switch (_busType) {
+        BusType.sleeper => _totalSeats,
+        BusType.mixed => _totalSeats - _seaterCountForMixed,
+        BusType.seater => 0,
+      };
+
   String get _subtitle {
     final tour = _tour;
     if (tour == null) return '';
-    final busCount = tour.buses.length;
-    return '${tour.title} · Bus ${busCount + 1}';
+    final label = _slotLabel.text.trim().isEmpty
+        ? _defaultSlotLabel
+        : _slotLabel.text.trim();
+    return '${tour.title} · $label';
   }
 
   String get _capacityHint {
@@ -50,42 +78,65 @@ class _AddBusScreenState extends State<AddBusScreen> {
     if (tour == null) return '';
     final busCount = tour.buses.length;
     final existingTotal = tour.buses.fold<int>(0, (s, b) => s + b.totalSeats);
-    if (busCount == 0) return 'This is the first bus for this tour.';
-    return 'This tour has $busCount '
-        '${busCount == 1 ? 'bus' : 'buses'} with $existingTotal '
-        '${existingTotal == 1 ? 'seat' : 'seats'} total. Adding this bus will '
-        'increase capacity.';
+    if (busCount == 0) return tr('add_bus.info.first_bus');
+    final seatsLabel = existingTotal == 1
+        ? tr('add_bus.info.seat')
+        : tr('add_bus.info.seats');
+    final key = busCount == 1
+        ? 'add_bus.info.existing_buses_one'
+        : 'add_bus.info.existing_buses_other';
+    return tr(key, namedArgs: {
+      'count': '$busCount',
+      'seats': '$existingTotal',
+      'seats_label': seatsLabel,
+    });
   }
 
   @override
   void dispose() {
+    _slotLabel.dispose();
     _busNumber.dispose();
     _driverName.dispose();
     _driverPhone.dispose();
+    _price.dispose();
     super.dispose();
   }
 
-  Future<void> _save() async {
-    final busNumber = _busNumber.text.trim();
-    final driverName = _driverName.text.trim();
-    final driverPhone = _driverPhone.text.trim();
+  /// Seed the price input with the tour-level default the first time we
+  /// have access to the tour (Obx may rebuild before tour is loaded).
+  void _maybeSeedPrice() {
+    if (_priceInitialized) return;
+    final tour = _tour;
+    if (tour == null) return;
+    if (tour.pricePerSeat > 0) {
+      _price.text = tour.pricePerSeat.toStringAsFixed(0);
+    }
+    _priceInitialized = true;
+  }
 
-    if (busNumber.isEmpty) {
-      AppSnackBar.error('Bus number is required');
-      return;
-    }
-    if (driverName.isEmpty) {
-      AppSnackBar.error('Driver name is required');
-      return;
-    }
+  /// Seed the slot label once we know the tour's current bus count, so
+  /// the suggested "Bus N" appears in the field but the agent can edit it.
+  void _maybeSeedSlotLabel() {
+    if (_slotLabelInitialized) return;
+    final tour = _tour;
+    if (tour == null) return;
+    _slotLabel.text = _defaultSlotLabel;
+    _slotLabelInitialized = true;
+  }
+
+  Future<void> _save() async {
     if (_busType == BusType.mixed && _seaterCountForMixed >= _totalSeats) {
-      AppSnackBar.error('Seater count must be less than total seats');
+      AppSnackBar.error(tr('add_bus.snackbar.error_seater_count'));
+      return;
+    }
+    if (_singleSofaCount > _sleeperSeats) {
+      AppSnackBar.error(tr('add_bus.snackbar.error_single_sofa'));
       return;
     }
 
     final tour = _tour;
     if (tour == null) {
-      AppSnackBar.error('Tour not found');
+      AppSnackBar.error(tr('add_bus.snackbar.error_tour_not_found'));
       return;
     }
 
@@ -93,16 +144,27 @@ class _AddBusScreenState extends State<AddBusScreen> {
       busType: _busType,
       totalSeats: _totalSeats,
       seaterCount: _busType == BusType.mixed ? _seaterCountForMixed : 0,
+      singleSofaCount: _singleSofaCount,
     );
 
+    final priceText = _price.text.trim();
+    final pricePerSeat = priceText.isEmpty
+        ? tour.pricePerSeat
+        : (double.tryParse(priceText) ?? tour.pricePerSeat);
+
+    final slotLabel = _slotLabel.text.trim().isEmpty
+        ? _defaultSlotLabel
+        : _slotLabel.text.trim();
+
     final bus = Bus(
-      name: 'Bus ${tour.buses.length + 1}',
-      busNumber: busNumber,
-      driverName: driverName,
-      driverPhone: driverPhone,
+      name: slotLabel,
+      busNumber: _busNumber.text.trim(),
+      driverName: _driverName.text.trim(),
+      driverPhone: _driverPhone.text.trim(),
       isAC: _isAC,
       busType: _busType.displayName,
       totalSeatsLegacy: _totalSeats,
+      pricePerSeat: pricePerSeat,
       layout: layout,
     );
 
@@ -110,19 +172,53 @@ class _AddBusScreenState extends State<AddBusScreen> {
     try {
       await _tourCtrl.addBus(widget.tourId, bus);
       if (!mounted) return;
-      AppSnackBar.success('${bus.name} added');
+      AppSnackBar.success(
+        tr('add_bus.snackbar.added', namedArgs: {'name': bus.name}),
+      );
       Get.back();
     } catch (e) {
-      AppSnackBar.error('Could not save bus — try again');
+      AppSnackBar.error(tr('add_bus.snackbar.error_save'));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  String get _mixedSummary {
+    final sleeperCount = _totalSeats - _seaterCountForMixed;
+    final sleeperKey = sleeperCount == 1
+        ? 'add_bus.summary.mixed_one_sleeper'
+        : 'add_bus.summary.mixed_many_sleeper';
+    final seaterLabel = _seaterCountForMixed == 1
+        ? tr('add_bus.summary.seater')
+        : tr('add_bus.summary.seaters');
+    return tr(sleeperKey, namedArgs: {
+      'sleeper': '$sleeperCount',
+      'seater': '$_seaterCountForMixed',
+      'seater_label': seaterLabel,
+    });
+  }
+
+  String get _singleSofaSummary {
+    final doubleCount = _sleeperSeats - _singleSofaCount;
+    final summaryKey = _singleSofaCount == 1
+        ? 'add_bus.summary.single_sofa_summary_one'
+        : 'add_bus.summary.single_sofa_summary_other';
+    final doubleLabel = doubleCount == 1
+        ? tr('add_bus.summary.double_sofa')
+        : tr('add_bus.summary.double_sofas');
+    return tr(summaryKey, namedArgs: {
+      'single': '$_singleSofaCount',
+      'double': '$doubleCount',
+      'double_label': doubleLabel,
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    _maybeSeedPrice();
+    _maybeSeedSlotLabel();
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -135,33 +231,54 @@ class _AddBusScreenState extends State<AddBusScreen> {
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 physics: const BouncingScrollPhysics(),
                 children: [
+                  // Editable slot label. Each bus on a tour can carry a
+                  // custom name (e.g. "Bus 1", "Bus A", "Express"). Pre-filled
+                  // with an auto-numbered suggestion so the common case is
+                  // zero-typing.
+                  _FieldLabel(tr('add_bus.label.slot_label')),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _slotLabel,
+                    textCapitalization: TextCapitalization.words,
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: _defaultSlotLabel,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
                   if (_capacityHint.isNotEmpty)
-                    _InfoBanner(text: _capacityHint, isDark: isDark),
+                    _InfoBanner(
+                      text:
+                          '${tr('add_bus.info.optional_fields')}'
+                          '\n\n$_capacityHint',
+                      isDark: isDark,
+                    ),
                   const SizedBox(height: 16),
 
-                  _FieldLabel('Bus Number'),
+                  _OptionalLabel(tr('add_bus.label.bus_number')),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _busNumber,
                     textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. GJ-05-AB-1234',
+                    decoration: InputDecoration(
+                      hintText: tr('add_bus.hint.bus_number'),
                     ),
                   ),
                   const SizedBox(height: 18),
 
-                  _FieldLabel('Driver Name'),
+                  _OptionalLabel(tr('add_bus.label.driver_name')),
                   const SizedBox(height: 8),
                   TextField(
                     controller: _driverName,
                     textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      hintText: "Enter driver's full name",
+                    decoration: InputDecoration(
+                      hintText: tr('add_bus.hint.driver_name'),
                     ),
                   ),
                   const SizedBox(height: 18),
 
-                  _FieldLabel('Driver Phone'),
+                  _OptionalLabel(tr('add_bus.label.driver_phone')),
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -208,13 +325,13 @@ class _AddBusScreenState extends State<AddBusScreen> {
                   const SizedBox(height: 18),
 
                   _ToggleRow(
-                    label: 'AC Bus',
+                    label: tr('add_bus.label.ac_bus'),
                     value: _isAC,
                     onChanged: (v) => setState(() => _isAC = v),
                   ),
                   const SizedBox(height: 18),
 
-                  _FieldLabel('Total Seats'),
+                  _FieldLabel(tr('add_bus.label.total_seats')),
                   const SizedBox(height: 8),
                   _Stepper(
                     value: _totalSeats,
@@ -225,11 +342,39 @@ class _AddBusScreenState extends State<AddBusScreen> {
                       if (_seaterCountForMixed >= v) {
                         _seaterCountForMixed = (v - 1).clamp(0, v);
                       }
+                      if (_singleSofaCount > _sleeperSeats) {
+                        _singleSofaCount = _sleeperSeats;
+                      }
                     }),
                   ),
                   const SizedBox(height: 18),
 
-                  _FieldLabel('Bus Type'),
+                  _FieldLabel(tr('add_bus.label.price_per_seat')),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _price,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
+                    decoration: InputDecoration(
+                      prefixText: '₹ ',
+                      hintText: _tour != null && _tour!.pricePerSeat > 0
+                          ? tr(
+                              'add_bus.hint.price_default',
+                              namedArgs: {
+                                'price': _tour!.pricePerSeat
+                                    .toStringAsFixed(0),
+                              },
+                            )
+                          : tr('add_bus.hint.price_plain'),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+
+                  _FieldLabel(tr('add_bus.label.bus_type')),
                   const SizedBox(height: 8),
                   _BusTypeChips(
                     value: _busType,
@@ -238,21 +383,47 @@ class _AddBusScreenState extends State<AddBusScreen> {
 
                   if (_busType == BusType.mixed) ...[
                     const SizedBox(height: 18),
-                    _FieldLabel('Seater Count (rest are Sleeper)'),
+                    _FieldLabel(tr('add_bus.label.seater_count')),
                     const SizedBox(height: 8),
                     _Stepper(
                       value: _seaterCountForMixed,
                       min: 1,
                       max: _totalSeats - 1,
-                      onChanged: (v) =>
-                          setState(() => _seaterCountForMixed = v),
+                      onChanged: (v) => setState(() {
+                        _seaterCountForMixed = v;
+                        if (_singleSofaCount > _sleeperSeats) {
+                          _singleSofaCount = _sleeperSeats;
+                        }
+                      }),
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '${_totalSeats - _seaterCountForMixed} sleeper berth'
-                      '${_totalSeats - _seaterCountForMixed == 1 ? '' : 's'}'
-                      ' + $_seaterCountForMixed seater'
-                      '${_seaterCountForMixed == 1 ? '' : 's'}',
+                      _mixedSummary,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                      ),
+                    ),
+                  ],
+
+                  // Single vs Double Sofa split — only meaningful when the
+                  // bus actually has sleeper berths. Without this, every
+                  // sleeper seat defaults to Double Sofa and customers
+                  // requesting a Single Sofa have nothing to be assigned to.
+                  if (_sleeperSeats > 0) ...[
+                    const SizedBox(height: 18),
+                    _FieldLabel(tr('add_bus.label.single_sofa_count')),
+                    const SizedBox(height: 8),
+                    _Stepper(
+                      value: _singleSofaCount,
+                      min: 0,
+                      max: _sleeperSeats,
+                      onChanged: (v) =>
+                          setState(() => _singleSofaCount = v),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _singleSofaSummary,
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         color: AppTheme.textMuted,
@@ -292,7 +463,9 @@ class _AddBusScreenState extends State<AddBusScreen> {
                         )
                       : const Icon(Icons.add_rounded, size: 20),
                   label: Text(
-                    _saving ? 'Saving…' : 'Save Bus',
+                    _saving
+                        ? tr('add_bus.action.saving')
+                        : tr('add_bus.action.save'),
                     style: GoogleFonts.inter(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -338,7 +511,7 @@ class _Header extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Add Bus',
+                  tr('add_bus.title'),
                   style: GoogleFonts.inter(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
@@ -417,6 +590,38 @@ class _FieldLabel extends StatelessWidget {
     );
   }
 }
+
+class _OptionalLabel extends StatelessWidget {
+  final String label;
+  const _OptionalLabel(this.label);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          tr('add_bus.label.optional'),
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontStyle: FontStyle.italic,
+            color: AppTheme.textMuted,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 
 class _ToggleRow extends StatelessWidget {
   final String label;

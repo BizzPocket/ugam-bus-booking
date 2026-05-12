@@ -1,0 +1,161 @@
+{
+  "en": {
+    "add_bus": {
+      "title": "Add Bus",
+      "label": {
+        "slot_label": "Slot Label",
+        "bus_number": "Bus Number",
+        "driver_name": "Driver Name",
+        "driver_phone": "Driver Phone",
+        "ac_bus": "AC Bus",
+        "total_seats": "Total Seats",
+        "price_per_seat": "Price Per Seat",
+        "bus_type": "Bus Type",
+        "seater_count": "Seater Count (rest are Sleeper)",
+        "single_sofa_count": "Single Sofa Count (rest are Double Sofa)",
+        "optional": "(optional)"
+      },
+      "hint": {
+        "bus_number": "e.g. GJ-05-AB-1234 (optional)",
+        "driver_name": "Add later when owner confirms (optional)",
+        "price_default": "Defaults to tour price (₹{price})",
+        "price_plain": "e.g. 500"
+      },
+      "info": {
+        "optional_fields": "Bus Number and driver details are optional — save now and fill them in once the bus owner confirms.",
+        "first_bus": "This is the first bus for this tour.",
+        "existing_buses_one": "This tour has {count} bus with {seats} {seats_label} total. Adding this bus will increase capacity.",
+        "existing_buses_other": "This tour has {count} buses with {seats} {seats_label} total. Adding this bus will increase capacity.",
+        "seat": "seat",
+        "seats": "seats"
+      },
+      "summary": {
+        "mixed_one_sleeper": "{sleeper} sleeper berth + {seater} {seater_label}",
+        "mixed_many_sleeper": "{sleeper} sleeper berths + {seater} {seater_label}",
+        "seater": "seater",
+        "seaters": "seaters",
+        "single_sofa_summary_one": "{single} single sofa + {double} {double_label}",
+        "single_sofa_summary_other": "{single} single sofas + {double} {double_label}",
+        "double_sofa": "double sofa",
+        "double_sofas": "double sofas"
+      },
+      "action": {
+        "save": "Save Bus",
+        "saving": "Saving…"
+      },
+      "snackbar": {
+        "added": "{name} added",
+        "error_save": "Could not save bus — try again",
+        "error_seater_count": "Seater count must be less than total seats",
+        "error_single_sofa": "Single Sofa count cannot exceed the sleeper berth count",
+        "error_tour_not_found": "Tour not found"
+      }
+    }
+  },
+  "gu": {
+    "add_bus": {
+      "title": "બસ ઉમેરો",
+      "label": {
+        "slot_label": "સ્લોટ લેબલ",
+        "bus_number": "બસ નંબર",
+        "driver_name": "ડ્રાઇવરનું નામ",
+        "driver_phone": "ડ્રાઇવરનો ફોન",
+        "ac_bus": "AC બસ",
+        "total_seats": "કુલ સીટ",
+        "price_per_seat": "પ્રતિ સીટ ભાવ",
+        "bus_type": "બસ પ્રકાર",
+        "seater_count": "સીટર સંખ્યા (બાકી સ્લીપર)",
+        "single_sofa_count": "સિંગલ સોફા સંખ્યા (બાકી ડબલ સોફા)",
+        "optional": "(વૈકલ્પિક)"
+      },
+      "hint": {
+        "bus_number": "દા.ત. GJ-05-AB-1234 (વૈકલ્પિક)",
+        "driver_name": "માલિક પુષ્ટિ કરે ત્યારે ઉમેરો (વૈકલ્પિક)",
+        "price_default": "ટૂર ભાવ પ્રમાણે (₹{price})",
+        "price_plain": "દા.ત. 500"
+      },
+      "info": {
+        "optional_fields": "બસ નંબર અને ડ્રાઇવરની વિગત વૈકલ્પિક છે — અત્યારે સાચવો અને બસ માલિક પુષ્ટિ કરે ત્યારે ભરો.",
+        "first_bus": "આ ટૂર માટે આ પ્રથમ બસ છે.",
+        "existing_buses_one": "આ ટૂરમાં {count} બસ અને {seats} {seats_label} છે. આ બસ ઉમેરવાથી ક્ષમતા વધશે.",
+        "existing_buses_other": "આ ટૂરમાં {count} બસ અને {seats} {seats_label} છે. આ બસ ઉમેરવાથી ક્ષમતા વધશે.",
+        "seat": "સીટ",
+        "seats": "સીટ"
+      },
+      "summary": {
+        "mixed_one_sleeper": "{sleeper} સ્લીપર બર્થ + {seater} {seater_label}",
+        "mixed_many_sleeper": "{sleeper} સ્લીપર બર્થ + {seater} {seater_label}",
+        "seater": "સીટર",
+        "seaters": "સીટર",
+        "single_sofa_summary_one": "{single} સિંગલ સોફા + {double} {double_label}",
+        "single_sofa_summary_other": "{single} સિંગલ સોફા + {double} {double_label}",
+        "double_sofa": "ડબલ સોફા",
+        "double_sofas": "ડબલ સોફા"
+      },
+      "action": {
+        "save": "બસ સાચવો",
+        "saving": "સાચવી રહ્યા છીએ…"
+      },
+      "snackbar": {
+        "added": "{name} ઉમેરાઈ",
+        "error_save": "બસ સાચવી શકાઈ નહીં — ફરી પ્રયાસ કરો",
+        "error_seater_count": "સીટર સંખ્યા કુલ સીટ કરતાં ઓછી હોવી જોઈએ",
+        "error_single_sofa": "સિંગલ સોફા સંખ્યા સ્લીપર બર્થ સંખ્યા કરતાં વધુ ન હોઈ શકે",
+        "error_tour_not_found": "ટૂર મળ્યું નહીં"
+      }
+    }
+  },
+  "hi": {
+    "add_bus": {
+      "title": "बस जोड़ें",
+      "label": {
+        "slot_label": "स्लॉट लेबल",
+        "bus_number": "बस नंबर",
+        "driver_name": "ड्राइवर का नाम",
+        "driver_phone": "ड्राइवर का फोन",
+        "ac_bus": "AC बस",
+        "total_seats": "कुल सीटें",
+        "price_per_seat": "प्रति सीट मूल्य",
+        "bus_type": "बस प्रकार",
+        "seater_count": "सीटर संख्या (शेष स्लीपर)",
+        "single_sofa_count": "सिंगल सोफा संख्या (शेष डबल सोफा)",
+        "optional": "(वैकल्पिक)"
+      },
+      "hint": {
+        "bus_number": "जैसे GJ-05-AB-1234 (वैकल्पिक)",
+        "driver_name": "मालिक की पुष्टि होने पर बाद में भरें (वैकल्पिक)",
+        "price_default": "टूर मूल्य के अनुसार (₹{price})",
+        "price_plain": "जैसे 500"
+      },
+      "info": {
+        "optional_fields": "बस नंबर और ड्राइवर की जानकारी वैकल्पिक है — अभी सहेजें और बस मालिक की पुष्टि होने पर भरें.",
+        "first_bus": "यह इस टूर की पहली बस है.",
+        "existing_buses_one": "इस टूर में {count} बस और {seats} {seats_label} हैं. यह बस जोड़ने से क्षमता बढ़ेगी.",
+        "existing_buses_other": "इस टूर में {count} बसें और {seats} {seats_label} हैं. यह बस जोड़ने से क्षमता बढ़ेगी.",
+        "seat": "सीट",
+        "seats": "सीटें"
+      },
+      "summary": {
+        "mixed_one_sleeper": "{sleeper} स्लीपर बर्थ + {seater} {seater_label}",
+        "mixed_many_sleeper": "{sleeper} स्लीपर बर्थ + {seater} {seater_label}",
+        "seater": "सीटर",
+        "seaters": "सीटर",
+        "single_sofa_summary_one": "{single} सिंगल सोफा + {double} {double_label}",
+        "single_sofa_summary_other": "{single} सिंगल सोफा + {double} {double_label}",
+        "double_sofa": "डबल सोफा",
+        "double_sofas": "डबल सोफा"
+      },
+      "action": {
+        "save": "बस सहेजें",
+        "saving": "सहेजा जा रहा है…"
+      },
+      "snackbar": {
+        "added": "{name} जोड़ी गई",
+        "error_save": "बस सहेजी नहीं जा सकी — पुनः प्रयास करें",
+        "error_seater_count": "सीटर संख्या कुल सीटों से कम होनी चाहिए",
+        "error_single_sofa": "सिंगल सोफा संख्या स्लीपर बर्थ संख्या से अधिक नहीं हो सकती",
+        "error_tour_not_found": "टूर नहीं मिला"
+      }
+    }
+  }
+}
