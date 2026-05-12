@@ -155,7 +155,7 @@ class _Header extends StatelessWidget {
                       namedArgs: {'tourTitle': title, 'dateRange': subtitle}),
                   style: GoogleFonts.inter(
                     fontSize: 12,
-                    color: AppTheme.textMuted,
+                    color: AppColors.textMuted(context),
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -236,7 +236,7 @@ class _EmptyState extends StatelessWidget {
             Icon(
               Icons.directions_bus_outlined,
               size: 56,
-              color: AppTheme.textMuted.withValues(alpha: 0.5),
+              color: AppColors.textMuted(context).withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
@@ -252,7 +252,7 @@ class _EmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 13,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
                 height: 1.4,
               ),
             ),
@@ -277,7 +277,6 @@ class _BusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final capacity = bus.totalSeats;
     final ratio = capacity > 0 ? (assigned / capacity).clamp(0.0, 1.0) : 0.0;
 
@@ -289,12 +288,12 @@ class _BusCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.cardDark : Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+          color: AppColors.border(context),
         ),
-        boxShadow: isDark ? [] : AppTheme.subtleShadow,
+        boxShadow: theme.brightness == Brightness.dark ? [] : AppTheme.subtleShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -333,7 +332,7 @@ class _BusCard extends StatelessWidget {
                         bus.driverName,
                         style: GoogleFonts.inter(
                           fontSize: 12,
-                          color: AppTheme.textMuted,
+                          color: AppColors.textMuted(context),
                         ),
                       ),
                   ],
@@ -376,7 +375,7 @@ class _BusCard extends StatelessWidget {
                 tr('manage_buses.occupancy_label'),
                 style: GoogleFonts.inter(
                   fontSize: 11,
-                  color: AppTheme.textMuted,
+                  color: AppColors.textMuted(context),
                 ),
               ),
               Text(
@@ -442,7 +441,7 @@ class _OccupancyBar extends StatelessWidget {
       child: LinearProgressIndicator(
         value: ratio,
         minHeight: 6,
-        backgroundColor: AppTheme.borderLight,
+        backgroundColor: AppColors.border(context),
         valueColor: AlwaysStoppedAnimation<Color>(color),
       ),
     );
