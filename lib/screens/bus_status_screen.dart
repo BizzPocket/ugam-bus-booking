@@ -37,7 +37,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
     return Scaffold(
-      backgroundColor: AppTheme.bgLight,
+      backgroundColor: AppColors.bg(context),
       body: SafeArea(
         child: Obx(() {
           final tour = tourCtrl.getTour(widget.tourId);
@@ -124,7 +124,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
         .join(', ');
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface(context),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -140,7 +140,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 14),
                 decoration: BoxDecoration(
-                  color: AppTheme.borderDefault,
+                  color: AppColors.border(context),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -158,7 +158,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                         style: GoogleFonts.inter(
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
+                          color: AppColors.text(context),
                         ),
                       ),
                       if (passenger.phone.isNotEmpty) ...[
@@ -167,7 +167,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                           passenger.phone,
                           style: GoogleFonts.inter(
                             fontSize: 13,
-                            color: AppTheme.textSecondary,
+                            color: AppColors.textMuted(context),
                           ),
                         ),
                       ],
@@ -247,7 +247,7 @@ class _Header extends StatelessWidget {
                   '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
                   style: GoogleFonts.inter(
                     fontSize: 12,
-                    color: AppTheme.textMuted,
+                    color: AppColors.textMuted(context),
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -273,9 +273,9 @@ class _Tally extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -287,7 +287,7 @@ class _Tally extends StatelessWidget {
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textPrimary,
+                  color: AppColors.text(context),
                 ),
               ),
               const Spacer(),
@@ -296,7 +296,7 @@ class _Tally extends StatelessWidget {
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: AppTheme.textMuted,
+                  color: AppColors.textMuted(context),
                 ),
               ),
             ],
@@ -307,7 +307,7 @@ class _Tally extends StatelessWidget {
             child: LinearProgressIndicator(
               value: ratio.clamp(0.0, 1.0),
               minHeight: 6,
-              backgroundColor: AppTheme.bgLight,
+              backgroundColor: AppColors.bg(context),
               valueColor: AlwaysStoppedAnimation(AppTheme.brand),
             ),
           ),
@@ -353,9 +353,9 @@ class _SeatGrid extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
       ),
       child: Column(
         children: [
@@ -364,7 +364,7 @@ class _SeatGrid extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               Icon(Icons.account_circle_rounded,
-                  size: 22, color: AppTheme.textMuted),
+                  size: 22, color: AppColors.textMuted(context)),
               const SizedBox(width: 6),
               Text(
                 tr('bus_status.driver_label'),
@@ -372,13 +372,13 @@ class _SeatGrid extends StatelessWidget {
                   fontSize: 9,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1,
-                  color: AppTheme.textMuted,
+                  color: AppColors.textMuted(context),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          const Divider(height: 1, color: AppTheme.borderLight),
+          Divider(height: 1, color: AppColors.border(context)),
           const SizedBox(height: 10),
           if (!hasUpper)
             lowerPanel
@@ -394,7 +394,7 @@ class _SeatGrid extends StatelessWidget {
                   // sized divider keeps it lined up without forcing the
                   // panels into IntrinsicHeight (which is expensive).
                   constraints: const BoxConstraints(minHeight: 200),
-                  color: AppTheme.borderLight,
+                  color: AppColors.border(context),
                 ),
                 Expanded(
                   child: _DeckPanel(
@@ -454,7 +454,7 @@ class _DeckPanel extends StatelessWidget {
             fontSize: 10,
             fontWeight: FontWeight.w700,
             letterSpacing: 1,
-            color: AppTheme.textMuted,
+            color: AppColors.textMuted(context),
           ),
         ),
         const SizedBox(height: 8),
@@ -543,16 +543,16 @@ class _Cell extends StatelessWidget {
     }
   }
 
-  Color get _typeBorder {
+  Color _typeBorder(BuildContext context) {
     switch (cell.seatType) {
       case SeatType.singleSofa:
         return const Color(0xFF22C55E);
       case SeatType.doubleSofa:
         return const Color(0xFF0EA5E9);
       case SeatType.seater:
-        return AppTheme.textMuted;
+        return AppColors.textMuted(context);
       case null:
-        return AppTheme.borderLight;
+        return AppColors.border(context);
     }
   }
 
@@ -605,7 +605,7 @@ class _Cell extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: _typeBorder, width: 1.5),
+            border: Border.all(color: _typeBorder(context), width: 1.5),
           ),
           clipBehavior: Clip.antiAlias,
           child: Row(
@@ -618,7 +618,7 @@ class _Cell extends StatelessWidget {
                     alignment: Alignment.center,
                     child: Text(
                       _initials(occupant.displayName),
-                      style: GoogleFonts.inter(
+                      style: AppText.badge.copyWith(
                         fontSize: compact ? 9 : 11,
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
@@ -634,10 +634,10 @@ class _Cell extends StatelessWidget {
                   alignment: Alignment.center,
                   child: Text(
                     cell.seatId ?? '',
-                    style: GoogleFonts.inter(
+                    style: AppText.badgeSm.copyWith(
                       fontSize: compact ? 8 : 9,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                     ),
                   ),
                 ),
@@ -670,7 +670,7 @@ class _Cell extends StatelessWidget {
                     alignment: Alignment.center,
                     child: Text(
                       _initials(left.displayName),
-                      style: GoogleFonts.inter(
+                      style: AppText.badge.copyWith(
                         fontSize: compact ? 9 : 11,
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
@@ -688,7 +688,7 @@ class _Cell extends StatelessWidget {
                     alignment: Alignment.center,
                     child: Text(
                       _initials(right.displayName),
-                      style: GoogleFonts.inter(
+                      style: AppText.badge.copyWith(
                         fontSize: compact ? 9 : 11,
                         fontWeight: FontWeight.w800,
                         color: Colors.white,
@@ -706,8 +706,8 @@ class _Cell extends StatelessWidget {
     final passenger = passengers.isNotEmpty ? passengers.first : null;
     final taken = passenger != null;
     final bg = taken ? AppTheme.brand : _typeTint;
-    final border = taken ? AppTheme.brand : _typeBorder;
-    final textColor = taken ? Colors.white : AppTheme.textPrimary;
+    final border = taken ? AppTheme.brand : _typeBorder(context);
+    final textColor = taken ? Colors.white : AppColors.text(context);
 
     return GestureDetector(
       onTap: taken ? () => onTap(passenger) : null,
@@ -727,7 +727,7 @@ class _Cell extends StatelessWidget {
                 children: [
                   Text(
                     cell.seatId ?? '',
-                    style: GoogleFonts.inter(
+                    style: AppText.cardLabel.copyWith(
                       fontSize: compact ? 9 : 10,
                       fontWeight: FontWeight.w600,
                       color: textColor,
@@ -736,7 +736,7 @@ class _Cell extends StatelessWidget {
                   if (taken)
                     Text(
                       _initials(passenger.displayName),
-                      style: GoogleFonts.inter(
+                      style: AppText.badge.copyWith(
                         fontSize: compact ? 9 : 11,
                         fontWeight: FontWeight.w800,
                         color: textColor,
@@ -751,9 +751,7 @@ class _Cell extends StatelessWidget {
                 right: 4,
                 child: Text(
                   _typeMark!,
-                  style: GoogleFonts.inter(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
+                  style: AppText.badgeSm.copyWith(
                     color: textColor.withValues(alpha: 0.75),
                   ),
                 ),
@@ -779,7 +777,7 @@ class _Legend extends StatelessWidget {
         children: [
           _LegendDot(color: const Color(0xFFE7F8EE), border: const Color(0xFF22C55E), label: tr('bus_status.legend_single')),
           _LegendDot(color: const Color(0xFFE0F2FE), border: const Color(0xFF0EA5E9), label: tr('bus_status.legend_double')),
-          _LegendDot(color: const Color(0xFFF1F5F9), border: AppTheme.textMuted, label: tr('bus_status.legend_seater')),
+          _LegendDot(color: const Color(0xFFF1F5F9), border: AppColors.textMuted(context), label: tr('bus_status.legend_seater')),
           _LegendDot(color: AppTheme.brand, border: AppTheme.brand, label: tr('bus_status.legend_booked')),
         ],
       ),
@@ -818,7 +816,7 @@ class _LegendDot extends StatelessWidget {
           style: GoogleFonts.inter(
             fontSize: 11,
             fontWeight: FontWeight.w500,
-            color: AppTheme.textSecondary,
+            color: AppColors.textMuted(context),
           ),
         ),
       ],
@@ -845,7 +843,7 @@ class _SheetRow extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
               ),
             ),
           ),
@@ -855,7 +853,7 @@ class _SheetRow extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textPrimary,
+                color: AppColors.text(context),
               ),
             ),
           ),
