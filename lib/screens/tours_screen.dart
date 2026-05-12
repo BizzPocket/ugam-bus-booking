@@ -14,9 +14,6 @@ class ToursScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return Scaffold(
       backgroundColor: Colors.transparent,
       // Lift the FAB above MainShell's floating pill bottom nav (~104px tall
@@ -45,7 +42,7 @@ class ToursScreen extends StatelessWidget {
                     style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : AppColors.text(context),
+                      color: AppColors.text(context),
                     ),
                   ),
                 ],
@@ -63,7 +60,6 @@ class ToursScreen extends StatelessWidget {
                         label: tr('tours.stat.active'),
                         count: tourCtrl.activeTours.length,
                         color: AppTheme.brand,
-                        isDark: isDark,
                       ),
                       const SizedBox(width: 8),
                       _StatChip(
@@ -72,7 +68,6 @@ class ToursScreen extends StatelessWidget {
                             .toursByStatus(TourStatus.collecting)
                             .length,
                         color: AppTheme.warning,
-                        isDark: isDark,
                       ),
                       const SizedBox(width: 8),
                       _StatChip(
@@ -80,14 +75,12 @@ class ToursScreen extends StatelessWidget {
                         count:
                             tourCtrl.toursByStatus(TourStatus.locked).length,
                         color: AppTheme.success,
-                        isDark: isDark,
                       ),
                       const SizedBox(width: 8),
                       _StatChip(
                         label: tr('tours.stat.completed'),
                         count: tourCtrl.completedTours.length,
                         color: const Color(0xFF6B7280),
-                        isDark: isDark,
                       ),
                     ],
                   ),
@@ -113,14 +106,14 @@ class ToursScreen extends StatelessWidget {
                         children: [
                           Icon(Icons.cloud_off_rounded,
                               size: 48,
-                              color: isDark ? Colors.white38 : AppColors.textMuted(context)),
+                              color: AppColors.textMuted(context)),
                           const SizedBox(height: 16),
                           Text(
                             tourCtrl.errorMessage.value,
                             textAlign: TextAlign.center,
                             style: GoogleFonts.inter(
                               fontSize: 15,
-                              color: isDark ? Colors.white70 : AppColors.textMuted(context),
+                              color: AppColors.textMuted(context),
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -140,7 +133,6 @@ class ToursScreen extends StatelessWidget {
                 if (tours.isEmpty) {
                   return _EmptyState(
                     onCreateTour: () => Get.toNamed('/create-tour'),
-                    isDark: isDark,
                   );
                 }
 
@@ -183,13 +175,11 @@ class _StatChip extends StatelessWidget {
   final String label;
   final int count;
   final Color color;
-  final bool isDark;
 
   const _StatChip({
     required this.label,
     required this.count,
     required this.color,
-    required this.isDark,
   });
 
   @override
@@ -198,12 +188,12 @@ class _StatChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
         decoration: BoxDecoration(
-          color: isDark ? AppTheme.surfaceDark : Colors.white,
+          color: AppColors.surface(context),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppColors.border(context),
+            color: AppColors.border(context),
           ),
-          boxShadow: isDark ? [] : AppTheme.subtleShadow,
+          boxShadow: AppTheme.subtleShadow,
         ),
         child: Column(
           children: [
@@ -238,9 +228,8 @@ class _StatChip extends StatelessWidget {
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback onCreateTour;
-  final bool isDark;
 
-  const _EmptyState({required this.onCreateTour, required this.isDark});
+  const _EmptyState({required this.onCreateTour});
 
   @override
   Widget build(BuildContext context) {
@@ -269,7 +258,7 @@ class _EmptyState extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : AppColors.text(context),
+                color: AppColors.text(context),
               ),
             ),
             const SizedBox(height: 8),
