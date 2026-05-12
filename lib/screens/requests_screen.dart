@@ -55,6 +55,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
           }
           final selected = tours[_selectedTourIndex];
           return FloatingActionButton.extended(
+            heroTag: 'requests_fab',
             onPressed: () => _openAddRequest(selected),
             backgroundColor: AppTheme.brand,
             foregroundColor: Colors.white,
@@ -88,25 +89,27 @@ class _RequestsScreenState extends State<RequestsScreen> {
           final selectedTour = activeTours[_selectedTourIndex];
           final allPassengers = selectedTour.passengers;
 
+          // "New" covers anything the admin still needs to act on — that
+          // includes partially assigned passengers (e.g. customer asked
+          // for 3 seats, admin only placed 1). They are NOT done, so they
+          // must not drop into the "Assigned" bucket and out of sight.
           final newCount = allPassengers
-              .where((p) => !p.isWaitlisted && p.totalSeatsAssigned == 0)
+              .where((p) => !p.isWaitlisted && !p.isFullyAssigned)
               .length;
           final waitlistCount =
               allPassengers.where((p) => p.isWaitlisted).length;
           final assignedCount =
-              allPassengers.where((p) => p.totalSeatsAssigned > 0).length;
+              allPassengers.where((p) => p.isFullyAssigned).length;
 
           // Filtered list based on current chip selection.
           final passengers = switch (_filter) {
             _RequestFilter.newRequests => allPassengers
-                .where(
-                    (p) => !p.isWaitlisted && p.totalSeatsAssigned == 0)
+                .where((p) => !p.isWaitlisted && !p.isFullyAssigned)
                 .toList(),
             _RequestFilter.waitlist =>
               allPassengers.where((p) => p.isWaitlisted).toList(),
-            _RequestFilter.assigned => allPassengers
-                .where((p) => p.totalSeatsAssigned > 0)
-                .toList(),
+            _RequestFilter.assigned =>
+              allPassengers.where((p) => p.isFullyAssigned).toList(),
           };
 
           return Column(
@@ -255,8 +258,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
                             const SizedBox(height: 12),
                         itemBuilder: (context, i) {
                           final passenger = passengers[i];
-                          final isAssigned =
-                              passenger.totalSeatsAssigned > 0;
+                          // A request is only "Assigned" once every requested
+                          // seat has been placed. Partial fills (1/3) stay
+                          // in the New bucket and keep the "Assign seats"
+                          // CTA so the admin can finish the job.
+                          final isAssigned = passenger.isFullyAssigned;
                           return _RequestCard(
                             passenger: passenger,
                             tour: selectedTour,
@@ -509,7 +515,18 @@ class _RequestCard extends StatelessWidget {
               children: [
                 _SeatChip(
                   icon: Icons.event_seat_rounded,
-                  label: tr('requests.seat_chip.seats', namedArgs: {'count': '${passenger.totalSeatsRequested}'}),
+                  // Partial state surfaces progress as "1/3 seats" so the
+                  // admin can see at a glance which requests still need
+                  // work. Fully-new and fully-done rows keep the compact
+                  // "3 seats" label.
+                  label: tr(
+                    'requests.seat_chip.seats',
+                    namedArgs: {
+                      'count': passenger.isPartiallyAssigned
+                          ? '${passenger.totalSeatsAssigned}/${passenger.totalSeatsRequested}'
+                          : '${passenger.totalSeatsRequested}',
+                    },
+                  ),
                   color: isAssigned ? AppTheme.success : AppTheme.brand,
                   bgColor: isAssigned
                       ? AppTheme.successLight

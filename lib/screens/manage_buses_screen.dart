@@ -101,6 +101,7 @@ class ManageBusesScreen extends StatelessWidget {
         }),
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'manage_buses_fab',
         onPressed: () => Get.to(() => AddBusScreen(tourId: tourId)),
         icon: const Icon(Icons.add_rounded),
         label: Text(tr('manage_buses.add_bus')),

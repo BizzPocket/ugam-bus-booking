@@ -24,6 +24,7 @@ class ToursScreen extends StatelessWidget {
       floatingActionButton: Padding(
         padding: const EdgeInsets.only(bottom: 90),
         child: FloatingActionButton(
+          heroTag: 'tours_fab',
           onPressed: () => Get.toNamed('/create-tour'),
           child: const Icon(Icons.add),
         ),
