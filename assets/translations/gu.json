@@ -90,7 +90,8 @@
     "stat_total_passengers": "કુલ પેસેન્જર",
     "stat_revenue": "આવક",
     "pax": "{count} જણ",
-    "empty_tours": "કોઈ આવનારી ટૂર નથી"
+    "empty_tours": "કોઈ આવનારી ટૂર નથી",
+    "action_assign_seats": "સીટ સોંપો"
   },
   "tours": {
     "title": "મારી ટૂર",
@@ -136,7 +137,8 @@
       "back_to_new": "નવીમાં પાછા",
       "unassign_all": "બધી સીટ ઉઠાવો",
       "decline_request": "વિનંતી નકારો",
-      "more_actions": "વધુ વિકલ્પો"
+      "more_actions": "વધુ વિકલ્પો",
+      "edit_request": "વિનંતી બદલો"
     },
     "decline_dialog": {
       "title": "વિનંતી નકારીએ?",
@@ -619,6 +621,23 @@
     "snack_handler_set_fallback_name": "પ્રવાસી",
     "err_not_all_assigned": "પહેલાં બધા પ્રવાસીઓ સંપૂર્ણ સોંપો.",
     "err_no_handler": "લૉક પહેલાં હેન્ડલર ચૂનો.",
-    "snack_tour_locked": "ટૂર લૉક થઈ. હવે સૂચનાઓ."
+    "snack_tour_locked": "ટૂર લૉક થઈ. હવે સૂચનાઓ.",
+    "share_confirm_title": "આ ડબલ સોફા શેર કરવો?",
+    "share_confirm_body": "સીટ {seat} પહેલેથી {otherName} ને આપેલી છે. આ સોફો {otherName} અને {currentName} વચ્ચે વહેંચાશે — દરેકને એક સીટ ગણાશે.",
+    "share_confirm_yes": "સોફા શેર કરો",
+    "tooltip_edit_request": "વિનંતી બદલો"
+  },
+  "edit_request": {
+    "title": "વિનંતી બદલો",
+    "subtitle": "{name}ની સીટ વિનંતી અપડેટ કરો",
+    "name_label": "નામ",
+    "phone_label": "ફોન (બદલી શકાતો નથી)",
+    "no_seats_error": "ઓછામાં ઓછી એક સીટ ઉમેરો",
+    "save": "ફેરફાર સેવ કરો",
+    "saving": "સેવ થાય છે…",
+    "snack_saved": "{name}ની વિનંતી અપડેટ થઈ",
+    "snack_error": "વિનંતી અપડેટ ના થઈ",
+    "auto_released": "{count} વધારાની સીટ છૂટી કરી — વિનંતી મેચ થાય તે માટે",
+    "auto_released_many": "{count} વધારાની સીટ છૂટી કરી — વિનંતી મેચ થાય તે માટે"
   }
 }

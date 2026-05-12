@@ -90,7 +90,8 @@
     "stat_total_passengers": "Total Passengers",
     "stat_revenue": "Revenue",
     "pax": "{count} pax",
-    "empty_tours": "No upcoming tours"
+    "empty_tours": "No upcoming tours",
+    "action_assign_seats": "Assign Seats"
   },
   "tours": {
     "title": "My Tours",
@@ -136,7 +137,8 @@
       "back_to_new": "Back to New",
       "unassign_all": "Unassign all seats",
       "decline_request": "Decline request",
-      "more_actions": "More actions"
+      "more_actions": "More actions",
+      "edit_request": "Edit request"
     },
     "decline_dialog": {
       "title": "Decline request?",
@@ -619,6 +621,23 @@
     "snack_handler_set_fallback_name": "Passenger",
     "err_not_all_assigned": "All passengers must be fully assigned first.",
     "err_no_handler": "Pick a handler before locking.",
-    "snack_tour_locked": "Tour locked. Notifications next."
+    "snack_tour_locked": "Tour locked. Notifications next.",
+    "share_confirm_title": "Share this double sofa?",
+    "share_confirm_body": "{otherName} already has seat {seat}. Splitting this sofa between {otherName} and {currentName} will count as one seat each.",
+    "share_confirm_yes": "Share sofa",
+    "tooltip_edit_request": "Edit request"
+  },
+  "edit_request": {
+    "title": "Edit request",
+    "subtitle": "Update {name}'s seat request",
+    "name_label": "Name",
+    "phone_label": "Phone (cannot be changed)",
+    "no_seats_error": "Add at least one seat",
+    "save": "Save changes",
+    "saving": "Saving…",
+    "snack_saved": "{name}'s request updated",
+    "snack_error": "Could not update request",
+    "auto_released": "Released {count} extra seat to keep the request consistent",
+    "auto_released_many": "Released {count} extra seats to keep the request consistent"
   }
 }

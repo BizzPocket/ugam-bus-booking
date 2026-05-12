@@ -14,6 +14,7 @@ import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_normalize.dart';
+import '../widgets/edit_request_sheet.dart';
 
 class RequestsScreen extends StatefulWidget {
   const RequestsScreen({super.key});
@@ -649,6 +650,14 @@ class _CardActions extends StatelessWidget {
     });
   }
 
+  void _openEdit(BuildContext context) {
+    EditRequestSheet.show(
+      context: context,
+      tour: tour,
+      passenger: passenger,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Pick primary action + menu items by state.
@@ -658,12 +667,19 @@ class _CardActions extends StatelessWidget {
     final VoidCallback primaryAction;
     final List<_MenuItem> menu;
 
+    final editItem = _MenuItem(
+      tr('requests.action.edit_request'),
+      Icons.edit_rounded,
+      () => _openEdit(context),
+    );
+
     if (isAssigned) {
       primaryLabel = tr('requests.action.view_assignment');
       primaryIcon = Icons.visibility_rounded;
       primaryColor = AppTheme.success;
       primaryAction = _openAssignment;
       menu = [
+        editItem,
         _MenuItem(tr('requests.action.send_wa_ack'), Icons.chat_rounded, _sendAck),
         _MenuItem(tr('requests.action.unassign_all'), Icons.replay_rounded, _unassignAll),
       ];
@@ -673,6 +689,7 @@ class _CardActions extends StatelessWidget {
       primaryColor = AppTheme.brand;
       primaryAction = _promote;
       menu = [
+        editItem,
         _MenuItem(tr('requests.action.send_wa_ack'), Icons.chat_rounded, _sendAck),
         _MenuItem(tr('requests.action.decline_request'), Icons.close_rounded,
             _confirmDecline,
@@ -685,6 +702,7 @@ class _CardActions extends StatelessWidget {
       primaryColor = AppTheme.brand;
       primaryAction = _openAssignment;
       menu = [
+        editItem,
         _MenuItem(tr('requests.action.send_wa_ack'), Icons.chat_rounded, _sendAck),
         _MenuItem(tr('requests.action.move_to_waitlist'), Icons.hourglass_top_rounded, _toWaitlist),
         _MenuItem(tr('requests.action.decline_request'), Icons.close_rounded,

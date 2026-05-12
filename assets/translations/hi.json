@@ -90,7 +90,8 @@
     "stat_total_passengers": "कुल यात्री",
     "stat_revenue": "राजस्व",
     "pax": "{count} यात्री",
-    "empty_tours": "कोई आगामी यात्रा नहीं"
+    "empty_tours": "कोई आगामी यात्रा नहीं",
+    "action_assign_seats": "सीट असाइन करें"
   },
   "tours": {
     "title": "मेरी यात्राएँ",
@@ -136,7 +137,8 @@
       "back_to_new": "नए में वापस",
       "unassign_all": "सभी सीट हटाएं",
       "decline_request": "अनुरोध अस्वीकार करें",
-      "more_actions": "और क्रियाएँ"
+      "more_actions": "और क्रियाएँ",
+      "edit_request": "रिक्वेस्ट बदलें"
     },
     "decline_dialog": {
       "title": "अनुरोध अस्वीकार करें?",
@@ -619,6 +621,23 @@
     "snack_handler_set_fallback_name": "यात्री",
     "err_not_all_assigned": "पहले सभी यात्रियों को पूरी तरह असाइन करना आवश्यक है।",
     "err_no_handler": "लॉक करने से पहले हैंडलर चुनें।",
-    "snack_tour_locked": "टूर लॉक हुआ। अब सूचनाएं।"
+    "snack_tour_locked": "टूर लॉक हुआ। अब सूचनाएं।",
+    "share_confirm_title": "क्या यह डबल सोफा शेयर करें?",
+    "share_confirm_body": "सीट {seat} पहले से {otherName} को दी गई है। इस सोफे को {otherName} और {currentName} के बीच बाँटा जाएगा — प्रत्येक को एक सीट गिनी जाएगी।",
+    "share_confirm_yes": "सोफा शेयर करें",
+    "tooltip_edit_request": "रिक्वेस्ट बदलें"
+  },
+  "edit_request": {
+    "title": "रिक्वेस्ट बदलें",
+    "subtitle": "{name} की सीट रिक्वेस्ट अपडेट करें",
+    "name_label": "नाम",
+    "phone_label": "फ़ोन (बदला नहीं जा सकता)",
+    "no_seats_error": "कम से कम एक सीट जोड़ें",
+    "save": "बदलाव सेव करें",
+    "saving": "सेव हो रहा है…",
+    "snack_saved": "{name} की रिक्वेस्ट अपडेट हो गई",
+    "snack_error": "रिक्वेस्ट अपडेट नहीं हुई",
+    "auto_released": "मेल बनाने के लिए {count} अतिरिक्त सीट छोड़ी",
+    "auto_released_many": "मेल बनाने के लिए {count} अतिरिक्त सीटें छोड़ीं"
   }
 }

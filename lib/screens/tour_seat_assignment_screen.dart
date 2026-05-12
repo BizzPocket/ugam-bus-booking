@@ -12,8 +12,10 @@ import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../utils/app_dialogs.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
+import '../widgets/edit_request_sheet.dart';
 import 'manage_buses_screen.dart';
 
 /// Tour-scoped seat assignment. Mirrors the Pencil "Seat Assignment" screen:
@@ -77,20 +79,67 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     return tour.passengers.first;
   }
 
-  /// All seats assigned to anyone for the given bus.
-  Map<String, String> _assignmentMap(Tour tour, String busId) {
-    final map = <String, String>{};
+  /// All seats assigned to anyone, indexed by bus then seat.
+  ///
+  /// One pass over `tour.passengers × assignedSeats` produces the maps
+  /// for every bus on the tour at once — far cheaper than the previous
+  /// per-bus filter, which `build()` invoked N+1 times (once for the
+  /// selected bus, plus once per pill in `_BusStrip`'s
+  /// `seatsAssignedFor` callback). A `doubleSofa` cell may carry up to
+  /// two passenger IDs when the agent has split the sofa between two
+  /// unrelated singles; insertion order is preserved so the first
+  /// occupant renders on the left half of a split tile.
+  Map<String, Map<String, List<String>>> _assignmentsByBus(Tour tour) {
+    final out = <String, Map<String, List<String>>>{};
     for (final p in tour.passengers) {
       for (final a in p.assignedSeats) {
-        if (a.busId == busId) map[a.seatId] = p.id;
+        ((out[a.busId] ??= <String, List<String>>{})[a.seatId] ??= <String>[])
+            .add(p.id);
+      }
+    }
+    return out;
+  }
+
+  /// Backwards-compatible single-bus accessor for code paths (e.g. the
+  /// tap handler) that don't have a precomputed `assignmentsByBus`
+  /// handy. Re-computes the slice for one bus; cheap because it
+  /// short-circuits on the busId filter.
+  Map<String, List<String>> _assignmentMap(Tour tour, String busId) {
+    final map = <String, List<String>>{};
+    for (final p in tour.passengers) {
+      for (final a in p.assignedSeats) {
+        if (a.busId == busId) {
+          (map[a.seatId] ??= <String>[]).add(p.id);
+        }
       }
     }
     return map;
   }
 
+  /// Total occupants across all seats on a bus — a shared double counts
+  /// as 2, not 1. Used wherever we display "seats sold" totals.
+  int _occupants(Map<String, List<String>> assignmentMap) =>
+      assignmentMap.values.fold<int>(0, (sum, list) => sum + list.length);
+
   /// Pending request lines for the passenger after subtracting what's
   /// already been assigned.
-  List<_PendingLine> _pendingLines(Passenger passenger) {
+  ///
+  /// Each entry in `assignedSeats` represents one "berth". On regular
+  /// seats (single / seater) that's always the whole seat. On a
+  /// doubleSofa cell a passenger may hold 1 berth (half — the other half
+  /// is free, or shared with someone else) or 2 berths (the whole
+  /// double, owned solo).
+  ///
+  /// Consumption rules, per cell the passenger has any berth on:
+  ///   - singleSofa / seater: decrement that type's line per berth.
+  ///   - doubleSofa, 2 berths held solo: decrement 1 `doubleSofa` line
+  ///     if available, otherwise 2 `singleSofa` lines (covers the
+  ///     "10-singles requested, only 6 singles in bus + 2 doubles"
+  ///     fill-from-doubles flow).
+  ///   - doubleSofa, 1 berth (half — empty other half OR shared):
+  ///     decrement 1 `singleSofa` line if available, fallback to 1
+  ///     `doubleSofa` line.
+  List<_PendingLine> _pendingLines(Passenger passenger, {Tour? tour}) {
     final pending = <_PendingLine>[];
     for (final line in passenger.requestLines) {
       pending.add(_PendingLine(
@@ -100,44 +149,117 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         totalRequested: line.qty,
       ));
     }
-    // Subtract already-assigned counts by walking decks.
-    final tour = _tour;
-    if (tour != null) {
-      for (final assignment in passenger.assignedSeats) {
-        final bus = tour.buses
-            .where((b) => b.id == assignment.busId)
-            .toList();
-        if (bus.isEmpty) continue;
-        final layout = bus.first.layout;
-        if (layout == null) continue;
-        SeatCell? cell;
-        for (final c in layout.lowerDeck) {
-          if (c.seatId == assignment.seatId) {
-            cell = c;
-            break;
-          }
+    final t = tour ?? _tour;
+    if (t == null) return pending;
+
+    // Group this passenger's berths by physical cell.
+    final groups = <String, _CellGroup>{};
+    for (final a in passenger.assignedSeats) {
+      final key = '${a.busId}:${a.seatId}';
+      groups
+          .putIfAbsent(key, () => _CellGroup(busId: a.busId, seatId: a.seatId))
+          .berths++;
+    }
+
+    for (final g in groups.values) {
+      final cell = _findCell(t, g.busId, g.seatId);
+      if (cell == null) continue;
+
+      if (cell.seatType != SeatType.doubleSofa) {
+        for (var i = 0; i < g.berths; i++) {
+          _drainPending(pending, [cell.seatType!], cell.position);
         }
-        cell ??= layout.upperDeck
-            .where((c) => c.seatId == assignment.seatId)
-            .cast<SeatCell?>()
-            .firstWhere((_) => true, orElse: () => null);
-        if (cell == null) continue;
-        // A request line with `position == null` (the new customer form
-        // doesn't ask upper vs lower — the agent picks) matches sleeper
-        // cells of either position. Strict-match only when the line
-        // explicitly specifies a position (legacy or admin-entered data).
-        final idx = pending.indexWhere(
-          (l) =>
-              l.seatType == cell!.seatType &&
-              (l.position == null || l.position == cell.position) &&
-              l.remaining > 0,
-        );
-        if (idx >= 0) {
-          pending[idx] = pending[idx].copyDecremented();
+        continue;
+      }
+
+      if (g.berths >= 2) {
+        // Whole double held solo. Prefer the doubleSofa line; otherwise
+        // consume 2 single lines.
+        if (!_drainPending(pending, [SeatType.doubleSofa], cell.position)) {
+          _drainPending(pending, [SeatType.singleSofa], cell.position);
+          _drainPending(pending, [SeatType.singleSofa], cell.position);
         }
+      } else {
+        // 1 berth on a double — half-share. Prefer single, fall back to
+        // double (e.g. partial doubleSofa request line — rare).
+        _drainPending(
+            pending, [SeatType.singleSofa, SeatType.doubleSofa], cell.position);
       }
     }
     return pending;
+  }
+
+  /// Decrement the first pending line whose `seatType` is in [tryTypes]
+  /// (checked in order) and whose position matches [cellPos]. Returns
+  /// true when something was decremented.
+  bool _drainPending(
+    List<_PendingLine> pending,
+    List<SeatType> tryTypes,
+    SeatPosition? cellPos,
+  ) {
+    for (final t in tryTypes) {
+      final idx = pending.indexWhere((l) =>
+          l.seatType == t &&
+          (l.position == null || l.position == cellPos) &&
+          l.remaining > 0);
+      if (idx >= 0) {
+        pending[idx] = pending[idx].copyDecremented();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  SeatCell? _findCell(Tour tour, String busId, String seatId) {
+    final bus = tour.buses.where((b) => b.id == busId).firstOrNull;
+    final layout = bus?.layout;
+    if (layout == null) return null;
+    for (final c in layout.lowerDeck) {
+      if (c.seatId == seatId) return c;
+    }
+    for (final c in layout.upperDeck) {
+      if (c.seatId == seatId) return c;
+    }
+    return null;
+  }
+
+  /// How many berths to claim when this passenger taps an unoccupied
+  /// cell. Returns 0 when the cell's type doesn't match anything pending.
+  ///
+  /// Special case for a `doubleSofa`:
+  ///   - 1 if a `doubleSofa` request line is pending (the passenger gets
+  ///     the whole double — single owner of the cell, but only one entry).
+  ///   - 2 if no `doubleSofa` line but ≥ 2 `singleSofa` lines remain (the
+  ///     "10 singles requested, fill the rest from doubles" flow — the
+  ///     passenger gets the whole sofa, both halves count as 1 single
+  ///     each).
+  ///   - 1 if exactly 1 `singleSofa` line remains (the other half of the
+  ///     double is left open for a future share).
+  int _berthsForFreeCell(Passenger passenger, SeatCell cell, {Tour? tour}) {
+    final pending = _pendingLines(passenger, tour: tour);
+    bool positionOk(_PendingLine l) =>
+        l.position == null || l.position == cell.position;
+
+    if (cell.seatType == SeatType.doubleSofa) {
+      final hasDoubleLine = pending.any((l) =>
+          l.seatType == SeatType.doubleSofa &&
+          positionOk(l) &&
+          l.remaining > 0);
+      if (hasDoubleLine) return 1;
+      final singleRemaining = pending
+          .where((l) =>
+              l.seatType == SeatType.singleSofa &&
+              positionOk(l) &&
+              l.remaining > 0)
+          .fold<int>(0, (sum, l) => sum + l.remaining);
+      if (singleRemaining >= 2) return 2;
+      if (singleRemaining == 1) return 1;
+      return 0;
+    }
+
+    final hasMatch = pending.any((l) =>
+        l.seatType == cell.seatType && positionOk(l) && l.remaining > 0);
+    return hasMatch ? 1 : 0;
   }
 
   Future<void> _onSeatTapped(SeatCell cell, Bus bus, Tour tour) async {
@@ -149,10 +271,12 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     }
 
     final assignmentMap = _assignmentMap(tour, bus.id);
-    final ownerId = assignmentMap[cell.seatId];
+    final owners = assignmentMap[cell.seatId] ?? const <String>[];
+    int berthsToAdd;
 
-    // Tap on own assigned seat → unassign it.
-    if (ownerId == passenger.id) {
+    // Tap on own assigned seat → drop this passenger's claim. Doesn't
+    // affect a co-owner (e.g. the other half of a shared double).
+    if (owners.contains(passenger.id)) {
       final next = List<SeatAssignment>.from(passenger.assignedSeats)
         ..removeWhere(
             (a) => a.busId == bus.id && a.seatId == cell.seatId);
@@ -160,41 +284,82 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       return;
     }
 
-    // Tap on someone else's seat → ask before reassigning.
-    if (ownerId != null) {
-      final other = tour.passengers
-          .where((p) => p.id == ownerId)
+    // Cell already occupied. Two sub-cases:
+    //   a) doubleSofa with exactly one other passenger → offer the share
+    //      flow (the agent talks to the existing occupant and agrees to
+    //      split the sofa between two unrelated singles).
+    //   b) anything else → refuse as taken.
+    if (owners.isNotEmpty) {
+      final isShareEligible =
+          cell.seatType == SeatType.doubleSofa && owners.length == 1;
+      if (!isShareEligible) {
+        final firstOther = tour.passengers
+            .where((p) => p.id == owners.first)
+            .toList()
+            .firstOrNull;
+        AppSnackBar.warning(
+          tr('tour_seat_assignment.err_seat_taken', namedArgs: {
+            'seat': cell.seatId!,
+            'otherName': firstOther?.name ??
+                tr('tour_seat_assignment.err_seat_taken_fallback_name'),
+          }),
+        );
+        return;
+      }
+
+      // Share path. A singleSofa OR doubleSofa pending line can claim
+      // half of the double (position match still required when the line
+      // specifies a position).
+      final pending = _pendingLines(passenger, tour: tour);
+      final matchIdx = pending.indexWhere((l) =>
+          (l.seatType == SeatType.singleSofa ||
+              l.seatType == SeatType.doubleSofa) &&
+          (l.position == null || l.position == cell.position) &&
+          l.remaining > 0);
+      if (matchIdx < 0) {
+        AppSnackBar.warning(
+          tr('tour_seat_assignment.err_type_mismatch', namedArgs: {
+            'passengerName': passenger.displayName,
+            'seatType': seatTypeLabel(cell.seatType!, cell.position),
+          }),
+        );
+        return;
+      }
+
+      final otherP = tour.passengers
+          .where((p) => p.id == owners.first)
           .toList()
           .firstOrNull;
-      AppSnackBar.warning(
-        tr('tour_seat_assignment.err_seat_taken', namedArgs: {
+      final confirmed = await AppDialogs.confirm(
+        title: tr('tour_seat_assignment.share_confirm_title'),
+        message: tr('tour_seat_assignment.share_confirm_body', namedArgs: {
           'seat': cell.seatId!,
-          'otherName': other?.name ??
+          'otherName': otherP?.displayName ??
               tr('tour_seat_assignment.err_seat_taken_fallback_name'),
+          'currentName': passenger.displayName,
         }),
+        confirmText: tr('tour_seat_assignment.share_confirm_yes'),
       );
-      return;
+      if (!confirmed) return;
+      berthsToAdd = 1;
+    } else {
+      // Free seat — decide how many berths to claim on this cell.
+      berthsToAdd = _berthsForFreeCell(passenger, cell, tour: tour);
+      if (berthsToAdd == 0) {
+        AppSnackBar.warning(
+          tr('tour_seat_assignment.err_type_mismatch', namedArgs: {
+            'passengerName': passenger.displayName,
+            'seatType': seatTypeLabel(cell.seatType!, cell.position),
+          }),
+        );
+        return;
+      }
     }
 
-    // Free seat. Check it matches a pending request line.
-    // Same null-position-is-wildcard rule as in _pendingLines above.
-    final pending = _pendingLines(passenger);
-    final matchIdx = pending.indexWhere((l) =>
-        l.seatType == cell.seatType &&
-        (l.position == null || l.position == cell.position) &&
-        l.remaining > 0);
-    if (matchIdx < 0) {
-      AppSnackBar.warning(
-        tr('tour_seat_assignment.err_type_mismatch', namedArgs: {
-          'passengerName': passenger.displayName,
-          'seatType': seatTypeLabel(cell.seatType!, cell.position),
-        }),
-      );
-      return;
+    final next = List<SeatAssignment>.from(passenger.assignedSeats);
+    for (var i = 0; i < berthsToAdd; i++) {
+      next.add(SeatAssignment(busId: bus.id, seatId: cell.seatId!));
     }
-
-    final next = List<SeatAssignment>.from(passenger.assignedSeats)
-      ..add(SeatAssignment(busId: bus.id, seatId: cell.seatId!));
     await _ctrl.assignSeats(tour.id, passenger.id, next);
 
     // Auto-advance to next unassigned passenger when current is done.
@@ -289,62 +454,55 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
 
           final bus = _selectedBus(tour)!;
           final passenger = _selectedPassenger(tour);
-          final assignmentMap = _assignmentMap(tour, bus.id);
+          // One pass over all passengers builds the lookup for every
+          // bus at once; we slice it instead of re-walking the
+          // passengers list per pill + per active bus.
+          final assignmentsByBus = _assignmentsByBus(tour);
+          final assignmentMap =
+              assignmentsByBus[bus.id] ?? const <String, List<String>>{};
 
+          final hasUpper = bus.layout?.upperDeck.any((c) => c.hasSeat) ?? false;
           return Column(
             children: [
               _Header(
                 title: tr('tour_seat_assignment.title'),
                 tourId: widget.tourId,
               ),
-              _Subtitle(tour: tour),
-              const SizedBox(height: 12),
-              _BusTabs(
+              // Single inline strip: horizontally scrolling bus tabs +
+              // (when present) a compact deck toggle on the right. Replaces
+              // the old subtitle / bus header / standalone deck tab stack
+              // that ate ~150-200px before the grid even rendered.
+              _BusStrip(
                 buses: tour.buses,
                 selectedBusId: bus.id,
-                seatsAssignedFor: (id) => _assignmentMap(tour, id).length,
-                onTap: (id) {
+                seatsAssignedFor: (id) => _occupants(
+                    assignmentsByBus[id] ?? const <String, List<String>>{}),
+                onTapBus: (id) {
                   setState(() {
                     _selectedBusId = id;
                     _showUpperDeck = false;
                   });
                 },
+                hasUpper: hasUpper,
+                showUpperDeck: _showUpperDeck,
+                onDeckChanged: (v) => setState(() => _showUpperDeck = v),
               ),
-              const SizedBox(height: 10),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _BusHeader(
-                  bus: bus,
-                  assignedSeats: assignmentMap.length,
-                ),
-              ),
-              const SizedBox(height: 10),
-              if (bus.layout?.upperDeck.any((c) => c.hasSeat) ?? false)
-                _DeckTabs(
-                  showUpperDeck: _showUpperDeck,
-                  onChanged: (v) => setState(() => _showUpperDeck = v),
-                ),
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
                   physics: const BouncingScrollPhysics(),
-                  child: Column(
-                    children: [
-                      _SeatGrid(
-                        layout: bus.layout,
-                        showUpper: _showUpperDeck,
-                        assignmentMap: assignmentMap,
-                        currentPassengerId: passenger?.id,
-                        onTap: (cell) => _onSeatTapped(cell, bus, tour),
-                      ),
-                      const SizedBox(height: 14),
-                      _Legend(),
-                    ],
+                  child: _SeatGrid(
+                    layout: bus.layout,
+                    showUpper: _showUpperDeck,
+                    assignmentMap: assignmentMap,
+                    currentPassengerId: passenger?.id,
+                    onTap: (cell) => _onSeatTapped(cell, bus, tour),
                   ),
                 ),
               ),
               if (passenger != null)
                 _PassengerCard(
+                  tour: tour,
                   passenger: passenger,
                   pending: _pendingLines(passenger),
                   allPassengers: tour.passengers,
@@ -364,6 +522,16 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       ),
     );
   }
+}
+
+/// Per-cell tally used by `_pendingLines`. `berths` is how many entries
+/// in `Passenger.assignedSeats` point at this cell — 1 for a regular
+/// seat or half-double, 2 when the passenger owns a whole double solo.
+class _CellGroup {
+  final String busId;
+  final String seatId;
+  int berths;
+  _CellGroup({required this.busId, required this.seatId}) : berths = 0;
 }
 
 class _PendingLine {
@@ -437,272 +605,166 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _Subtitle extends StatelessWidget {
-  final Tour tour;
-  const _Subtitle({required this.tour});
-
-  @override
-  Widget build(BuildContext context) {
-    final assigned = tour.totalSeatsAssigned;
-    final capacity = tour.totalBusSeats;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          tr('tour_seat_assignment.subtitle', namedArgs: {
-            'tourTitle': tour.title,
-            'busCount': tour.buses.length.toString(),
-            'busTerm': tour.buses.length == 1
-                ? tr('tour_seat_assignment.subtitle_bus_singular')
-                : tr('tour_seat_assignment.subtitle_bus_plural'),
-            'assigned': assigned.toString(),
-            'capacity': capacity.toString(),
-          }),
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            color: AppTheme.textMuted,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BusTabs extends StatelessWidget {
+/// Compact top strip on the assignment screen. Combines:
+///   - horizontally-scrolling bus tabs (one chip per bus, showing
+///     name + seats-sold)
+///   - an inline deck toggle on the right when the selected bus has
+///     an upper deck
+///
+/// Replaces the previous _Subtitle + _BusTabs + _BusHeader + _DeckTabs
+/// stack which ate ~150-200px of vertical space before the seat grid
+/// even rendered. Driver name was sacrificed (it lives in the Fleet
+/// screen) so this band fits in a single 48-px row.
+class _BusStrip extends StatelessWidget {
   final List<Bus> buses;
   final String selectedBusId;
   final int Function(String) seatsAssignedFor;
-  final ValueChanged<String> onTap;
+  final ValueChanged<String> onTapBus;
+  final bool hasUpper;
+  final bool showUpperDeck;
+  final ValueChanged<bool> onDeckChanged;
 
-  const _BusTabs({
+  const _BusStrip({
     required this.buses,
     required this.selectedBusId,
     required this.seatsAssignedFor,
-    required this.onTap,
+    required this.onTapBus,
+    required this.hasUpper,
+    required this.showUpperDeck,
+    required this.onDeckChanged,
   });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 60,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        scrollDirection: Axis.horizontal,
-        itemCount: buses.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (ctx, i) {
-          final bus = buses[i];
-          final selected = bus.id == selectedBusId;
-          final assigned = seatsAssignedFor(bus.id);
-          final capacity = bus.totalSeats;
-          return GestureDetector(
-            onTap: () => onTap(bus.id),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                color: selected ? AppTheme.brand : Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: selected ? AppTheme.brand : AppTheme.borderLight,
-                ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    bus.name,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: selected ? Colors.white : AppTheme.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$assigned/$capacity ${bus.isAC ? 'AC' : 'Non-AC'}',
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      color: selected
-                          ? Colors.white.withValues(alpha: 0.8)
-                          : AppTheme.textMuted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _BusHeader extends StatelessWidget {
-  final Bus bus;
-  final int assignedSeats;
-
-  const _BusHeader({required this.bus, required this.assignedSeats});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final capacity = bus.totalSeats;
-    final percent =
-        capacity > 0 ? ((assignedSeats / capacity) * 100).round() : 0;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppTheme.brandLight,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.brand.withValues(alpha: 0.18)),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.directions_bus_rounded,
-            size: 18,
-            color: AppTheme.brand,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '${bus.busNumber} · ${bus.isAC ? 'AC' : 'Non-AC'} '
-                  '${bus.busTypeEnum.displayName}',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.brandDark,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  tr('tour_seat_assignment.driver_label',
-                      namedArgs: {'name': bus.driverName.isEmpty ? '—' : bus.driverName}),
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: isDark ? Colors.white70 : AppTheme.textSecondary,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$assignedSeats/$capacity',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.brandDark,
-                ),
-              ),
-              Text(
-                tr('tour_seat_assignment.percent_full',
-                    namedArgs: {'percent': percent.toString()}),
-                style: GoogleFonts.inter(
-                  fontSize: 10,
-                  color: AppTheme.textMuted,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DeckTabs extends StatelessWidget {
-  final bool showUpperDeck;
-  final ValueChanged<bool> onChanged;
-
-  const _DeckTabs({required this.showUpperDeck, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       child: Row(
         children: [
           Expanded(
-            child: _DeckTab(
-              label: tr('tour_seat_assignment.deck_lower'),
-              selected: !showUpperDeck,
-              onTap: () => onChanged(false),
+            child: SizedBox(
+              height: 40,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.zero,
+                itemCount: buses.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (ctx, i) {
+                  final bus = buses[i];
+                  final selected = bus.id == selectedBusId;
+                  final assigned = seatsAssignedFor(bus.id);
+                  final capacity = bus.totalSeats;
+                  return GestureDetector(
+                    onTap: () => onTapBus(bus.id),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: selected ? AppTheme.brand : Colors.white,
+                        borderRadius: BorderRadius.circular(9999),
+                        border: Border.all(
+                          color: selected
+                              ? AppTheme.brand
+                              : AppTheme.borderLight,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            bus.name,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: selected
+                                  ? Colors.white
+                                  : AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '$assigned/$capacity',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: selected
+                                  ? Colors.white.withValues(alpha: 0.85)
+                                  : AppTheme.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: _DeckTab(
-              label: tr('tour_seat_assignment.deck_upper'),
-              selected: showUpperDeck,
-              onTap: () => onChanged(true),
+          if (hasUpper) ...[
+            const SizedBox(width: 10),
+            _DeckToggle(
+              showUpper: showUpperDeck,
+              onChanged: onDeckChanged,
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _DeckTab extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _DeckTab({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
+/// Compact two-state pill: "L" / "U" deck toggle. Lives on the right
+/// edge of `_BusStrip` only when the current bus has an upper deck.
+class _DeckToggle extends StatelessWidget {
+  final bool showUpper;
+  final ValueChanged<bool> onChanged;
+  const _DeckToggle({required this.showUpper, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 38,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? AppTheme.brand : Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected ? AppTheme.brand : AppTheme.borderLight,
+    Widget half(String label, bool isUpper) {
+      final active = isUpper == showUpper;
+      return GestureDetector(
+        onTap: () => onChanged(isUpper),
+        child: Container(
+          width: 30,
+          height: 40,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: active ? AppTheme.brand : Colors.transparent,
+            borderRadius: BorderRadius.circular(9999),
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: active ? Colors.white : AppTheme.textMuted,
+            ),
           ),
         ),
-        child: Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: selected ? Colors.white : AppTheme.textPrimary,
-          ),
-        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      decoration: BoxDecoration(
+        color: AppTheme.bgLight,
+        borderRadius: BorderRadius.circular(9999),
+        border: Border.all(color: AppTheme.borderLight),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [half('L', false), half('U', true)],
       ),
     );
   }
 }
+
 
 class _SeatGrid extends StatelessWidget {
   final BusLayout? layout;
   final bool showUpper;
-  final Map<String, String> assignmentMap;
+  final Map<String, List<String>> assignmentMap;
   final String? currentPassengerId;
   final ValueChanged<SeatCell> onTap;
 
@@ -795,15 +857,26 @@ class _SeatGrid extends StatelessWidget {
                 // the surrounding seats stay aligned in their lanes.
                 return const SizedBox.shrink();
               }
-              final ownerId = assignmentMap[cell.seatId];
-              final isMine =
-                  ownerId != null && ownerId == currentPassengerId;
-              final isOther = ownerId != null && ownerId != currentPassengerId;
-              return _SeatTile(
-                cell: cell,
-                isMine: isMine,
-                isOther: isOther,
-                onTap: () => onTap(cell),
+              final owners = assignmentMap[cell.seatId] ?? const <String>[];
+              // Count this passenger's berths separately from others' so
+              // a whole-double-held-solo (2 of MY entries on the same
+              // cell) reads as `mineCount=2, otherCount=0` and not as a
+              // share.
+              final mineCount = currentPassengerId == null
+                  ? 0
+                  : owners.where((id) => id == currentPassengerId).length;
+              final otherCount = owners.length - mineCount;
+              // RepaintBoundary isolates each tile's repaint from its
+              // neighbours — selecting a passenger changes amber/blue
+              // tints on a handful of tiles, but without this boundary
+              // the whole grid layer is invalidated every tap.
+              return RepaintBoundary(
+                child: _SeatTile(
+                  cell: cell,
+                  mineCount: mineCount,
+                  otherCount: otherCount,
+                  onTap: () => onTap(cell),
+                ),
               );
             },
           ),
@@ -815,16 +888,39 @@ class _SeatGrid extends StatelessWidget {
 
 class _SeatTile extends StatelessWidget {
   final SeatCell cell;
-  final bool isMine;
-  final bool isOther;
+  /// Berths the currently-selected passenger holds on this cell.
+  /// 0 = none, 1 = half (the other half is free or shared), 2 = whole
+  /// double held solo.
+  final int mineCount;
+  /// Berths held by OTHER passengers — i.e. everyone except the one
+  /// currently selected at the bottom of the screen.
+  final int otherCount;
   final VoidCallback onTap;
 
   const _SeatTile({
     required this.cell,
-    required this.isMine,
-    required this.isOther,
+    required this.mineCount,
+    required this.otherCount,
     required this.onTap,
   });
+
+  bool get isMine => mineCount > 0;
+
+  /// True iff this cell needs the split-rendering path. Three cases on a
+  /// doubleSofa:
+  ///   - mineCount == 1 && otherCount == 1: shared (amber | brand)
+  ///   - mineCount == 1 && otherCount == 0: half-mine (amber | free tint)
+  ///   - mineCount == 0 && otherCount == 1: half-other (brand | free tint)
+  /// Whole-owned (count == 2 on one side) renders as a solid tile, not
+  /// a split — both berths belong to the same passenger.
+  bool get _needsSplit {
+    if (cell.seatType != SeatType.doubleSofa) return false;
+    final total = mineCount + otherCount;
+    if (total == 0 || total >= 2 && (mineCount == 2 || otherCount == 2)) {
+      return false;
+    }
+    return true;
+  }
 
   /// 1-letter mark for the seat type (S = Single Sofa, D = Double Sofa,
   /// T = Seater). Shown in the corner so the agent can read the bus
@@ -870,29 +966,110 @@ class _SeatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isOther = otherCount > 0;
+    final mark = _typeMark;
+
+    // Partial doubleSofa: render two side-by-side halves so the agent
+    // can see at a glance which berths are taken vs free. Cases:
+    //   - mine=1, other=1: shared (amber | brand)
+    //   - mine=1, other=0: half-mine, other half free (amber | tint)
+    //   - mine=0, other=1: half-other, other half free (brand | tint)
+    if (_needsSplit) {
+      final Color leftColor;
+      final Color rightColor;
+      if (isMine && otherCount > 0) {
+        leftColor = AppTheme.brandAccent; // self
+        rightColor = AppTheme.brand;      // co-owner
+      } else if (isMine) {
+        leftColor = AppTheme.brandAccent; // self half
+        rightColor = _typeTint;           // free half — agent can still claim it
+      } else {
+        leftColor = AppTheme.brand;       // other half
+        rightColor = _typeTint;           // free half
+      }
+      return GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppTheme.brand, width: 1.5),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            children: [
+              Row(
+                children: [
+                  Expanded(child: Container(color: leftColor)),
+                  Expanded(child: Container(color: rightColor)),
+                ],
+              ),
+              // Seat label sits in a small dark chip so it stays legible
+              // regardless of whether the half behind it is filled
+              // (amber/brand) or free (tint).
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    cell.seatId ?? '',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              if (mark != null)
+                Positioned(
+                  top: 2,
+                  right: 4,
+                  child: Text(
+                    mark,
+                    style: GoogleFonts.inter(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white.withValues(alpha: 0.85),
+                    ),
+                  ),
+                ),
+              const Positioned(
+                bottom: 2,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Icon(
+                    Icons.swap_horiz_rounded,
+                    size: 10,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     Color bg;
     Color border;
     Color textColor;
     if (isMine) {
-      // The current passenger's seat — amber so the agent sees what
-      // they've already picked.
       bg = AppTheme.brandAccent;
       border = AppTheme.brandAccent;
       textColor = Colors.white;
     } else if (isOther) {
-      // Taken by another passenger.
       bg = AppTheme.brand;
       border = AppTheme.brand;
       textColor = Colors.white;
     } else {
-      // Available — tint by seat type so Single / Double / Seater are
-      // visually distinct at a glance.
       bg = _typeTint;
       border = _typeBorder;
       textColor = AppTheme.textPrimary;
     }
-
-    final mark = _typeMark;
 
     return GestureDetector(
       onTap: onTap,
@@ -934,79 +1111,8 @@ class _SeatTile extends StatelessWidget {
   }
 }
 
-class _Legend extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 14,
-      runSpacing: 6,
-      children: [
-        _LegendDot(
-          color: Color(0xFFE7F8EE),
-          border: Color(0xFF22C55E),
-          label: tr('tour_seat_assignment.legend_single_sofa'),
-        ),
-        _LegendDot(
-          color: Color(0xFFE0F2FE),
-          border: Color(0xFF0EA5E9),
-          label: tr('tour_seat_assignment.legend_double_sofa'),
-        ),
-        _LegendDot(
-          color: Color(0xFFF1F5F9),
-          border: AppTheme.textMuted,
-          label: tr('tour_seat_assignment.legend_seater'),
-        ),
-        _LegendDot(
-          color: AppTheme.brand,
-          border: AppTheme.brand,
-          label: tr('tour_seat_assignment.legend_booked'),
-        ),
-        _LegendDot(
-          color: AppTheme.brandAccent,
-          border: AppTheme.brandAccent,
-          label: tr('tour_seat_assignment.legend_this_passenger'),
-        ),
-      ],
-    );
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final Color border;
-  final String label;
-
-  const _LegendDot({
-    required this.color,
-    required this.border,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: border),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
-        ),
-      ],
-    );
-  }
-}
-
 class _PassengerCard extends StatelessWidget {
+  final Tour tour;
   final Passenger passenger;
   final List<_PendingLine> pending;
   final List<Passenger> allPassengers;
@@ -1016,6 +1122,7 @@ class _PassengerCard extends StatelessWidget {
   final VoidCallback? onLockTour;
 
   const _PassengerCard({
+    required this.tour,
     required this.passenger,
     required this.pending,
     required this.allPassengers,
@@ -1188,6 +1295,20 @@ class _PassengerCard extends StatelessWidget {
                   color: handlerId == passenger.id
                       ? AppTheme.brandAccent
                       : AppTheme.textMuted,
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                tooltip: tr('tour_seat_assignment.tooltip_edit_request'),
+                onPressed: () => EditRequestSheet.show(
+                  context: context,
+                  tour: tour,
+                  passenger: passenger,
+                ),
+                icon: Icon(
+                  Icons.edit_outlined,
+                  size: 20,
+                  color: AppTheme.textMuted,
                 ),
               ),
               Text(
