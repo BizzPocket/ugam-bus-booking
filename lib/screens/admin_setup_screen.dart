@@ -51,11 +51,10 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      backgroundColor: isDark ? colorScheme.surface : Colors.white,
+      backgroundColor: AppColors.surface(context),
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -217,7 +216,7 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
         style: GoogleFonts.inter(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: AppTheme.textMuted,
+          color: AppColors.textMuted(context),
           letterSpacing: 1.5,
         ),
       );
