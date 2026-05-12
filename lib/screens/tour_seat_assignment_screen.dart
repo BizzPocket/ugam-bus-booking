@@ -161,17 +161,33 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           .berths++;
     }
 
+    // Track berths that didn't find a matching exact-type line on the
+    // first pass — used for the cross-fill rule (2 singles can satisfy
+    // 1 doubleSofa line when the bus is short on doubles).
+    int leftoverSingleBerths = 0;
+    int leftoverHalfDoubles = 0;
+
     for (final g in groups.values) {
       final cell = _findCell(t, g.busId, g.seatId);
       if (cell == null) continue;
 
-      if (cell.seatType != SeatType.doubleSofa) {
+      if (cell.seatType == SeatType.singleSofa) {
         for (var i = 0; i < g.berths; i++) {
-          _drainPending(pending, [cell.seatType!], cell.position);
+          if (!_drainPending(pending, [SeatType.singleSofa], cell.position)) {
+            leftoverSingleBerths++;
+          }
         }
         continue;
       }
 
+      if (cell.seatType == SeatType.seater) {
+        for (var i = 0; i < g.berths; i++) {
+          _drainPending(pending, [SeatType.seater], cell.position);
+        }
+        continue;
+      }
+
+      // doubleSofa
       if (g.berths >= 2) {
         // Whole double held solo. Prefer the doubleSofa line; otherwise
         // consume 2 single lines.
@@ -181,11 +197,29 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         }
       } else {
         // 1 berth on a double — half-share. Prefer single, fall back to
-        // double (e.g. partial doubleSofa request line — rare).
-        _drainPending(
-            pending, [SeatType.singleSofa, SeatType.doubleSofa], cell.position);
+        // a half-of-double counted toward a doubleSofa line in the
+        // cross-fill pass below.
+        if (!_drainPending(pending, [SeatType.singleSofa], cell.position)) {
+          leftoverHalfDoubles++;
+        }
       }
     }
+
+    // Cross-fill: two leftover single-class berths (single sofas OR
+    // half-doubles) drain ONE doubleSofa line. This is the "bus is
+    // short on whole doubles, fill the customer's double request with
+    // two singles instead" flow. We pass null cellPos so we only match
+    // doubleSofa lines that don't specify a position — customer-form
+    // requests don't set one.
+    int leftoverPairs = (leftoverSingleBerths + leftoverHalfDoubles) ~/ 2;
+    while (leftoverPairs > 0) {
+      if (_drainPending(pending, [SeatType.doubleSofa], null)) {
+        leftoverPairs--;
+      } else {
+        break;
+      }
+    }
+
     return pending;
   }
 
@@ -226,15 +260,25 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// How many berths to claim when this passenger taps an unoccupied
   /// cell. Returns 0 when the cell's type doesn't match anything pending.
   ///
+  /// Berth model recap: one entry in `assignedSeats` = one berth. A
+  /// whole Double Sofa is TWO entries with the same seatId; sharing a
+  /// double is ONE entry per occupant. `_pendingLines`,
+  /// `TourController.moveSeat`, and `swapSeats` all consume/preserve
+  /// this count, so this helper has to agree with them.
+  ///
   /// Special case for a `doubleSofa`:
-  ///   - 1 if a `doubleSofa` request line is pending (the passenger gets
-  ///     the whole double — single owner of the cell, but only one entry).
-  ///   - 2 if no `doubleSofa` line but ≥ 2 `singleSofa` lines remain (the
-  ///     "10 singles requested, fill the rest from doubles" flow — the
-  ///     passenger gets the whole sofa, both halves count as 1 single
-  ///     each).
-  ///   - 1 if exactly 1 `singleSofa` line remains (the other half of the
-  ///     double is left open for a future share).
+  ///   - 2 if a `doubleSofa` request line is pending → passenger takes
+  ///     the WHOLE double. Two berth-entries are added; the other half
+  ///     is no longer bookable by anyone else. (Previously this branch
+  ///     returned 1, which silently halved every double assignment and
+  ///     left the partner-slot open for accidental shares — that's the
+  ///     bug the user reported.)
+  ///   - 2 if no `doubleSofa` line but ≥ 2 `singleSofa` lines remain
+  ///     (the "10 singles requested, fill the rest from doubles" flow:
+  ///     two singles fold into one whole double).
+  ///   - 1 if exactly 1 `singleSofa` line remains — the passenger
+  ///     intentionally takes half, leaving the other half open for a
+  ///     later share.
   int _berthsForFreeCell(Passenger passenger, SeatCell cell, {Tour? tour}) {
     final pending = _pendingLines(passenger, tour: tour);
     bool positionOk(_PendingLine l) =>
@@ -245,7 +289,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           l.seatType == SeatType.doubleSofa &&
           positionOk(l) &&
           l.remaining > 0);
-      if (hasDoubleLine) return 1;
+      if (hasDoubleLine) return 2;
       final singleRemaining = pending
           .where((l) =>
               l.seatType == SeatType.singleSofa &&
@@ -254,6 +298,24 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           .fold<int>(0, (sum, l) => sum + l.remaining);
       if (singleRemaining >= 2) return 2;
       if (singleRemaining == 1) return 1;
+      return 0;
+    }
+
+    if (cell.seatType == SeatType.singleSofa) {
+      // First preference: an exact singleSofa line.
+      final hasSingleLine = pending.any((l) =>
+          l.seatType == SeatType.singleSofa &&
+          positionOk(l) &&
+          l.remaining > 0);
+      if (hasSingleLine) return 1;
+      // Cross-fill: passenger requested a Double Sofa but the bus is
+      // short on doubles. Each single sofa we assign covers HALF of a
+      // pending doubleSofa line; once they have two, _pendingLines'
+      // pair-up pass drains the line. Returning 1 here lets the agent
+      // tap a single while honouring the doubleSofa request.
+      final hasDoubleLine = pending.any((l) =>
+          l.seatType == SeatType.doubleSofa && l.remaining > 0);
+      if (hasDoubleLine) return 1;
       return 0;
     }
 
@@ -440,17 +502,29 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
-        child: Obx(() {
-          final tour = _tour;
-          if (tour == null) {
-            return Center(child: Text(tr('tour_seat_assignment.tour_not_found')));
-          }
-          if (tour.buses.isEmpty) {
-            return _NoBuses(tourId: widget.tourId);
-          }
-          if (tour.passengers.isEmpty) {
-            return _NoPassengers();
-          }
+        // The header doesn't depend on any reactive state (title is a
+        // static `tr` key, tourId comes from widget config) — hoist it
+        // above the Obx so realtime tour updates don't repaint it. It
+        // also keeps the back button + Fleet link visible across the
+        // tour-not-found / no-buses / no-passengers empty states.
+        child: Column(
+          children: [
+            _Header(
+              title: tr('tour_seat_assignment.title'),
+              tourId: widget.tourId,
+            ),
+            Expanded(
+              child: Obx(() {
+        final tour = _tour;
+        if (tour == null) {
+          return Center(child: Text(tr('tour_seat_assignment.tour_not_found')));
+        }
+        if (tour.buses.isEmpty) {
+          return _NoBuses(tourId: widget.tourId);
+        }
+        if (tour.passengers.isEmpty) {
+          return _NoPassengers();
+        }
 
           final bus = _selectedBus(tour)!;
           final passenger = _selectedPassenger(tour);
@@ -464,10 +538,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           final hasUpper = bus.layout?.upperDeck.any((c) => c.hasSeat) ?? false;
           return Column(
             children: [
-              _Header(
-                title: tr('tour_seat_assignment.title'),
-                tourId: widget.tourId,
-              ),
               // Single inline strip: horizontally scrolling bus tabs +
               // (when present) a compact deck toggle on the right. Replaces
               // the old subtitle / bus header / standalone deck tab stack
@@ -518,7 +588,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                 ),
             ],
           );
-        }),
+              }),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -659,12 +732,12 @@ class _BusStrip extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: selected ? AppTheme.brand : Colors.white,
+                        color: selected ? AppTheme.brand : AppColors.surface(ctx),
                         borderRadius: BorderRadius.circular(9999),
                         border: Border.all(
                           color: selected
                               ? AppTheme.brand
-                              : AppTheme.borderLight,
+                              : AppColors.border(ctx),
                         ),
                       ),
                       child: Row(
@@ -672,23 +745,20 @@ class _BusStrip extends StatelessWidget {
                         children: [
                           Text(
                             bus.name,
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
+                            style: AppText.chipTextActive.copyWith(
                               color: selected
                                   ? Colors.white
-                                  : AppTheme.textPrimary,
+                                  : AppColors.text(ctx),
                             ),
                           ),
                           const SizedBox(width: 6),
                           Text(
                             '$assigned/$capacity',
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
+                            style: AppText.cardMeta.copyWith(
                               fontWeight: FontWeight.w600,
                               color: selected
                                   ? Colors.white.withValues(alpha: 0.85)
-                                  : AppTheme.textMuted,
+                                  : AppColors.textMuted(ctx),
                             ),
                           ),
                         ],
@@ -735,10 +805,8 @@ class _DeckToggle extends StatelessWidget {
           ),
           child: Text(
             label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: active ? Colors.white : AppTheme.textMuted,
+            style: AppText.buttonInline.copyWith(
+              color: active ? Colors.white : AppColors.textMuted(context),
             ),
           ),
         ),
@@ -748,9 +816,9 @@ class _DeckToggle extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       decoration: BoxDecoration(
-        color: AppTheme.bgLight,
+        color: AppColors.bg(context),
         borderRadius: BorderRadius.circular(9999),
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -813,21 +881,20 @@ class _SeatGrid extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            const Icon(
+            Icon(
               Icons.person_outline_rounded,
               size: 14,
-              color: AppTheme.textMuted,
+              color: AppColors.textMuted(context),
             ),
             const SizedBox(width: 4),
             Text(
               showUpper
                   ? tr('tour_seat_assignment.grid_label_upper')
                   : tr('tour_seat_assignment.grid_label_driver'),
-              style: GoogleFonts.inter(
-                fontSize: 9,
+              style: AppText.badgeSm.copyWith(
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.8,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
               ),
             ),
           ],
@@ -836,9 +903,9 @@ class _SeatGrid extends StatelessWidget {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface(context),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppTheme.borderLight),
+            border: Border.all(color: AppColors.border(context)),
           ),
           child: GridView.builder(
             shrinkWrap: true,
@@ -1015,8 +1082,7 @@ class _SeatTile extends StatelessWidget {
                   ),
                   child: Text(
                     cell.seatId ?? '',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
+                    style: AppText.cardMeta.copyWith(
                       fontWeight: FontWeight.w700,
                       color: Colors.white,
                     ),
@@ -1029,9 +1095,7 @@ class _SeatTile extends StatelessWidget {
                   right: 4,
                   child: Text(
                     mark,
-                    style: GoogleFonts.inter(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
+                    style: AppText.badgeSm.copyWith(
                       color: Colors.white.withValues(alpha: 0.85),
                     ),
                   ),
@@ -1068,7 +1132,7 @@ class _SeatTile extends StatelessWidget {
     } else {
       bg = _typeTint;
       border = _typeBorder;
-      textColor = AppTheme.textPrimary;
+      textColor = AppColors.text(context);
     }
 
     return GestureDetector(
@@ -1097,9 +1161,7 @@ class _SeatTile extends StatelessWidget {
                 right: 4,
                 child: Text(
                   mark,
-                  style: GoogleFonts.inter(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
+                  style: AppText.badgeSm.copyWith(
                     color: textColor.withValues(alpha: 0.75),
                   ),
                 ),
@@ -1135,7 +1197,6 @@ class _PassengerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final selectedSeats = passenger.assignedSeats.isEmpty
         ? '—'
         : passenger.assignedSeats.map((a) => a.seatId).join(', ');
@@ -1144,8 +1205,8 @@ class _PassengerCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.cardDark : Colors.white,
-        border: Border(top: BorderSide(color: AppTheme.borderLight)),
+        color: AppColors.surface(context),
+        border: Border(top: BorderSide(color: AppColors.border(context))),
       ),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Column(
@@ -1170,12 +1231,12 @@ class _PassengerCard extends StatelessWidget {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: selected ? AppTheme.brand : AppTheme.bgLight,
+                      color: selected ? AppTheme.brand : AppColors.bg(ctx),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                         color: selected
                             ? AppTheme.brand
-                            : AppTheme.borderLight,
+                            : AppColors.border(ctx),
                       ),
                     ),
                     child: Row(
@@ -1193,12 +1254,11 @@ class _PassengerCard extends StatelessWidget {
                           ),
                         Text(
                           p.displayName,
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
+                          style: AppText.cardMeta.copyWith(
                             fontWeight: FontWeight.w600,
                             color: selected
                                 ? Colors.white
-                                : AppTheme.textPrimary,
+                                : AppColors.text(ctx),
                           ),
                         ),
                       ],
@@ -1218,11 +1278,7 @@ class _PassengerCard extends StatelessWidget {
                   passenger.name.isNotEmpty
                       ? passenger.name[0].toUpperCase()
                       : '?',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.brand,
-                  ),
+                  style: AppText.buttonInline.copyWith(color: AppTheme.brand),
                 ),
               ),
               const SizedBox(width: 10),
@@ -1237,9 +1293,8 @@ class _PassengerCard extends StatelessWidget {
                         Flexible(
                           child: Text(
                             passenger.displayName,
-                            style: GoogleFonts.inter(
+                            style: AppText.cardTitleSm.copyWith(
                               fontSize: 14,
-                              fontWeight: FontWeight.w700,
                               color: theme.colorScheme.onSurface,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -1273,9 +1328,8 @@ class _PassengerCard extends StatelessWidget {
                     if (passenger.phone.isNotEmpty)
                       Text(
                         passenger.phone,
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: AppTheme.textMuted,
+                        style: AppText.cardMeta.copyWith(
+                          color: AppColors.textMuted(context),
                         ),
                       ),
                   ],
@@ -1294,7 +1348,7 @@ class _PassengerCard extends StatelessWidget {
                   size: 22,
                   color: handlerId == passenger.id
                       ? AppTheme.brandAccent
-                      : AppTheme.textMuted,
+                      : AppColors.textMuted(context),
                 ),
               ),
               IconButton(
@@ -1308,14 +1362,12 @@ class _PassengerCard extends StatelessWidget {
                 icon: Icon(
                   Icons.edit_outlined,
                   size: 20,
-                  color: AppTheme.textMuted,
+                  color: AppColors.textMuted(context),
                 ),
               ),
               Text(
                 '${passenger.totalSeatsAssigned}/${passenger.totalSeatsRequested}',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
+                style: AppText.chipTextActive.copyWith(
                   color: theme.colorScheme.onSurface,
                 ),
               ),
@@ -1332,17 +1384,16 @@ class _PassengerCard extends StatelessWidget {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: AppTheme.bgLight,
+                  color: AppColors.bg(context),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '${line.label}  ${line.progress}',
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
+                  style: AppText.cardLabel.copyWith(
                     fontWeight: FontWeight.w600,
                     color: line.remaining == 0
                         ? AppTheme.success
-                        : AppTheme.textPrimary,
+                        : AppColors.text(context),
                   ),
                 ),
               );
@@ -1357,7 +1408,7 @@ class _PassengerCard extends StatelessWidget {
                       namedArgs: {'seats': selectedSeats}),
                   style: GoogleFonts.inter(
                     fontSize: 12,
-                    color: AppTheme.textSecondary,
+                    color: AppColors.textMuted(context),
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1444,10 +1495,10 @@ class _NoBuses extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.directions_bus_outlined,
               size: 56,
-              color: AppTheme.textMuted,
+              color: AppColors.textMuted(context),
             ),
             const SizedBox(height: 14),
             Text(
@@ -1463,7 +1514,7 @@ class _NoBuses extends StatelessWidget {
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 12,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
               ),
             ),
             const SizedBox(height: 16),
@@ -1494,10 +1545,10 @@ class _NoPassengers extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.people_outline_rounded,
               size: 56,
-              color: AppTheme.textMuted,
+              color: AppColors.textMuted(context),
             ),
             const SizedBox(height: 14),
             Text(
@@ -1513,7 +1564,7 @@ class _NoPassengers extends StatelessWidget {
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 12,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
               ),
             ),
           ],
@@ -1532,7 +1583,7 @@ class _NoLayout extends StatelessWidget {
       child: Text(
         tr('tour_seat_assignment.no_layout'),
         textAlign: TextAlign.center,
-        style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+        style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted(context)),
       ),
     );
   }
