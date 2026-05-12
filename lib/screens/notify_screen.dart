@@ -59,7 +59,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                     Icon(
                       Icons.notifications_off_rounded,
                       size: 48,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -67,7 +67,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                       style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
-                        color: AppTheme.textPrimary,
+                        color: AppColors.text(context),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -76,7 +76,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
                         fontSize: 14,
-                        color: AppTheme.textMuted,
+                        color: AppColors.textMuted(context),
                       ),
                     ),
                   ],
@@ -133,7 +133,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 1,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -158,11 +158,11 @@ class _NotifyScreenState extends State<NotifyScreen> {
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: isActive ? AppTheme.brand : Colors.white,
+                              color: isActive ? AppTheme.brand : AppColors.surface(context),
                               borderRadius: BorderRadius.circular(9999),
                               border: isActive
                                   ? null
-                                  : Border.all(color: AppTheme.borderLight),
+                                  : Border.all(color: AppColors.border(context)),
                             ),
                             child: Center(
                               child: Text(
@@ -174,7 +174,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                                       : FontWeight.w500,
                                   color: isActive
                                       ? Colors.white
-                                      : AppTheme.textSecondary,
+                                      : AppColors.textMuted(context),
                                 ),
                               ),
                             ),
@@ -190,7 +190,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: AppTheme.cardLight,
+                    color: AppColors.surface(context),
                     borderRadius: BorderRadius.circular(6),
                     boxShadow: AppTheme.cardShadow,
                   ),
@@ -202,7 +202,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                         style: GoogleFonts.inter(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
+                          color: AppColors.text(context),
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -255,10 +255,10 @@ class _NotifyScreenState extends State<NotifyScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(8),
         boxShadow: AppTheme.cardShadow,
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -287,7 +287,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
             tr('notify.lock_gate_body'),
             style: GoogleFonts.inter(
               fontSize: 13,
-              color: AppTheme.textSecondary,
+              color: AppColors.textMuted(context),
               height: 1.4,
             ),
           ),
@@ -324,8 +324,8 @@ class _NotifyScreenState extends State<NotifyScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.brand,
                 foregroundColor: Colors.white,
-                disabledBackgroundColor: AppTheme.bgLight,
-                disabledForegroundColor: AppTheme.textMuted,
+                disabledBackgroundColor: AppColors.bg(context),
+                disabledForegroundColor: AppColors.textMuted(context),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -385,7 +385,7 @@ class _Check extends StatelessWidget {
         Icon(
           done ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
           size: 18,
-          color: done ? AppTheme.success : AppTheme.textMuted,
+          color: done ? AppTheme.success : AppColors.textMuted(context),
         ),
         const SizedBox(width: 10),
         Expanded(
@@ -394,7 +394,7 @@ class _Check extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w500,
-              color: done ? AppTheme.textPrimary : AppTheme.textSecondary,
+              color: done ? AppColors.text(context) : AppColors.textMuted(context),
             ),
           ),
         ),
@@ -415,7 +415,7 @@ class _SummaryBox extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
         decoration: BoxDecoration(
-          color: AppTheme.bgLight,
+          color: AppColors.bg(context),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Column(
@@ -427,7 +427,7 @@ class _SummaryBox extends StatelessWidget {
                 fontSize: 9,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.8,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
               ),
             ),
             const SizedBox(height: 4),
@@ -436,7 +436,7 @@ class _SummaryBox extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color: AppTheme.textPrimary,
+                color: AppColors.text(context),
               ),
             ),
           ],
@@ -543,20 +543,20 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: AppTheme.bgLight,
+          color: AppColors.bg(context),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppTheme.borderLight),
+          border: Border.all(color: AppColors.border(context)),
         ),
         child: Column(
           children: [
             Icon(Icons.info_outline_rounded,
-                size: 22, color: AppTheme.textMuted),
+                size: 22, color: AppColors.textMuted(context)),
             const SizedBox(height: 8),
             Text(
               tr('notify.empty_no_seats'),
               style: GoogleFonts.inter(
                 fontSize: 13,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
               ),
             ),
           ],
@@ -589,7 +589,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
+                color: AppColors.text(context),
               ),
             ),
             if (sentCount > 0) ...[
@@ -599,7 +599,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                 child: Icon(
                   Icons.refresh_rounded,
                   size: 16,
-                  color: AppTheme.textMuted,
+                  color: AppColors.textMuted(context),
                 ),
               ),
             ],
@@ -611,7 +611,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
           child: LinearProgressIndicator(
             value: all.isEmpty ? 0 : sentCount / all.length,
             minHeight: 6,
-            backgroundColor: AppTheme.bgLight,
+            backgroundColor: AppColors.bg(context),
             valueColor: AlwaysStoppedAnimation(
               allDone ? AppTheme.success : AppTheme.brand,
             ),
@@ -624,14 +624,14 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface(context),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppTheme.borderLight),
+            border: Border.all(color: AppColors.border(context)),
           ),
           child: Row(
             children: [
-              const Icon(Icons.search_rounded,
-                  size: 18, color: AppTheme.textMuted),
+              Icon(Icons.search_rounded,
+                  size: 18, color: AppColors.textMuted(context)),
               const SizedBox(width: 8),
               Expanded(
                 child: TextField(
@@ -642,12 +642,12 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                     hintText: tr('notify.search_hint'),
                     hintStyle: GoogleFonts.inter(
                       fontSize: 13,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                     ),
                   ),
                   style: GoogleFonts.inter(
                     fontSize: 14,
-                    color: AppTheme.textPrimary,
+                    color: AppColors.text(context),
                   ),
                   onChanged: (v) {
                     setState(() {
@@ -666,8 +666,8 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                     _search.clear();
                     setState(() => _query = '');
                   },
-                  child: const Icon(Icons.close_rounded,
-                      size: 16, color: AppTheme.textMuted),
+                  child: Icon(Icons.close_rounded,
+                      size: 16, color: AppColors.textMuted(context)),
                 ),
             ],
           ),
@@ -681,16 +681,16 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: AppTheme.bgLight,
+              color: AppColors.bg(context),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppTheme.borderLight),
+              border: Border.all(color: AppColors.border(context)),
             ),
             child: Center(
               child: Text(
                 tr('notify.no_matches', namedArgs: {'query': _query}),
                 style: GoogleFonts.inter(
                   fontSize: 13,
-                  color: AppTheme.textMuted,
+                  color: AppColors.textMuted(context),
                 ),
               ),
             ),
@@ -731,7 +731,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                   width: active ? 18 : 6,
                   height: 6,
                   decoration: BoxDecoration(
-                    color: active ? AppTheme.brand : AppTheme.borderDefault,
+                    color: active ? AppTheme.brand : AppColors.border(context),
                     borderRadius: BorderRadius.circular(3),
                   ),
                 );
@@ -749,7 +749,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
             fontSize: 10,
             fontWeight: FontWeight.w600,
             letterSpacing: 1,
-            color: AppTheme.textMuted,
+            color: AppColors.textMuted(context),
           ),
         ),
         const SizedBox(height: 8),
@@ -768,14 +768,14 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                 decoration: BoxDecoration(
                   color: isSent
                       ? AppTheme.successLight
-                      : (isCurrent ? AppTheme.brandLight : Colors.white),
+                      : (isCurrent ? AppTheme.brandLight : AppColors.surface(context)),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: isCurrent
                         ? AppTheme.brand
                         : (isSent
                             ? AppTheme.success
-                            : AppTheme.borderLight),
+                            : AppColors.border(context)),
                   ),
                 ),
                 child: Row(
@@ -787,7 +787,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                       size: 16,
                       color: isSent
                           ? AppTheme.success
-                          : AppTheme.textMuted,
+                          : AppColors.textMuted(context),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -799,7 +799,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                             style: GoogleFonts.inter(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
-                              color: AppTheme.textPrimary,
+                              color: AppColors.text(context),
                             ),
                           ),
                           if (seats.isNotEmpty)
@@ -807,7 +807,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                               'Seat $seats',
                               style: GoogleFonts.inter(
                                 fontSize: 11,
-                                color: AppTheme.textSecondary,
+                                color: AppColors.textMuted(context),
                               ),
                             ),
                         ],
@@ -816,7 +816,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                     Icon(
                       Icons.chevron_right_rounded,
                       size: 18,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                     ),
                   ],
                 ),
@@ -848,10 +848,10 @@ class _PassengerCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isSent ? AppTheme.success : AppTheme.borderLight,
+          color: isSent ? AppTheme.success : AppColors.border(context),
           width: isSent ? 1.5 : 1,
         ),
         boxShadow: AppTheme.cardShadow,
@@ -872,7 +872,7 @@ class _PassengerCard extends StatelessWidget {
                       style: GoogleFonts.inter(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.textPrimary,
+                        color: AppColors.text(context),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -882,7 +882,7 @@ class _PassengerCard extends StatelessWidget {
                       passenger.phone,
                       style: GoogleFonts.inter(
                         fontSize: 12,
-                        color: AppTheme.textSecondary,
+                        color: AppColors.textMuted(context),
                       ),
                     ),
                   ],
@@ -921,13 +921,13 @@ class _PassengerCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(
                 horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: AppTheme.bgLight,
+              color: AppColors.bg(context),
               borderRadius: BorderRadius.circular(6),
             ),
             child: Row(
               children: [
                 Icon(Icons.event_seat_rounded,
-                    size: 14, color: AppTheme.textSecondary),
+                    size: 14, color: AppColors.textMuted(context)),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -935,7 +935,7 @@ class _PassengerCard extends StatelessWidget {
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimary,
+                      color: AppColors.text(context),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -948,7 +948,7 @@ class _PassengerCard extends StatelessWidget {
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                     ),
                   ),
                 ],
