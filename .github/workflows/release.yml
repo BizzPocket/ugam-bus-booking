@@ -45,7 +45,15 @@ jobs:
       - run: flutter pub get
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: |
+          VERSION="${{ steps.tag.outputs.name }}"
+          VERSION_NUMERIC="${VERSION#v}"
+          # Stamp the APK with the tag's version so PackageInfo.version on
+          # device matches what `latest.json` advertises — otherwise the
+          # installed app would re-detect "update available" forever.
+          flutter build apk --release \
+            --build-name "$VERSION_NUMERIC" \
+            --build-number "$GITHUB_RUN_NUMBER"
 
       - name: Rename APK
         run: |
