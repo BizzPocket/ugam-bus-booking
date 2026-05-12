@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +8,7 @@ import '../controllers/tour_controller.dart';
 import '../models/bus_details.dart';
 import '../models/tour.dart';
 import 'add_bus_screen.dart';
+import 'bus_status_screen.dart';
 
 /// List of buses attached to a tour. Mirrors the Pencil "Manage Buses"
 /// screen: header with tour context, capacity tally, and a card per bus
@@ -40,7 +42,7 @@ class ManageBusesScreen extends StatelessWidget {
         child: Obx(() {
           final tour = _tourCtrl.getTour(tourId);
           if (tour == null) {
-            return const Center(child: Text('Tour not found'));
+            return Center(child: Text(tr('manage_buses.tour_not_found')));
           }
 
           final assigned = tour.totalSeatsAssigned;
@@ -74,12 +76,21 @@ class ManageBusesScreen extends StatelessWidget {
                           );
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
-                            child: _BusCard(
-                              bus: bus,
-                              assigned: assignedForBus,
-                              onEdit: () {
-                                // Edit flow lands in a later phase.
-                              },
+                            child: GestureDetector(
+                              onTap: () => Get.to(
+                                () => BusStatusScreen(
+                                  tourId: tourId,
+                                  busId: bus.id,
+                                ),
+                                transition: Transition.cupertino,
+                              ),
+                              child: _BusCard(
+                                bus: bus,
+                                assigned: assignedForBus,
+                                onEdit: () {
+                                  // Edit flow lands in a later phase.
+                                },
+                              ),
                             ),
                           );
                         },
@@ -92,7 +103,7 @@ class ManageBusesScreen extends StatelessWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => Get.to(() => AddBusScreen(tourId: tourId)),
         icon: const Icon(Icons.add_rounded),
-        label: const Text('Add Bus'),
+        label: Text(tr('manage_buses.add_bus')),
         backgroundColor: AppTheme.brand,
         foregroundColor: Colors.white,
       ),
@@ -131,7 +142,7 @@ class _Header extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Manage Buses',
+                  tr('manage_buses.title'),
                   style: GoogleFonts.inter(
                     fontSize: 22,
                     fontWeight: FontWeight.w700,
@@ -139,7 +150,8 @@ class _Header extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '$title · $subtitle',
+                  tr('manage_buses.tour_context',
+                      namedArgs: {'tourTitle': title, 'dateRange': subtitle}),
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     color: AppTheme.textMuted,
@@ -169,6 +181,16 @@ class _Tally extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final busLabel = busCount == 1
+        ? tr('manage_buses.tally_bus_one',
+            namedArgs: {'count': busCount.toString()})
+        : tr('manage_buses.tally_bus_other',
+            namedArgs: {'count': busCount.toString()});
+    final seatsLabel = tr('manage_buses.tally_total_seats',
+        namedArgs: {'count': totalSeats.toString()});
+    final assignedLabel = tr('manage_buses.tally_assigned',
+        namedArgs: {'count': assignedSeats.toString()});
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
@@ -185,9 +207,7 @@ class _Tally extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              '$busCount ${busCount == 1 ? 'Bus' : 'Buses'} · '
-              '$totalSeats Total Seats · '
-              '$assignedSeats Assigned',
+              '$busLabel · $seatsLabel · $assignedLabel',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -219,7 +239,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'No buses yet',
+              tr('manage_buses.empty_title'),
               style: GoogleFonts.inter(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -227,8 +247,7 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Once your bus owner confirms, tap "Add Bus" to enter '
-              'the driver and seat details.',
+              tr('manage_buses.empty_body'),
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 13,
@@ -260,6 +279,11 @@ class _BusCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final capacity = bus.totalSeats;
     final ratio = capacity > 0 ? (assigned / capacity).clamp(0.0, 1.0) : 0.0;
+
+    final busNumberLabel = bus.busNumber.isEmpty
+        ? tr('manage_buses.bus_number_blank')
+        : tr('manage_buses.bus_number',
+            namedArgs: {'number': bus.busNumber});
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -296,7 +320,7 @@ class _BusCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Bus #${bus.busNumber.isEmpty ? '—' : bus.busNumber}',
+                      busNumberLabel,
                       style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
@@ -329,7 +353,9 @@ class _BusCard extends StatelessWidget {
           Row(
             children: [
               _Tag(
-                label: bus.isAC ? 'AC' : 'Non-AC',
+                label: bus.isAC
+                    ? tr('manage_buses.tag_ac')
+                    : tr('manage_buses.tag_non_ac'),
                 color: bus.isAC ? AppTheme.success : AppTheme.warning,
               ),
               const SizedBox(width: 6),
@@ -346,14 +372,17 @@ class _BusCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Occupancy',
+                tr('manage_buses.occupancy_label'),
                 style: GoogleFonts.inter(
                   fontSize: 11,
                   color: AppTheme.textMuted,
                 ),
               ),
               Text(
-                '$assigned/$capacity seats',
+                tr('manage_buses.occupancy_count', namedArgs: {
+                  'assigned': assigned.toString(),
+                  'capacity': capacity.toString(),
+                }),
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
