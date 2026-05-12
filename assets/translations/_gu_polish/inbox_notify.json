@@ -1,0 +1,133 @@
+{
+  "requests": {
+    "title": "વિનંતીઓ",
+    "fab_add": "વિનંતી ઉમેરો",
+    "filter": {
+      "new": "નવી",
+      "waitlist": "વેઇટલિસ્ટ",
+      "assigned": "સીટ મળ્યા"
+    },
+    "status": {
+      "new": "નવી",
+      "waitlist": "વેઇટલિસ્ટ",
+      "seats_assigned": "સીટ ફળવ્યા"
+    },
+    "time": {
+      "just_now": "હમણાં જ",
+      "minutes_ago": "{n} મિ. પહેલાં",
+      "hours_ago": "{n} ક. પહેલાં",
+      "days_ago": "{n} દિ. પહેલાં"
+    },
+    "seat_chip": {
+      "seats": "{count} સીટ"
+    },
+    "action": {
+      "assign_seats": "સીટ ફાળવો",
+      "view_assignment": "ફાળવણી જુઓ",
+      "send_wa_ack": "WhatsApp પર જાણ કરો",
+      "move_to_waitlist": "વેઇટલિસ્ટમાં મૂકો",
+      "back_to_new": "નવીમાં પાછા",
+      "unassign_all": "બધી સીટ ઉઠાવો",
+      "decline_request": "વિનંતી નકારો",
+      "more_actions": "વધુ વિકલ્પો"
+    },
+    "decline_dialog": {
+      "title": "વિનંતી નકારીએ?",
+      "body": "{name} ની વિનંતી આ ટૂરમાંથી કાઢી નાખવી? મન બદલો તો તેઓ ફરીથી ભરી શકે.",
+      "confirm": "નકારો"
+    },
+    "empty_no_tours": {
+      "title": "કોઈ સક્રિય ટૂર નથી",
+      "body": "સીટ વિનંતીઓ ભેગી કરવા ટૂર બનાવો."
+    },
+    "empty_new": {
+      "title": "કોઈ નવી વિનંતી નથી",
+      "body": "પ્રવાસીઓ સીટ માટે ફોર્મ ભરે એટલે અહીં દેખાશે."
+    },
+    "empty_waitlist": {
+      "title": "વેઇટલિસ્ટ ખાલી છે",
+      "body": "જે વિનંતીઓ બાજુ પર રાખવી હોય તે અહીં ખસેડો."
+    },
+    "empty_assigned": {
+      "title": "હજી કોઈ સીટ ફળવ્યા નથી",
+      "body": "જ્યારે કોઈ પ્રવાસીને સીટ ફળવો ત્યારે તે અહીં આવશે."
+    },
+    "sheet": {
+      "title": "વિનંતી ઉમેરો",
+      "subtitle": "{tourTitle} · ગ્રાહક ફોર્મ વિના સીધું ઉમેરે છે",
+      "name_label": "ગ્રાહકનું નામ",
+      "name_hint": "દા.ત. Mahesh Patel",
+      "phone_label": "ફોન",
+      "phone_hint": "98765 43210",
+      "note_label": "નોંધ (વૈકલ્પિક)",
+      "note_hint": "દા.ત. વૃદ્ધ માતા-પિતા સાથે",
+      "single_sofa": "સિંગલ સોફા",
+      "double_sofa": "ડબલ સોફા",
+      "save": "વિનંતી સાચવો",
+      "saving": "સાચવી રહ્યા છીએ…"
+    },
+    "validation": {
+      "name_required": "નામ દાખલ કરો",
+      "phone_invalid": "10 અંકનો ફોન નંબર દાખલ કરો",
+      "seat_required": "ઓછામાં ઓછી એક સીટ પસંદ કરો"
+    },
+    "snack": {
+      "ack_title": "મેસેજ તૈયાર",
+      "ack_opened": "{name} માટે WhatsApp ખુલ્યું.",
+      "ack_error": "WhatsApp ખૂલ્યું નહીં.",
+      "added_one": "{name} — 1 સીટ સાથે ઉમેર્યા.",
+      "added_many": "{name} — {count} સીટ સાથે ઉમેર્યા.",
+      "add_error": "વિનંતી ઉમેરી ન શકાઈ — ફરી પ્રયાસ કરો.",
+      "seats_cleared": "{name} ની સીટ ફાળવણી સાફ કરી.",
+      "moved_to_waitlist": "{name} ને વેઇટલિસ્ટમાં ખસેડ્યા.",
+      "promoted_to_new": "{name} ને પાછા નવીમાં લઈ ગયા.",
+      "declined_title": "નકાર્યું",
+      "declined_body": "{name} ને આ ટૂરમાંથી કાઢ્યા."
+    }
+  },
+  "notify": {
+    "no_active_tours_title": "કોઈ ટૂર ચાલુ નથી",
+    "no_active_tours_body": "મેસેજ મોકલવા પહેલાં ટૂર બનાવો.",
+    "not_assigned": "સીટ નહીં",
+    "section_label": "ટૂર — જાણ કરો",
+    "summary_date": "તારીખ",
+    "summary_bus_no": "બસ નં.",
+    "summary_seats": "સીટ",
+    "passenger_assignments": "પ્રવાસીની સીટ",
+    "no_seats_assigned": "હજી કોઈ સીટ ફળવ્યા નથી",
+    "seat_label": "સીટ {seats}",
+    "lock_gate_title": "મેસેજ પહેલાં ટૂર લૉક કરો",
+    "lock_gate_body": "સીટ ફ્રીઝ કરવા ટૂર લૉક કરો. એકવાર લૉક થયા પછી WhatsApp કન્ફર્મેશન મોકલી શકાય — અને અનલૉક કર્યા વિના સીટ બદલાશે નહીં.",
+    "check_has_passengers": "ટૂરમાં ઓછામાં ઓછો એક પ્રવાસી હોય",
+    "check_all_assigned": "બધા પ્રવાસીઓને સીટ ફળવ્યા હોય",
+    "check_has_handler": "ટ્રિપ હેન્ડલર નક્કી કર્યો હોય",
+    "lock_btn": "ટૂર લૉક કરો",
+    "lock_btn_disabled": "પહેલાં સેટઅપ પૂરો કરો",
+    "lock_dialog_title": "ટૂર લૉક કરીએ?",
+    "lock_dialog_body": "એકવાર લૉક થઈ ગયા પછી અનલૉક કર્યા વિના સીટ બદલાશે નહીં. {count} પ્રવાસી(ઓ)ને WhatsApp મોકલવા તૈયાર થઈ જશો.",
+    "lock_dialog_lock": "લૉક કરો",
+    "locked_snack_title": "ટૂર લૉક થઈ ✓",
+    "locked_snack_body": "હવે દરેક પ્રવાસીને WhatsApp પર સીટ કન્ફર્મ કરો.",
+    "assign_first": "પહેલાં સીટ ફળવો — પછી WhatsApp મોકલ શકાશે.",
+    "all_sent": "બધા મોકલ્યા ✓",
+    "sending_confirmations": "કન્ફર્મેશન મોકલાઈ રહ્યા છે",
+    "next_label": "આગળ",
+    "next_seat_phone": "સીટ {seats} · {phone}",
+    "open_whatsapp": "WhatsApp ખોલીને મોકલો",
+    "remaining": "{count} બાકી",
+    "all_done_title": "બધા મેસેજ ગયા!",
+    "all_done_body": "દરેક પ્રવાસીને WhatsApp પર ટિકિટ મળી ગઈ.",
+    "reset_send_again": "ફરી શરૂ કરો",
+    "opened_snack_title": "{name} માટે ખુલ્યું",
+    "opened_snack_body": "WhatsApp માં Send ટેપ કરો, પછી પાછા આવો.",
+    "wa_error": "WhatsApp ખૂલ્યું નહીં. ઇન્સ્ટૉલ છે?",
+    "send_now_help": "WhatsApp માં Send ટેપ કરો, પછી આગળના પ્રવાસી માટે પાછા આવો.",
+    "whatsapp_unavailable": "WhatsApp ખૂલ્યું નહીં. ઇન્સ્ટૉલ છે?",
+    "empty_no_seats": "હજી કોઈ પ્રવાસીને સીટ ફળવ્યા નથી.",
+    "search_hint": "નામ કે ફોન દ્વારા શોધો",
+    "no_matches": "\"{query}\" માટે કોઈ પ્રવાસી મળ્યા નહીં",
+    "cta_send_again": "ફરી મોકલો",
+    "cta_send_first": "WhatsApp ખોલીને મોકલો",
+    "send_now_opened_title": "{name} માટે ખુલ્યું"
+  }
+}
