@@ -19,8 +19,20 @@ class LocaleController extends GetxController {
 
   /// Switch the app locale. Must be called with a live BuildContext so
   /// easy_localization can rebuild the tree and persist the choice.
+  ///
+  /// We push the locale change through THREE places on purpose:
+  ///   1. `context.setLocale(...)` — easy_localization stores it in
+  ///      SharedPreferences and rebuilds anything that reads
+  ///      `context.locale` / uses `tr(...)`.
+  ///   2. `Get.updateLocale(...)` — `GetMaterialApp` caches its `locale`
+  ///      arg; without this call the Material chrome (date pickers,
+  ///      tooltips, system widgets) keeps showing the old language until
+  ///      the next cold start.
+  ///   3. `currentLocale.value = ...` — drives the radio selection in
+  ///      the picker sheet.
   Future<void> setLocale(BuildContext context, Locale locale) async {
     await context.setLocale(locale);
+    Get.updateLocale(locale);
     currentLocale.value = locale;
   }
 }
