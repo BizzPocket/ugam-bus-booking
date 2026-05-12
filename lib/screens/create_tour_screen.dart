@@ -105,11 +105,8 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.bgDark : AppTheme.bgLight,
+      backgroundColor: AppColors.bg(context),
       body: SafeArea(
         child: Column(
           children: [
@@ -118,9 +115,9 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
               padding:
                   const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               decoration: BoxDecoration(
-                color: isDark ? AppTheme.surfaceDark : Colors.white,
-                border: const Border(
-                  bottom: BorderSide(color: AppTheme.borderLight, width: 1),
+                color: AppColors.surface(context),
+                border: Border(
+                  bottom: BorderSide(color: AppColors.border(context), width: 1),
                 ),
               ),
               child: Row(
@@ -128,7 +125,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                   IconButton(
                     icon: Icon(
                       Icons.arrow_back,
-                      color: isDark ? Colors.white : AppTheme.textPrimary,
+                      color: AppColors.text(context),
                     ),
                     onPressed: () => Get.back(),
                   ),
@@ -138,7 +135,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                     style: GoogleFonts.inter(
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : AppTheme.textPrimary,
+                      color: AppColors.text(context),
                     ),
                   ),
                 ],
@@ -156,12 +153,12 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Tour Name
-                      _buildLabel(tr('create_tour.label.tour_name')),
+                      _buildLabel(context, tr('create_tour.label.tour_name')),
                       const SizedBox(height: 8),
                       _buildInput(
+                        context: context,
                         controller: _titleCtrl,
                         hint: tr('create_tour.hint.tour_name'),
-                        isDark: isDark,
                         validator: (v) => v == null || v.trim().isEmpty
                             ? tr('app.error.required')
                             : null,
@@ -170,15 +167,15 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       const SizedBox(height: 20),
 
                       // Route
-                      _buildLabel(tr('create_tour.label.route')),
+                      _buildLabel(context, tr('create_tour.label.route')),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: _buildInput(
+                              context: context,
                               controller: _fromCtrl,
                               hint: tr('create_tour.hint.from_city'),
-                              isDark: isDark,
                               prefixIcon: Icons.location_on_outlined,
                               validator: (v) => v == null || v.trim().isEmpty
                                   ? tr('app.error.required')
@@ -191,14 +188,14 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                             child: Icon(
                               Icons.arrow_forward_rounded,
                               size: 18,
-                              color: AppTheme.textMuted,
+                              color: AppColors.textMuted(context),
                             ),
                           ),
                           Expanded(
                             child: _buildInput(
+                              context: context,
                               controller: _toCtrl,
                               hint: tr('create_tour.hint.to_city'),
-                              isDark: isDark,
                               prefixIcon: Icons.location_on_outlined,
                               validator: (v) => v == null || v.trim().isEmpty
                                   ? tr('app.error.required')
@@ -211,7 +208,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       const SizedBox(height: 20),
 
                       // Date Range
-                      _buildLabel(tr('create_tour.label.date_range')),
+                      _buildLabel(context, tr('create_tour.label.date_range')),
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -220,7 +217,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                               hint: tr('create_tour.hint.start_date'),
                               date: _departureDate,
                               onTap: () => _pickDate(false),
-                              isDark: isDark,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -229,7 +225,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                               hint: tr('create_tour.hint.end_date'),
                               date: _returnDate,
                               onTap: () => _pickDate(true),
-                              isDark: isDark,
                             ),
                           ),
                         ],
@@ -240,23 +235,23 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       // Price Per Seat (optional — can be set per bus later)
                       Row(
                         children: [
-                          _buildLabel(tr('create_tour.label.price_per_seat')),
+                          _buildLabel(context, tr('create_tour.label.price_per_seat')),
                           const SizedBox(width: 6),
                           Text(
                             tr('create_tour.label.optional'),
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               fontStyle: FontStyle.italic,
-                              color: AppTheme.textMuted,
+                              color: AppColors.textMuted(context),
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 8),
                       _buildInput(
+                        context: context,
                         controller: _priceCtrl,
                         hint: tr('create_tour.hint.price'),
-                        isDark: isDark,
                         prefixText: '₹ ',
                         keyboardType: TextInputType.number,
                         validator: (v) {
@@ -271,12 +266,12 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       const SizedBox(height: 20),
 
                       // Tour Description
-                      _buildLabel(tr('create_tour.label.tour_description')),
+                      _buildLabel(context, tr('create_tour.label.tour_description')),
                       const SizedBox(height: 8),
                       _buildInput(
+                        context: context,
                         controller: _descCtrl,
                         hint: tr('create_tour.hint.description'),
-                        isDark: isDark,
                         maxLines: 4,
                         minHeight: 100,
                       ),
@@ -345,14 +340,14 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                           Icon(
                             Icons.chat_bubble_outline_rounded,
                             size: 14,
-                            color: AppTheme.textMuted,
+                            color: AppColors.textMuted(context),
                           ),
                           const SizedBox(width: 6),
                           Text(
                             tr('create_tour.broadcast_note'),
                             style: GoogleFonts.inter(
                               fontSize: 11,
-                              color: AppTheme.textMuted,
+                              color: AppColors.textMuted(context),
                             ),
                           ),
                         ],
@@ -372,22 +367,22 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
 
   // ── Helpers ──────────────────────────────────────────────────────
 
-  Widget _buildLabel(String text) {
+  Widget _buildLabel(BuildContext context, String text) {
     return Text(
       text,
       style: GoogleFonts.inter(
         fontSize: 12,
         fontWeight: FontWeight.w500,
         letterSpacing: 0.5,
-        color: AppTheme.textPrimary,
+        color: AppColors.text(context),
       ),
     );
   }
 
   Widget _buildInput({
+    required BuildContext context,
     required TextEditingController controller,
     required String hint,
-    required bool isDark,
     IconData? prefixIcon,
     String? prefixText,
     int maxLines = 1,
@@ -404,36 +399,34 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
         validator: validator,
         style: GoogleFonts.inter(
           fontSize: 15,
-          color: isDark ? Colors.white : AppTheme.textPrimary,
+          color: AppColors.text(context),
         ),
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: GoogleFonts.inter(
             fontSize: 15,
-            color: AppTheme.textMuted,
+            color: AppColors.textMuted(context),
           ),
           prefixIcon: prefixIcon != null
-              ? Icon(prefixIcon, size: 18, color: AppTheme.textMuted)
+              ? Icon(prefixIcon, size: 18, color: AppColors.textMuted(context))
               : null,
           prefixText: prefixText,
           prefixStyle: GoogleFonts.inter(
             fontSize: 15,
             fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : AppTheme.textPrimary,
+            color: AppColors.text(context),
           ),
           filled: true,
-          fillColor: isDark ? AppTheme.cardDark : Colors.white,
+          fillColor: AppColors.surface(context),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppTheme.borderDefault),
+            borderSide: BorderSide(color: AppColors.border(context)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(
-              color: isDark ? AppTheme.borderDark : AppTheme.borderDefault,
-            ),
+            borderSide: BorderSide(color: AppColors.border(context)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
@@ -455,13 +448,11 @@ class _DatePickerField extends StatelessWidget {
   final String hint;
   final DateTime? date;
   final VoidCallback onTap;
-  final bool isDark;
 
   const _DatePickerField({
     required this.hint,
     required this.date,
     required this.onTap,
-    required this.isDark,
   });
 
   @override
@@ -472,18 +463,16 @@ class _DatePickerField extends StatelessWidget {
         height: 50,
         padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
-          color: isDark ? AppTheme.cardDark : Colors.white,
+          color: AppColors.surface(context),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppTheme.borderDefault,
-          ),
+          border: Border.all(color: AppColors.border(context)),
         ),
         child: Row(
           children: [
             Icon(
               Icons.calendar_today_outlined,
               size: 16,
-              color: AppTheme.textMuted,
+              color: AppColors.textMuted(context),
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -492,8 +481,8 @@ class _DatePickerField extends StatelessWidget {
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   color: date != null
-                      ? (isDark ? Colors.white : AppTheme.textPrimary)
-                      : AppTheme.textMuted,
+                      ? AppColors.text(context)
+                      : AppColors.textMuted(context),
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
