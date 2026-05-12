@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -82,84 +83,104 @@ class _PillBottomNav extends StatelessWidget {
   const _PillBottomNav({required this.currentIndex, required this.onTap});
 
   static const _tabs = <_TabData>[
-    _TabData(icon: Icons.home_rounded, label: 'HOME'),
-    _TabData(icon: Icons.location_on_rounded, label: 'TOUR'),
-    _TabData(icon: Icons.chat_bubble_rounded, label: 'REQUESTS'),
-    _TabData(icon: Icons.grid_view_rounded, label: 'ASSIGN'),
-    _TabData(icon: Icons.notifications_rounded, label: 'NOTIFY'),
+    _TabData(icon: Icons.home_rounded, labelKey: 'main_shell.tab_home'),
+    _TabData(icon: Icons.location_on_rounded, labelKey: 'main_shell.tab_tour'),
+    _TabData(icon: Icons.chat_bubble_rounded, labelKey: 'main_shell.tab_requests'),
+    _TabData(icon: Icons.grid_view_rounded, labelKey: 'main_shell.tab_assign'),
+    _TabData(icon: Icons.notifications_rounded, labelKey: 'main_shell.tab_notify'),
   ];
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 21, 12, 21),
-      child: Container(
-        height: 62,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: Theme.of(context).brightness == Brightness.dark
-              ? AppTheme.cardDark
-              : Colors.white,
-          borderRadius: BorderRadius.circular(36),
-          border: Border.all(
-            color: Theme.of(context).brightness == Brightness.dark
-                ? AppTheme.borderDark
-                : AppTheme.borderLight,
-            width: 1,
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final scheme = theme.colorScheme;
+
+    final surface = isDark ? AppTheme.cardDark : scheme.surface;
+    final border = isDark ? AppTheme.borderDark : AppTheme.borderLight;
+    final inactiveFg = scheme.onSurfaceVariant;
+
+    // SafeArea wraps the pill so it sits above the OS gesture inset on
+    // modern phones without us padding for it manually. Tighter outer
+    // padding (8/10) replaces the old 21px slab that was wasting ~30%
+    // of the bottom area on every screen.
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        child: Container(
+          height: 58,
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: surface,
+            borderRadius: BorderRadius.circular(32),
+            border: Border.all(color: border, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.35)
+                    : Colors.black.withValues(alpha: 0.05),
+                offset: const Offset(0, 4),
+                blurRadius: 16,
+              ),
+            ],
           ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x08000000),
-              offset: Offset(0, 1),
-              blurRadius: 3,
-            ),
-            BoxShadow(
-              color: Color(0x0A000000),
-              offset: Offset(0, 8),
-              blurRadius: 24,
-            ),
-          ],
-        ),
-        child: Row(
-          children: List.generate(_tabs.length, (index) {
-            final tab = _tabs[index];
-            final isActive = index == currentIndex;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => onTap(index),
-                behavior: HitTestBehavior.opaque,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeInOut,
-                  decoration: BoxDecoration(
-                    color: isActive ? AppTheme.brand : Colors.transparent,
-                    borderRadius: BorderRadius.circular(26),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        tab.icon,
-                        size: 18,
-                        color: isActive ? Colors.white : AppTheme.textMuted,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        tab.label,
-                        style: GoogleFonts.inter(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 0.5,
-                          color:
-                              isActive ? Colors.white : AppTheme.textMuted,
+          child: Row(
+            children: List.generate(_tabs.length, (index) {
+              final tab = _tabs[index];
+              final isActive = index == currentIndex;
+              return Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onTap(index);
+                  },
+                  behavior: HitTestBehavior.opaque,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      color: isActive ? AppTheme.brand : Colors.transparent,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          tab.icon,
+                          size: 18,
+                          color: isActive ? Colors.white : inactiveFg,
                         ),
-                      ),
-                    ],
+                        // Labels appear only on the active tab so the
+                        // inactive ones don't pull visual weight. Compact
+                        // labels are the iOS-style pattern most users
+                        // already expect from mobile chrome.
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          child: isActive
+                              ? Padding(
+                                  padding:
+                                      const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    tr(tab.labelKey),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.6,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            );
-          }),
+              );
+            }),
+          ),
         ),
       ),
     );
@@ -168,6 +189,6 @@ class _PillBottomNav extends StatelessWidget {
 
 class _TabData {
   final IconData icon;
-  final String label;
-  const _TabData({required this.icon, required this.label});
+  final String labelKey;
+  const _TabData({required this.icon, required this.labelKey});
 }
