@@ -38,12 +38,12 @@ class TourDetailScreen extends StatelessWidget {
       final declined = 0; // Logic for declined not yet in model, keeping 0
 
       return Scaffold(
-        backgroundColor: AppTheme.bgLight,
+        backgroundColor: AppColors.bg(context),
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: AppColors.surface(context),
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+            icon: Icon(Icons.arrow_back, color: AppColors.text(context)),
             onPressed: () => Get.back(),
           ),
           title: Text(
@@ -51,14 +51,14 @@ class TourDetailScreen extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
+              color: AppColors.text(context),
             ),
           ),
           centerTitle: true,
           actions: [
             IconButton(
-              icon: const Icon(Icons.edit_outlined,
-                  color: AppTheme.textPrimary),
+              icon: Icon(Icons.edit_outlined,
+                  color: AppColors.text(context)),
               tooltip: tr('tour_detail.tooltip_edit'),
               onPressed: () => Get.to(
                 () => EditTourScreen(tourId: tourId),
@@ -85,9 +85,9 @@ class TourDetailScreen extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface(context),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.borderLight),
+                    border: Border.all(color: AppColors.border(context)),
                     boxShadow: [AppTheme.subtleShadow[0]],
                   ),
                   child: Column(
@@ -102,7 +102,7 @@ class TourDetailScreen extends StatelessWidget {
                               style: GoogleFonts.inter(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w700,
-                                color: AppTheme.textPrimary,
+                                color: AppColors.text(context),
                               ),
                             ),
                           ),
@@ -147,7 +147,7 @@ class TourDetailScreen extends StatelessWidget {
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
+                    color: AppColors.text(context),
                   ),
                 ),
               ),
@@ -199,7 +199,7 @@ class TourDetailScreen extends StatelessWidget {
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textPrimary,
+                    color: AppColors.text(context),
                   ),
                 ),
               ),
@@ -332,7 +332,7 @@ class _StatusBadge extends StatelessWidget {
             width: 6,
             height: 6,
             decoration: BoxDecoration(
-              color: isActive ? AppTheme.success : AppTheme.textSecondary,
+              color: isActive ? AppTheme.success : AppColors.textMuted(context),
               shape: BoxShape.circle,
             ),
           ),
@@ -342,7 +342,7 @@ class _StatusBadge extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: isActive ? AppTheme.success : AppTheme.textSecondary,
+              color: isActive ? AppTheme.success : AppColors.textMuted(context),
             ),
           ),
         ],
@@ -367,7 +367,7 @@ class _InfoItem extends StatelessWidget {
           style: GoogleFonts.inter(
             fontSize: 10,
             fontWeight: FontWeight.w600,
-            color: AppTheme.textMuted,
+            color: AppColors.textMuted(context),
             letterSpacing: 0.5,
           ),
         ),
@@ -377,7 +377,7 @@ class _InfoItem extends StatelessWidget {
           style: GoogleFonts.inter(
             fontSize: 15,
             fontWeight: FontWeight.w500,
-            color: AppTheme.textSecondary,
+            color: AppColors.textMuted(context),
           ),
         ),
       ],
@@ -442,9 +442,9 @@ class _BusInfoCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
       ),
       child: Row(
         children: [
@@ -467,7 +467,7 @@ class _BusInfoCard extends StatelessWidget {
                   style: GoogleFonts.inter(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
-                    color: AppTheme.textPrimary,
+                    color: AppColors.text(context),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -475,7 +475,7 @@ class _BusInfoCard extends StatelessWidget {
                   tr('tour_detail.driver_label', namedArgs: {'name': bus.driverName ?? ''}),
                   style: GoogleFonts.inter(
                     fontSize: 12,
-                    color: AppTheme.textSecondary,
+                    color: AppColors.textMuted(context),
                   ),
                 ),
               ],
@@ -493,9 +493,9 @@ class _EmptyBusInfo extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.borderLight),
+        border: Border.all(color: AppColors.border(context)),
       ),
       child: Row(
         children: [
@@ -503,17 +503,17 @@ class _EmptyBusInfo extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: AppTheme.bgLight,
+              color: AppColors.bg(context),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: const Icon(Icons.bus_alert_rounded, color: AppTheme.textMuted),
+            child: Icon(Icons.bus_alert_rounded, color: AppColors.textMuted(context)),
           ),
           const SizedBox(width: 14),
           Text(
             tr('tour_detail.no_bus_assigned'),
             style: GoogleFonts.inter(
               fontSize: 14,
-              color: AppTheme.textMuted,
+              color: AppColors.textMuted(context),
             ),
           ),
         ],
