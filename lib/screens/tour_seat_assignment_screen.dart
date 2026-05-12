@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,7 +22,16 @@ import 'manage_buses_screen.dart';
 class TourSeatAssignmentScreen extends StatefulWidget {
   final String tourId;
 
-  const TourSeatAssignmentScreen({super.key, required this.tourId});
+  /// Optional. When set, the screen lands on this specific passenger so
+  /// the agent can start tapping seats immediately. Passed through from
+  /// the "Assign Seats →" button on the Requests screen.
+  final String? initialPassengerId;
+
+  const TourSeatAssignmentScreen({
+    super.key,
+    required this.tourId,
+    this.initialPassengerId,
+  });
 
   @override
   State<TourSeatAssignmentScreen> createState() =>
@@ -32,6 +42,12 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   String? _selectedBusId;
   bool _showUpperDeck = false;
   String? _selectedPassengerId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedPassengerId = widget.initialPassengerId;
+  }
 
   TourController get _ctrl => Get.find<TourController>();
 
@@ -106,10 +122,14 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
             .cast<SeatCell?>()
             .firstWhere((_) => true, orElse: () => null);
         if (cell == null) continue;
+        // A request line with `position == null` (the new customer form
+        // doesn't ask upper vs lower — the agent picks) matches sleeper
+        // cells of either position. Strict-match only when the line
+        // explicitly specifies a position (legacy or admin-entered data).
         final idx = pending.indexWhere(
           (l) =>
               l.seatType == cell!.seatType &&
-              l.position == cell.position &&
+              (l.position == null || l.position == cell.position) &&
               l.remaining > 0,
         );
         if (idx >= 0) {
@@ -124,7 +144,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     if (cell.isEmpty || cell.seatId == null) return;
     final passenger = _selectedPassenger(tour);
     if (passenger == null) {
-      AppSnackBar.error('No passengers to assign — add one first.');
+      AppSnackBar.error(tr('tour_seat_assignment.err_no_passengers'));
       return;
     }
 
@@ -147,24 +167,28 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           .toList()
           .firstOrNull;
       AppSnackBar.warning(
-        '${cell.seatId} is currently with '
-        '${other?.name ?? 'another passenger'}. '
-        'Unassign there before reassigning.',
+        tr('tour_seat_assignment.err_seat_taken', namedArgs: {
+          'seat': cell.seatId!,
+          'otherName': other?.name ??
+              tr('tour_seat_assignment.err_seat_taken_fallback_name'),
+        }),
       );
       return;
     }
 
     // Free seat. Check it matches a pending request line.
+    // Same null-position-is-wildcard rule as in _pendingLines above.
     final pending = _pendingLines(passenger);
     final matchIdx = pending.indexWhere((l) =>
         l.seatType == cell.seatType &&
-        l.position == cell.position &&
+        (l.position == null || l.position == cell.position) &&
         l.remaining > 0);
     if (matchIdx < 0) {
       AppSnackBar.warning(
-        '${passenger.displayName} did not request a '
-        '${seatTypeLabel(cell.seatType!, cell.position)}. '
-        'Edit their request first.',
+        tr('tour_seat_assignment.err_type_mismatch', namedArgs: {
+          'passengerName': passenger.displayName,
+          'seatType': seatTypeLabel(cell.seatType!, cell.position),
+        }),
       );
       return;
     }
@@ -174,26 +198,49 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     await _ctrl.assignSeats(tour.id, passenger.id, next);
 
     // Auto-advance to next unassigned passenger when current is done.
-    final updatedPassenger = _ctrl
-        .getTour(tour.id)
-        ?.passengers
+    final updatedTour = _ctrl.getTour(tour.id);
+    final updatedPassenger = updatedTour?.passengers
         .firstWhere((p) => p.id == passenger.id, orElse: () => passenger);
+
     if (updatedPassenger != null && updatedPassenger.isFullyAssigned) {
-      final nextUnassigned = _ctrl
-          .getTour(tour.id)!
-          .passengers
+      // Passenger is done — surface the milestone clearly.
+      AppSnackBar.success(
+        tr('tour_seat_assignment.snack_fully_assigned_body',
+            namedArgs: {'passengerName': passenger.displayName}),
+        title: tr('tour_seat_assignment.snack_fully_assigned_title'),
+      );
+
+      final nextUnassigned = updatedTour!.passengers
           .where((p) => !p.isFullyAssigned)
           .toList();
       if (nextUnassigned.isNotEmpty) {
         setState(() => _selectedPassengerId = nextUnassigned.first.id);
+      } else if (updatedTour.handlerId != null) {
+        // Everyone's done and a handler is picked — the Lock Tour CTA
+        // is now active. Nudge the agent toward it.
+        AppSnackBar.success(
+          tr('tour_seat_assignment.snack_all_done_body'),
+          title: tr('tour_seat_assignment.snack_all_done_title'),
+        );
+      } else {
+        AppSnackBar.warning(
+          tr('tour_seat_assignment.snack_no_handler'),
+        );
       }
+    } else {
+      // Mid-passenger: brief, low-noise confirmation so the agent knows
+      // the tap was saved (the seat turning amber is also a visual cue).
+      AppSnackBar.success(
+        tr('tour_seat_assignment.snack_seat_saved',
+            namedArgs: {'seatId': cell.seatId!}),
+      );
     }
   }
 
   Future<void> _toggleHandler(Tour tour, String passengerId) async {
     if (tour.handlerId == passengerId) {
       await _ctrl.removeHandler(tour.id);
-      AppSnackBar.success('Handler removed.');
+      AppSnackBar.success(tr('tour_seat_assignment.snack_handler_removed'));
     } else {
       await _ctrl.setHandler(tour.id, passengerId);
       final p = tour.passengers
@@ -201,22 +248,25 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           .toList()
           .firstOrNull;
       AppSnackBar.success(
-        '${p?.name ?? 'Passenger'} is now the trip handler.',
+        tr('tour_seat_assignment.snack_handler_set', namedArgs: {
+          'name': p?.name ??
+              tr('tour_seat_assignment.snack_handler_set_fallback_name'),
+        }),
       );
     }
   }
 
   Future<void> _lockTour(Tour tour) async {
     if (!tour.allSeatsAssigned) {
-      AppSnackBar.error('All passengers must be fully assigned first.');
+      AppSnackBar.error(tr('tour_seat_assignment.err_not_all_assigned'));
       return;
     }
     if (tour.handlerId == null) {
-      AppSnackBar.error('Pick a handler before locking.');
+      AppSnackBar.error(tr('tour_seat_assignment.err_no_handler'));
       return;
     }
     await _ctrl.lockTour(tour.id);
-    AppSnackBar.success('Tour locked. Notifications next.');
+    AppSnackBar.success(tr('tour_seat_assignment.snack_tour_locked'));
   }
 
   @override
@@ -228,7 +278,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         child: Obx(() {
           final tour = _tour;
           if (tour == null) {
-            return const Center(child: Text('Tour not found'));
+            return Center(child: Text(tr('tour_seat_assignment.tour_not_found')));
           }
           if (tour.buses.isEmpty) {
             return _NoBuses(tourId: widget.tourId);
@@ -244,7 +294,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           return Column(
             children: [
               _Header(
-                title: 'Seat Assignment',
+                title: tr('tour_seat_assignment.title'),
                 tourId: widget.tourId,
               ),
               _Subtitle(tour: tour),
@@ -372,7 +422,7 @@ class _Header extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
               child: Text(
-                'Fleet',
+                tr('tour_seat_assignment.fleet_link'),
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
@@ -400,9 +450,15 @@ class _Subtitle extends StatelessWidget {
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text(
-          '${tour.title} · ${tour.buses.length} '
-          '${tour.buses.length == 1 ? 'Bus' : 'Buses'} · '
-          '$assigned/$capacity Seats Assigned',
+          tr('tour_seat_assignment.subtitle', namedArgs: {
+            'tourTitle': tour.title,
+            'busCount': tour.buses.length.toString(),
+            'busTerm': tour.buses.length == 1
+                ? tr('tour_seat_assignment.subtitle_bus_singular')
+                : tr('tour_seat_assignment.subtitle_bus_plural'),
+            'assigned': assigned.toString(),
+            'capacity': capacity.toString(),
+          }),
           style: GoogleFonts.inter(
             fontSize: 12,
             color: AppTheme.textMuted,
@@ -531,7 +587,8 @@ class _BusHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  'Driver: ${bus.driverName.isEmpty ? '—' : bus.driverName}',
+                  tr('tour_seat_assignment.driver_label',
+                      namedArgs: {'name': bus.driverName.isEmpty ? '—' : bus.driverName}),
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     color: isDark ? Colors.white70 : AppTheme.textSecondary,
@@ -556,7 +613,8 @@ class _BusHeader extends StatelessWidget {
                 ),
               ),
               Text(
-                '$percent% full',
+                tr('tour_seat_assignment.percent_full',
+                    namedArgs: {'percent': percent.toString()}),
                 style: GoogleFonts.inter(
                   fontSize: 10,
                   color: AppTheme.textMuted,
@@ -584,7 +642,7 @@ class _DeckTabs extends StatelessWidget {
         children: [
           Expanded(
             child: _DeckTab(
-              label: 'Lower Deck',
+              label: tr('tour_seat_assignment.deck_lower'),
               selected: !showUpperDeck,
               onTap: () => onChanged(false),
             ),
@@ -592,7 +650,7 @@ class _DeckTabs extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _DeckTab(
-              label: 'Upper Deck',
+              label: tr('tour_seat_assignment.deck_upper'),
               selected: showUpperDeck,
               onTap: () => onChanged(true),
             ),
@@ -663,9 +721,28 @@ class _SeatGrid extends StatelessWidget {
       return _NoLayout();
     }
     final cells = showUpper ? l.upperDeck : l.lowerDeck;
-    final seatCells = cells.where((c) => c.hasSeat).toList();
-    if (seatCells.isEmpty) {
+    final seatCellsForCheck = cells.where((c) => c.hasSeat).toList();
+    if (seatCellsForCheck.isEmpty) {
       return _NoLayout();
+    }
+
+    // Lay seats out by their actual (row, col) instead of packing
+    // sequentially, so a layout with empty grid cells (e.g. the col-1
+    // aisle in 2x1 sleeper buses, or single-on-left / double-on-right
+    // splits) renders the way it was generated. Previously the GridView
+    // dropped empty slots, collapsing the new lane-based layout back
+    // into a flat grid.
+    final cols = l.cols;
+    var maxRow = 0;
+    for (final c in seatCellsForCheck) {
+      if (c.row > maxRow) maxRow = c.row;
+    }
+    final slots = List<SeatCell?>.filled((maxRow + 1) * cols, null);
+    for (final c in seatCellsForCheck) {
+      final idx = c.row * cols + c.col;
+      if (idx >= 0 && idx < slots.length) {
+        slots[idx] = c;
+      }
     }
 
     return Column(
@@ -681,7 +758,9 @@ class _SeatGrid extends StatelessWidget {
             ),
             const SizedBox(width: 4),
             Text(
-              showUpper ? 'UPPER' : 'DRIVER',
+              showUpper
+                  ? tr('tour_seat_assignment.grid_label_upper')
+                  : tr('tour_seat_assignment.grid_label_driver'),
               style: GoogleFonts.inter(
                 fontSize: 9,
                 fontWeight: FontWeight.w600,
@@ -708,9 +787,14 @@ class _SeatGrid extends StatelessWidget {
               crossAxisSpacing: 8,
               childAspectRatio: 1.1,
             ),
-            itemCount: seatCells.length,
+            itemCount: slots.length,
             itemBuilder: (ctx, i) {
-              final cell = seatCells[i];
+              final cell = slots[i];
+              if (cell == null) {
+                // Empty slot — aisle / gap. Keep the cell footprint so
+                // the surrounding seats stay aligned in their lanes.
+                return const SizedBox.shrink();
+              }
               final ownerId = assignmentMap[cell.seatId];
               final isMine =
                   ownerId != null && ownerId == currentPassengerId;
@@ -742,40 +826,108 @@ class _SeatTile extends StatelessWidget {
     required this.onTap,
   });
 
+  /// 1-letter mark for the seat type (S = Single Sofa, D = Double Sofa,
+  /// T = Seater). Shown in the corner so the agent can read the bus
+  /// at a glance.
+  String? get _typeMark {
+    switch (cell.seatType) {
+      case SeatType.singleSofa:
+        return 'S';
+      case SeatType.doubleSofa:
+        return 'D';
+      case SeatType.seater:
+        return 'T';
+      case null:
+        return null;
+    }
+  }
+
+  Color get _typeTint {
+    switch (cell.seatType) {
+      case SeatType.singleSofa:
+        return const Color(0xFFE7F8EE); // pale green
+      case SeatType.doubleSofa:
+        return const Color(0xFFE0F2FE); // pale blue
+      case SeatType.seater:
+        return const Color(0xFFF1F5F9); // pale grey
+      case null:
+        return Colors.white;
+    }
+  }
+
+  Color get _typeBorder {
+    switch (cell.seatType) {
+      case SeatType.singleSofa:
+        return const Color(0xFF22C55E);
+      case SeatType.doubleSofa:
+        return const Color(0xFF0EA5E9);
+      case SeatType.seater:
+        return AppTheme.textMuted;
+      case null:
+        return AppTheme.borderLight;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     Color bg;
     Color border;
     Color textColor;
     if (isMine) {
+      // The current passenger's seat — amber so the agent sees what
+      // they've already picked.
       bg = AppTheme.brandAccent;
       border = AppTheme.brandAccent;
       textColor = Colors.white;
     } else if (isOther) {
-      bg = const Color(0xFFE5E7EB);
-      border = const Color(0xFFD1D5DB);
-      textColor = AppTheme.textSecondary;
-    } else {
+      // Taken by another passenger.
       bg = AppTheme.brand;
       border = AppTheme.brand;
       textColor = Colors.white;
+    } else {
+      // Available — tint by seat type so Single / Double / Seater are
+      // visually distinct at a glance.
+      bg = _typeTint;
+      border = _typeBorder;
+      textColor = AppTheme.textPrimary;
     }
+
+    final mark = _typeMark;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: border),
+          border: Border.all(color: border, width: 1.5),
         ),
-        alignment: Alignment.center,
-        child: Text(
-          cell.seatId ?? '',
-          style: GoogleFonts.inter(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: textColor,
-          ),
+        child: Stack(
+          children: [
+            Center(
+              child: Text(
+                cell.seatId ?? '',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+              ),
+            ),
+            if (mark != null)
+              Positioned(
+                top: 2,
+                right: 4,
+                child: Text(
+                  mark,
+                  style: GoogleFonts.inter(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: textColor.withValues(alpha: 0.75),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -785,14 +937,36 @@ class _SeatTile extends StatelessWidget {
 class _Legend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 14,
+      runSpacing: 6,
       children: [
-        _LegendDot(color: Colors.white, border: AppTheme.borderLight, label: 'Available'),
-        const SizedBox(width: 16),
-        _LegendDot(color: const Color(0xFFE5E7EB), border: const Color(0xFFD1D5DB), label: 'Booked'),
-        const SizedBox(width: 16),
-        _LegendDot(color: AppTheme.brandAccent, border: AppTheme.brandAccent, label: 'Selected'),
+        _LegendDot(
+          color: Color(0xFFE7F8EE),
+          border: Color(0xFF22C55E),
+          label: tr('tour_seat_assignment.legend_single_sofa'),
+        ),
+        _LegendDot(
+          color: Color(0xFFE0F2FE),
+          border: Color(0xFF0EA5E9),
+          label: tr('tour_seat_assignment.legend_double_sofa'),
+        ),
+        _LegendDot(
+          color: Color(0xFFF1F5F9),
+          border: AppTheme.textMuted,
+          label: tr('tour_seat_assignment.legend_seater'),
+        ),
+        _LegendDot(
+          color: AppTheme.brand,
+          border: AppTheme.brand,
+          label: tr('tour_seat_assignment.legend_booked'),
+        ),
+        _LegendDot(
+          color: AppTheme.brandAccent,
+          border: AppTheme.brandAccent,
+          label: tr('tour_seat_assignment.legend_this_passenger'),
+        ),
       ],
     );
   }
@@ -977,7 +1151,7 @@ class _PassengerCard extends StatelessWidget {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              'HANDLER',
+                              tr('tour_seat_assignment.badge_handler'),
                               style: GoogleFonts.inter(
                                 fontSize: 8,
                                 fontWeight: FontWeight.w800,
@@ -1003,8 +1177,8 @@ class _PassengerCard extends StatelessWidget {
               IconButton(
                 visualDensity: VisualDensity.compact,
                 tooltip: handlerId == passenger.id
-                    ? 'Remove as handler'
-                    : 'Set as handler',
+                    ? tr('tour_seat_assignment.tooltip_remove_handler')
+                    : tr('tour_seat_assignment.tooltip_set_handler'),
                 onPressed: () => onToggleHandler(passenger.id),
                 icon: Icon(
                   handlerId == passenger.id
@@ -1058,7 +1232,8 @@ class _PassengerCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'Seats: $selectedSeats',
+                  tr('tour_seat_assignment.seats_label',
+                      namedArgs: {'seats': selectedSeats}),
                   style: GoogleFonts.inter(
                     fontSize: 12,
                     color: AppTheme.textSecondary,
@@ -1068,7 +1243,8 @@ class _PassengerCard extends StatelessWidget {
               ),
               if (stillNeeded > 0)
                 Text(
-                  '$stillNeeded more needed',
+                  tr('tour_seat_assignment.more_needed',
+                      namedArgs: {'count': stillNeeded.toString()}),
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -1098,8 +1274,7 @@ class _PassengerCard extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'Tap the star next to a passenger to mark them as the '
-                      'trip handler before locking.',
+                      tr('tour_seat_assignment.hint_pick_handler'),
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         color: AppTheme.warning,
@@ -1118,7 +1293,7 @@ class _PassengerCard extends StatelessWidget {
               child: ElevatedButton.icon(
                 onPressed: onLockTour,
                 icon: const Icon(Icons.lock_rounded, size: 16),
-                label: const Text('Lock Tour & Notify'),
+                label: Text(tr('tour_seat_assignment.btn_lock_tour')),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.success,
                   foregroundColor: Colors.white,
@@ -1155,7 +1330,7 @@ class _NoBuses extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              'No buses on this tour yet',
+              tr('tour_seat_assignment.no_buses_title'),
               style: GoogleFonts.inter(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -1163,7 +1338,7 @@ class _NoBuses extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Add at least one bus before assigning seats.',
+              tr('tour_seat_assignment.no_buses_body'),
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 12,
@@ -1176,7 +1351,7 @@ class _NoBuses extends StatelessWidget {
                 () => ManageBusesScreen(tourId: tourId),
               ),
               icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('Add Bus'),
+              label: Text(tr('tour_seat_assignment.btn_add_bus')),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.brand,
                 foregroundColor: Colors.white,
@@ -1205,7 +1380,7 @@ class _NoPassengers extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              'No passengers yet',
+              tr('tour_seat_assignment.no_passengers_title'),
               style: GoogleFonts.inter(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -1213,7 +1388,7 @@ class _NoPassengers extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              'Once customers submit requests for this tour, they appear here.',
+              tr('tour_seat_assignment.no_passengers_body'),
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 12,
@@ -1234,7 +1409,7 @@ class _NoLayout extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 32),
       alignment: Alignment.center,
       child: Text(
-        'This bus has no seat layout — open the bus to add one.',
+        tr('tour_seat_assignment.no_layout'),
         textAlign: TextAlign.center,
         style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
       ),
