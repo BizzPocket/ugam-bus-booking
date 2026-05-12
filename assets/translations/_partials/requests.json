@@ -1,0 +1,266 @@
+{
+  "en": {
+    "requests": {
+      "title": "Requests",
+      "fab_add": "Add Request",
+      "filter": {
+        "new": "NEW",
+        "waitlist": "WAITLIST",
+        "assigned": "ASSIGNED"
+      },
+      "empty_no_tours": {
+        "title": "No active tours",
+        "body": "Create a tour to start collecting seat requests."
+      },
+      "empty_new": {
+        "title": "No new requests",
+        "body": "Passengers will appear here once they submit seat requests."
+      },
+      "empty_waitlist": {
+        "title": "Waitlist is empty",
+        "body": "Move new requests here when you want to hold them aside."
+      },
+      "empty_assigned": {
+        "title": "No seats assigned yet",
+        "body": "Once you assign seats to a passenger, they show up here."
+      },
+      "status": {
+        "seats_assigned": "SEATS ASSIGNED",
+        "waitlist": "WAITLIST",
+        "new": "NEW"
+      },
+      "time": {
+        "just_now": "Just now",
+        "days_ago": "{n}d ago",
+        "hours_ago": "{n}h ago",
+        "minutes_ago": "{n}m ago"
+      },
+      "seat_chip": {
+        "seats": "{count} Seats"
+      },
+      "action": {
+        "view_assignment": "View Assignment",
+        "assign_seats": "Assign Seats",
+        "back_to_new": "Back to New",
+        "send_wa_ack": "Send WhatsApp Ack",
+        "unassign_all": "Unassign all seats",
+        "move_to_waitlist": "Move to Waitlist",
+        "decline_request": "Decline request",
+        "more_actions": "More actions"
+      },
+      "snack": {
+        "ack_title": "Acknowledgment ready",
+        "ack_opened": "WhatsApp opened for {name}.",
+        "ack_error": "Could not open WhatsApp.",
+        "moved_to_waitlist": "{name} moved to the waitlist.",
+        "promoted_to_new": "{name} promoted back to New.",
+        "seats_cleared": "Cleared seat assignments for {name}.",
+        "declined_title": "Declined",
+        "declined_body": "{name} removed from this tour.",
+        "added_one": "{name} added with 1 seat.",
+        "added_many": "{name} added with {count} seats.",
+        "add_error": "Could not add request — try again."
+      },
+      "decline_dialog": {
+        "title": "Decline request?",
+        "body": "Remove {name}'s request from this tour? They will need to resubmit if you change your mind.",
+        "confirm": "Decline"
+      },
+      "validation": {
+        "name_required": "Enter a name",
+        "phone_invalid": "Enter a 10-digit phone number",
+        "seat_required": "Pick at least one seat"
+      },
+      "sheet": {
+        "title": "Add Request",
+        "subtitle": "{tourTitle} · adds directly without customer form",
+        "name_label": "Customer name",
+        "name_hint": "e.g. Mahesh Patel",
+        "phone_label": "Phone",
+        "phone_hint": "98765 43210",
+        "double_sofa": "Double Sofa",
+        "single_sofa": "Single Sofa",
+        "note_label": "Note (optional)",
+        "note_hint": "e.g. Travelling with elder parents",
+        "saving": "Saving…",
+        "save": "Save Request"
+      }
+    }
+  },
+  "gu": {
+    "requests": {
+      "title": "વિનંતીઓ",
+      "fab_add": "વિનંતી ઉમેરો",
+      "filter": {
+        "new": "નવી",
+        "waitlist": "રાહ-યાદી",
+        "assigned": "ફાળવેલ"
+      },
+      "empty_no_tours": {
+        "title": "કોઈ સક્રિય પ્રવાસ નથી",
+        "body": "બેઠક વિનંતીઓ એકત્ર કરવા માટે પ્રવાસ બનાવો."
+      },
+      "empty_new": {
+        "title": "કોઈ નવી વિનંતી નથી",
+        "body": "મુસાફરો વિનંતી સબમિટ કર્યા પછી અહીં દેખાશે."
+      },
+      "empty_waitlist": {
+        "title": "રાહ-યાદી ખાલી છે",
+        "body": "નવી વિનંતીઓ અહીં ખસેડો જ્યારે તમે તેમને બાજુ પર રાખવા ઇચ્છો."
+      },
+      "empty_assigned": {
+        "title": "હજી કોઈ બેઠક ફાળવી નથી",
+        "body": "એકવાર તમે મુસાફરને બેઠક ફાળવો, તે અહીં દેખાશે."
+      },
+      "status": {
+        "seats_assigned": "બેઠક ફાળવી",
+        "waitlist": "રાહ-યાદી",
+        "new": "નવી"
+      },
+      "time": {
+        "just_now": "હમણાં જ",
+        "days_ago": "{n} દિ. પહેલાં",
+        "hours_ago": "{n} ક. પહેલાં",
+        "minutes_ago": "{n} મિ. પહેલાં"
+      },
+      "seat_chip": {
+        "seats": "{count} બેઠક"
+      },
+      "action": {
+        "view_assignment": "ફાળવણી જુઓ",
+        "assign_seats": "બેઠક ફાળવો",
+        "back_to_new": "નવીમાં પાછા",
+        "send_wa_ack": "WhatsApp Ack મોકલો",
+        "unassign_all": "બધી બેઠક રદ કરો",
+        "move_to_waitlist": "રાહ-યાદીમાં ખસેડો",
+        "decline_request": "વિનંતી નકારો",
+        "more_actions": "વધુ ક્રિયાઓ"
+      },
+      "snack": {
+        "ack_title": "સ્વીકૃતિ તૈયાર",
+        "ack_opened": "{name} માટે WhatsApp ખોલ્યું.",
+        "ack_error": "WhatsApp ખોલી શકાયું નહીં.",
+        "moved_to_waitlist": "{name} ને રાહ-યાદીમાં ખસેડ્યા.",
+        "promoted_to_new": "{name} ને નવીમાં પાછા લઈ ગયા.",
+        "seats_cleared": "{name} ની બેઠક ફાળવણી સાફ કરી.",
+        "declined_title": "નકાર્યું",
+        "declined_body": "{name} ને આ પ્રવાસમાંથી દૂર કર્યા.",
+        "added_one": "{name} ને 1 બેઠક સાથે ઉમેર્યા.",
+        "added_many": "{name} ને {count} બેઠક સાથે ઉમેર્યા.",
+        "add_error": "વિનંતી ઉમેરી શકાઈ નહીં — ફરી પ્રયાસ કરો."
+      },
+      "decline_dialog": {
+        "title": "વિનંતી નકારો?",
+        "body": "આ પ્રવાસમાંથી {name} ની વિનંતી દૂર કરો? જો મન બદલો તો તેઓ ફરી સબમિટ કરવા પડશે.",
+        "confirm": "નકારો"
+      },
+      "validation": {
+        "name_required": "નામ દાખલ કરો",
+        "phone_invalid": "10 અંકનો ફોન નંબર દાખલ કરો",
+        "seat_required": "ઓછામાં ઓછી એક બેઠક પસંદ કરો"
+      },
+      "sheet": {
+        "title": "વિનંતી ઉમેરો",
+        "subtitle": "{tourTitle} · ગ્રાહક ફોર્મ વિના સીધું ઉમેરે છે",
+        "name_label": "ગ્રાહકનું નામ",
+        "name_hint": "દા.ત. Mahesh Patel",
+        "phone_label": "ફોન",
+        "phone_hint": "98765 43210",
+        "double_sofa": "ડબલ સોફા",
+        "single_sofa": "સિંગલ સોફા",
+        "note_label": "નોંધ (વૈકલ્પિક)",
+        "note_hint": "દા.ત. વૃદ્ધ માતા-પિતા સાથે પ્રવાસ",
+        "saving": "સાચવી રહ્યા છીએ…",
+        "save": "વિનંતી સાચવો"
+      }
+    }
+  },
+  "hi": {
+    "requests": {
+      "title": "अनुरोध",
+      "fab_add": "अनुरोध जोड़ें",
+      "filter": {
+        "new": "नया",
+        "waitlist": "प्रतीक्षा-सूची",
+        "assigned": "आवंटित"
+      },
+      "empty_no_tours": {
+        "title": "कोई सक्रिय यात्रा नहीं",
+        "body": "सीट अनुरोध एकत्र करना शुरू करने के लिए एक यात्रा बनाएं।"
+      },
+      "empty_new": {
+        "title": "कोई नया अनुरोध नहीं",
+        "body": "यात्री सीट अनुरोध सबमिट करने के बाद यहाँ दिखाई देंगे।"
+      },
+      "empty_waitlist": {
+        "title": "प्रतीक्षा-सूची खाली है",
+        "body": "नए अनुरोधों को यहाँ ले जाएँ जब आप उन्हें रोके रखना चाहें।"
+      },
+      "empty_assigned": {
+        "title": "अभी कोई सीट आवंटित नहीं",
+        "body": "जैसे ही आप किसी यात्री को सीट आवंटित करते हैं, वे यहाँ दिखेंगे।"
+      },
+      "status": {
+        "seats_assigned": "सीट आवंटित",
+        "waitlist": "प्रतीक्षा-सूची",
+        "new": "नया"
+      },
+      "time": {
+        "just_now": "अभी-अभी",
+        "days_ago": "{n} दिन पहले",
+        "hours_ago": "{n} घं. पहले",
+        "minutes_ago": "{n} मि. पहले"
+      },
+      "seat_chip": {
+        "seats": "{count} सीट"
+      },
+      "action": {
+        "view_assignment": "आवंटन देखें",
+        "assign_seats": "सीट आवंटित करें",
+        "back_to_new": "नए में वापस",
+        "send_wa_ack": "WhatsApp Ack भेजें",
+        "unassign_all": "सभी सीट हटाएं",
+        "move_to_waitlist": "प्रतीक्षा-सूची में ले जाएँ",
+        "decline_request": "अनुरोध अस्वीकार करें",
+        "more_actions": "और क्रियाएँ"
+      },
+      "snack": {
+        "ack_title": "स्वीकृति तैयार",
+        "ack_opened": "{name} के लिए WhatsApp खोला।",
+        "ack_error": "WhatsApp नहीं खोल सका।",
+        "moved_to_waitlist": "{name} को प्रतीक्षा-सूची में ले जाया गया।",
+        "promoted_to_new": "{name} को वापस नए में लाया गया।",
+        "seats_cleared": "{name} की सीट आवंटन हटाई गई।",
+        "declined_title": "अस्वीकृत",
+        "declined_body": "{name} को इस यात्रा से हटाया गया।",
+        "added_one": "{name} को 1 सीट के साथ जोड़ा गया।",
+        "added_many": "{name} को {count} सीट के साथ जोड़ा गया।",
+        "add_error": "अनुरोध नहीं जोड़ा जा सका — पुनः प्रयास करें।"
+      },
+      "decline_dialog": {
+        "title": "अनुरोध अस्वीकार करें?",
+        "body": "इस यात्रा से {name} का अनुरोध हटाएं? यदि आप मन बदलते हैं तो उन्हें दोबारा सबमिट करना होगा।",
+        "confirm": "अस्वीकार करें"
+      },
+      "validation": {
+        "name_required": "नाम दर्ज करें",
+        "phone_invalid": "10 अंकों का फ़ोन नंबर दर्ज करें",
+        "seat_required": "कम से कम एक सीट चुनें"
+      },
+      "sheet": {
+        "title": "अनुरोध जोड़ें",
+        "subtitle": "{tourTitle} · ग्राहक फ़ॉर्म के बिना सीधे जोड़ता है",
+        "name_label": "ग्राहक का नाम",
+        "name_hint": "जैसे Mahesh Patel",
+        "phone_label": "फ़ोन",
+        "phone_hint": "98765 43210",
+        "double_sofa": "डबल सोफा",
+        "single_sofa": "सिंगल सोफा",
+        "note_label": "नोट (वैकल्पिक)",
+        "note_hint": "जैसे बुजुर्ग माता-पिता के साथ यात्रा",
+        "saving": "सहेज रहे हैं…",
+        "save": "अनुरोध सहेजें"
+      }
+    }
+  }
+}
