@@ -10,6 +10,7 @@ import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
+import '../models/trip_type.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 
@@ -59,6 +60,7 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
   late final TextEditingController _note;
   int _doubleSofa = 0;
   int _singleSofa = 0;
+  late TripType _tripType;
   bool _saving = false;
 
   int get _totalSeats => _doubleSofa + _singleSofa;
@@ -69,6 +71,7 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
     super.initState();
     _name = TextEditingController(text: widget.passenger.name);
     _note = TextEditingController(text: widget.passenger.note ?? '');
+    _tripType = widget.passenger.tripType;
     for (final line in widget.passenger.requestLines) {
       if (line.seatType == SeatType.doubleSofa) {
         _doubleSofa += line.qty;
@@ -134,6 +137,7 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
         note: note.isEmpty ? null : note,
         requestLines: newLines,
         assignedSeats: newAssignedSeats,
+        tripType: _tripType,
       );
       await Get.find<TourController>().updatePassenger(widget.tour.id, updated);
       if (!mounted) return;
@@ -162,16 +166,13 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final bg = isDark ? AppTheme.cardDark : Colors.white;
     final viewInsets = MediaQuery.of(context).viewInsets.bottom;
 
     return Padding(
       padding: EdgeInsets.only(bottom: viewInsets),
       child: Container(
         decoration: BoxDecoration(
-          color: bg,
+          color: AppColors.surface(context),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
@@ -186,7 +187,7 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: AppTheme.borderDefault,
+                    color: AppColors.border(context),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -196,7 +197,7 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
                 style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onSurface,
+                  color: AppColors.text(context),
                 ),
               ),
               Text(
@@ -206,7 +207,7 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
                 ),
                 style: GoogleFonts.inter(
                   fontSize: 11,
-                  color: AppTheme.textMuted,
+                  color: AppColors.textMuted(context),
                 ),
               ),
               const SizedBox(height: 16),
@@ -226,6 +227,13 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
                 ),
               ),
               const SizedBox(height: 16),
+              _EditTripTypeSegmented(
+                value: _tripType,
+                fromCity: widget.tour.fromCity,
+                toCity: widget.tour.toCity,
+                onChanged: (v) => setState(() => _tripType = v),
+              ),
+              const SizedBox(height: 12),
               _EditSeatCounter(
                 label: tr('requests.sheet.double_sofa'),
                 value: _doubleSofa,
@@ -243,7 +251,7 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
                   '$_alreadyAssigned / ${widget.passenger.totalSeatsRequested} ${tr('requests.seat_chip.seats', namedArgs: {'count': ''}).trim()}',
                   style: GoogleFonts.inter(
                     fontSize: 11,
-                    color: AppTheme.textMuted,
+                    color: AppColors.textMuted(context),
                   ),
                 ),
               ],
@@ -294,6 +302,131 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
   }
 }
 
+class _EditTripTypeSegmented extends StatelessWidget {
+  final TripType value;
+  final String fromCity;
+  final String toCity;
+  final ValueChanged<TripType> onChanged;
+
+  const _EditTripTypeSegmented({
+    required this.value,
+    required this.fromCity,
+    required this.toCity,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          tr('requests.sheet.trip_type_label'),
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textMuted(context),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: _EditTripChip(
+                icon: Icons.sync_alt_rounded,
+                label: tr('requests.sheet.trip_round'),
+                selected: value == TripType.roundTrip,
+                onTap: () => onChanged(TripType.roundTrip),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _EditTripChip(
+                icon: Icons.arrow_forward_rounded,
+                label: tr('requests.sheet.trip_outbound', namedArgs: {
+                  'from': fromCity,
+                  'to': toCity,
+                }),
+                selected: value == TripType.outboundOnly,
+                onTap: () => onChanged(TripType.outboundOnly),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _EditTripChip(
+                icon: Icons.arrow_back_rounded,
+                label: tr('requests.sheet.trip_return', namedArgs: {
+                  'from': toCity,
+                  'to': fromCity,
+                }),
+                selected: value == TripType.returnOnly,
+                onTap: () => onChanged(TripType.returnOnly),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _EditTripChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _EditTripChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.brandLight : AppColors.surfaceAlt(context),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? AppTheme.brand : AppColors.border(context),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 16,
+              color: selected ? AppTheme.brand : AppColors.textMuted(context),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                height: 1.2,
+                fontWeight: FontWeight.w600,
+                color: selected ? AppTheme.brandDark : AppColors.text(context),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _EditSeatCounter extends StatelessWidget {
   final String label;
   final int value;
@@ -307,14 +440,13 @@ class _EditSeatCounter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
-        color: AppTheme.bgLight,
+        color: AppColors.surfaceAlt(context),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppTheme.borderDefault),
+        border: Border.all(color: AppColors.border(context)),
       ),
       child: Row(
         children: [
@@ -324,7 +456,7 @@ class _EditSeatCounter extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                color: theme.colorScheme.onSurface,
+                color: AppColors.text(context),
               ),
             ),
           ),
@@ -341,7 +473,7 @@ class _EditSeatCounter extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
-                color: theme.colorScheme.onSurface,
+                color: AppColors.text(context),
               ),
             ),
           ),
