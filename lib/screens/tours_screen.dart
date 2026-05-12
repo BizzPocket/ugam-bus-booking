@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -39,11 +40,11 @@ class ToursScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
-                    'My Tours',
+                    tr('tours.title'),
                     style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : AppTheme.textPrimary,
+                      color: isDark ? Colors.white : AppColors.text(context),
                     ),
                   ),
                 ],
@@ -58,14 +59,14 @@ class ToursScreen extends StatelessWidget {
                   child: Row(
                     children: [
                       _StatChip(
-                        label: 'Active',
+                        label: tr('tours.stat.active'),
                         count: tourCtrl.activeTours.length,
                         color: AppTheme.brand,
                         isDark: isDark,
                       ),
                       const SizedBox(width: 8),
                       _StatChip(
-                        label: 'Collecting',
+                        label: tr('tours.stat.collecting'),
                         count: tourCtrl
                             .toursByStatus(TourStatus.collecting)
                             .length,
@@ -74,7 +75,7 @@ class ToursScreen extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       _StatChip(
-                        label: 'Locked',
+                        label: tr('tours.stat.locked'),
                         count:
                             tourCtrl.toursByStatus(TourStatus.locked).length,
                         color: AppTheme.success,
@@ -82,7 +83,7 @@ class ToursScreen extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       _StatChip(
-                        label: 'Completed',
+                        label: tr('tours.stat.completed'),
                         count: tourCtrl.completedTours.length,
                         color: const Color(0xFF6B7280),
                         isDark: isDark,
@@ -111,21 +112,21 @@ class ToursScreen extends StatelessWidget {
                         children: [
                           Icon(Icons.cloud_off_rounded,
                               size: 48,
-                              color: isDark ? Colors.white38 : AppTheme.textMuted),
+                              color: isDark ? Colors.white38 : AppColors.textMuted(context)),
                           const SizedBox(height: 16),
                           Text(
                             tourCtrl.errorMessage.value,
                             textAlign: TextAlign.center,
                             style: GoogleFonts.inter(
                               fontSize: 15,
-                              color: isDark ? Colors.white70 : AppTheme.textSecondary,
+                              color: isDark ? Colors.white70 : AppColors.textMuted(context),
                             ),
                           ),
                           const SizedBox(height: 16),
                           OutlinedButton.icon(
                             onPressed: tourCtrl.refreshTours,
                             icon: const Icon(Icons.refresh_rounded, size: 18),
-                            label: const Text('Retry'),
+                            label: Text(tr('app.action.retry')),
                           ),
                         ],
                       ),
@@ -142,23 +143,29 @@ class ToursScreen extends StatelessWidget {
                   );
                 }
 
-                return ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
-                  physics: const BouncingScrollPhysics(),
-                  itemCount: tours.length,
-                  itemBuilder: (ctx, i) {
-                    final tour = tours[tours.length - 1 - i]; // newest first
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: TourCard(
-                        tour: tour,
-                        onTap: () => Get.to(
-                          () => TourDetailScreen(tourId: tour.id),
-                          transition: Transition.cupertino,
+                return RefreshIndicator(
+                  onRefresh: tourCtrl.refreshTours,
+                  color: AppTheme.brand,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    itemCount: tours.length,
+                    itemBuilder: (ctx, i) {
+                      final tour = tours[tours.length - 1 - i]; // newest first
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: TourCard(
+                          tour: tour,
+                          onTap: () => Get.to(
+                            () => TourDetailScreen(tourId: tour.id),
+                            transition: Transition.cupertino,
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 );
               }),
             ),
@@ -193,7 +200,7 @@ class _StatChip extends StatelessWidget {
           color: isDark ? AppTheme.surfaceDark : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+            color: isDark ? AppTheme.borderDark : AppColors.border(context),
           ),
           boxShadow: isDark ? [] : AppTheme.subtleShadow,
         ),
@@ -214,7 +221,7 @@ class _StatChip extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 10,
                 fontWeight: FontWeight.w500,
-                color: AppTheme.textMuted,
+                color: AppColors.textMuted(context),
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -257,20 +264,20 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             Text(
-              'No Tours Yet',
+              tr('tours.empty.title'),
               style: GoogleFonts.inter(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : AppTheme.textPrimary,
+                color: isDark ? Colors.white : AppColors.text(context),
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'Create your first tour to start collecting bookings from passengers',
+              tr('tours.empty.subtitle'),
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 fontSize: 14,
-                color: AppTheme.textSecondary,
+                color: AppColors.textMuted(context),
               ),
             ),
             const SizedBox(height: 24),
@@ -281,7 +288,7 @@ class _EmptyState extends StatelessWidget {
                 onPressed: onCreateTour,
                 icon: const Icon(Icons.add_rounded, size: 20),
                 label: Text(
-                  'Create your first tour',
+                  tr('tours.empty.cta'),
                   style: GoogleFonts.inter(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
