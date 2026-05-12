@@ -1,0 +1,38 @@
+{
+  "app": {
+    "title": "Ugam Booking",
+    "action": {
+      "ok": "OK",
+      "cancel": "Cancel",
+      "save": "Save",
+      "delete": "Delete",
+      "edit": "Edit",
+      "add": "Add",
+      "back": "Back",
+      "retry": "Retry",
+      "refresh": "Refresh",
+      "continue_": "Continue",
+      "submit": "Submit",
+      "yes": "Yes",
+      "no": "No",
+      "done": "Done",
+      "next": "Next",
+      "skip": "Skip"
+    },
+    "error": {
+      "network": "Network error. Please try again.",
+      "unknown": "Something went wrong.",
+      "required": "This field is required."
+    }
+  },
+  "settings": {
+    "language": "Language",
+    "language_subtitle": "Gujarati, English, Hindi"
+  },
+  "language": {
+    "gujarati": "ગુજરાતી",
+    "english": "English",
+    "hindi": "हिंदी",
+    "pick_title": "Choose language"
+  }
+}

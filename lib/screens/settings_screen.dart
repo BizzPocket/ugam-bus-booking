@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -5,6 +6,7 @@ import '../config/theme.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../utils/app_dialogs.dart';
+import '../widgets/language_picker_sheet.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -271,6 +273,17 @@ class SettingsScreen extends StatelessWidget {
                       primaryText: primaryText,
                       mutedText: mutedText,
                       onTap: () {},
+                    ),
+                    Divider(height: 1, color: borderColor),
+                    _SettingsRow(
+                      icon: Icons.language_rounded,
+                      iconBgColor: AppTheme.brandLight,
+                      iconColor: AppTheme.brand,
+                      title: tr('settings.language'),
+                      subtitle: tr('settings.language_subtitle'),
+                      primaryText: primaryText,
+                      mutedText: mutedText,
+                      onTap: () => LanguagePickerSheet.show(context),
                     ),
                     Divider(height: 1, color: borderColor),
                     _SettingsRow(
