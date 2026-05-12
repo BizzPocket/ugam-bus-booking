@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -42,9 +43,8 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
     // Supabase dashboard (Auth → Users), not from the app. Keeping this
     // screen reachable but inert avoids breaking existing routes.
     AppSnackBar.error(
-      'Admin accounts are created in the Supabase dashboard. '
-      'Ask your project owner to add you under Authentication → Users.',
-      title: 'Setup not available',
+      tr('admin_setup.snackbar_unavailable_body'),
+      title: tr('admin_setup.snackbar_unavailable_title'),
     );
   }
 
@@ -62,7 +62,7 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
           onPressed: () => Get.back(),
         ),
         title: Text(
-          'Admin setup',
+          tr('admin_setup.title'),
           style: GoogleFonts.inter(
             fontSize: 18,
             fontWeight: FontWeight.w700,
@@ -77,7 +77,7 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             children: [
               Text(
-                'Create the first admin account.',
+                tr('admin_setup.heading'),
                 style: GoogleFonts.inter(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
@@ -86,9 +86,7 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'These credentials are stored in your Appwrite admins '
-                'collection. Anyone using this phone number with the right '
-                'password will get full admin access in the app.',
+                tr('admin_setup.subtitle'),
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   color: colorScheme.onSurfaceVariant,
@@ -96,18 +94,18 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
                 ),
               ),
               const SizedBox(height: 28),
-              _label('NAME'),
+              _label(tr('admin_setup.label_name')),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _name,
                 textCapitalization: TextCapitalization.words,
-                decoration: _decoration(hint: 'e.g. Zeel Shiyani'),
+                decoration: _decoration(hint: tr('admin_setup.hint_name')),
                 validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Required'
+                    ? tr('admin_setup.error_required')
                     : null,
               ),
               const SizedBox(height: 20),
-              _label('PHONE'),
+              _label(tr('admin_setup.label_phone')),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _phone,
@@ -115,17 +113,17 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 maxLength: 10,
                 decoration: _decoration(
-                  hint: '10-digit phone number',
+                  hint: tr('admin_setup.hint_phone'),
                   counter: '',
                 ),
                 validator: (v) {
                   final s = (v ?? '').trim();
-                  if (s.length != 10) return 'Enter a 10-digit phone number';
+                  if (s.length != 10) return tr('admin_setup.error_phone_invalid');
                   return null;
                 },
               ),
               const SizedBox(height: 20),
-              _label('WHATSAPP NUMBER (OPTIONAL)'),
+              _label(tr('admin_setup.label_whatsapp')),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _whatsapp,
@@ -133,24 +131,24 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 maxLength: 10,
                 decoration: _decoration(
-                  hint: 'Leave blank to use the phone above',
+                  hint: tr('admin_setup.hint_whatsapp'),
                   counter: '',
                 ),
                 validator: (v) {
                   final s = (v ?? '').trim();
                   if (s.isEmpty) return null;
-                  if (s.length != 10) return 'Enter a 10-digit number or leave blank';
+                  if (s.length != 10) return tr('admin_setup.error_whatsapp_invalid');
                   return null;
                 },
               ),
               const SizedBox(height: 20),
-              _label('PASSWORD'),
+              _label(tr('admin_setup.label_password')),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _password,
                 obscureText: _obscurePassword,
                 decoration: _decoration(
-                  hint: 'At least 8 characters',
+                  hint: tr('admin_setup.hint_password'),
                   suffix: IconButton(
                     icon: Icon(_obscurePassword
                         ? Icons.visibility_outlined
@@ -161,19 +159,19 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
                 ),
                 validator: (v) {
                   final s = v ?? '';
-                  if (s.length < 8) return 'Use at least 8 characters';
+                  if (s.length < 8) return tr('admin_setup.error_password_short');
                   return null;
                 },
               ),
               const SizedBox(height: 20),
-              _label('CONFIRM PASSWORD'),
+              _label(tr('admin_setup.label_confirm_password')),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _confirm,
                 obscureText: _obscurePassword,
-                decoration: _decoration(hint: 'Re-enter your password'),
+                decoration: _decoration(hint: tr('admin_setup.hint_confirm_password')),
                 validator: (v) =>
-                    (v != _password.text) ? 'Passwords do not match' : null,
+                    (v != _password.text) ? tr('admin_setup.error_passwords_mismatch') : null,
               ),
               const SizedBox(height: 36),
               SizedBox(
@@ -199,7 +197,7 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
                           ),
                         )
                       : Text(
-                          'Create admin',
+                          tr('admin_setup.btn_create'),
                           style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,

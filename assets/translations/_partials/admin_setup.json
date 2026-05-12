@@ -1,0 +1,77 @@
+{
+  "en": {
+    "admin_setup": {
+      "title": "Admin setup",
+      "heading": "Create the first admin account.",
+      "subtitle": "These credentials are stored in your Appwrite admins collection. Anyone using this phone number with the right password will get full admin access in the app.",
+      "label_name": "NAME",
+      "label_phone": "PHONE",
+      "label_whatsapp": "WHATSAPP NUMBER (OPTIONAL)",
+      "label_password": "PASSWORD",
+      "label_confirm_password": "CONFIRM PASSWORD",
+      "hint_name": "e.g. Zeel Shiyani",
+      "hint_phone": "10-digit phone number",
+      "hint_whatsapp": "Leave blank to use the phone above",
+      "hint_password": "At least 8 characters",
+      "hint_confirm_password": "Re-enter your password",
+      "btn_create": "Create admin",
+      "error_required": "Required",
+      "error_phone_invalid": "Enter a 10-digit phone number",
+      "error_whatsapp_invalid": "Enter a 10-digit number or leave blank",
+      "error_password_short": "Use at least 8 characters",
+      "error_passwords_mismatch": "Passwords do not match",
+      "snackbar_unavailable_title": "Setup not available",
+      "snackbar_unavailable_body": "Admin accounts are created in the Supabase dashboard. Ask your project owner to add you under Authentication → Users."
+    }
+  },
+  "gu": {
+    "admin_setup": {
+      "title": "વ્યવસ્થાપક સેટઅપ",
+      "heading": "પ્રથમ વ્યવસ્થાપક એકાઉન્ટ બનાવો.",
+      "subtitle": "આ ઓળખપત્ર તમારા Appwrite admins કોલેક્શનમાં સંગ્રહિત છે. આ ફોન નંબર અને સાચો પાસવર્ડ ઉપયોગ કરનારને એપ્લિકેશનમાં સંપૂર્ણ વ્યવસ્થાપક ઍક્સેસ મળશે.",
+      "label_name": "નામ",
+      "label_phone": "ફોન",
+      "label_whatsapp": "WhatsApp નંબર (વૈકલ્પિક)",
+      "label_password": "પાસવર્ડ",
+      "label_confirm_password": "પાસવર્ડ પુષ્ટિ",
+      "hint_name": "દા.ત. ઝીલ શિયાણી",
+      "hint_phone": "10 અંકનો ફોન નંબર",
+      "hint_whatsapp": "ઉપરના ફોન નંબરનો ઉપયોગ કરવા ખાલી છોડો",
+      "hint_password": "ઓછામાં ઓછા 8 અક્ષરો",
+      "hint_confirm_password": "તમારો પાસવર્ડ ફરી દાખલ કરો",
+      "btn_create": "વ્યવસ્થાપક બનાવો",
+      "error_required": "જરૂરી છે",
+      "error_phone_invalid": "10 અંકનો ફોન નંબર દાખલ કરો",
+      "error_whatsapp_invalid": "10 અંકનો નંબર દાખલ કરો અથવા ખાલી છોડો",
+      "error_password_short": "ઓછામાં ઓછા 8 અક્ષરો વાપરો",
+      "error_passwords_mismatch": "પાસવર્ડ મેળ ખાતા નથી",
+      "snackbar_unavailable_title": "સેટઅપ ઉપલબ્ધ નથી",
+      "snackbar_unavailable_body": "Supabase ડૅશબોર્ડ પર વ્યવસ્થાપક એકાઉન્ટ બનાવવામાં આવે છે. Authentication → Users હેઠળ ઉમેરવા માટે તમારા પ્રોજેક્ટ માલિકને કહો."
+    }
+  },
+  "hi": {
+    "admin_setup": {
+      "title": "व्यवस्थापक सेटअप",
+      "heading": "पहला व्यवस्थापक खाता बनाएँ।",
+      "subtitle": "ये क्रेडेंशियल आपके Appwrite admins कलेक्शन में संग्रहित हैं। इस फ़ोन नंबर और सही पासवर्ड का उपयोग करने वाले किसी भी व्यक्ति को ऐप में पूरी व्यवस्थापक पहुँच मिलेगी।",
+      "label_name": "नाम",
+      "label_phone": "फ़ोन",
+      "label_whatsapp": "WhatsApp नंबर (वैकल्पिक)",
+      "label_password": "पासवर्ड",
+      "label_confirm_password": "पासवर्ड पुष्टि",
+      "hint_name": "जैसे ज़ील शियानी",
+      "hint_phone": "10 अंकों का फ़ोन नंबर",
+      "hint_whatsapp": "ऊपर दिए फ़ोन नंबर का उपयोग करने के लिए खाली छोड़ें",
+      "hint_password": "कम से कम 8 अक्षर",
+      "hint_confirm_password": "अपना पासवर्ड दोबारा दर्ज करें",
+      "btn_create": "व्यवस्थापक बनाएँ",
+      "error_required": "आवश्यक है",
+      "error_phone_invalid": "10 अंकों का फ़ोन नंबर दर्ज करें",
+      "error_whatsapp_invalid": "10 अंकों का नंबर दर्ज करें या खाली छोड़ें",
+      "error_password_short": "कम से कम 8 अक्षरों का उपयोग करें",
+      "error_passwords_mismatch": "पासवर्ड मेल नहीं खाते",
+      "snackbar_unavailable_title": "सेटअप उपलब्ध नहीं",
+      "snackbar_unavailable_body": "Supabase डैशबोर्ड पर व्यवस्थापक खाते बनाए जाते हैं। Authentication → Users के अंतर्गत आपको जोड़ने के लिए अपने प्रोजेक्ट मालिक से कहें।"
+    }
+  }
+}
