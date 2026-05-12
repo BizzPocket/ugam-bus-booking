@@ -20,7 +20,6 @@ class PhaseIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final step = currentStatus.stepIndex;
 
     return SizedBox(
@@ -36,7 +35,7 @@ class PhaseIndicator extends StatelessWidget {
                 height: 2,
                 color: done
                     ? AppTheme.brand
-                    : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                    : AppColors.border(context),
               ),
             );
           }
@@ -51,8 +50,8 @@ class PhaseIndicator extends StatelessWidget {
             label: tr('app.label.phase_$label'),
             isActive: isActive,
             isDone: isDone,
-            isDark: isDark,
             theme: theme,
+            context: context,
           );
         }),
       ),
@@ -65,20 +64,20 @@ class _PhaseNode extends StatelessWidget {
   final String label;
   final bool isActive;
   final bool isDone;
-  final bool isDark;
   final ThemeData theme;
+  final BuildContext context;
 
   const _PhaseNode({
     required this.icon,
     required this.label,
     required this.isActive,
     required this.isDone,
-    required this.isDark,
     required this.theme,
+    required this.context,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext ctx) {
     final Color circleColor;
     final Color iconColor;
     final Color textColor;
@@ -92,9 +91,9 @@ class _PhaseNode extends StatelessWidget {
       iconColor = Colors.white;
       textColor = AppTheme.success;
     } else {
-      circleColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-      iconColor = isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8);
-      textColor = isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8);
+      circleColor = AppColors.border(context);
+      iconColor = AppColors.textMuted(context);
+      textColor = AppColors.textMuted(context);
     }
 
     return Column(
