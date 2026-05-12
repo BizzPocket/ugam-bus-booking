@@ -1,6 +1,6 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../controllers/tour_controller.dart';
 import '../config/theme.dart';
@@ -81,7 +81,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_departureDate == null) {
-      AppSnackBar.warning('Please select a start date');
+      AppSnackBar.warning(tr('edit_tour.error_select_start_date'));
       return;
     }
 
@@ -98,10 +98,10 @@ class _EditTourScreenState extends State<EditTourScreen> {
         description:
             _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
       );
-      AppSnackBar.success('Tour updated');
+      AppSnackBar.success(tr('edit_tour.snack_updated'));
       Get.back();
     } catch (e) {
-      AppSnackBar.error('Could not save changes');
+      AppSnackBar.error(tr('edit_tour.snack_save_failed'));
       setState(() => _saving = false);
     }
   }
@@ -136,7 +136,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    'Edit Tour',
+                    tr('edit_tour.title'),
                     style: GoogleFonts.inter(
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
@@ -155,28 +155,28 @@ class _EditTourScreenState extends State<EditTourScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildLabel('Tour Name'),
+                      _buildLabel(tr('edit_tour.label_tour_name')),
                       const SizedBox(height: 8),
                       _buildInput(
                         controller: _titleCtrl,
-                        hint: 'e.g. Rajkot → Goa Express',
+                        hint: tr('edit_tour.hint_tour_name'),
                         isDark: isDark,
                         validator: (v) =>
-                            v == null || v.trim().isEmpty ? 'Required' : null,
+                            v == null || v.trim().isEmpty ? tr('app.error.required') : null,
                       ),
                       const SizedBox(height: 20),
-                      _buildLabel('Route'),
+                      _buildLabel(tr('edit_tour.label_route')),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: _buildInput(
                               controller: _fromCtrl,
-                              hint: 'From city',
+                              hint: tr('edit_tour.hint_from_city'),
                               isDark: isDark,
                               prefixIcon: Icons.location_on_outlined,
                               validator: (v) => v == null || v.trim().isEmpty
-                                  ? 'Required'
+                                  ? tr('app.error.required')
                                   : null,
                             ),
                           ),
@@ -192,24 +192,24 @@ class _EditTourScreenState extends State<EditTourScreen> {
                           Expanded(
                             child: _buildInput(
                               controller: _toCtrl,
-                              hint: 'To city',
+                              hint: tr('edit_tour.hint_to_city'),
                               isDark: isDark,
                               prefixIcon: Icons.location_on_outlined,
                               validator: (v) => v == null || v.trim().isEmpty
-                                  ? 'Required'
+                                  ? tr('app.error.required')
                                   : null,
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 20),
-                      _buildLabel('Date Range'),
+                      _buildLabel(tr('edit_tour.label_date_range')),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: _DatePickerField(
-                              hint: 'Start Date',
+                              hint: tr('edit_tour.hint_start_date'),
                               date: _departureDate,
                               onTap: () => _pickDate(false),
                               isDark: isDark,
@@ -218,7 +218,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _DatePickerField(
-                              hint: 'End Date',
+                              hint: tr('edit_tour.hint_end_date'),
                               date: _returnDate,
                               onTap: () => _pickDate(true),
                               onClear: _returnDate != null
@@ -230,7 +230,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                         ],
                       ),
                       const SizedBox(height: 20),
-                      _buildLabel('Price Per Seat'),
+                      _buildLabel(tr('edit_tour.label_price_per_seat')),
                       const SizedBox(height: 8),
                       _buildInput(
                         controller: _priceCtrl,
@@ -239,20 +239,19 @@ class _EditTourScreenState extends State<EditTourScreen> {
                         prefixText: '₹ ',
                         keyboardType: TextInputType.number,
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Required';
+                          if (v == null || v.trim().isEmpty) return tr('app.error.required');
                           if (double.tryParse(v) == null) {
-                            return 'Invalid amount';
+                            return tr('edit_tour.error_invalid_amount');
                           }
                           return null;
                         },
                       ),
                       const SizedBox(height: 20),
-                      _buildLabel('Tour Description'),
+                      _buildLabel(tr('edit_tour.label_description')),
                       const SizedBox(height: 8),
                       _buildInput(
                         controller: _descCtrl,
-                        hint:
-                            'Describe the tour highlights, amenities, stops…',
+                        hint: tr('edit_tour.hint_description'),
                         isDark: isDark,
                         maxLines: 4,
                         minHeight: 100,
@@ -292,7 +291,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                                       ),
                                       const SizedBox(width: 10),
                                       Text(
-                                        'Save Changes',
+                                        tr('edit_tour.btn_save_changes'),
                                         style: GoogleFonts.inter(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w600,

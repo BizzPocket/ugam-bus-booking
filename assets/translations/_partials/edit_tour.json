@@ -1,0 +1,65 @@
+{
+  "en": {
+    "edit_tour": {
+      "title": "Edit Tour",
+      "label_tour_name": "Tour Name",
+      "label_route": "Route",
+      "label_date_range": "Date Range",
+      "label_price_per_seat": "Price Per Seat",
+      "label_description": "Tour Description",
+      "hint_tour_name": "e.g. Rajkot → Goa Express",
+      "hint_from_city": "From city",
+      "hint_to_city": "To city",
+      "hint_start_date": "Start Date",
+      "hint_end_date": "End Date",
+      "hint_description": "Describe the tour highlights, amenities, stops…",
+      "error_select_start_date": "Please select a start date",
+      "error_invalid_amount": "Invalid amount",
+      "snack_updated": "Tour updated",
+      "snack_save_failed": "Could not save changes",
+      "btn_save_changes": "Save Changes"
+    }
+  },
+  "gu": {
+    "edit_tour": {
+      "title": "ટૂર સંપાદિત કરો",
+      "label_tour_name": "ટૂર નામ",
+      "label_route": "રૂટ",
+      "label_date_range": "તારીખ શ્રેણી",
+      "label_price_per_seat": "પ્રતિ સીટ કિંમત",
+      "label_description": "ટૂર વિવરણ",
+      "hint_tour_name": "દા.ત. રાજકોટ → ગોઆ એક્સપ્રેસ",
+      "hint_from_city": "પ્રસ્થાન શહેર",
+      "hint_to_city": "ગંતવ્ય શહેર",
+      "hint_start_date": "શરૂઆત તારીખ",
+      "hint_end_date": "સમાપ્તિ તારીખ",
+      "hint_description": "ટૂરની મુખ્ય વિગતો, સુવિધાઓ, સ્ટૉપ…",
+      "error_select_start_date": "કૃપા કરી શરૂઆત તારીખ પસંદ કરો",
+      "error_invalid_amount": "અમાન્ય રકમ",
+      "snack_updated": "ટૂર અપડેટ થઈ",
+      "snack_save_failed": "ફેરફારો સાચવી શકાયા નહીં",
+      "btn_save_changes": "ફેરફારો સાચવો"
+    }
+  },
+  "hi": {
+    "edit_tour": {
+      "title": "टूर संपादित करें",
+      "label_tour_name": "टूर का नाम",
+      "label_route": "रूट",
+      "label_date_range": "तारीख सीमा",
+      "label_price_per_seat": "प्रति सीट कीमत",
+      "label_description": "टूर विवरण",
+      "hint_tour_name": "जैसे राजकोट → गोआ एक्सप्रेस",
+      "hint_from_city": "प्रस्थान शहर",
+      "hint_to_city": "गंतव्य शहर",
+      "hint_start_date": "शुरुआत तारीख",
+      "hint_end_date": "समाप्ति तारीख",
+      "hint_description": "टूर की मुख्य जानकारी, सुविधाएँ, स्टॉप…",
+      "error_select_start_date": "कृपया शुरुआत की तारीख चुनें",
+      "error_invalid_amount": "अमान्य राशि",
+      "snack_updated": "टूर अपडेट हो गई",
+      "snack_save_failed": "परिवर्तन सहेजे नहीं जा सके",
+      "btn_save_changes": "परिवर्तन सहेजें"
+    }
+  }
+}
