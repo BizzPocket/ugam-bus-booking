@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -145,7 +146,7 @@ class _SplashScreenState extends State<SplashScreen>
                   const SizedBox(height: 32),
                   // Brand name
                   Text(
-                    'Ugam Booking',
+                    tr('splash.brand_name'),
                     style: GoogleFonts.inter(
                       fontSize: 34,
                       fontWeight: FontWeight.w700,
@@ -154,9 +155,9 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  // Gujarati tagline
+                  // Tagline
                   Text(
-                    'ઉગમ ફોજ બસ બુકિંગ',
+                    tr('splash.tagline'),
                     style: GoogleFonts.notoSansGujarati(
                       fontSize: 14,
                       fontWeight: FontWeight.w400,
