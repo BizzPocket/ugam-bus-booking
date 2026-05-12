@@ -1,0 +1,47 @@
+{
+  "en": {
+    "customer_tour_detail": {
+      "title": "Tour details",
+      "tour_id_label": "[Tour ID: {code}]",
+      "about_section": "About this tour",
+      "request_seats_cta": "Request seats",
+      "label_departure": "Departure",
+      "label_return": "Return",
+      "label_price_per_seat": "Price per seat",
+      "label_tour_status": "Tour status",
+      "bus_confirmed": "Bus confirmed",
+      "bus_ac": "AC",
+      "bus_non_ac": "Non-AC"
+    }
+  },
+  "gu": {
+    "customer_tour_detail": {
+      "title": "ટૂર વિગતો",
+      "tour_id_label": "[ટૂર ID: {code}]",
+      "about_section": "આ ટૂર વિશે",
+      "request_seats_cta": "સીટ માટે વિનંતી કરો",
+      "label_departure": "પ્રસ્થાન",
+      "label_return": "પરત",
+      "label_price_per_seat": "પ્રતિ સીટ કિંમત",
+      "label_tour_status": "ટૂર સ્થિતિ",
+      "bus_confirmed": "બસ નિશ્ચિત",
+      "bus_ac": "AC",
+      "bus_non_ac": "Non-AC"
+    }
+  },
+  "hi": {
+    "customer_tour_detail": {
+      "title": "टूर विवरण",
+      "tour_id_label": "[टूर ID: {code}]",
+      "about_section": "इस टूर के बारे में",
+      "request_seats_cta": "सीट के लिए अनुरोध करें",
+      "label_departure": "प्रस्थान",
+      "label_return": "वापसी",
+      "label_price_per_seat": "प्रति सीट कीमत",
+      "label_tour_status": "टूर स्थिति",
+      "bus_confirmed": "बस की पुष्टि हो गई",
+      "bus_ac": "AC",
+      "bus_non_ac": "Non-AC"
+    }
+  }
+}

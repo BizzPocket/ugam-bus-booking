@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -29,7 +30,7 @@ class CustomerTourDetailScreen extends StatelessWidget {
           onPressed: () => Get.back(),
         ),
         title: Text(
-          'Tour details',
+          tr('customer_tour_detail.title'),
           style: GoogleFonts.inter(
             fontSize: 17,
             fontWeight: FontWeight.w700,
@@ -65,7 +66,8 @@ class CustomerTourDetailScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '[Tour ID: ${WhatsAppService.tourCode(tour.id)}]',
+                    tr('customer_tour_detail.tour_id_label',
+                        namedArgs: {'code': WhatsAppService.tourCode(tour.id)}),
                     style: GoogleFonts.robotoMono(
                       fontSize: 12,
                       color: colorScheme.onSurfaceVariant,
@@ -81,7 +83,7 @@ class CustomerTourDetailScreen extends StatelessWidget {
                       tour.description!.isNotEmpty) ...[
                     const SizedBox(height: 20),
                     Text(
-                      'About this tour',
+                      tr('customer_tour_detail.about_section'),
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -117,7 +119,7 @@ class CustomerTourDetailScreen extends StatelessWidget {
                       () => CustomerBookingRequestScreen(tour: tour)),
                   icon: const Icon(Icons.event_seat_rounded),
                   label: Text(
-                    'Request seats',
+                    tr('customer_tour_detail.request_seats_cta'),
                     style: GoogleFonts.inter(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -182,20 +184,23 @@ class _DetailGrid extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _row(Icons.calendar_today_rounded, 'Departure',
+          _row(Icons.calendar_today_rounded,
+              tr('customer_tour_detail.label_departure'),
               _formatDate(tour.departureDate)),
           if (tour.returnDate != null) ...[
             const SizedBox(height: 12),
-            _row(Icons.event_available_rounded, 'Return',
+            _row(Icons.event_available_rounded,
+                tr('customer_tour_detail.label_return'),
                 _formatDate(tour.returnDate!)),
           ],
           const SizedBox(height: 12),
-          _row(Icons.currency_rupee_rounded, 'Price per seat',
+          _row(Icons.currency_rupee_rounded,
+              tr('customer_tour_detail.label_price_per_seat'),
               '₹${tour.pricePerSeat.toStringAsFixed(0)}'),
           const SizedBox(height: 12),
           _row(
             Icons.group_rounded,
-            'Tour status',
+            tr('customer_tour_detail.label_tour_status'),
             tour.status.description,
           ),
         ],
@@ -267,7 +272,7 @@ class _BusCard extends StatelessWidget {
                   size: 18, color: AppTheme.brandDark),
               const SizedBox(width: 8),
               Text(
-                'Bus confirmed',
+                tr('customer_tour_detail.bus_confirmed'),
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
@@ -288,7 +293,7 @@ class _BusCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${bus.isAC ? "AC" : "Non-AC"} · ${bus.busType} · ${bus.driverName}',
+            '${bus.isAC ? tr('customer_tour_detail.bus_ac') : tr('customer_tour_detail.bus_non_ac')} · ${bus.busType} · ${bus.driverName}',
             style: GoogleFonts.inter(
               fontSize: 13,
               color: AppTheme.brandDark.withValues(alpha: 0.85),
