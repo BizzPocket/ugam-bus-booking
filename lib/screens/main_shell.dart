@@ -22,9 +22,14 @@ class ShellController extends GetxController {
 /// of the touch target.
 const double _kAdminMaxWidth = 540;
 
-class MainShell extends StatelessWidget {
+class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
+  @override
+  State<MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends State<MainShell> {
   static const _adminPages = <Widget>[
     DashboardScreen(),
     ToursScreen(),
@@ -34,14 +39,22 @@ class MainShell extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
-    final shell = Get.find<ShellController>();
-
+  void initState() {
+    super.initState();
+    // Set the status bar style once, not on every rebuild. The previous
+    // implementation called this from build(), so every Obx fire (which
+    // happens on every tour write) bounced through a platform channel
+    // for no reason — pure waste on the hot path.
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle.dark.copyWith(
         statusBarColor: Colors.transparent,
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shell = Get.find<ShellController>();
 
     return Obx(() {
       return Scaffold(
@@ -94,11 +107,10 @@ class _PillBottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final scheme = theme.colorScheme;
 
-    final surface = isDark ? AppTheme.cardDark : scheme.surface;
-    final border = isDark ? AppTheme.borderDark : AppTheme.borderLight;
-    final inactiveFg = scheme.onSurfaceVariant;
+    final surface = AppColors.surface(context);
+    final border = AppColors.border(context);
+    final inactiveFg = theme.colorScheme.onSurfaceVariant;
 
     // SafeArea wraps the pill so it sits above the OS gesture inset on
     // modern phones without us padding for it manually. Tighter outer
