@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -36,7 +37,7 @@ class CustomerTourListScreen extends StatelessWidget {
                 if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
                   return _Empty(
                     icon: Icons.cloud_off_rounded,
-                    title: 'Cannot load tours',
+                    title: tr('customer_tour_list.error_title'),
                     subtitle: tourCtrl.errorMessage.value,
                     onRetry: tourCtrl.refreshTours,
                   );
@@ -45,9 +46,8 @@ class CustomerTourListScreen extends StatelessWidget {
                 if (tours.isEmpty) {
                   return _Empty(
                     icon: Icons.event_busy_rounded,
-                    title: 'No upcoming tours',
-                    subtitle: 'Check back soon — new tours are announced '
-                        'as soon as the route and date are confirmed.',
+                    title: tr('customer_tour_list.empty_title'),
+                    subtitle: tr('customer_tour_list.empty_subtitle'),
                     onRetry: tourCtrl.refreshTours,
                   );
                 }
@@ -99,7 +99,7 @@ class _Header extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  'ઉગમ ફોજ બસ બુકિંગ',
+                  tr('customer_tour_list.brand_tagline'),
                   style: GoogleFonts.notoSansGujarati(
                     fontSize: 11,
                     fontWeight: FontWeight.w400,
@@ -109,11 +109,18 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
+          IconButton(
+            onPressed: () => Get.toNamed('/customer-my-requests'),
+            icon: const Icon(Icons.inbox_rounded),
+            tooltip: tr('customer_tour_list.my_requests_tooltip'),
+            color: AppTheme.brand,
+          ),
+          const SizedBox(width: 4),
           OutlinedButton.icon(
             onPressed: () => Get.toNamed('/login'),
             icon: const Icon(Icons.lock_outline_rounded, size: 16),
             label: Text(
-              'Admin',
+              tr('customer_tour_list.admin_button'),
               style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -169,7 +176,8 @@ class _CustomerTourCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   Text(
-                    '₹${tour.pricePerSeat.toStringAsFixed(0)} / seat',
+                    tr('customer_tour_list.price_per_seat',
+                        namedArgs: {'price': tour.pricePerSeat.toStringAsFixed(0)}),
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -206,7 +214,7 @@ class _CustomerTourCard extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(
                     tour.buses.isEmpty
-                        ? 'Bus to be confirmed'
+                        ? tr('customer_tour_list.bus_to_be_confirmed')
                         : tour.buses.first.busNumber,
                     style: GoogleFonts.inter(
                       fontSize: 12,
@@ -215,7 +223,7 @@ class _CustomerTourCard extends StatelessWidget {
                   ),
                   const Spacer(),
                   Text(
-                    'Tap to book →',
+                    tr('customer_tour_list.tap_to_book'),
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -286,7 +294,7 @@ class _Empty extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('Refresh'),
+              label: Text(tr('app.action.refresh')),
             ),
           ],
         ),
