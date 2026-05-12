@@ -34,7 +34,12 @@ class _SplashScreenState extends State<SplashScreen>
     );
     _animController.forward();
 
-    Future.delayed(const Duration(seconds: 2), () {
+    // Hand-off as soon as the brand animation has visibly resolved.
+    // The previous 2-second hard delay was added to "feel polished" but
+    // it just adds two seconds of black-hole between tap and usable UI.
+    // 900ms is short enough to feel snappy, long enough for the fade-in
+    // to read as intentional rather than a flash.
+    Future.delayed(const Duration(milliseconds: 900), () {
       if (mounted) {
         final auth = Get.find<AuthController>();
         if (auth.isLoggedIn.value && auth.isAdmin) {
