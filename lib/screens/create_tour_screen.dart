@@ -1,6 +1,6 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../controllers/tour_controller.dart';
 import '../config/theme.dart';
@@ -23,6 +23,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   DateTime? _departureDate;
   DateTime? _returnDate;
   final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -58,33 +59,48 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
     }
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     if (_departureDate == null) {
-      AppSnackBar.warning('Please select a start date');
+      AppSnackBar.warning(tr('create_tour.validation.select_start_date'));
       return;
     }
 
-    final tourCtrl = Get.find<TourController>();
-    tourCtrl.createTour(
-      title: _titleCtrl.text.trim(),
-      fromCity: _fromCtrl.text.trim(),
-      toCity: _toCtrl.text.trim(),
-      departureDate: _departureDate!,
-      returnDate: _returnDate,
-      pricePerSeat: double.tryParse(_priceCtrl.text) ?? 0,
-      description:
-          _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
-    );
+    setState(() => _saving = true);
+    try {
+      final tourCtrl = Get.find<TourController>();
+      // Await the insert so by the time we navigate, the row is committed
+      // to Supabase (when online) and present in the local list. Otherwise
+      // a background refetch can clobber the local-only tour before the
+      // detail screen reads it.
+      final newTour = await tourCtrl.createTour(
+        title: _titleCtrl.text.trim(),
+        fromCity: _fromCtrl.text.trim(),
+        toCity: _toCtrl.text.trim(),
+        departureDate: _departureDate!,
+        returnDate: _returnDate,
+        pricePerSeat: double.tryParse(_priceCtrl.text) ?? 0,
+        description:
+            _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+      );
 
-    final newTour = tourCtrl.tours.last;
-
-    AppSnackBar.success('${newTour.route} is ready to broadcast', title: 'Tour Created!');
-
-    Get.off(
-      () => TourDetailScreen(tourId: newTour.id),
-      transition: Transition.cupertino,
-    );
+      if (!mounted) return;
+      AppSnackBar.success(
+        tr('create_tour.snackbar.created_body', namedArgs: {'route': newTour.route}),
+        title: tr('create_tour.snackbar.created_title'),
+      );
+      Get.off(
+        () => TourDetailScreen(tourId: newTour.id),
+        transition: Transition.cupertino,
+      );
+    } catch (_) {
+      if (mounted) {
+        AppSnackBar.error(tr('create_tour.snackbar.error'));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -118,7 +134,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    'Create Tour',
+                    tr('create_tour.title'),
                     style: GoogleFonts.inter(
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
@@ -140,31 +156,32 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Tour Name
-                      _buildLabel('Tour Name'),
+                      _buildLabel(tr('create_tour.label.tour_name')),
                       const SizedBox(height: 8),
                       _buildInput(
                         controller: _titleCtrl,
-                        hint: 'e.g. Rajkot \u2192 Goa Express',
+                        hint: tr('create_tour.hint.tour_name'),
                         isDark: isDark,
-                        validator: (v) =>
-                            v == null || v.trim().isEmpty ? 'Required' : null,
+                        validator: (v) => v == null || v.trim().isEmpty
+                            ? tr('app.error.required')
+                            : null,
                       ),
 
                       const SizedBox(height: 20),
 
                       // Route
-                      _buildLabel('Route'),
+                      _buildLabel(tr('create_tour.label.route')),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: _buildInput(
                               controller: _fromCtrl,
-                              hint: 'From city',
+                              hint: tr('create_tour.hint.from_city'),
                               isDark: isDark,
                               prefixIcon: Icons.location_on_outlined,
                               validator: (v) => v == null || v.trim().isEmpty
-                                  ? 'Required'
+                                  ? tr('app.error.required')
                                   : null,
                             ),
                           ),
@@ -180,11 +197,11 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                           Expanded(
                             child: _buildInput(
                               controller: _toCtrl,
-                              hint: 'To city',
+                              hint: tr('create_tour.hint.to_city'),
                               isDark: isDark,
                               prefixIcon: Icons.location_on_outlined,
                               validator: (v) => v == null || v.trim().isEmpty
-                                  ? 'Required'
+                                  ? tr('app.error.required')
                                   : null,
                             ),
                           ),
@@ -194,13 +211,13 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       const SizedBox(height: 20),
 
                       // Date Range
-                      _buildLabel('Date Range'),
+                      _buildLabel(tr('create_tour.label.date_range')),
                       const SizedBox(height: 8),
                       Row(
                         children: [
                           Expanded(
                             child: _DatePickerField(
-                              hint: 'Start Date',
+                              hint: tr('create_tour.hint.start_date'),
                               date: _departureDate,
                               onTap: () => _pickDate(false),
                               isDark: isDark,
@@ -209,7 +226,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _DatePickerField(
-                              hint: 'End Date',
+                              hint: tr('create_tour.hint.end_date'),
                               date: _returnDate,
                               onTap: () => _pickDate(true),
                               isDark: isDark,
@@ -220,19 +237,32 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
 
                       const SizedBox(height: 20),
 
-                      // Price Per Seat
-                      _buildLabel('Price Per Seat'),
+                      // Price Per Seat (optional — can be set per bus later)
+                      Row(
+                        children: [
+                          _buildLabel(tr('create_tour.label.price_per_seat')),
+                          const SizedBox(width: 6),
+                          Text(
+                            tr('create_tour.label.optional'),
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 8),
                       _buildInput(
                         controller: _priceCtrl,
-                        hint: '0.00',
+                        hint: tr('create_tour.hint.price'),
                         isDark: isDark,
-                        prefixText: '\u20B9 ',
+                        prefixText: '₹ ',
                         keyboardType: TextInputType.number,
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Required';
+                          if (v == null || v.trim().isEmpty) return null;
                           if (double.tryParse(v) == null) {
-                            return 'Invalid amount';
+                            return tr('create_tour.validation.invalid_amount');
                           }
                           return null;
                         },
@@ -241,12 +271,11 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       const SizedBox(height: 20),
 
                       // Tour Description
-                      _buildLabel('Tour Description'),
+                      _buildLabel(tr('create_tour.label.tour_description')),
                       const SizedBox(height: 8),
                       _buildInput(
                         controller: _descCtrl,
-                        hint:
-                            'Describe the tour highlights, amenities, stops\u2026',
+                        hint: tr('create_tour.hint.description'),
                         isDark: isDark,
                         maxLines: 4,
                         minHeight: 100,
@@ -260,26 +289,41 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                         height: 54,
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: AppTheme.brand,
+                            color: _saving
+                                ? AppTheme.brand.withValues(alpha: 0.7)
+                                : AppTheme.brand,
                             borderRadius: BorderRadius.circular(6),
-                            boxShadow: AppTheme.brandShadow,
+                            boxShadow:
+                                _saving ? null : AppTheme.brandShadow,
                           ),
                           child: MaterialButton(
-                            onPressed: _submit,
+                            onPressed: _saving ? null : _submit,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(
-                                  Icons.send_rounded,
-                                  size: 18,
-                                  color: Colors.white,
-                                ),
+                                if (_saving)
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                else
+                                  const Icon(
+                                    Icons.send_rounded,
+                                    size: 18,
+                                    color: Colors.white,
+                                  ),
                                 const SizedBox(width: 10),
                                 Text(
-                                  'Create & Broadcast',
+                                  _saving
+                                      ? tr('create_tour.action.creating')
+                                      : tr('create_tour.action.create_broadcast'),
                                   style: GoogleFonts.inter(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
@@ -305,7 +349,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            'Will broadcast to all WhatsApp contacts',
+                            tr('create_tour.broadcast_note'),
                             style: GoogleFonts.inter(
                               fontSize: 11,
                               color: AppTheme.textMuted,

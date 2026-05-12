@@ -1,0 +1,110 @@
+{
+  "en": {
+    "create_tour": {
+      "title": "Create Tour",
+      "label": {
+        "tour_name": "Tour Name",
+        "route": "Route",
+        "date_range": "Date Range",
+        "price_per_seat": "Price Per Seat",
+        "optional": "(optional)",
+        "tour_description": "Tour Description"
+      },
+      "hint": {
+        "tour_name": "e.g. Rajkot → Goa Express",
+        "from_city": "From city",
+        "to_city": "To city",
+        "start_date": "Start Date",
+        "end_date": "End Date",
+        "price": "Leave blank — set per bus later",
+        "description": "Describe the tour highlights, amenities, stops…"
+      },
+      "validation": {
+        "invalid_amount": "Invalid amount",
+        "select_start_date": "Please select a start date"
+      },
+      "action": {
+        "create_broadcast": "Create & Broadcast",
+        "creating": "Creating tour…"
+      },
+      "snackbar": {
+        "created_title": "Tour Created!",
+        "created_body": "{route} is ready to broadcast",
+        "error": "Could not create tour — try again."
+      },
+      "broadcast_note": "Will broadcast to all WhatsApp contacts"
+    }
+  },
+  "gu": {
+    "create_tour": {
+      "title": "પ્રવાસ બનાવો",
+      "label": {
+        "tour_name": "પ્રવાસનું નામ",
+        "route": "રૂટ",
+        "date_range": "તારીખ શ્રેણી",
+        "price_per_seat": "પ્રતિ સીટ ભાવ",
+        "optional": "(વૈકલ્પિક)",
+        "tour_description": "પ્રવાસ વિવરણ"
+      },
+      "hint": {
+        "tour_name": "દા.ત. રાજકોટ → ગોવા એક્સપ્રેસ",
+        "from_city": "પ્રસ્થાન શહેર",
+        "to_city": "ગંતવ્ય શહેર",
+        "start_date": "પ્રસ્થાન તારીખ",
+        "end_date": "પરત તારીખ",
+        "price": "ખાલી છોડો — પ્રતિ બસ પછી સેટ કરો",
+        "description": "પ્રવાસની વિશેષતાઓ, સુવિધાઓ, સ્ટૉપ વર્ણવો…"
+      },
+      "validation": {
+        "invalid_amount": "અમાન્ય રકમ",
+        "select_start_date": "કૃપા કરી પ્રસ્થાન તારીખ પસંદ કરો"
+      },
+      "action": {
+        "create_broadcast": "બનાવો અને પ્રસારિત કરો",
+        "creating": "પ્રવાસ બનાવાઈ રહ્યો છે…"
+      },
+      "snackbar": {
+        "created_title": "પ્રવાસ બન્યો!",
+        "created_body": "{route} પ્રસારિત કરવા તૈયાર છે",
+        "error": "પ્રવાસ બની શક્યો નહીં — ફરી પ્રયાસ કરો."
+      },
+      "broadcast_note": "બધા WhatsApp સંપર્કોને પ્રસારિત કરવામાં આવશે"
+    }
+  },
+  "hi": {
+    "create_tour": {
+      "title": "यात्रा बनाएं",
+      "label": {
+        "tour_name": "यात्रा का नाम",
+        "route": "रूट",
+        "date_range": "तिथि सीमा",
+        "price_per_seat": "प्रति सीट मूल्य",
+        "optional": "(वैकल्पिक)",
+        "tour_description": "यात्रा विवरण"
+      },
+      "hint": {
+        "tour_name": "जैसे राजकोट → गोवा एक्सप्रेस",
+        "from_city": "प्रस्थान शहर",
+        "to_city": "गंतव्य शहर",
+        "start_date": "प्रस्थान तिथि",
+        "end_date": "वापसी तिथि",
+        "price": "खाली छोड़ें — प्रति बस बाद में सेट करें",
+        "description": "यात्रा की विशेषताएं, सुविधाएं, पड़ाव बताएं…"
+      },
+      "validation": {
+        "invalid_amount": "अमान्य राशि",
+        "select_start_date": "कृपया प्रस्थान तिथि चुनें"
+      },
+      "action": {
+        "create_broadcast": "बनाएं और प्रसारित करें",
+        "creating": "यात्रा बन रही है…"
+      },
+      "snackbar": {
+        "created_title": "यात्रा बनाई गई!",
+        "created_body": "{route} प्रसारित करने के लिए तैयार है",
+        "error": "यात्रा नहीं बन सकी — पुनः प्रयास करें."
+      },
+      "broadcast_note": "सभी WhatsApp संपर्कों को प्रसारित किया जाएगा"
+    }
+  }
+}
