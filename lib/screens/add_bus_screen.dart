@@ -216,7 +216,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     _maybeSeedPrice();
     _maybeSeedSlotLabel();
 
@@ -252,7 +251,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
                       text:
                           '${tr('add_bus.info.optional_fields')}'
                           '\n\n$_capacityHint',
-                      isDark: isDark,
                     ),
                   const SizedBox(height: 16),
 
@@ -287,14 +285,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: isDark
-                              ? AppTheme.cardDark
-                              : AppTheme.bgLight,
+                          color: AppColors.bg(context),
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
-                            color: isDark
-                                ? AppTheme.borderDark
-                                : AppTheme.borderLight,
+                            color: AppColors.border(context),
                           ),
                         ),
                         child: Text(
@@ -401,7 +395,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
                       _mixedSummary,
                       style: GoogleFonts.inter(
                         fontSize: 12,
-                        color: AppTheme.textMuted,
+                        color: AppColors.textMuted(context),
                       ),
                     ),
                   ],
@@ -426,7 +420,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
                       _singleSofaSummary,
                       style: GoogleFonts.inter(
                         fontSize: 12,
-                        color: AppTheme.textMuted,
+                        color: AppColors.textMuted(context),
                       ),
                     ),
                   ],
@@ -441,9 +435,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
                 color: theme.colorScheme.surface,
                 border: Border(
                   top: BorderSide(
-                    color: isDark
-                        ? AppTheme.borderDark
-                        : AppTheme.borderLight,
+                    color: AppColors.border(context),
                   ),
                 ),
               ),
@@ -523,7 +515,7 @@ class _Header extends StatelessWidget {
                     subtitle,
                     style: GoogleFonts.inter(
                       fontSize: 12,
-                      color: AppTheme.textMuted,
+                      color: AppColors.textMuted(context),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -539,9 +531,8 @@ class _Header extends StatelessWidget {
 
 class _InfoBanner extends StatelessWidget {
   final String text;
-  final bool isDark;
 
-  const _InfoBanner({required this.text, required this.isDark});
+  const _InfoBanner({required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -614,7 +605,7 @@ class _OptionalLabel extends StatelessWidget {
           style: GoogleFonts.inter(
             fontSize: 11,
             fontStyle: FontStyle.italic,
-            color: AppTheme.textMuted,
+            color: AppColors.textMuted(context),
           ),
         ),
       ],
@@ -637,7 +628,6 @@ class _ToggleRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -645,7 +635,7 @@ class _ToggleRow extends StatelessWidget {
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+          color: AppColors.border(context),
         ),
       ),
       child: Row(
@@ -683,14 +673,13 @@ class _Stepper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     return Container(
       height: 52,
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDark ? AppTheme.borderDark : AppTheme.borderLight,
+          color: AppColors.border(context),
         ),
       ),
       child: Row(
@@ -760,21 +749,16 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         height: 44,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: selected
-              ? AppTheme.brand
-              : (isDark ? AppTheme.cardDark : Colors.white),
+          color: selected ? AppTheme.brand : AppColors.surface(context),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: selected
-                ? AppTheme.brand
-                : (isDark ? AppTheme.borderDark : AppTheme.borderLight),
+            color: selected ? AppTheme.brand : AppColors.border(context),
           ),
         ),
         child: Text(
