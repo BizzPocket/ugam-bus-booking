@@ -17,12 +17,23 @@
       "no": "No",
       "done": "Done",
       "next": "Next",
-      "skip": "Skip"
+      "skip": "Skip",
+      "confirm": "Confirm"
     },
     "error": {
       "network": "Network error. Please try again.",
       "unknown": "Something went wrong.",
       "required": "This field is required."
+    },
+    "label": {
+      "available": "Available",
+      "booked": "Booked",
+      "phase_collect": "Collect",
+      "phase_assign": "Assign",
+      "phase_plan": "Plan",
+      "phase_book": "Book",
+      "phase_lock": "Lock",
+      "phase_done": "Done"
     }
   },
   "settings": {
@@ -482,7 +493,15 @@
     "reset_send_again": "Reset & Send Again",
     "opened_snack_title": "Opened for {name}",
     "opened_snack_body": "Tap send in WhatsApp, then come back for the next passenger.",
-    "wa_error": "Could not open WhatsApp. Is it installed?"
+    "wa_error": "Could not open WhatsApp. Is it installed?",
+    "send_now_help": "Tap send in WhatsApp, then come back for the next passenger.",
+    "whatsapp_unavailable": "Could not open WhatsApp. Is it installed?",
+    "empty_no_seats": "No passengers have seats yet.",
+    "search_hint": "Search by name or phone",
+    "no_matches": "No matches for \"{query}\"",
+    "cta_send_again": "Send Again",
+    "cta_send_first": "Open WhatsApp & Send",
+    "send_now_opened_title": "Opened for {name}"
   },
   "seat_assignment": {
     "title": "Seat Assignment",

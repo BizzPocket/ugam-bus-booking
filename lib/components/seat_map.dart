@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 class SeatMap extends StatelessWidget {
@@ -94,7 +95,7 @@ class SeatMap extends StatelessWidget {
               _LegendDot(
                 color: theme.colorScheme.primary.withAlpha(30),
                 borderColor: theme.colorScheme.primary,
-                label: 'Available',
+                label: tr('app.label.available'),
                 theme: theme,
               ),
               const SizedBox(width: 20),
@@ -103,7 +104,7 @@ class SeatMap extends StatelessWidget {
                 borderColor: isDark
                     ? const Color(0xFF64748B)
                     : const Color(0xFF94A3B8),
-                label: 'Booked',
+                label: tr('app.label.booked'),
                 theme: theme,
               ),
             ],

@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../utils/platform_detector.dart';
@@ -74,14 +75,16 @@ Future<dynamic> showConfirmDialog(
   String? confirmText,
   String? cancelText,
 }) async {
+  final resolvedConfirm = confirmText ?? tr('app.action.confirm');
+  final resolvedCancel = cancelText ?? tr('app.action.cancel');
   if (PlatformDetector.isIOS) {
     return showCupertinoDialog<bool>(
       context: context,
       builder: (context) => IOSConfirmDialog(
         title: title,
         content: content,
-        confirmText: confirmText ?? 'Confirm',
-        cancelText: cancelText ?? 'Cancel',
+        confirmText: resolvedConfirm,
+        cancelText: resolvedCancel,
       ),
     );
   }
@@ -90,8 +93,8 @@ Future<dynamic> showConfirmDialog(
     builder: (context) => AndroidConfirmDialog(
       title: title,
       content: content,
-      confirmText: confirmText ?? 'Confirm',
-      cancelText: cancelText ?? 'Cancel',
+      confirmText: resolvedConfirm,
+      cancelText: resolvedCancel,
     ),
   );
 }

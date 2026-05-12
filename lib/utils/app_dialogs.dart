@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../config/theme.dart';
@@ -7,14 +8,18 @@ class AppDialogs {
   AppDialogs._();
 
   /// Shows a confirmation dialog for destructive or important actions.
-  /// Returns `true` if confirmed, `false` if cancelled.
+  /// Returns `true` if confirmed, `false` if cancelled. When [confirmText] or
+  /// [cancelText] are omitted, the localised defaults from `app.action.*` are
+  /// used so dialogs read in the active language.
   static Future<bool> confirm({
     required String title,
     required String message,
-    String confirmText = 'Confirm',
-    String cancelText = 'Cancel',
+    String? confirmText,
+    String? cancelText,
     bool isDestructive = false,
   }) async {
+    final resolvedConfirm = confirmText ?? tr('app.action.confirm');
+    final resolvedCancel = cancelText ?? tr('app.action.cancel');
     final result = await Get.dialog<bool>(
       Builder(
         builder: (context) {
@@ -47,7 +52,7 @@ class AppDialogs {
               TextButton(
                 onPressed: () => Get.back(result: false),
                 child: Text(
-                  cancelText,
+                  resolvedCancel,
                   style: TextStyle(
                     color: colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w600,
@@ -62,7 +67,7 @@ class AppDialogs {
                       : colorScheme.primary,
                 ),
                 child: Text(
-                  confirmText,
+                  resolvedConfirm,
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
@@ -119,9 +124,9 @@ class AppDialogs {
                 width: double.infinity,
                 child: TextButton(
                   onPressed: () => Get.back(),
-                  child: const Text(
-                    'OK',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  child: Text(
+                    tr('app.action.ok'),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
               ),

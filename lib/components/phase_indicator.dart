@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import '../models/tour_status.dart';
 import '../config/theme.dart';
@@ -8,12 +9,12 @@ class PhaseIndicator extends StatelessWidget {
   const PhaseIndicator({super.key, required this.currentStatus});
 
   static const _phases = [
-    (Icons.edit_note_rounded, 'Plan'),
-    (Icons.campaign_rounded, 'Collect'),
-    (Icons.directions_bus_rounded, 'Book'),
-    (Icons.event_seat_rounded, 'Assign'),
-    (Icons.lock_rounded, 'Lock'),
-    (Icons.check_circle_rounded, 'Done'),
+    (Icons.edit_note_rounded, 'plan'),
+    (Icons.campaign_rounded, 'collect'),
+    (Icons.directions_bus_rounded, 'book'),
+    (Icons.event_seat_rounded, 'assign'),
+    (Icons.lock_rounded, 'lock'),
+    (Icons.check_circle_rounded, 'done'),
   ];
 
   @override
@@ -47,7 +48,7 @@ class PhaseIndicator extends StatelessWidget {
 
           return _PhaseNode(
             icon: icon,
-            label: label,
+            label: tr('app.label.phase_$label'),
             isActive: isActive,
             isDone: isDone,
             isDark: isDark,

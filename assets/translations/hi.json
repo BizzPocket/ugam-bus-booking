@@ -17,12 +17,23 @@
       "no": "नहीं",
       "done": "पूर्ण",
       "next": "आगे",
-      "skip": "छोड़ें"
+      "skip": "छोड़ें",
+      "confirm": "पुष्टि करें"
     },
     "error": {
       "network": "नेटवर्क त्रुटि. कृपया पुनः प्रयास करें.",
       "unknown": "कुछ गलत हो गया.",
       "required": "यह फ़ील्ड आवश्यक है."
+    },
+    "label": {
+      "available": "उपलब्ध",
+      "booked": "बुक हो चुकी",
+      "phase_collect": "एकत्र करें",
+      "phase_assign": "सौंपें",
+      "phase_plan": "योजना",
+      "phase_book": "बुक",
+      "phase_lock": "लॉक",
+      "phase_done": "पूर्ण"
     }
   },
   "settings": {
@@ -482,7 +493,15 @@
     "reset_send_again": "रीसेट करें और फिर भेजें",
     "opened_snack_title": "{name} के लिए खोला",
     "opened_snack_body": "WhatsApp में Send टैप करें, फिर वापस आएं।",
-    "wa_error": "WhatsApp नहीं खोला जा सका। क्या यह इंस्टॉल है?"
+    "wa_error": "WhatsApp नहीं खोला जा सका। क्या यह इंस्टॉल है?",
+    "send_now_help": "WhatsApp में भेजें दबाएँ, फिर अगले यात्री के लिए वापस आएँ.",
+    "whatsapp_unavailable": "WhatsApp नहीं खुल रहा. क्या यह इंस्टॉल है?",
+    "empty_no_seats": "अभी तक किसी यात्री को सीट नहीं मिली है.",
+    "search_hint": "नाम या फ़ोन से खोजें",
+    "no_matches": "\"{query}\" के लिए कोई परिणाम नहीं",
+    "cta_send_again": "फिर भेजें",
+    "cta_send_first": "WhatsApp खोलकर भेजें",
+    "send_now_opened_title": "{name} के लिए खोला"
   },
   "seat_assignment": {
     "title": "सीट आवंटन",

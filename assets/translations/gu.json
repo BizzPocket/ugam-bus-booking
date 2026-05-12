@@ -17,12 +17,23 @@
       "no": "ના",
       "done": "પૂર્ણ",
       "next": "આગળ",
-      "skip": "છોડો"
+      "skip": "છોડો",
+      "confirm": "પુષ્ટિ કરો"
     },
     "error": {
       "network": "નેટવર્ક ભૂલ. કૃપા કરી ફરી પ્રયત્ન કરો.",
       "unknown": "કંઈક ખોટું થયું.",
       "required": "આ ફીલ્ડ જરૂરી છે."
+    },
+    "label": {
+      "available": "ઉપલબ્ધ",
+      "booked": "બુક થયેલ",
+      "phase_collect": "એકત્ર કરો",
+      "phase_assign": "સોંપો",
+      "phase_plan": "આયોજન",
+      "phase_book": "બુક",
+      "phase_lock": "લોક",
+      "phase_done": "પૂર્ણ"
     }
   },
   "settings": {
@@ -482,7 +493,15 @@
     "reset_send_again": "રીસેટ કરો અને ફરી મોકલો",
     "opened_snack_title": "{name} માટે ખોલ્યું",
     "opened_snack_body": "WhatsApp માં Send ટેપ કરો, પછી પાછા આવો.",
-    "wa_error": "WhatsApp ખોલી શકાયું નહીં. શું ઇન્સ્ટૉલ છે?"
+    "wa_error": "WhatsApp ખોલી શકાયું નહીં. શું ઇન્સ્ટૉલ છે?",
+    "send_now_help": "WhatsApp માં મોકલો દબાવો, પછી આગળના પેસેન્જર માટે પાછા આવો.",
+    "whatsapp_unavailable": "WhatsApp ખુલતું નથી. શું તે ઇન્સ્ટોલ થયેલ છે?",
+    "empty_no_seats": "હજુ સુધી કોઈ પેસેન્જરને બેઠક આપવામાં આવી નથી.",
+    "search_hint": "નામ કે ફોન દ્વારા શોધો",
+    "no_matches": "\"{query}\" માટે કોઈ પરિણામ નથી",
+    "cta_send_again": "ફરી મોકલો",
+    "cta_send_first": "WhatsApp ખોલીને મોકલો",
+    "send_now_opened_title": "{name} માટે ખોલ્યું"
   },
   "seat_assignment": {
     "title": "બેઠક ફાળવણી",
