@@ -12,6 +12,7 @@ import '../models/passenger.dart';
 import '../models/request_line.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
+import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
@@ -59,6 +60,7 @@ class _CustomerBookingRequestScreenState
 
   int _doubleSofa = 0;
   int _singleSofa = 0;
+  TripType _tripType = TripType.roundTrip;
 
   bool _saving = false;
   bool _showNote = false;
@@ -76,6 +78,7 @@ class _CustomerBookingRequestScreenState
       _phone.text = normalisePhone(e.customerPhone);
       _doubleSofa = e.doubleSofa;
       _singleSofa = e.singleSofa;
+      _tripType = e.tripType;
       if (e.note != null && e.note!.isNotEmpty) {
         _note.text = e.note!;
         _showNote = true;
@@ -161,9 +164,11 @@ class _CustomerBookingRequestScreenState
       'customer_phone': normalisedPhone,
       'customer_name': name,
       'party_size': _totalSeats,
+      'trip_type': _tripType.storageKey,
       'raw_form': {
         'double_sofa': _doubleSofa,
         'single_sofa': _singleSofa,
+        'trip_type': _tripType.storageKey,
         if (note.isNotEmpty) 'note': note,
       },
     });
@@ -178,6 +183,7 @@ class _CustomerBookingRequestScreenState
       phone: normalisedPhone,
       requestLines: requestLines,
       note: note.isEmpty ? null : note,
+      tripType: _tripType,
     );
     await Supabase.instance.client
         .from('passengers')
@@ -199,6 +205,7 @@ class _CustomerBookingRequestScreenState
       doubleSofa: _doubleSofa,
       singleSofa: _singleSofa,
       note: note.isEmpty ? null : note,
+      tripType: _tripType,
       status: 'pending',
       createdAt: DateTime.now(),
     ));
@@ -225,6 +232,7 @@ class _CustomerBookingRequestScreenState
         singleSofaCount: _singleSofa,
         doubleSofaCount: _doubleSofa,
         note: note.isEmpty ? null : note,
+        tripType: _tripType,
       );
     }
 
@@ -261,9 +269,11 @@ class _CustomerBookingRequestScreenState
         'p_raw_form': {
           'double_sofa': _doubleSofa,
           'single_sofa': _singleSofa,
+          'trip_type': _tripType.storageKey,
           if (note.isNotEmpty) 'note': note,
         },
         'p_request_lines': requestLinesJson,
+        'p_trip_type': _tripType.storageKey,
       },
     );
 
@@ -287,6 +297,7 @@ class _CustomerBookingRequestScreenState
       doubleSofa: _doubleSofa,
       singleSofa: _singleSofa,
       note: note.isEmpty ? null : note,
+      tripType: _tripType,
       customerEditedAt: DateTime.now(),
       lastRefreshedAt: DateTime.now(),
     ));
@@ -371,9 +382,9 @@ class _CustomerBookingRequestScreenState
                         padding: const EdgeInsets.symmetric(horizontal: 12),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: AppTheme.bgLight,
+                          color: AppColors.bg(context),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: AppTheme.borderLight),
+                          border: Border.all(color: AppColors.border(context)),
                         ),
                         child: Text(
                           '+91',
@@ -399,6 +410,16 @@ class _CustomerBookingRequestScreenState
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 22),
+
+                  _Label(tr('customer_booking.label_trip_type')),
+                  const SizedBox(height: 6),
+                  _TripTypeSelector(
+                    value: _tripType,
+                    fromCity: widget.tour.fromCity,
+                    toCity: widget.tour.toCity,
+                    onChanged: (v) => setState(() => _tripType = v),
                   ),
                   const SizedBox(height: 22),
 
@@ -432,7 +453,7 @@ class _CustomerBookingRequestScreenState
                         icon: const Icon(Icons.add_rounded, size: 16),
                         label: Text(tr('customer_booking.add_note_button')),
                         style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.textSecondary,
+                          foregroundColor: AppColors.textMuted(context),
                           padding: EdgeInsets.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         ),
@@ -578,7 +599,7 @@ class _Label extends StatelessWidget {
       style: GoogleFonts.inter(
         fontSize: 11,
         fontWeight: FontWeight.w600,
-        color: AppTheme.textMuted,
+        color: AppColors.textMuted(context),
         letterSpacing: 1.4,
       ),
     );
@@ -626,13 +647,13 @@ class _SeatTile extends StatelessWidget {
             decoration: BoxDecoration(
               color: selected
                   ? AppTheme.brand.withValues(alpha: 0.15)
-                  : AppTheme.bgLight,
+                  : AppColors.surfaceAlt(context),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
               icon,
               size: 22,
-              color: selected ? AppTheme.brand : AppTheme.textSecondary,
+              color: selected ? AppTheme.brand : AppColors.textMuted(context),
             ),
           ),
           const SizedBox(width: 12),
@@ -711,13 +732,156 @@ class _StepperButton extends StatelessWidget {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: enabled ? AppTheme.brand : AppTheme.bgLight,
+          color: enabled ? AppTheme.brand : AppColors.surfaceAlt(context),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Icon(
           icon,
           size: 18,
-          color: enabled ? Colors.white : AppTheme.textMuted,
+          color: enabled ? Colors.white : AppColors.textMuted(context),
+        ),
+      ),
+    );
+  }
+}
+
+class _TripTypeSelector extends StatelessWidget {
+  final TripType value;
+  final String fromCity;
+  final String toCity;
+  final ValueChanged<TripType> onChanged;
+
+  const _TripTypeSelector({
+    required this.value,
+    required this.fromCity,
+    required this.toCity,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _TripTypeOption(
+          icon: Icons.sync_alt_rounded,
+          title: tr('customer_booking.trip_round_title'),
+          subtitle: tr('customer_booking.trip_round_sub', namedArgs: {
+            'from': fromCity,
+            'to': toCity,
+          }),
+          selected: value == TripType.roundTrip,
+          onTap: () => onChanged(TripType.roundTrip),
+        ),
+        const SizedBox(height: 8),
+        _TripTypeOption(
+          icon: Icons.arrow_forward_rounded,
+          title: tr('customer_booking.trip_outbound_title', namedArgs: {
+            'from': fromCity,
+            'to': toCity,
+          }),
+          subtitle: tr('customer_booking.trip_outbound_sub'),
+          selected: value == TripType.outboundOnly,
+          onTap: () => onChanged(TripType.outboundOnly),
+        ),
+        const SizedBox(height: 8),
+        _TripTypeOption(
+          icon: Icons.arrow_back_rounded,
+          title: tr('customer_booking.trip_return_title', namedArgs: {
+            'from': toCity,
+            'to': fromCity,
+          }),
+          subtitle: tr('customer_booking.trip_return_sub'),
+          selected: value == TripType.returnOnly,
+          onTap: () => onChanged(TripType.returnOnly),
+        ),
+      ],
+    );
+  }
+}
+
+class _TripTypeOption extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _TripTypeOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.brandLight : theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppTheme.brand : theme.colorScheme.outline,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppTheme.brand.withValues(alpha: 0.15)
+                    : AppColors.surfaceAlt(context),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                size: 20,
+                color: selected ? AppTheme.brand : AppColors.textMuted(context),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      height: 1.3,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              selected
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_off_rounded,
+              size: 20,
+              color: selected ? AppTheme.brand : AppColors.textMuted(context),
+            ),
+          ],
         ),
       ),
     );
@@ -741,7 +905,7 @@ class _Totals extends StatelessWidget {
             style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: AppTheme.textSecondary,
+              color: AppColors.textMuted(context),
             ),
           ),
           const Spacer(),
@@ -753,7 +917,7 @@ class _Totals extends StatelessWidget {
               style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
+                color: AppColors.text(context),
               ),
             ),
         ],
