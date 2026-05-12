@@ -1,0 +1,65 @@
+{
+  "en": {
+    "login": {
+      "tagline": "Tour Booking Agent",
+      "hero": "Welcome\nback.",
+      "description": "Sign in with your phone number to continue planning extraordinary journeys.",
+      "phone_label": "PHONE NUMBER",
+      "phone_hint": "Enter your phone number",
+      "password_label": "PASSWORD",
+      "password_hint": "Admin password",
+      "signing_in_as": "Signing in as {name}",
+      "btn_sign_in": "Sign in",
+      "btn_different_number": "Use a different number",
+      "btn_setup": "First-time setup — create admin account",
+      "btn_ping": "Send a Ping",
+      "terms": "By continuing, you agree to our Terms of Service\nand Privacy Policy.",
+      "ping_success_title": "Ping Success",
+      "ping_success_msg": "Connection to Supabase successful.\n{result}",
+      "ping_failed_title": "Ping Failed",
+      "ping_failed_msg": "Could not reach Supabase:\n{error}"
+    }
+  },
+  "gu": {
+    "login": {
+      "tagline": "ટૂર બુકિંગ એજન્ટ",
+      "hero": "ફરી\nઆવ્યા.",
+      "description": "અસાધારણ પ્રવાસ આગળ ધપાવવા માટે તમારા ફોન નંબરથી સાઇન ઇન કરો.",
+      "phone_label": "ફોન નંબર",
+      "phone_hint": "તમારો ફોન નંબર દાખલ કરો",
+      "password_label": "પાસવર્ડ",
+      "password_hint": "એડમિન પાસવર્ડ",
+      "signing_in_as": "{name} તરીકે સાઇન ઇન થઈ રહ્યા છો",
+      "btn_sign_in": "સાઇન ઇન",
+      "btn_different_number": "અલગ નંબર વાપરો",
+      "btn_setup": "પ્રથમ વખત સેટઅપ — એડમિન એકાઉન્ટ બનાવો",
+      "btn_ping": "પિંગ મોકલો",
+      "terms": "ચાલુ રાખીને, તમે અમારી સેવાની શરતો\nઅને ગોપનીયતા નીતિ સ્વીકારો છો.",
+      "ping_success_title": "પિંગ સફળ",
+      "ping_success_msg": "Supabase સાથે કનેક્શન સફળ.\n{result}",
+      "ping_failed_title": "પિંગ નિષ્ફળ",
+      "ping_failed_msg": "Supabase સુધી પહોંચી શકાયું નહીં:\n{error}"
+    }
+  },
+  "hi": {
+    "login": {
+      "tagline": "टूर बुकिंग एजेंट",
+      "hero": "वापसी\nपर स्वागत है।",
+      "description": "असाधारण यात्राएं जारी रखने के लिए अपने फ़ोन नंबर से साइन इन करें।",
+      "phone_label": "फ़ोन नंबर",
+      "phone_hint": "अपना फ़ोन नंबर दर्ज करें",
+      "password_label": "पासवर्ड",
+      "password_hint": "एडमिन पासवर्ड",
+      "signing_in_as": "{name} के रूप में साइन इन हो रहे हैं",
+      "btn_sign_in": "साइन इन",
+      "btn_different_number": "कोई अलग नंबर उपयोग करें",
+      "btn_setup": "पहली बार सेटअप — एडमिन अकाउंट बनाएं",
+      "btn_ping": "पिंग भेजें",
+      "terms": "जारी रखकर आप हमारी सेवा की शर्तों\nऔर गोपनीयता नीति से सहमत होते हैं।",
+      "ping_success_title": "पिंग सफल",
+      "ping_success_msg": "Supabase से कनेक्शन सफल।\n{result}",
+      "ping_failed_title": "पिंग विफल",
+      "ping_failed_msg": "Supabase तक पहुँचा नहीं जा सका:\n{error}"
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -38,7 +39,7 @@ class LoginScreen extends GetView<AuthController> {
                   ),
                   const Spacer(),
                   Text(
-                    'Tour Booking Agent',
+                    tr('login.tagline'),
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w400,
@@ -57,7 +58,7 @@ class LoginScreen extends GetView<AuthController> {
               const SizedBox(height: 48),
               // ── Hero text ────────────────────────────────────
               Text(
-                'Welcome\nback.',
+                tr('login.hero'),
                 style: GoogleFonts.inter(
                   fontSize: 42,
                   fontWeight: FontWeight.w600,
@@ -69,7 +70,7 @@ class LoginScreen extends GetView<AuthController> {
               const SizedBox(height: 20),
               // ── Description ──────────────────────────────────
               Text(
-                'Sign in with your phone number to continue planning extraordinary journeys.',
+                tr('login.description'),
                 style: GoogleFonts.inter(
                   fontSize: 17,
                   fontWeight: FontWeight.w400,
@@ -80,7 +81,7 @@ class LoginScreen extends GetView<AuthController> {
               const SizedBox(height: 48),
               // ── Phone label ──────────────────────────────────
               Text(
-                'PHONE NUMBER',
+                tr('login.phone_label'),
                 style: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
@@ -142,7 +143,7 @@ class LoginScreen extends GetView<AuthController> {
                         ),
                         decoration: InputDecoration(
                           counterText: '',
-                          hintText: 'Enter your phone number',
+                          hintText: tr('login.phone_hint'),
                           hintStyle: GoogleFonts.inter(
                             fontSize: 15,
                             color: colorScheme.onSurfaceVariant,
@@ -178,7 +179,7 @@ class LoginScreen extends GetView<AuthController> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'PASSWORD',
+                      tr('login.password_label'),
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
@@ -200,7 +201,7 @@ class LoginScreen extends GetView<AuthController> {
                           color: colorScheme.onSurface,
                         ),
                         decoration: InputDecoration(
-                          hintText: 'Admin password',
+                          hintText: tr('login.password_hint'),
                           hintStyle: GoogleFonts.inter(
                             fontSize: 15,
                             color: colorScheme.onSurfaceVariant,
@@ -227,7 +228,7 @@ class LoginScreen extends GetView<AuthController> {
                     if (adminName.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
-                        'Signing in as $adminName',
+                        tr('login.signing_in_as', namedArgs: {'name': adminName}),
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           color: colorScheme.onSurfaceVariant,
@@ -272,7 +273,7 @@ class LoginScreen extends GetView<AuthController> {
                             ),
                           )
                         : Text(
-                            showPasswordStep ? 'Sign in' : 'Continue',
+                            showPasswordStep ? tr('login.btn_sign_in') : tr('app.action.continue_'),
                             style: GoogleFonts.inter(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -293,7 +294,7 @@ class LoginScreen extends GetView<AuthController> {
                     child: TextButton(
                       onPressed: controller.cancelAdminPassword,
                       child: Text(
-                        'Use a different number',
+                        tr('login.btn_different_number'),
                         style: GoogleFonts.inter(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
@@ -310,7 +311,7 @@ class LoginScreen extends GetView<AuthController> {
                 child: TextButton(
                   onPressed: () => Get.toNamed('/admin-setup'),
                   child: Text(
-                    'First-time setup — create admin account',
+                    tr('login.btn_setup'),
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -326,7 +327,7 @@ class LoginScreen extends GetView<AuthController> {
                   onPressed: () => _sendPing(context),
                   icon: const Icon(Icons.network_check_rounded, size: 16),
                   label: Text(
-                    'Send a Ping',
+                    tr('login.btn_ping'),
                     style: GoogleFonts.inter(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
@@ -338,7 +339,7 @@ class LoginScreen extends GetView<AuthController> {
               // ── Terms ────────────────────────────────────────
               Center(
                 child: Text(
-                  'By continuing, you agree to our Terms of Service\nand Privacy Policy.',
+                  tr('login.terms'),
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
                     fontSize: 11,
@@ -400,15 +401,15 @@ class LoginScreen extends GetView<AuthController> {
       if (!context.mounted) return;
       Navigator.of(context).pop(); // dismiss loader
       AppSnackBar.success(
-        'Connection to Supabase successful.\n${result.length > 100 ? "${result.substring(0, 100)}..." : result}',
-        title: 'Ping Success',
+        tr('login.ping_success_msg', namedArgs: {'result': result.length > 100 ? '${result.substring(0, 100)}...' : result}),
+        title: tr('login.ping_success_title'),
       );
     } catch (e) {
       if (!context.mounted) return;
       Navigator.of(context).pop();
       AppSnackBar.error(
-        'Could not reach Supabase:\n$e',
-        title: 'Ping Failed',
+        tr('login.ping_failed_msg', namedArgs: {'error': e.toString()}),
+        title: tr('login.ping_failed_title'),
       );
     }
   }
