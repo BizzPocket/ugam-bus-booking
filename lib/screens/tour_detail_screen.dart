@@ -322,7 +322,7 @@ class _StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: isActive ? AppTheme.successLight : AppTheme.borderLight,
+        color: isActive ? AppTheme.successLight : AppColors.border(context),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(

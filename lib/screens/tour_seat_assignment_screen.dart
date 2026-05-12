@@ -1018,16 +1018,16 @@ class _SeatTile extends StatelessWidget {
     }
   }
 
-  Color get _typeBorder {
+  Color _typeBorder(BuildContext context) {
     switch (cell.seatType) {
       case SeatType.singleSofa:
         return const Color(0xFF22C55E);
       case SeatType.doubleSofa:
         return const Color(0xFF0EA5E9);
       case SeatType.seater:
-        return AppTheme.textMuted;
+        return AppColors.textMuted(context);
       case null:
-        return AppTheme.borderLight;
+        return AppColors.border(context);
     }
   }
 
@@ -1131,7 +1131,7 @@ class _SeatTile extends StatelessWidget {
       textColor = Colors.white;
     } else {
       bg = _typeTint;
-      border = _typeBorder;
+      border = _typeBorder(context);
       textColor = AppColors.text(context);
     }
 
