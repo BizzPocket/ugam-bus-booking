@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -7,27 +8,43 @@ import 'package:uuid/uuid.dart';
 
 import '../config/theme.dart';
 import '../controllers/user_controller.dart';
+import '../models/passenger.dart';
+import '../models/request_line.dart';
+import '../models/seat_type.dart';
 import '../models/tour.dart';
+import '../services/customer_requests_store.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/phone_normalize.dart';
 
 /// Customer-side seat request form.
 ///
-/// On submit:
-///   1. Writes a Passenger record to the DB (idempotent on tourId+phone).
-///   2. Opens WhatsApp via deep link with a pre-filled message addressed
-///      to the agent's number; the customer taps Send to give the agent
-///      a familiar courtesy ping. The DB write is the source of truth —
-///      the agent's Requests screen reads from there.
+/// Two modes:
+///   • Create  — [existing] is null. Inserts into booking_requests + upserts
+///     into passengers, then opens WhatsApp with the standard request message.
+///   • Edit    — [existing] is non-null. Calls booking_request_customer_update
+///     RPC (which atomically updates both tables and stamps customer_edited_at),
+///     then opens WhatsApp with an "updated request" variant message so the
+///     organiser sees this isn't a fresh ping.
 ///
-/// Customer-facing seat types are simplified to Sleeper Lower / Sleeper
-/// Upper / Seater. They map to the data model's doubleSofa+position and
-/// seater types so the agent's assignment screen can match them up.
+/// Edit mode is only entered for entries where the server says the request
+/// is still pending and no seats have been assigned — the My Requests screen
+/// enforces that gate, and the RPC enforces it again server-side.
+///
+/// Seat choices are intentionally limited to Double Sofa and Single Sofa.
+/// The agent decides upper/lower berth assignment later, so the customer
+/// doesn't have to think about it.
 class CustomerBookingRequestScreen extends StatefulWidget {
   final Tour tour;
+  final CustomerRequestEntry? existing;
 
-  const CustomerBookingRequestScreen({super.key, required this.tour});
+  const CustomerBookingRequestScreen({
+    super.key,
+    required this.tour,
+    this.existing,
+  });
+
+  bool get isEditing => existing != null;
 
   @override
   State<CustomerBookingRequestScreen> createState() =>
@@ -40,14 +57,31 @@ class _CustomerBookingRequestScreenState
   final _phone = TextEditingController();
   final _note = TextEditingController();
 
-  int _sleeperLower = 0;
-  int _sleeperUpper = 0;
-  int _seater = 0;
+  int _doubleSofa = 0;
+  int _singleSofa = 0;
 
   bool _saving = false;
+  bool _showNote = false;
 
-  int get _totalSeats => _sleeperLower + _sleeperUpper + _seater;
+  int get _totalSeats => _doubleSofa + _singleSofa;
   double get _estTotal => widget.tour.pricePerSeat * _totalSeats;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    if (e != null) {
+      _name.text = e.customerName;
+      // Stored as '+91XXXXXXXXXX' — show just the 10-digit local part.
+      _phone.text = normalisePhone(e.customerPhone);
+      _doubleSofa = e.doubleSofa;
+      _singleSofa = e.singleSofa;
+      if (e.note != null && e.note!.isNotEmpty) {
+        _note.text = e.note!;
+        _showNote = true;
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -62,15 +96,15 @@ class _CustomerBookingRequestScreenState
     final phone = _phone.text.trim();
 
     if (name.isEmpty) {
-      AppSnackBar.error('Please enter your name');
+      AppSnackBar.error(tr('customer_booking.err_name_required'));
       return;
     }
     if (phone.length != 10) {
-      AppSnackBar.error('Please enter a 10-digit phone number');
+      AppSnackBar.error(tr('customer_booking.err_phone_invalid'));
       return;
     }
     if (_totalSeats == 0) {
-      AppSnackBar.error('Pick at least one seat');
+      AppSnackBar.error(tr('customer_booking.err_no_seats'));
       return;
     }
     // Organiser phone is best-effort: old tours may have null `createdBy`.
@@ -82,65 +116,209 @@ class _CustomerBookingRequestScreenState
     setState(() => _saving = true);
 
     try {
-      // Write a booking_requests row. Anon insert — no auth required.
-      final requestId = const Uuid().v4();
       final note = _note.text.trim();
-      await Supabase.instance.client.from('booking_requests').insert({
-        'id': requestId,
-        'tour_id': widget.tour.id,
-        'customer_phone': '+91${normalisePhone(phone)}',
-        'customer_name': name,
-        'party_size': _totalSeats,
-        'raw_form': {
-          'sleeper_lower': _sleeperLower,
-          'sleeper_upper': _sleeperUpper,
-          'seater': _seater,
-          if (note.isNotEmpty) 'note': note,
-        },
-      });
+      final normalisedPhone = '+91${normalisePhone(phone)}';
 
-      // Auto-grow the tour creator admin's contact directory. Best-effort:
-      // if it fails (network, permissions), the booking still went through.
-      if (hasOrganiser && Get.isRegistered<UserController>()) {
-        // ignore: unawaited_futures
-        Get.find<UserController>().autoGrowFromBooking(
-          tourCreatorPhone: adminPhone,
-          passengerPhone: phone,
-          passengerName: name,
-        );
-      }
-
-      // Hand off to WhatsApp when we know the organiser. Old tours with
-      // no `createdBy` skip this step — the agent still sees the request
-      // in the Requests tab.
-      if (hasOrganiser) {
-        await WhatsAppService().sendBookingRequest(
+      if (widget.isEditing) {
+        await _submitEdit(
+          name: name,
+          normalisedPhone: normalisedPhone,
+          note: note,
           adminPhone: adminPhone,
-          tour: widget.tour,
-          customerName: name,
-          singleSofaCount: 0,
-          doubleSofaCount: _sleeperLower + _sleeperUpper,
-          note: _note.text.trim().isEmpty
-              ? 'Sleeper L:$_sleeperLower U:$_sleeperUpper · Seater $_seater'
-              : '${_note.text.trim()} (Sleeper L:$_sleeperLower '
-                  'U:$_sleeperUpper · Seater $_seater)',
+          hasOrganiser: hasOrganiser,
+        );
+      } else {
+        await _submitCreate(
+          name: name,
+          rawPhone: phone,
+          normalisedPhone: normalisedPhone,
+          note: note,
+          adminPhone: adminPhone,
+          hasOrganiser: hasOrganiser,
         );
       }
-
-      if (!mounted) return;
-      Get.back();
-      AppSnackBar.success(
-        hasOrganiser
-            ? 'Request sent. Tap Send in WhatsApp to confirm.'
-            : 'Request saved. The organiser will reach out shortly.',
-        title: 'Submitted',
-      );
-    } catch (e) {
-      AppSnackBar.error('Could not save your request — try again.');
+    } catch (_) {
+      AppSnackBar.error(tr('customer_booking.err_save_failed'));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
+
+  Future<void> _submitCreate({
+    required String name,
+    required String rawPhone,
+    required String normalisedPhone,
+    required String note,
+    required String? adminPhone,
+    required bool hasOrganiser,
+  }) async {
+    final requestId = const Uuid().v4();
+
+    // 1. Audit row in booking_requests (raw form snapshot).
+    await Supabase.instance.client.from('booking_requests').insert({
+      'id': requestId,
+      'tour_id': widget.tour.id,
+      'customer_phone': normalisedPhone,
+      'customer_name': name,
+      'party_size': _totalSeats,
+      'raw_form': {
+        'double_sofa': _doubleSofa,
+        'single_sofa': _singleSofa,
+        if (note.isNotEmpty) 'note': note,
+      },
+    });
+
+    // 2. Live row in passengers — this is the table the admin's Requests
+    //    screen actually reads. The unique (tour_id, phone) index makes
+    //    the upsert idempotent for re-submissions.
+    final requestLines = _buildRequestLines();
+    final passenger = Passenger(
+      tourId: widget.tour.id,
+      name: name,
+      phone: normalisedPhone,
+      requestLines: requestLines,
+      note: note.isEmpty ? null : note,
+    );
+    await Supabase.instance.client
+        .from('passengers')
+        .upsert(passenger.toMap(), onConflict: 'tour_id,phone');
+
+    // 3. Device-local journal so the customer can find this request again
+    //    on their My Requests screen.
+    await CustomerRequestsStore().upsert(CustomerRequestEntry(
+      id: requestId,
+      tourId: widget.tour.id,
+      tourTitle: widget.tour.title,
+      tourFromCity: widget.tour.fromCity,
+      tourToCity: widget.tour.toCity,
+      tourDepartureDate: widget.tour.departureDate,
+      tourPricePerSeat: widget.tour.pricePerSeat,
+      customerName: name,
+      customerPhone: normalisedPhone,
+      partySize: _totalSeats,
+      doubleSofa: _doubleSofa,
+      singleSofa: _singleSofa,
+      note: note.isEmpty ? null : note,
+      status: 'pending',
+      createdAt: DateTime.now(),
+    ));
+
+    // Auto-grow the tour creator admin's contact directory. Best-effort:
+    // if it fails (network, permissions), the booking still went through.
+    if (hasOrganiser && Get.isRegistered<UserController>()) {
+      // ignore: unawaited_futures
+      Get.find<UserController>().autoGrowFromBooking(
+        tourCreatorPhone: adminPhone!,
+        passengerPhone: rawPhone,
+        passengerName: name,
+      );
+    }
+
+    // Hand off to WhatsApp when we know the organiser. Old tours with
+    // no `createdBy` skip this step — the agent still sees the request
+    // in the Requests tab.
+    if (hasOrganiser) {
+      await WhatsAppService().sendBookingRequest(
+        adminPhone: adminPhone!,
+        tour: widget.tour,
+        customerName: name,
+        singleSofaCount: _singleSofa,
+        doubleSofaCount: _doubleSofa,
+        note: note.isEmpty ? null : note,
+      );
+    }
+
+    if (!mounted) return;
+    Get.back();
+    AppSnackBar.success(
+      hasOrganiser
+          ? tr('customer_booking.success_sent_wa')
+          : tr('customer_booking.success_sent_no_wa'),
+      title: tr('customer_booking.success_title_submitted'),
+    );
+  }
+
+  Future<void> _submitEdit({
+    required String name,
+    required String normalisedPhone,
+    required String note,
+    required String? adminPhone,
+    required bool hasOrganiser,
+  }) async {
+    final existing = widget.existing!;
+    final requestLines = _buildRequestLines();
+    final requestLinesJson =
+        requestLines.map((rl) => rl.toMap()).toList();
+
+    // The RPC enforces server-side that status is still 'pending' AND no
+    // seats have been assigned yet. Returns false if either gate fails.
+    final ok = await Supabase.instance.client.rpc(
+      'booking_request_customer_update',
+      params: {
+        'p_id': existing.id,
+        'p_party_size': _totalSeats,
+        'p_customer_name': name,
+        'p_raw_form': {
+          'double_sofa': _doubleSofa,
+          'single_sofa': _singleSofa,
+          if (note.isNotEmpty) 'note': note,
+        },
+        'p_request_lines': requestLinesJson,
+      },
+    );
+
+    if (ok != true) {
+      if (!mounted) return;
+      AppSnackBar.warning(
+        tr('customer_booking.warn_edit_blocked'),
+        title: tr('customer_booking.warn_title_edit_blocked'),
+      );
+      // Pull the latest server state into the local store so the My Requests
+      // screen shows the new status the next time it's opened.
+      // ignore: unawaited_futures
+      CustomerRequestsStore().refresh(existing.id);
+      return;
+    }
+
+    // Mirror the edit into the device-local journal.
+    await CustomerRequestsStore().upsert(existing.copyWith(
+      customerName: name,
+      partySize: _totalSeats,
+      doubleSofa: _doubleSofa,
+      singleSofa: _singleSofa,
+      note: note.isEmpty ? null : note,
+      customerEditedAt: DateTime.now(),
+      lastRefreshedAt: DateTime.now(),
+    ));
+
+    if (hasOrganiser) {
+      await WhatsAppService().sendBookingRequest(
+        adminPhone: adminPhone!,
+        tour: widget.tour,
+        customerName: name,
+        singleSofaCount: _singleSofa,
+        doubleSofaCount: _doubleSofa,
+        note: note.isEmpty ? null : note,
+        isUpdate: true,
+      );
+    }
+
+    if (!mounted) return;
+    Get.back();
+    AppSnackBar.success(
+      hasOrganiser
+          ? tr('customer_booking.success_updated_wa')
+          : tr('customer_booking.success_updated_no_wa'),
+      title: tr('customer_booking.success_title_updated'),
+    );
+  }
+
+  List<RequestLine> _buildRequestLines() => <RequestLine>[
+        if (_doubleSofa > 0)
+          RequestLine(seatType: SeatType.doubleSofa, qty: _doubleSofa),
+        if (_singleSofa > 0)
+          RequestLine(seatType: SeatType.singleSofa, qty: _singleSofa),
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -155,7 +333,7 @@ class _CustomerBookingRequestScreenState
           onPressed: () => Get.back(),
         ),
         title: Text(
-          'Request seats',
+          tr('customer_booking.title'),
           style: GoogleFonts.inter(
             fontSize: 17,
             fontWeight: FontWeight.w700,
@@ -173,18 +351,18 @@ class _CustomerBookingRequestScreenState
                   _SummaryCard(tour: widget.tour),
                   const SizedBox(height: 22),
 
-                  _Label('YOUR NAME'),
+                  _Label(tr('customer_booking.label_your_name')),
                   const SizedBox(height: 6),
                   TextField(
                     controller: _name,
                     textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      hintText: 'How should we list you?',
+                    decoration: InputDecoration(
+                      hintText: tr('customer_booking.hint_your_name'),
                     ),
                   ),
                   const SizedBox(height: 18),
 
-                  _Label('PHONE (we will WhatsApp you here)'),
+                  _Label(tr('customer_booking.label_phone')),
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -224,41 +402,55 @@ class _CustomerBookingRequestScreenState
                   ),
                   const SizedBox(height: 22),
 
-                  _Label('SEATS NEEDED'),
+                  _Label(tr('customer_booking.label_seat_count')),
                   const SizedBox(height: 6),
-                  _SeatStepper(
-                    label: 'Sleeper — Lower berth',
-                    sublabel: 'Easier to access; popular with elders',
-                    value: _sleeperLower,
-                    onChanged: (v) => setState(() => _sleeperLower = v),
+                  _SeatTile(
+                    icon: Icons.king_bed_rounded,
+                    label: tr('customer_booking.seat_double_sofa_label'),
+                    sublabel: tr('customer_booking.seat_double_sofa_sub'),
+                    value: _doubleSofa,
+                    onChanged: (v) => setState(() => _doubleSofa = v),
                   ),
                   const SizedBox(height: 10),
-                  _SeatStepper(
-                    label: 'Sleeper — Upper berth',
-                    sublabel: 'Above the lower berth',
-                    value: _sleeperUpper,
-                    onChanged: (v) => setState(() => _sleeperUpper = v),
-                  ),
-                  const SizedBox(height: 10),
-                  _SeatStepper(
-                    label: 'Seater',
-                    sublabel: 'Standard sit-up seat',
-                    value: _seater,
-                    onChanged: (v) => setState(() => _seater = v),
+                  _SeatTile(
+                    icon: Icons.single_bed_rounded,
+                    label: tr('customer_booking.seat_single_sofa_label'),
+                    sublabel: tr('customer_booking.seat_single_sofa_sub'),
+                    value: _singleSofa,
+                    onChanged: (v) => setState(() => _singleSofa = v),
                   ),
 
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 18),
 
-                  _Label('NOTE (OPTIONAL)'),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: _note,
-                    maxLines: 3,
-                    maxLength: 200,
-                    decoration: const InputDecoration(
-                      hintText: 'Special requests, group members, etc.',
+                  // Collapsible note — fewer fields on first sight.
+                  if (!_showNote)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () =>
+                            setState(() => _showNote = true),
+                        icon: const Icon(Icons.add_rounded, size: 16),
+                        label: Text(tr('customer_booking.add_note_button')),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.textSecondary,
+                          padding: EdgeInsets.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    )
+                  else ...[
+                    _Label(tr('customer_booking.label_note')),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _note,
+                      maxLines: 3,
+                      maxLength: 200,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: tr('customer_booking.hint_note'),
+                      ),
                     ),
-                  ),
+                  ],
 
                   const SizedBox(height: 6),
                   _Totals(
@@ -280,8 +472,7 @@ class _CustomerBookingRequestScreenState
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    'Tapping below saves your request and opens WhatsApp '
-                    'with a pre-filled message — just hit Send.',
+                    tr('customer_booking.cta_hint'),
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       color: colorScheme.onSurfaceVariant,
@@ -305,8 +496,8 @@ class _CustomerBookingRequestScreenState
                           : const Icon(Icons.send_rounded),
                       label: Text(
                         _saving
-                            ? 'Saving…'
-                            : 'Confirm & open WhatsApp',
+                            ? tr('customer_booking.button_saving')
+                            : tr('customer_booking.button_confirm'),
                         style: GoogleFonts.inter(
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
@@ -360,8 +551,11 @@ class _SummaryCard extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            '${tour.fromCity} → ${tour.toCity}  ·  '
-            '₹${tour.pricePerSeat.toStringAsFixed(0)} / seat',
+            tr('customer_booking.route_price', namedArgs: {
+              'from': tour.fromCity,
+              'to': tour.toCity,
+              'price': tour.pricePerSeat.toStringAsFixed(0),
+            }),
             style: GoogleFonts.inter(
               fontSize: 12,
               color: AppTheme.brandDark.withValues(alpha: 0.85),
@@ -391,13 +585,15 @@ class _Label extends StatelessWidget {
   }
 }
 
-class _SeatStepper extends StatelessWidget {
+class _SeatTile extends StatelessWidget {
+  final IconData icon;
   final String label;
   final String sublabel;
   final int value;
   final ValueChanged<int> onChanged;
 
-  const _SeatStepper({
+  const _SeatTile({
+    required this.icon,
     required this.label,
     required this.sublabel,
     required this.value,
@@ -407,15 +603,39 @@ class _SeatStepper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    final selected = value > 0;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: theme.colorScheme.outline),
+        color: selected
+            ? AppTheme.brandLight
+            : theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: selected ? AppTheme.brand : theme.colorScheme.outline,
+          width: selected ? 1.5 : 1,
+        ),
       ),
       child: Row(
         children: [
+          // Icon chip
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: selected
+                  ? AppTheme.brand.withValues(alpha: 0.15)
+                  : AppTheme.bgLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              size: 22,
+              color: selected ? AppTheme.brand : AppTheme.textSecondary,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -424,8 +644,8 @@ class _SeatStepper extends StatelessWidget {
                 Text(
                   label,
                   style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
                     color: theme.colorScheme.onSurface,
                   ),
                 ),
@@ -434,16 +654,17 @@ class _SeatStepper extends StatelessWidget {
                   sublabel,
                   style: GoogleFonts.inter(
                     fontSize: 11,
+                    height: 1.3,
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
             ),
           ),
-          IconButton.outlined(
-            visualDensity: VisualDensity.compact,
-            onPressed: value > 0 ? () => onChanged(value - 1) : null,
-            icon: const Icon(Icons.remove_rounded, size: 18),
+          _StepperButton(
+            icon: Icons.remove_rounded,
+            enabled: value > 0,
+            onTap: () => onChanged(value - 1),
           ),
           SizedBox(
             width: 32,
@@ -451,18 +672,53 @@ class _SeatStepper extends StatelessWidget {
               '$value',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
-                fontSize: 17,
+                fontSize: 18,
                 fontWeight: FontWeight.w700,
-                color: theme.colorScheme.onSurface,
+                color: selected
+                    ? AppTheme.brand
+                    : theme.colorScheme.onSurface,
               ),
             ),
           ),
-          IconButton.outlined(
-            visualDensity: VisualDensity.compact,
-            onPressed: value < 8 ? () => onChanged(value + 1) : null,
-            icon: const Icon(Icons.add_rounded, size: 18),
+          _StepperButton(
+            icon: Icons.add_rounded,
+            enabled: value < 8,
+            onTap: () => onChanged(value + 1),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _StepperButton extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _StepperButton({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: enabled ? AppTheme.brand : AppTheme.bgLight,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 18,
+          color: enabled ? Colors.white : AppTheme.textMuted,
+        ),
       ),
     );
   }
@@ -481,7 +737,7 @@ class _Totals extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            '$seatCount ${seatCount == 1 ? "seat" : "seats"}',
+            plural('customer_booking.totals_seat', seatCount),
             style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w600,
@@ -491,7 +747,9 @@ class _Totals extends StatelessWidget {
           const Spacer(),
           if (estTotal > 0)
             Text(
-              'Estimated total: ₹${estTotal.toStringAsFixed(0)}',
+              tr('customer_booking.totals_estimated', namedArgs: {
+                'amount': estTotal.toStringAsFixed(0),
+              }),
               style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
