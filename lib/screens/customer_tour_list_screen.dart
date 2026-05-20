@@ -1,69 +1,87 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../components/ugam_logo.dart';
-import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import 'customer_tour_detail_screen.dart';
 
 /// Anonymous landing screen — lists public tours that customers can
-/// browse without signing in. Tapping a tour opens its detail screen,
-/// which leads to the WhatsApp booking request flow.
+/// browse without signing in. Tapping a tour opens its detail screen.
+/// The header carries an inbox icon to reach My Requests, and an admin
+/// lock icon to reach the agent login.
 class CustomerTourListScreen extends StatelessWidget {
   const CustomerTourListScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final c = UgamColors.of(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: c.bg,
       body: SafeArea(
+        bottom: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _Header(),
+            _Header(c: c),
             Expanded(
               child: Obx(() {
                 if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
+                  return _LoadingShimmer();
                 }
                 if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-                  return _Empty(
+                  return UgamEmpty(
                     icon: Icons.cloud_off_rounded,
                     title: tr('customer_tour_list.error_title'),
-                    subtitle: tourCtrl.errorMessage.value,
-                    onRetry: tourCtrl.refreshTours,
+                    body: tourCtrl.errorMessage.value,
+                    cta: UgamCTA(
+                      label: tr('app.action.retry'),
+                      leadingIcon: Icons.refresh_rounded,
+                      onPressed: tourCtrl.refreshTours,
+                    ),
                   );
                 }
                 final tours = _visibleTours(tourCtrl.tours);
                 if (tours.isEmpty) {
-                  return _Empty(
+                  return UgamEmpty(
                     icon: Icons.event_busy_rounded,
                     title: tr('customer_tour_list.empty_title'),
-                    subtitle: tr('customer_tour_list.empty_subtitle'),
-                    onRetry: tourCtrl.refreshTours,
+                    body: tr('customer_tour_list.empty_subtitle'),
                   );
                 }
                 return RefreshIndicator(
+                  color: c.accent,
                   onRefresh: tourCtrl.refreshTours,
                   child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
-                    itemCount: tours.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 14),
-                    itemBuilder: (_, i) => _CustomerTourCard(
-                      tour: tours[i],
-                      colorScheme: colorScheme,
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
                     ),
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.gutter,
+                      UgamSpacing.sm,
+                      UgamSpacing.gutter,
+                      UgamSpacing.md,
+                    ),
+                    itemCount: tours.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: UgamSpacing.md),
+                    itemBuilder: (_, i) => _TourCard(tour: tours[i]),
                   ),
                 );
               }),
+            ),
+            UgamStickyCTA(
+              child: UgamCTA(
+                label: tr('customer_tour_list.my_requests_tooltip'),
+                leadingIcon: Icons.inbox_rounded,
+                trailingValue: '→',
+                onPressed: () => Get.toNamed('/customer-my-requests'),
+              ),
             ),
           ],
         ),
@@ -78,54 +96,35 @@ class CustomerTourListScreen extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
+  final UgamColorSet c;
+  const _Header({required this.c});
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.lg,
+        UgamSpacing.md,
+        UgamSpacing.lg,
+        UgamSpacing.lg,
+      ),
       child: Row(
         children: [
-          const UgamLogo(size: 44),
-          const SizedBox(width: 12),
+          const UgamLogo(size: 36),
+          const SizedBox(width: UgamSpacing.md - 2),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Ugam Booking',
-                  style: GoogleFonts.inter(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-                Text(
-                  tr('customer_tour_list.brand_tagline'),
-                  style: GoogleFonts.notoSansGujarati(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w400,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+            child: Text(
+              tr('splash.brand_name'),
+              style: UgamText.titleM.copyWith(color: c.ink),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          IconButton(
-            onPressed: () => Get.toNamed('/customer-my-requests'),
-            icon: const Icon(Icons.inbox_rounded),
-            tooltip: tr('customer_tour_list.my_requests_tooltip'),
-            color: AppTheme.brand,
-          ),
-          const SizedBox(width: 4),
-          OutlinedButton.icon(
-            onPressed: () => Get.toNamed('/login'),
-            icon: const Icon(Icons.lock_outline_rounded, size: 16),
-            label: Text(
-              tr('customer_tour_list.admin_button'),
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+          _HeaderIcon(
+            icon: Icons.lock_outline_rounded,
+            c: c,
+            tooltip: tr('customer_tour_list.admin_button'),
+            onTap: () => Get.toNamed('/login'),
           ),
         ],
       ),
@@ -133,107 +132,238 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _CustomerTourCard extends StatelessWidget {
-  final Tour tour;
-  final ColorScheme colorScheme;
-
-  const _CustomerTourCard({required this.tour, required this.colorScheme});
+class _HeaderIcon extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final UgamColorSet c;
+  final VoidCallback onTap;
+  const _HeaderIcon({
+    required this.icon,
+    required this.c,
+    required this.tooltip,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: () => Get.to(() => CustomerTourDetailScreen(tour: tour)),
-      child: Ink(
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colorScheme.outline),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.brandLight,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      _formatDate(tour.departureDate),
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.brandDark,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    tr('customer_tour_list.price_per_seat',
-                        namedArgs: {'price': tour.pricePerSeat.toStringAsFixed(0)}),
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: colorScheme.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                tour.title,
-                style: GoogleFonts.inter(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: colorScheme.onSurface,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${tour.fromCity} → ${tour.toCity}',
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(
-                    Icons.directions_bus_rounded,
-                    size: 16,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    tour.buses.isEmpty
-                        ? tr('customer_tour_list.bus_to_be_confirmed')
-                        : tour.buses.first.busNumber,
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    tr('customer_tour_list.tap_to_book'),
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.brand,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: c.cardElev,
+            shape: BoxShape.circle,
           ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 18, color: c.ink2),
+        ),
+      ),
+    );
+  }
+}
+
+class _TourCard extends StatelessWidget {
+  final Tour tour;
+  const _TourCard({required this.tour});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return UgamCard.media(
+      onTap: () => Get.to(
+        () => CustomerTourDetailScreen(tour: tour),
+        transition: Transition.cupertino,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _HeroBlock(tour: tour, c: c),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              UgamSpacing.sm,
+              UgamSpacing.md - 2,
+              UgamSpacing.sm,
+              UgamSpacing.xs,
+            ),
+            child: Row(
+              children: [
+                if (tour.buses.isNotEmpty &&
+                    tour.buses.first.isAC) ...[
+                  const UgamReqChip(label: 'AC'),
+                  const SizedBox(width: 6),
+                ],
+                if (_seatsLow(tour))
+                  const UgamReqChip(
+                    label: 'FEW LEFT',
+                    variant: UgamChipVariant.warm,
+                  ),
+                const Spacer(),
+                Text(
+                  '${tour.passengerCount} booked',
+                  style: UgamText.tabular(
+                    UgamText.caption.copyWith(color: c.ink2),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _seatsLow(Tour t) {
+    if (t.buses.isEmpty) return false;
+    final cap = t.totalBusSeats;
+    if (cap == 0) return false;
+    final free = cap - t.passengerCount;
+    return free > 0 && free <= 6;
+  }
+}
+
+class _HeroBlock extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _HeroBlock({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(UgamRadius.photo),
+      child: SizedBox(
+        height: 156,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Brand gradient fallback (Phase 1 actual photos ship later).
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    c.accent.withValues(alpha: 0.85),
+                    Color.alphaBlend(
+                      c.accent.withValues(alpha: 0.6),
+                      Colors.black,
+                    ),
+                  ],
+                ),
+              ),
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(UgamSpacing.md),
+                  child: Icon(
+                    Icons.directions_bus_rounded,
+                    size: 38,
+                    color: Colors.white.withValues(alpha: 0.32),
+                  ),
+                ),
+              ),
+            ),
+            // Bottom gradient overlay for legibility.
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Color(0x99000000)],
+                  stops: [0.45, 1],
+                ),
+              ),
+            ),
+            // Date tab top-left.
+            Positioned(
+              top: UgamSpacing.sm,
+              left: UgamSpacing.sm,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.sm + 2,
+                  vertical: UgamSpacing.xs + 1,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.95),
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
+                ),
+                child: Text(
+                  _formatDate(tour.departureDate),
+                  style: UgamText.tabular(
+                    UgamText.micro.copyWith(
+                      color: const Color(0xFF111111),
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Title + route + price at bottom.
+            Positioned(
+              left: UgamSpacing.md,
+              right: UgamSpacing.md,
+              bottom: UgamSpacing.md,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${tour.fromCity} → ${tour.toCity}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: UgamText.caption.copyWith(
+                            color: Colors.white.withValues(alpha: 0.88),
+                            fontSize: 11,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          tour.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: UgamText.titleS.copyWith(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: UgamSpacing.sm),
+                  RichText(
+                    text: TextSpan(
+                      style: UgamText.tabular(
+                        UgamText.titleS.copyWith(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      children: [
+                        TextSpan(text: '₹${tour.pricePerSeat.toStringAsFixed(0)}'),
+                        TextSpan(
+                          text: '/seat',
+                          style: UgamText.caption.copyWith(
+                            color: Colors.white.withValues(alpha: 0.78),
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -244,61 +374,24 @@ class _CustomerTourCard extends StatelessWidget {
       'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
       'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
     ];
-    return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
+    const weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+    return '${weekdays[d.weekday - 1]} · ${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
   }
 }
 
-class _Empty extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onRetry;
-
-  const _Empty({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onRetry,
-  });
-
+class _LoadingShimmer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 56, color: colorScheme.onSurfaceVariant),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              subtitle,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: colorScheme.onSurfaceVariant,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 18),
-            OutlinedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: Text(tr('app.action.refresh')),
-            ),
-          ],
-        ),
-      ),
+    return ListView(
+      padding: const EdgeInsets.all(UgamSpacing.gutter),
+      physics: const NeverScrollableScrollPhysics(),
+      children: const [
+        UgamSkeleton.card(),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton.card(),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton.card(),
+      ],
     );
   }
 }

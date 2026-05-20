@@ -1,9 +1,8 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
+import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../services/whatsapp_service.dart';
@@ -19,120 +18,87 @@ class CustomerTourDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final c = UgamColors.of(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Get.back(),
-        ),
-        title: Text(
-          tr('customer_tour_detail.title'),
-          style: GoogleFonts.inter(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: colorScheme.onSurface,
-          ),
-        ),
-      ),
+      backgroundColor: c.bg,
       body: SafeArea(
         child: Column(
           children: [
+            _TopBar(c: c),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                padding: const EdgeInsets.fromLTRB(
+                  UgamSpacing.gutter,
+                  UgamSpacing.sm,
+                  UgamSpacing.gutter,
+                  UgamSpacing.xl,
+                ),
                 children: [
-                  _StatusChip(status: tour.status),
-                  const SizedBox(height: 14),
+                  _HeroPhoto(tour: tour, c: c),
+                  const SizedBox(height: UgamSpacing.lg),
+                  _statusDot(),
+                  const SizedBox(height: UgamSpacing.md),
                   Text(
                     tour.title,
-                    style: GoogleFonts.inter(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      color: colorScheme.onSurface,
-                      height: 1.2,
-                    ),
+                    style: UgamText.titleXl.copyWith(color: c.ink),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: UgamSpacing.xs),
                   Text(
                     '${tour.fromCity} → ${tour.toCity}',
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                    style: UgamText.body.copyWith(color: c.ink2, fontSize: 15),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: UgamSpacing.xs),
                   Text(
                     tr('customer_tour_detail.tour_id_label',
                         namedArgs: {'code': WhatsAppService.tourCode(tour.id)}),
-                    style: GoogleFonts.robotoMono(
-                      fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
+                    style: UgamText.tabular(
+                      UgamText.caption.copyWith(color: c.ink3),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  _DetailGrid(tour: tour, colorScheme: colorScheme),
+                  const SizedBox(height: UgamSpacing.xl),
+                  UgamRouteHeader(
+                    fromCode: _code(tour.fromCity),
+                    fromName: tour.fromCity,
+                    fromTime: _formatDate(tour.departureDate),
+                    toCode: _code(tour.toCity),
+                    toName: tour.toCity,
+                    toTime: tour.returnDate != null
+                        ? _formatDate(tour.returnDate!)
+                        : null,
+                    duration: tour.returnDate != null ? 'Round trip' : 'One way',
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  _PriceTile(tour: tour, c: c),
                   if (tour.buses.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    _BusCard(tour: tour, colorScheme: colorScheme),
+                    const SizedBox(height: UgamSpacing.md),
+                    _BusCard(tour: tour, c: c),
                   ],
                   if (tour.description != null &&
                       tour.description!.isNotEmpty) ...[
-                    const SizedBox(height: 20),
+                    const SizedBox(height: UgamSpacing.xl),
                     Text(
-                      tr('customer_tour_detail.about_section'),
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: colorScheme.onSurfaceVariant,
-                        letterSpacing: 0.5,
-                      ),
+                      tr('customer_tour_detail.about_section').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink3),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: UgamSpacing.sm),
                     Text(
                       tour.description!,
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        color: colorScheme.onSurface,
-                        height: 1.55,
-                      ),
+                      style: UgamText.body
+                          .copyWith(color: c.ink, fontSize: 15, height: 1.55),
                     ),
                   ],
                 ],
               ),
             ),
-            // Sticky bottom CTA
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-              decoration: BoxDecoration(
-                color: colorScheme.surface,
-                border: Border(top: BorderSide(color: colorScheme.outline)),
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton.icon(
-                  onPressed: () => Get.to(
-                      () => CustomerBookingRequestScreen(tour: tour)),
-                  icon: const Icon(Icons.event_seat_rounded),
-                  label: Text(
-                    tr('customer_tour_detail.request_seats_cta'),
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.brand,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+            UgamStickyCTA(
+              child: UgamCTA(
+                label: tr('customer_tour_detail.request_seats_cta'),
+                leadingIcon: Icons.event_seat_rounded,
+                trailingValue: '₹${tour.pricePerSeat.toStringAsFixed(0)}',
+                onPressed: () => Get.to(
+                  () => CustomerBookingRequestScreen(tour: tour),
+                  transition: Transition.cupertino,
                 ),
               ),
             ),
@@ -141,102 +107,24 @@ class CustomerTourDetailScreen extends StatelessWidget {
       ),
     );
   }
-}
 
-class _StatusChip extends StatelessWidget {
-  final TourStatus status;
-  const _StatusChip({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppTheme.brandLight,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        status.displayName,
-        style: GoogleFonts.inter(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: AppTheme.brandDark,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
-}
-
-class _DetailGrid extends StatelessWidget {
-  final Tour tour;
-  final ColorScheme colorScheme;
-  const _DetailGrid({required this.tour, required this.colorScheme});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colorScheme.outline),
-      ),
-      child: Column(
-        children: [
-          _row(Icons.calendar_today_rounded,
-              tr('customer_tour_detail.label_departure'),
-              _formatDate(tour.departureDate)),
-          if (tour.returnDate != null) ...[
-            const SizedBox(height: 12),
-            _row(Icons.event_available_rounded,
-                tr('customer_tour_detail.label_return'),
-                _formatDate(tour.returnDate!)),
-          ],
-          const SizedBox(height: 12),
-          _row(Icons.currency_rupee_rounded,
-              tr('customer_tour_detail.label_price_per_seat'),
-              '₹${tour.pricePerSeat.toStringAsFixed(0)}'),
-          const SizedBox(height: 12),
-          _row(
-            Icons.group_rounded,
-            tr('customer_tour_detail.label_tour_status'),
-            tour.status.description,
-          ),
-        ],
-      ),
-    );
+  Widget _statusDot() {
+    final tone = switch (tour.status) {
+      TourStatus.collecting => UgamStatusTone.good,
+      TourStatus.planning || TourStatus.busBooked || TourStatus.assigning =>
+        UgamStatusTone.accent,
+      TourStatus.locked => UgamStatusTone.warm,
+      TourStatus.completed => UgamStatusTone.neutral,
+    };
+    return UgamStatusDot(label: tour.status.displayName, tone: tone);
   }
 
-  Widget _row(IconData icon, String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 110,
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: colorScheme.onSurface,
-            ),
-          ),
-        ),
-      ],
-    );
+  static String _code(String city) {
+    if (city.isEmpty) return '—';
+    final cleaned = city.replaceAll(RegExp(r'[^A-Za-z]'), '');
+    return cleaned.length >= 3
+        ? cleaned.substring(0, 3).toUpperCase()
+        : cleaned.toUpperCase();
   }
 
   static String _formatDate(DateTime d) {
@@ -244,60 +132,201 @@ class _DetailGrid extends StatelessWidget {
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
-    return '${d.day} ${months[d.month - 1]} ${d.year}';
+    return '${d.day} ${months[d.month - 1]}';
+  }
+}
+
+class _TopBar extends StatelessWidget {
+  final UgamColorSet c;
+  const _TopBar({required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.md,
+        UgamSpacing.sm,
+        UgamSpacing.md,
+        UgamSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => Get.back(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: c.card,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.arrow_back_rounded, size: 18, color: c.ink),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Text(
+              tr('customer_tour_detail.title'),
+              style: UgamText.titleS.copyWith(color: c.ink),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroPhoto extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _HeroPhoto({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(UgamRadius.card),
+      child: SizedBox(
+        height: 200,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    c.accent.withValues(alpha: 0.9),
+                    Color.alphaBlend(
+                      c.accent.withValues(alpha: 0.5),
+                      Colors.black,
+                    ),
+                  ],
+                ),
+              ),
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(UgamSpacing.lg),
+                  child: Icon(
+                    Icons.directions_bus_rounded,
+                    size: 56,
+                    color: Colors.white.withValues(alpha: 0.28),
+                  ),
+                ),
+              ),
+            ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Color(0x66000000)],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PriceTile extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _PriceTile({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCard.plain(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.gutter,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: c.accentFill,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.currency_rupee_rounded,
+                size: 18, color: c.accent),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr('customer_tour_detail.label_price_per_seat')
+                      .toUpperCase(),
+                  style: UgamText.micro.copyWith(color: c.ink3),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '₹${tour.pricePerSeat.toStringAsFixed(0)}',
+                  style: UgamText.numLg.copyWith(color: c.ink),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
 class _BusCard extends StatelessWidget {
   final Tour tour;
-  final ColorScheme colorScheme;
-  const _BusCard({required this.tour, required this.colorScheme});
+  final UgamColorSet c;
+  const _BusCard({required this.tour, required this.c});
 
   @override
   Widget build(BuildContext context) {
     final bus = tour.buses.first;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.brandLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.brandAccent.withValues(alpha: 0.4)),
-      ),
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             children: [
-              const Icon(Icons.directions_bus_rounded,
-                  size: 18, color: AppTheme.brandDark),
-              const SizedBox(width: 8),
-              Text(
-                tr('customer_tour_detail.bus_confirmed'),
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.brandDark,
-                  letterSpacing: 0.5,
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: c.goodFill,
+                  borderRadius: BorderRadius.circular(10),
                 ),
+                alignment: Alignment.center,
+                child: Icon(Icons.directions_bus_rounded,
+                    size: 16, color: c.good),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Text(
+                tr('customer_tour_detail.bus_confirmed').toUpperCase(),
+                style: UgamText.micro.copyWith(color: c.good),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: UgamSpacing.md),
           Text(
             bus.busNumber,
-            style: GoogleFonts.inter(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.brandDark,
-            ),
+            style: UgamText.titleM.copyWith(color: c.ink),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             '${bus.isAC ? tr('customer_tour_detail.bus_ac') : tr('customer_tour_detail.bus_non_ac')} · ${bus.busType} · ${bus.driverName}',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: AppTheme.brandDark.withValues(alpha: 0.85),
-            ),
+            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 13),
           ),
         ],
       ),

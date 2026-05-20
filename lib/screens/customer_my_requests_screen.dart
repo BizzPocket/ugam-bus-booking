@@ -1,19 +1,18 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
 
-/// Customer-facing list of every booking request submitted from THIS
-/// device. Pull-to-refresh fans out one RPC per row to fetch live status
-/// + seat assignment. Rows in the `pending` state with no seats assigned
+/// Customer-facing list of every booking request submitted from this
+/// device. Pull-to-refresh fans out one RPC per row to fetch live
+/// status + seat assignment. Rows in the `pending` state with no seats
 /// expose an Edit affordance; everything else is read-only.
 class CustomerMyRequestsScreen extends StatefulWidget {
   const CustomerMyRequestsScreen({super.key});
@@ -42,7 +41,6 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       _entries = cached;
       _loading = false;
     });
-    // Kick off a server refresh in the background.
     _refresh();
   }
 
@@ -54,133 +52,150 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       if (!mounted) return;
       setState(() => _entries = fresh);
     } catch (_) {
-      // Swallow — the cached list is still usable.
+      // Cached list is still usable.
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
   }
 
   Future<void> _openEdit(CustomerRequestEntry entry) async {
-    // Resolve the live Tour from the existing TourController cache. We need
-    // a Tour instance (not just the stored snapshot) so the booking form's
-    // pricing/route logic stays consistent with the server.
     Tour? tour;
     if (Get.isRegistered<TourController>()) {
       tour = Get.find<TourController>().getTour(entry.tourId);
     }
     tour ??= _tourFromEntry(entry);
-
     await Get.to<void>(() => CustomerBookingRequestScreen(
           tour: tour!,
           existing: entry,
         ));
-    // On return, refresh — the edit may have flipped customer_edited_at
-    // or, in the blocked case, surfaced new server state.
     _refresh();
   }
 
-  /// Synthesise a Tour from the local snapshot. Used when the
-  /// TourController doesn't have this tour cached (e.g., it was removed
-  /// from the public list after the customer submitted).
-  Tour _tourFromEntry(CustomerRequestEntry e) {
-    return Tour(
-      id: e.tourId,
-      title: e.tourTitle,
-      fromCity: e.tourFromCity,
-      toCity: e.tourToCity,
-      departureDate: e.tourDepartureDate,
-      pricePerSeat: e.tourPricePerSeat,
-    );
-  }
+  Tour _tourFromEntry(CustomerRequestEntry e) => Tour(
+        id: e.tourId,
+        title: e.tourTitle,
+        fromCity: e.tourFromCity,
+        toCity: e.tourToCity,
+        departureDate: e.tourDepartureDate,
+        pricePerSeat: e.tourPricePerSeat,
+      );
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final c = UgamColors.of(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Get.back(),
-        ),
-        title: Text(
-          tr('customer_my_requests.title'),
-          style: GoogleFonts.inter(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: colorScheme.onSurface,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: _refreshing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh_rounded),
-            onPressed: _refreshing ? null : _refresh,
-            tooltip: tr('customer_my_requests.refresh_tooltip'),
-          ),
-        ],
-      ),
+      backgroundColor: c.bg,
       body: SafeArea(
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _entries.isEmpty
-                ? _empty(theme)
-                : RefreshIndicator(
-                    onRefresh: _refresh,
-                    child: ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                      itemCount: _entries.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 14),
-                      itemBuilder: (_, i) => _RequestCard(
-                        entry: _entries[i],
-                        onEdit: () => _openEdit(_entries[i]),
-                      ),
-                    ),
-                  ),
-      ),
-    );
-  }
-
-  Widget _empty(ThemeData theme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.inbox_outlined,
-              size: 56,
-              color: theme.colorScheme.onSurfaceVariant,
+            _TopBar(
+              c: c,
+              refreshing: _refreshing,
+              onRefresh: _refreshing ? null : _refresh,
             ),
-            const SizedBox(height: 16),
-            Text(
-              tr('customer_my_requests.empty_title'),
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: theme.colorScheme.onSurface,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              tr('customer_my_requests.empty_body'),
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: theme.colorScheme.onSurfaceVariant,
-                height: 1.5,
-              ),
+            Expanded(
+              child: _loading
+                  ? _LoadingShimmer()
+                  : _entries.isEmpty
+                      ? UgamEmpty(
+                          icon: Icons.inbox_outlined,
+                          title: tr('customer_my_requests.empty_title'),
+                          body: tr('customer_my_requests.empty_body'),
+                        )
+                      : RefreshIndicator(
+                          color: c.accent,
+                          onRefresh: _refresh,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(
+                              UgamSpacing.gutter,
+                              UgamSpacing.sm,
+                              UgamSpacing.gutter,
+                              UgamSpacing.xxl,
+                            ),
+                            itemCount: _entries.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: UgamSpacing.md),
+                            itemBuilder: (_, i) => _RequestCard(
+                              entry: _entries[i],
+                              onEdit: () => _openEdit(_entries[i]),
+                            ),
+                          ),
+                        ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _TopBar extends StatelessWidget {
+  final UgamColorSet c;
+  final bool refreshing;
+  final VoidCallback? onRefresh;
+  const _TopBar({
+    required this.c,
+    required this.refreshing,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.md,
+        UgamSpacing.sm,
+        UgamSpacing.md,
+        UgamSpacing.md,
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () => Get.back(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: c.card,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.arrow_back_rounded, size: 18, color: c.ink),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Text(
+              tr('customer_my_requests.title'),
+              style: UgamText.titleL.copyWith(color: c.ink),
+            ),
+          ),
+          GestureDetector(
+            onTap: onRefresh,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: refreshing
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: c.ink2,
+                      ),
+                    )
+                  : Icon(Icons.refresh_rounded, size: 18, color: c.ink2),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -194,75 +209,57 @@ class _RequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final c = UgamColors.of(context);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colorScheme.outline),
-      ),
-      padding: const EdgeInsets.all(16),
+    return UgamCard.plain(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Status + edited pill row
           Row(
             children: [
-              _StatusBadge(status: entry.status, hasSeats: entry.hasSeatsAssigned),
-              const SizedBox(width: 8),
+              _StatusChip(status: entry.status, hasSeats: entry.hasSeatsAssigned),
+              const SizedBox(width: UgamSpacing.sm),
               if (entry.wasEdited)
-                _MutedPill(
-                  icon: Icons.edit_rounded,
-                  label: tr('customer_my_requests.edited_pill'),
+                const UgamReqChip(
+                  label: 'EDITED',
+                  variant: UgamChipVariant.neutral,
                 ),
               const Spacer(),
               Text(
                 _formatDate(entry.tourDepartureDate),
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: colorScheme.onSurfaceVariant,
-                  letterSpacing: 0.5,
+                style: UgamText.tabular(
+                  UgamText.micro.copyWith(color: c.ink3),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: UgamSpacing.md),
           Text(
             entry.tourTitle,
-            style: GoogleFonts.inter(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: colorScheme.onSurface,
-            ),
+            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
           ),
           const SizedBox(height: 2),
           Text(
             '${entry.tourFromCity} → ${entry.tourToCity}',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: colorScheme.onSurfaceVariant,
-            ),
+            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 13),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: UgamSpacing.md),
           Row(
             children: [
-              Icon(Icons.event_seat_rounded,
-                  size: 16, color: colorScheme.onSurfaceVariant),
+              Icon(Icons.event_seat_rounded, size: 16, color: c.ink2),
               const SizedBox(width: 6),
-              Text(
-                _seatsLabel(entry),
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: colorScheme.onSurface,
+              Expanded(
+                child: Text(
+                  _seatsLabel(entry),
+                  style: UgamText.body
+                      .copyWith(color: c.ink, fontSize: 13),
                 ),
               ),
             ],
           ),
           if (entry.tripType.isOneWay) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: UgamSpacing.sm),
             Row(
               children: [
                 Icon(
@@ -270,26 +267,23 @@ class _RequestCard extends StatelessWidget {
                       ? Icons.arrow_forward_rounded
                       : Icons.arrow_back_rounded,
                   size: 16,
-                  color: AppTheme.warning,
+                  color: c.warm,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     entry.tripType == TripType.outboundOnly
-                        ? tr('customer_my_requests.trip_outbound',
-                            namedArgs: {
-                              'from': entry.tourFromCity,
-                              'to': entry.tourToCity,
-                            })
-                        : tr('customer_my_requests.trip_return',
-                            namedArgs: {
-                              'from': entry.tourToCity,
-                              'to': entry.tourFromCity,
-                            }),
-                    style: GoogleFonts.inter(
+                        ? tr('customer_my_requests.trip_outbound', namedArgs: {
+                            'from': entry.tourFromCity,
+                            'to': entry.tourToCity,
+                          })
+                        : tr('customer_my_requests.trip_return', namedArgs: {
+                            'from': entry.tourToCity,
+                            'to': entry.tourFromCity,
+                          }),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.warm,
                       fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.warning,
                     ),
                   ),
                 ),
@@ -297,62 +291,51 @@ class _RequestCard extends StatelessWidget {
             ),
           ],
           if (entry.hasSeatsAssigned) ...[
-            const SizedBox(height: 6),
-            InkWell(
+            const SizedBox(height: UgamSpacing.md),
+            GestureDetector(
               onTap: () => showCustomerSeatLayoutSheet(context, entry: entry),
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.md,
+                  vertical: UgamSpacing.sm + 2,
+                ),
+                decoration: BoxDecoration(
+                  color: c.accentFill,
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
+                ),
                 child: Row(
                   children: [
                     Icon(Icons.confirmation_number_rounded,
-                        size: 16, color: AppTheme.brand),
+                        size: 16, color: c.accent),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        tr(
-                          'customer_my_requests.seats_assigned_label',
-                          namedArgs: {
-                            'seats': entry.assignedSeats
-                                .map((s) => s.seatId)
-                                .join(', '),
-                          },
-                        ),
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.brand,
-                        ),
+                        tr('customer_my_requests.seats_assigned_label',
+                            namedArgs: {
+                              'seats': entry.assignedSeats
+                                  .map((s) => s.seatId)
+                                  .join(', '),
+                            }),
+                        style: UgamText.bodyStrong
+                            .copyWith(color: c.accent, fontSize: 13),
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Icon(Icons.grid_view_rounded,
-                        size: 14, color: AppTheme.brand),
+                    Icon(Icons.grid_view_rounded, size: 14, color: c.accent),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              tr('customer_my_requests.layout_view_hint'),
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
           ],
           if (entry.note != null && entry.note!.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: UgamSpacing.sm),
             Text(
               '📝 ${entry.note}',
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                color: colorScheme.onSurfaceVariant,
-                height: 1.4,
-              ),
+              style: UgamText.caption
+                  .copyWith(color: c.ink2, fontSize: 12, height: 1.4),
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: UgamSpacing.md),
           if (entry.canEdit)
             Align(
               alignment: Alignment.centerLeft,
@@ -360,37 +343,28 @@ class _RequestCard extends StatelessWidget {
                 onPressed: onEdit,
                 icon: const Icon(Icons.edit_rounded, size: 16),
                 label: Text(tr('customer_my_requests.edit_request_btn')),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.brand,
-                  side: const BorderSide(color: AppTheme.brand),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
               ),
             )
           else
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.md,
+                vertical: UgamSpacing.sm + 2,
+              ),
               decoration: BoxDecoration(
-                color: AppColors.bg(context),
-                borderRadius: BorderRadius.circular(8),
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.lock_outline_rounded,
-                      size: 14, color: colorScheme.onSurfaceVariant),
+                  Icon(Icons.lock_outline_rounded, size: 14, color: c.ink3),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       entry.hasSeatsAssigned
                           ? tr('customer_my_requests.locked_seats_assigned')
                           : tr('customer_my_requests.locked_no_edit'),
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+                      style: UgamText.caption.copyWith(color: c.ink3),
                     ),
                   ),
                 ],
@@ -429,95 +403,58 @@ class _RequestCard extends StatelessWidget {
   }
 }
 
-class _StatusBadge extends StatelessWidget {
+class _StatusChip extends StatelessWidget {
   final String status;
   final bool hasSeats;
-  const _StatusBadge({required this.status, required this.hasSeats});
+  const _StatusChip({required this.status, required this.hasSeats});
 
   @override
   Widget build(BuildContext context) {
-    final (label, fg, bg) = _palette(status, hasSeats);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w700,
-          color: fg,
-          letterSpacing: 0.6,
-        ),
-      ),
-    );
+    final (label, variant) = _palette();
+    return UgamReqChip(label: label, variant: variant);
   }
 
-  (String, Color, Color) _palette(String status, bool hasSeats) {
+  (String, UgamChipVariant) _palette() {
     if (hasSeats) {
       return (
-        tr('customer_my_requests.status_seats_assigned'),
-        const Color(0xFF065F46),
-        const Color(0xFFD1FAE5),
+        tr('customer_my_requests.status_seats_assigned').toUpperCase(),
+        UgamChipVariant.good,
       );
     }
     switch (status) {
       case 'accepted':
         return (
-          tr('customer_my_requests.status_accepted'),
-          const Color(0xFF065F46),
-          const Color(0xFFD1FAE5),
+          tr('customer_my_requests.status_accepted').toUpperCase(),
+          UgamChipVariant.good,
         );
       case 'rejected':
         return (
-          tr('customer_my_requests.status_rejected'),
-          const Color(0xFF991B1B),
-          const Color(0xFFFEE2E2),
+          tr('customer_my_requests.status_rejected').toUpperCase(),
+          UgamChipVariant.warm,
         );
       case 'pending':
       default:
         return (
-          tr('customer_my_requests.status_pending'),
-          const Color(0xFF92400E),
-          const Color(0xFFFEF3C7),
+          tr('customer_my_requests.status_pending').toUpperCase(),
+          UgamChipVariant.warm,
         );
     }
   }
 }
 
-class _MutedPill extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _MutedPill({required this.icon, required this.label});
-
+class _LoadingShimmer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.bg(context),
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: cs.outline),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: cs.onSurfaceVariant),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              color: cs.onSurfaceVariant,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ],
-      ),
+    return ListView(
+      padding: const EdgeInsets.all(UgamSpacing.gutter),
+      physics: const NeverScrollableScrollPhysics(),
+      children: const [
+        UgamSkeleton(height: 180, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 180, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 180, radius: UgamRadius.card),
+      ],
     );
   }
 }

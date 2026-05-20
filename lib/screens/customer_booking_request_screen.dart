@@ -2,12 +2,11 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../config/theme.dart';
 import '../controllers/user_controller.dart';
+import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/request_line.dart';
 import '../models/seat_type.dart';
@@ -74,7 +73,6 @@ class _CustomerBookingRequestScreenState
     final e = widget.existing;
     if (e != null) {
       _name.text = e.customerName;
-      // Stored as '+91XXXXXXXXXX' — show just the 10-digit local part.
       _phone.text = normalisePhone(e.customerPhone);
       _doubleSofa = e.doubleSofa;
       _singleSofa = e.singleSofa;
@@ -110,18 +108,13 @@ class _CustomerBookingRequestScreenState
       AppSnackBar.error(tr('customer_booking.err_no_seats'));
       return;
     }
-    // Organiser phone is best-effort: old tours may have null `createdBy`.
-    // We still save the request — the agent sees it in the Requests tab —
-    // and only skip the WhatsApp handoff when we don't know who to message.
     final adminPhone = widget.tour.createdBy;
     final hasOrganiser = adminPhone != null && adminPhone.isNotEmpty;
 
     setState(() => _saving = true);
-
     try {
       final note = _note.text.trim();
       final normalisedPhone = '+91${normalisePhone(phone)}';
-
       if (widget.isEditing) {
         await _submitEdit(
           name: name,
@@ -157,7 +150,6 @@ class _CustomerBookingRequestScreenState
   }) async {
     final requestId = const Uuid().v4();
 
-    // 1. Audit row in booking_requests (raw form snapshot).
     await Supabase.instance.client.from('booking_requests').insert({
       'id': requestId,
       'tour_id': widget.tour.id,
@@ -173,9 +165,6 @@ class _CustomerBookingRequestScreenState
       },
     });
 
-    // 2. Live row in passengers — this is the table the admin's Requests
-    //    screen actually reads. The unique (tour_id, phone) index makes
-    //    the upsert idempotent for re-submissions.
     final requestLines = _buildRequestLines();
     final passenger = Passenger(
       tourId: widget.tour.id,
@@ -189,8 +178,6 @@ class _CustomerBookingRequestScreenState
         .from('passengers')
         .upsert(passenger.toMap(), onConflict: 'tour_id,phone');
 
-    // 3. Device-local journal so the customer can find this request again
-    //    on their My Requests screen.
     await CustomerRequestsStore().upsert(CustomerRequestEntry(
       id: requestId,
       tourId: widget.tour.id,
@@ -210,8 +197,6 @@ class _CustomerBookingRequestScreenState
       createdAt: DateTime.now(),
     ));
 
-    // Auto-grow the tour creator admin's contact directory. Best-effort:
-    // if it fails (network, permissions), the booking still went through.
     if (hasOrganiser && Get.isRegistered<UserController>()) {
       // ignore: unawaited_futures
       Get.find<UserController>().autoGrowFromBooking(
@@ -221,9 +206,6 @@ class _CustomerBookingRequestScreenState
       );
     }
 
-    // Hand off to WhatsApp when we know the organiser. Old tours with
-    // no `createdBy` skip this step — the agent still sees the request
-    // in the Requests tab.
     if (hasOrganiser) {
       await WhatsAppService().sendBookingRequest(
         adminPhone: adminPhone!,
@@ -258,8 +240,6 @@ class _CustomerBookingRequestScreenState
     final requestLinesJson =
         requestLines.map((rl) => rl.toMap()).toList();
 
-    // The RPC enforces server-side that status is still 'pending' AND no
-    // seats have been assigned yet. Returns false if either gate fails.
     final ok = await Supabase.instance.client.rpc(
       'booking_request_customer_update',
       params: {
@@ -283,14 +263,11 @@ class _CustomerBookingRequestScreenState
         tr('customer_booking.warn_edit_blocked'),
         title: tr('customer_booking.warn_title_edit_blocked'),
       );
-      // Pull the latest server state into the local store so the My Requests
-      // screen shows the new status the next time it's opened.
       // ignore: unawaited_futures
       CustomerRequestsStore().refresh(existing.id);
       return;
     }
 
-    // Mirror the edit into the device-local journal.
     await CustomerRequestsStore().upsert(existing.copyWith(
       customerName: name,
       partySize: _totalSeats,
@@ -333,98 +310,47 @@ class _CustomerBookingRequestScreenState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final c = UgamColors.of(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Get.back(),
-        ),
-        title: Text(
-          tr('customer_booking.title'),
-          style: GoogleFonts.inter(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            color: colorScheme.onSurface,
-          ),
-        ),
-      ),
+      backgroundColor: c.bg,
       body: SafeArea(
         child: Column(
           children: [
+            _TopBar(c: c, title: tr('customer_booking.title')),
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                padding: const EdgeInsets.fromLTRB(
+                  UgamSpacing.gutter,
+                  UgamSpacing.sm,
+                  UgamSpacing.gutter,
+                  UgamSpacing.xxl,
+                ),
                 children: [
-                  _SummaryCard(tour: widget.tour),
-                  const SizedBox(height: 22),
-
-                  _Label(tr('customer_booking.label_your_name')),
-                  const SizedBox(height: 6),
-                  TextField(
+                  _SummaryCard(tour: widget.tour, c: c),
+                  const SizedBox(height: UgamSpacing.xl),
+                  UgamInput(
+                    label: tr('customer_booking.label_your_name'),
+                    hint: tr('customer_booking.hint_your_name'),
                     controller: _name,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: InputDecoration(
-                      hintText: tr('customer_booking.hint_your_name'),
-                    ),
                   ),
-                  const SizedBox(height: 18),
-
-                  _Label(tr('customer_booking.label_phone')),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Container(
-                        height: 48,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AppColors.bg(context),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: AppColors.border(context)),
-                        ),
-                        child: Text(
-                          '+91',
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: colorScheme.onSurface,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _phone,
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                            LengthLimitingTextInputFormatter(10),
-                          ],
-                          decoration: const InputDecoration(
-                            hintText: '98765 43210',
-                          ),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: UgamSpacing.lg),
+                  UgamPhoneInput(
+                    controller: _phone,
+                    label: tr('customer_booking.label_phone'),
                   ),
-                  const SizedBox(height: 22),
-
-                  _Label(tr('customer_booking.label_trip_type')),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: UgamSpacing.xl),
+                  _SectionLabel(tr('customer_booking.label_trip_type'), c),
+                  const SizedBox(height: UgamSpacing.sm),
                   _TripTypeSelector(
                     value: _tripType,
                     fromCity: widget.tour.fromCity,
                     toCity: widget.tour.toCity,
                     onChanged: (v) => setState(() => _tripType = v),
                   ),
-                  const SizedBox(height: 22),
-
-                  _Label(tr('customer_booking.label_seat_count')),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: UgamSpacing.xl),
+                  _SectionLabel(tr('customer_booking.label_seat_count'), c),
+                  const SizedBox(height: UgamSpacing.sm),
                   _SeatTile(
                     icon: Icons.king_bed_rounded,
                     label: tr('customer_booking.seat_double_sofa_label'),
@@ -432,7 +358,7 @@ class _CustomerBookingRequestScreenState
                     value: _doubleSofa,
                     onChanged: (v) => setState(() => _doubleSofa = v),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: UgamSpacing.sm),
                   _SeatTile(
                     icon: Icons.single_bed_rounded,
                     label: tr('customer_booking.seat_single_sofa_label'),
@@ -440,101 +366,39 @@ class _CustomerBookingRequestScreenState
                     value: _singleSofa,
                     onChanged: (v) => setState(() => _singleSofa = v),
                   ),
-
-                  const SizedBox(height: 18),
-
-                  // Collapsible note — fewer fields on first sight.
+                  const SizedBox(height: UgamSpacing.lg),
                   if (!_showNote)
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
-                        onPressed: () =>
-                            setState(() => _showNote = true),
+                        onPressed: () => setState(() => _showNote = true),
                         icon: const Icon(Icons.add_rounded, size: 16),
                         label: Text(tr('customer_booking.add_note_button')),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppColors.textMuted(context),
-                          padding: EdgeInsets.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
                       ),
                     )
-                  else ...[
-                    _Label(tr('customer_booking.label_note')),
-                    const SizedBox(height: 6),
-                    TextField(
+                  else
+                    UgamInput(
+                      label: tr('customer_booking.label_note'),
+                      hint: tr('customer_booking.hint_note'),
                       controller: _note,
-                      maxLines: 3,
                       maxLength: 200,
                       autofocus: true,
-                      decoration: InputDecoration(
-                        hintText: tr('customer_booking.hint_note'),
-                      ),
                     ),
-                  ],
-
-                  const SizedBox(height: 6),
-                  _Totals(
-                    seatCount: _totalSeats,
-                    estTotal: _estTotal,
-                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  _Totals(seatCount: _totalSeats, estTotal: _estTotal, c: c),
                 ],
               ),
             ),
-
-            // Sticky bottom CTA.
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-              decoration: BoxDecoration(
-                color: colorScheme.surface,
-                border: Border(top: BorderSide(color: colorScheme.outline)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    tr('customer_booking.cta_hint'),
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    height: 56,
-                    child: ElevatedButton.icon(
-                      onPressed: _saving ? null : _submit,
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.send_rounded),
-                      label: Text(
-                        _saving
-                            ? tr('customer_booking.button_saving')
-                            : tr('customer_booking.button_confirm'),
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF25D366),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+            UgamStickyCTA(
+              child: UgamCTA(
+                label: _saving
+                    ? tr('customer_booking.button_saving')
+                    : tr('customer_booking.button_confirm'),
+                leadingIcon: Icons.send_rounded,
+                trailingValue:
+                    _estTotal > 0 ? '₹${_estTotal.toStringAsFixed(0)}' : null,
+                loading: _saving,
+                onPressed: _submit,
               ),
             ),
           ],
@@ -544,32 +408,63 @@ class _CustomerBookingRequestScreenState
   }
 }
 
-class _SummaryCard extends StatelessWidget {
-  final Tour tour;
-  const _SummaryCard({required this.tour});
+class _TopBar extends StatelessWidget {
+  final UgamColorSet c;
+  final String title;
+  const _TopBar({required this.c, required this.title});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.brandLight,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: AppTheme.brandAccent.withValues(alpha: 0.4),
-        ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.md,
+        UgamSpacing.sm,
+        UgamSpacing.md,
+        UgamSpacing.sm,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            tour.title,
-            style: GoogleFonts.inter(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppTheme.brandDark,
+          GestureDetector(
+            onTap: () => Get.back(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: c.card,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.arrow_back_rounded, size: 18, color: c.ink),
             ),
           ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child:
+                Text(title, style: UgamText.titleM.copyWith(color: c.ink)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _SummaryCard({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.gutter),
+      elev: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(tour.title,
+              style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15)),
           const SizedBox(height: 2),
           Text(
             tr('customer_booking.route_price', namedArgs: {
@@ -577,9 +472,8 @@ class _SummaryCard extends StatelessWidget {
               'to': tour.toCity,
               'price': tour.pricePerSeat.toStringAsFixed(0),
             }),
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              color: AppTheme.brandDark.withValues(alpha: 0.85),
+            style: UgamText.tabular(
+              UgamText.caption.copyWith(color: c.ink2),
             ),
           ),
         ],
@@ -588,19 +482,18 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-class _Label extends StatelessWidget {
+class _SectionLabel extends StatelessWidget {
   final String text;
-  const _Label(this.text);
+  final UgamColorSet c;
+  const _SectionLabel(this.text, this.c);
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: GoogleFonts.inter(
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        color: AppColors.textMuted(context),
-        letterSpacing: 1.4,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Text(
+        text.toUpperCase(),
+        style: UgamText.micro.copyWith(color: c.ink2),
       ),
     );
   }
@@ -623,88 +516,81 @@ class _SeatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = UgamColors.of(context);
     final selected = value > 0;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      padding: const EdgeInsets.fromLTRB(14, 14, 10, 14),
+      duration: UgamMotion.tab,
+      curve: UgamMotion.easeOut,
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.gutter,
+        UgamSpacing.sm + 2,
+        UgamSpacing.gutter,
+      ),
       decoration: BoxDecoration(
-        color: selected
-            ? AppTheme.brandLight
-            : theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: selected ? AppTheme.brand : theme.colorScheme.outline,
-          width: selected ? 1.5 : 1,
-        ),
+        color: selected ? c.accentFill : c.card,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
       child: Row(
         children: [
-          // Icon chip
           Container(
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: selected
-                  ? AppTheme.brand.withValues(alpha: 0.15)
-                  : AppColors.surfaceAlt(context),
-              borderRadius: BorderRadius.circular(10),
+              color: selected ? c.accent.withValues(alpha: 0.18) : c.cardElev,
+              borderRadius: BorderRadius.circular(12),
             ),
+            alignment: Alignment.center,
             child: Icon(
               icon,
               size: 22,
-              color: selected ? AppTheme.brand : AppColors.textMuted(context),
+              color: selected ? c.accent : c.ink2,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  label,
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
+                Text(label,
+                    style: UgamText.titleS
+                        .copyWith(color: c.ink, fontSize: 15)),
                 const SizedBox(height: 2),
-                Text(
-                  sublabel,
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    height: 1.3,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
+                Text(sublabel,
+                    style: UgamText.caption
+                        .copyWith(color: c.ink2, fontSize: 11)),
               ],
             ),
           ),
           _StepperButton(
             icon: Icons.remove_rounded,
             enabled: value > 0,
-            onTap: () => onChanged(value - 1),
+            onTap: () {
+              HapticFeedback.lightImpact();
+              onChanged(value - 1);
+            },
           ),
           SizedBox(
             width: 32,
             child: Text(
               '$value',
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: selected
-                    ? AppTheme.brand
-                    : theme.colorScheme.onSurface,
+              style: UgamText.tabular(
+                UgamText.titleM.copyWith(
+                  color: selected ? c.accent : c.ink,
+                  fontSize: 18,
+                ),
               ),
             ),
           ),
           _StepperButton(
             icon: Icons.add_rounded,
             enabled: value < 8,
-            onTap: () => onChanged(value + 1),
+            onTap: () {
+              HapticFeedback.lightImpact();
+              onChanged(value + 1);
+            },
           ),
         ],
       ),
@@ -725,20 +611,22 @@ class _StepperButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final c = UgamColors.of(context);
+    return GestureDetector(
       onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(8),
+      behavior: HitTestBehavior.opaque,
       child: Container(
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: enabled ? AppTheme.brand : AppColors.surfaceAlt(context),
+          color: enabled ? c.accent : c.cardElev,
           borderRadius: BorderRadius.circular(8),
         ),
+        alignment: Alignment.center,
         child: Icon(
           icon,
           size: 18,
-          color: enabled ? Colors.white : AppColors.textMuted(context),
+          color: enabled ? c.onAccent : c.ink3,
         ),
       ),
     );
@@ -772,24 +660,20 @@ class _TripTypeSelector extends StatelessWidget {
           selected: value == TripType.roundTrip,
           onTap: () => onChanged(TripType.roundTrip),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: UgamSpacing.sm),
         _TripTypeOption(
           icon: Icons.arrow_forward_rounded,
-          title: tr('customer_booking.trip_outbound_title', namedArgs: {
-            'from': fromCity,
-            'to': toCity,
-          }),
+          title: tr('customer_booking.trip_outbound_title',
+              namedArgs: {'from': fromCity, 'to': toCity}),
           subtitle: tr('customer_booking.trip_outbound_sub'),
           selected: value == TripType.outboundOnly,
           onTap: () => onChanged(TripType.outboundOnly),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: UgamSpacing.sm),
         _TripTypeOption(
           icon: Icons.arrow_back_rounded,
-          title: tr('customer_booking.trip_return_title', namedArgs: {
-            'from': toCity,
-            'to': fromCity,
-          }),
+          title: tr('customer_booking.trip_return_title',
+              namedArgs: {'from': toCity, 'to': fromCity}),
           subtitle: tr('customer_booking.trip_return_sub'),
           selected: value == TripType.returnOnly,
           onTap: () => onChanged(TripType.returnOnly),
@@ -816,20 +700,23 @@ class _TripTypeOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+    final c = UgamColors.of(context);
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        duration: UgamMotion.tab,
+        curve: UgamMotion.easeOut,
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.gutter,
+          vertical: UgamSpacing.md,
+        ),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.brandLight : theme.colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? AppTheme.brand : theme.colorScheme.outline,
-            width: selected ? 1.5 : 1,
-          ),
+          color: selected ? c.accentFill : c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
         ),
         child: Row(
           children: [
@@ -837,40 +724,29 @@ class _TripTypeOption extends StatelessWidget {
               width: 38,
               height: 38,
               decoration: BoxDecoration(
-                color: selected
-                    ? AppTheme.brand.withValues(alpha: 0.15)
-                    : AppColors.surfaceAlt(context),
+                color: selected ? c.accent.withValues(alpha: 0.18) : c.cardElev,
                 borderRadius: BorderRadius.circular(10),
               ),
+              alignment: Alignment.center,
               child: Icon(
                 icon,
                 size: 20,
-                color: selected ? AppTheme.brand : AppColors.textMuted(context),
+                color: selected ? c.accent : c.ink2,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: UgamSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                  ),
+                  Text(title,
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.ink, fontSize: 14)),
                   const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      height: 1.3,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
+                  Text(subtitle,
+                      style: UgamText.caption
+                          .copyWith(color: c.ink2, fontSize: 11)),
                 ],
               ),
             ),
@@ -879,7 +755,7 @@ class _TripTypeOption extends StatelessWidget {
                   ? Icons.radio_button_checked_rounded
                   : Icons.radio_button_off_rounded,
               size: 20,
-              color: selected ? AppTheme.brand : AppColors.textMuted(context),
+              color: selected ? c.accent : c.ink3,
             ),
           ],
         ),
@@ -891,33 +767,36 @@ class _TripTypeOption extends StatelessWidget {
 class _Totals extends StatelessWidget {
   final int seatCount;
   final double estTotal;
+  final UgamColorSet c;
 
-  const _Totals({required this.seatCount, required this.estTotal});
+  const _Totals({
+    required this.seatCount,
+    required this.estTotal,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.xs,
+        vertical: UgamSpacing.sm,
+      ),
       child: Row(
         children: [
           Text(
             plural('customer_booking.totals_seat', seatCount),
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textMuted(context),
+            style: UgamText.tabular(
+              UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 13),
             ),
           ),
           const Spacer(),
           if (estTotal > 0)
             Text(
-              tr('customer_booking.totals_estimated', namedArgs: {
-                'amount': estTotal.toStringAsFixed(0),
-              }),
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: AppColors.text(context),
+              tr('customer_booking.totals_estimated',
+                  namedArgs: {'amount': estTotal.toStringAsFixed(0)}),
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
               ),
             ),
         ],
