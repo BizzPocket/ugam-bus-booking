@@ -17,7 +17,7 @@ import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/phone_normalize.dart';
 
-/// Customer-side seat request form.
+/// Customer-side seat request form — image-5 fidelity.
 ///
 /// Two modes:
 ///   • Create  — [existing] is null. Inserts into booking_requests + upserts
@@ -27,9 +27,9 @@ import '../utils/phone_normalize.dart';
 ///     then opens WhatsApp with an "updated request" variant message so the
 ///     organiser sees this isn't a fresh ping.
 ///
-/// Edit mode is only entered for entries where the server says the request
-/// is still pending and no seats have been assigned — the My Requests screen
-/// enforces that gate, and the RPC enforces it again server-side.
+/// Visual treatment matches admin's create_tour_screen.dart: tour preview
+/// card on top + single-column UgamInput fields + sticky bottom UgamCTA
+/// with passenger-count chip.
 ///
 /// Seat choices are intentionally limited to Double Sofa and Single Sofa.
 /// The agent decides upper/lower berth assignment later, so the customer
@@ -91,6 +91,8 @@ class _CustomerBookingRequestScreenState
     _note.dispose();
     super.dispose();
   }
+
+  // ─── BUSINESS LOGIC — PRESERVED VERBATIM ───────────────────────────
 
   Future<void> _submit() async {
     final name = _name.text.trim();
@@ -308,6 +310,8 @@ class _CustomerBookingRequestScreenState
           RequestLine(seatType: SeatType.singleSofa, qty: _singleSofa),
       ];
 
+  // ─── UI ────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -315,9 +319,15 @@ class _CustomerBookingRequestScreenState
     return Scaffold(
       backgroundColor: c.bg,
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
-            _TopBar(c: c, title: tr('customer_booking.title')),
+            _TopBar(
+              c: c,
+              title: widget.isEditing
+                  ? 'Edit request'
+                  : tr('customer_booking.title'),
+            ),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(
@@ -327,8 +337,10 @@ class _CustomerBookingRequestScreenState
                   UgamSpacing.xxl,
                 ),
                 children: [
-                  _SummaryCard(tour: widget.tour, c: c),
+                  _TourPreviewCard(tour: widget.tour, c: c),
                   const SizedBox(height: UgamSpacing.xl),
+                  _SectionEyebrow(label: 'WHO IS BOOKING', c: c),
+                  const SizedBox(height: UgamSpacing.md),
                   UgamInput(
                     label: tr('customer_booking.label_your_name'),
                     hint: tr('customer_booking.hint_your_name'),
@@ -340,8 +352,12 @@ class _CustomerBookingRequestScreenState
                     label: tr('customer_booking.label_phone'),
                   ),
                   const SizedBox(height: UgamSpacing.xl),
-                  _SectionLabel(tr('customer_booking.label_trip_type'), c),
-                  const SizedBox(height: UgamSpacing.sm),
+                  _SectionEyebrow(
+                    label: tr('customer_booking.label_trip_type')
+                        .toUpperCase(),
+                    c: c,
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
                   _TripTypeSelector(
                     value: _tripType,
                     fromCity: widget.tour.fromCity,
@@ -349,8 +365,12 @@ class _CustomerBookingRequestScreenState
                     onChanged: (v) => setState(() => _tripType = v),
                   ),
                   const SizedBox(height: UgamSpacing.xl),
-                  _SectionLabel(tr('customer_booking.label_seat_count'), c),
-                  const SizedBox(height: UgamSpacing.sm),
+                  _SectionEyebrow(
+                    label: tr('customer_booking.label_seat_count')
+                        .toUpperCase(),
+                    c: c,
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
                   _SeatTile(
                     icon: Icons.king_bed_rounded,
                     label: tr('customer_booking.seat_double_sofa_label'),
@@ -370,10 +390,32 @@ class _CustomerBookingRequestScreenState
                   if (!_showNote)
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: () => setState(() => _showNote = true),
-                        icon: const Icon(Icons.add_rounded, size: 16),
-                        label: Text(tr('customer_booking.add_note_button')),
+                      child: GestureDetector(
+                        onTap: () => setState(() => _showNote = true),
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: UgamSpacing.md,
+                            vertical: UgamSpacing.sm,
+                          ),
+                          decoration: BoxDecoration(
+                            color: c.cardElev,
+                            borderRadius:
+                                BorderRadius.circular(UgamRadius.chip),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.add_rounded, size: 14, color: c.ink2),
+                              const SizedBox(width: 4),
+                              Text(
+                                tr('customer_booking.add_note_button'),
+                                style: UgamText.bodyStrong
+                                    .copyWith(color: c.ink2, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     )
                   else
@@ -385,7 +427,8 @@ class _CustomerBookingRequestScreenState
                       autofocus: true,
                     ),
                   const SizedBox(height: UgamSpacing.md),
-                  _Totals(seatCount: _totalSeats, estTotal: _estTotal, c: c),
+                  _Totals(
+                      seatCount: _totalSeats, estTotal: _estTotal, c: c),
                 ],
               ),
             ),
@@ -393,7 +436,9 @@ class _CustomerBookingRequestScreenState
               child: UgamCTA(
                 label: _saving
                     ? tr('customer_booking.button_saving')
-                    : tr('customer_booking.button_confirm'),
+                    : (widget.isEditing
+                        ? 'Update request'
+                        : 'Submit request'),
                 leadingIcon: Icons.send_rounded,
                 trailingValue:
                     _estTotal > 0 ? '₹${_estTotal.toStringAsFixed(0)}' : null,
@@ -408,6 +453,8 @@ class _CustomerBookingRequestScreenState
   }
 }
 
+// ─── TOP BAR ──────────────────────────────────────────────────────────
+
 class _TopBar extends StatelessWidget {
   final UgamColorSet c;
   final String title;
@@ -417,10 +464,10 @@ class _TopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+        UgamSpacing.gutter,
         UgamSpacing.md,
-        UgamSpacing.sm,
-        UgamSpacing.md,
-        UgamSpacing.sm,
       ),
       child: Row(
         children: [
@@ -428,52 +475,23 @@ class _TopBar extends StatelessWidget {
             onTap: () => Get.back(),
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 38,
-              height: 38,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color: c.card,
+                color: c.cardElev,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 18, color: c.ink),
+              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
-            child:
-                Text(title, style: UgamText.titleM.copyWith(color: c.ink)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryCard extends StatelessWidget {
-  final Tour tour;
-  final UgamColorSet c;
-  const _SummaryCard({required this.tour, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return UgamCard.plain(
-      padding: const EdgeInsets.all(UgamSpacing.gutter),
-      elev: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(tour.title,
-              style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15)),
-          const SizedBox(height: 2),
-          Text(
-            tr('customer_booking.route_price', namedArgs: {
-              'from': tour.fromCity,
-              'to': tour.toCity,
-              'price': tour.pricePerSeat.toStringAsFixed(0),
-            }),
-            style: UgamText.tabular(
-              UgamText.caption.copyWith(color: c.ink2),
+            child: Text(
+              title,
+              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 22),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -482,22 +500,118 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  final String text;
+// ─── TOUR PREVIEW CARD ────────────────────────────────────────────────
+
+class _TourPreviewCard extends StatelessWidget {
+  final Tour tour;
   final UgamColorSet c;
-  const _SectionLabel(this.text, this.c);
+  const _TourPreviewCard({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.sm),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: SizedBox(
+              width: 88,
+              height: 88,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  UgamBusBackdrop(seed: tour.id),
+                  Positioned(
+                    left: 6,
+                    top: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _formatDate(tour.departureDate),
+                        style: UgamText.tabular(
+                          UgamText.micro
+                              .copyWith(color: Colors.white, fontSize: 9.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tour.title,
+                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${tour.fromCity} → ${tour.toCity}',
+                  style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: UgamSpacing.sm),
+                Text(
+                  '₹${tour.pricePerSeat.toStringAsFixed(0)} / seat',
+                  style: UgamText.tabular(
+                    UgamText.bodyStrong
+                        .copyWith(color: c.accent, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatDate(DateTime d) {
+    const months = [
+      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+    ];
+    return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
+  }
+}
+
+// ─── SECTION EYEBROW ──────────────────────────────────────────────────
+
+class _SectionEyebrow extends StatelessWidget {
+  final String label;
+  final UgamColorSet c;
+  const _SectionEyebrow({required this.label, required this.c});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Text(
-        text.toUpperCase(),
-        style: UgamText.micro.copyWith(color: c.ink2),
-      ),
+      child: Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
     );
   }
 }
+
+// ─── SEAT TILE ────────────────────────────────────────────────────────
 
 class _SeatTile extends StatelessWidget {
   final IconData icon;
@@ -528,7 +642,7 @@ class _SeatTile extends StatelessWidget {
         UgamSpacing.gutter,
       ),
       decoration: BoxDecoration(
-        color: selected ? c.accentFill : c.card,
+        color: selected ? c.accentFill : c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
       child: Row(
@@ -537,7 +651,7 @@ class _SeatTile extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: selected ? c.accent.withValues(alpha: 0.18) : c.cardElev,
+              color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
               borderRadius: BorderRadius.circular(12),
             ),
             alignment: Alignment.center,
@@ -619,7 +733,7 @@ class _StepperButton extends StatelessWidget {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: enabled ? c.accent : c.cardElev,
+          color: enabled ? c.accent : c.card,
           borderRadius: BorderRadius.circular(8),
         ),
         alignment: Alignment.center,
@@ -632,6 +746,8 @@ class _StepperButton extends StatelessWidget {
     );
   }
 }
+
+// ─── TRIP TYPE SELECTOR ───────────────────────────────────────────────
 
 class _TripTypeSelector extends StatelessWidget {
   final TripType value;
@@ -715,7 +831,7 @@ class _TripTypeOption extends StatelessWidget {
           vertical: UgamSpacing.md,
         ),
         decoration: BoxDecoration(
-          color: selected ? c.accentFill : c.card,
+          color: selected ? c.accentFill : c.cardElev,
           borderRadius: BorderRadius.circular(UgamRadius.row),
         ),
         child: Row(
@@ -724,7 +840,7 @@ class _TripTypeOption extends StatelessWidget {
               width: 38,
               height: 38,
               decoration: BoxDecoration(
-                color: selected ? c.accent.withValues(alpha: 0.18) : c.cardElev,
+                color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
                 borderRadius: BorderRadius.circular(10),
               ),
               alignment: Alignment.center,
@@ -763,6 +879,8 @@ class _TripTypeOption extends StatelessWidget {
     );
   }
 }
+
+// ─── TOTALS ───────────────────────────────────────────────────────────
 
 class _Totals extends StatelessWidget {
   final int seatCount;

@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../design/ugam.dart';
 import '../models/tour.dart';
+import '../models/tour_status.dart';
 import '../services/whatsapp_service.dart';
 import 'customer_booking_request_screen.dart';
 
-/// Public-facing tour detail. Layout mirrors the image-5 "My Bookings"
-/// detail: full-bleed photo + floating overlay card carrying title +
-/// rating + price + back/notify icons; pill tab row (Deals / Details /
-/// Reviews); list of journey/bus cards; sticky bottom CTA with seat
-/// count + total + "Book Now" pill.
+/// Public-facing tour detail — image-5 fidelity.
+///
+/// Layout mirrors the admin `tour_detail_screen.dart`:
+///   [Hero (320 px) — UgamBusBackdrop + back chevron + share chevron]
+///   [Overlay summary card (title / route header / date / price / seats)]
+///   [Tab pills (About / Schedule)]
+///   [Body — switches per tab]
+///   [Sticky bottom CTA — "Request to book" / "Booked" / "Tour full"]
 class CustomerTourDetailScreen extends StatefulWidget {
   final Tour tour;
 
@@ -21,183 +26,115 @@ class CustomerTourDetailScreen extends StatefulWidget {
       _CustomerTourDetailScreenState();
 }
 
-enum _DetailTab { deals, details, reviews }
-
 class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
-  _DetailTab _tab = _DetailTab.details;
-  int _seats = 1;
+  int _tabIndex = 0;
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final t = widget.tour;
-    final totalPrice = t.pricePerSeat * _seats;
 
     return Scaffold(
       backgroundColor: c.bg,
       extendBody: true,
-      body: SafeArea(
-        bottom: false,
-        child: CustomScrollView(
-          physics: const BouncingScrollPhysics(),
-          slivers: [
-            SliverToBoxAdapter(child: _HeroSection(tour: t, c: c)),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  UgamSpacing.gutter,
-                  UgamSpacing.md,
-                  UgamSpacing.gutter,
-                  UgamSpacing.md,
-                ),
-                child: _TabPills(
-                  current: _tab,
-                  onChanged: (v) => setState(() => _tab = v),
-                  c: c,
-                ),
-              ),
-            ),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.gutter,
-                0,
-                UgamSpacing.gutter,
-                140,
-              ),
-              sliver: switch (_tab) {
-                _DetailTab.deals => SliverList.list(
-                    children: [
-                      _BusOptionCard(
-                        title: t.fromCity.isEmpty
-                            ? 'Outbound Route'
-                            : '${t.fromCity} Departure',
-                        subtitle: '${t.fromCity} → ${t.toCity}',
-                        price: t.pricePerSeat,
-                        c: c,
-                        seed: '${t.id}-1',
-                      ),
-                      const SizedBox(height: UgamSpacing.md),
-                      if (t.returnDate != null)
-                        _BusOptionCard(
-                          title: 'Return Route',
-                          subtitle: '${t.toCity} → ${t.fromCity}',
-                          price: t.pricePerSeat,
-                          c: c,
-                          seed: '${t.id}-2',
-                        ),
-                    ],
-                  ),
-                _DetailTab.details =>
-                  SliverList.list(children: _detailsBlocks(c)),
-                _DetailTab.reviews => SliverList.list(
-                    children: [
-                      _ReviewsEmpty(c: c),
-                    ],
-                  ),
+      body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
+        slivers: [
+          SliverToBoxAdapter(
+            child: _HeroSection(
+              tour: t,
+              onBack: () => Get.back(),
+              onShare: () async {
+                HapticFeedback.lightImpact();
+                await WhatsAppService().copyAnnouncementToClipboard(tour: t);
               },
             ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: _StickyBookBar(
-        seats: _seats,
-        total: totalPrice,
-        c: c,
-        onMinus: _seats > 1 ? () => setState(() => _seats--) : null,
-        onPlus: () => setState(() => _seats++),
-        onBook: () => Get.to(
-          () => CustomerBookingRequestScreen(tour: t),
-          transition: Transition.cupertino,
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _detailsBlocks(UgamColorSet c) {
-    final t = widget.tour;
-    return [
-      _InfoCard(
-        c: c,
-        title: t.title,
-        rows: [
-          ('Route', '${t.fromCity} → ${t.toCity}'),
-          ('Departure', _formatDate(t.departureDate)),
-          if (t.returnDate != null) ('Return', _formatDate(t.returnDate!)),
-          ('Tour ID', WhatsAppService.tourCode(t.id)),
+          ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.gutter,
+                UgamSpacing.huge,
+                UgamSpacing.gutter,
+                UgamSpacing.lg,
+              ),
+              child: _TabBar(
+                index: _tabIndex,
+                onChanged: (i) => setState(() => _tabIndex = i),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(
+              UgamSpacing.gutter,
+              0,
+              UgamSpacing.gutter,
+              140,
+            ),
+            sliver: _tabIndex == 0
+                ? _AboutTab(tour: t, c: c)
+                : _ScheduleTab(tour: t, c: c),
+          ),
         ],
       ),
-      if (t.buses.isNotEmpty) ...[
-        const SizedBox(height: UgamSpacing.md),
-        _BusOptionCard(
-          title: t.buses.first.busNumber,
-          subtitle:
-              '${t.buses.first.isAC ? "AC" : "Non-AC"} · ${t.buses.first.busType} · ${t.buses.first.driverName}',
-          price: t.pricePerSeat,
-          c: c,
-          seed: '${t.id}-bus',
-        ),
-      ],
-      if (t.description != null && t.description!.isNotEmpty) ...[
-        const SizedBox(height: UgamSpacing.md),
-        Container(
-          padding: const EdgeInsets.all(UgamSpacing.lg),
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(22),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('About this tour'.toUpperCase(),
-                  style: UgamText.micro.copyWith(color: c.ink3)),
-              const SizedBox(height: UgamSpacing.sm),
-              Text(
-                t.description!,
-                style: UgamText.body.copyWith(
-                  color: c.ink,
-                  fontSize: 14,
-                  height: 1.55,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ];
-  }
-
-  static String _formatDate(DateTime d) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${d.day} ${months[d.month - 1]} ${d.year}';
+      bottomNavigationBar: _StickyBookCta(tour: t),
+    );
   }
 }
 
+// ─── HERO ─────────────────────────────────────────────────────────────
+
 class _HeroSection extends StatelessWidget {
   final Tour tour;
-  final UgamColorSet c;
-  const _HeroSection({required this.tour, required this.c});
+  final VoidCallback onBack;
+  final VoidCallback onShare;
+
+  const _HeroSection({
+    required this.tour,
+    required this.onBack,
+    required this.onShare,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final topInset = MediaQuery.of(context).padding.top;
+    final capacity = tour.totalBusSeats;
+    final seatsLeft = capacity - tour.totalSeatsAssigned;
+
     return SizedBox(
-      height: 360,
+      height: 320,
       child: Stack(
+        clipBehavior: Clip.none,
         children: [
           Positioned.fill(child: UgamBusBackdrop(seed: tour.id)),
-          // Top action row over the hero photo
+          // Dark gradient for legibility.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.45),
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.35),
+                  ],
+                  stops: const [0.0, 0.45, 1.0],
+                ),
+              ),
+            ),
+          ),
+          // Top chrome row.
           Positioned(
             left: UgamSpacing.gutter,
             right: UgamSpacing.gutter,
-            top: UgamSpacing.md,
+            top: topInset + UgamSpacing.sm,
             child: Row(
               children: [
-                _HeroBtn(
+                _ChromeCircle(
                   icon: Icons.arrow_back_rounded,
-                  onTap: () => Get.back(),
+                  onTap: onBack,
                 ),
                 const Spacer(),
                 Container(
@@ -210,20 +147,20 @@ class _HeroSection extends StatelessWidget {
                     borderRadius: BorderRadius.circular(UgamRadius.chip),
                   ),
                   child: Text(
-                    'My Bookings',
-                    style: UgamText.bodyStrong
-                        .copyWith(color: Colors.white, fontSize: 13),
+                    tour.status.displayName.toUpperCase(),
+                    style: UgamText.micro
+                        .copyWith(color: Colors.white, fontSize: 10),
                   ),
                 ),
                 const Spacer(),
-                _HeroBtn(
-                  icon: Icons.notifications_none_rounded,
-                  onTap: () {},
+                _ChromeCircle(
+                  icon: Icons.ios_share_rounded,
+                  onTap: onShare,
                 ),
               ],
             ),
           ),
-          // Overlay card pinned to the bottom of the hero
+          // Overlay summary card overhanging the hero bottom.
           Positioned(
             left: UgamSpacing.gutter,
             right: UgamSpacing.gutter,
@@ -238,80 +175,109 @@ class _HeroSection extends StatelessWidget {
               decoration: BoxDecoration(
                 color: c.cardElev,
                 borderRadius: BorderRadius.circular(22),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x14000000),
+                    blurRadius: 12,
+                    offset: Offset(0, 4),
+                  ),
+                ],
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
                           tour.title,
+                          style: UgamText.titleM
+                              .copyWith(color: c.ink, fontSize: 18),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: UgamText.titleM
-                              .copyWith(color: c.ink, fontSize: 17),
                         ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(Icons.location_on_rounded,
-                                size: 12, color: c.ink2),
-                            const SizedBox(width: 3),
-                            Flexible(
-                              child: Text(
-                                '${tour.fromCity}, IN',
-                                style: UgamText.caption
-                                    .copyWith(color: c.ink2, fontSize: 11),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+                      ),
+                      const SizedBox(width: UgamSpacing.sm),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: UgamSpacing.sm,
-                          vertical: 3,
+                          horizontal: UgamSpacing.md,
+                          vertical: UgamSpacing.sm,
                         ),
                         decoration: BoxDecoration(
-                          color: c.warm,
-                          borderRadius:
-                              BorderRadius.circular(UgamRadius.chip),
+                          color: c.accentFill,
+                          borderRadius: BorderRadius.circular(14),
                         ),
-                        child: Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.star_rounded,
-                                size: 11, color: Colors.white),
-                            const SizedBox(width: 2),
                             Text(
-                              '4.6',
-                              style: UgamText.bodyStrong.copyWith(
-                                color: Colors.white,
-                                fontSize: 11,
+                              '₹${tour.pricePerSeat.toStringAsFixed(0)}',
+                              style: UgamText.tabular(
+                                UgamText.titleM.copyWith(
+                                    color: c.accent, fontSize: 18),
                               ),
+                            ),
+                            Text(
+                              '/ seat',
+                              style: UgamText.caption
+                                  .copyWith(color: c.accent, fontSize: 10),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '₹${tour.pricePerSeat.toStringAsFixed(0)}',
-                        style: UgamText.tabular(
-                          UgamText.titleM.copyWith(
-                            color: c.accent,
-                            fontSize: 18,
-                          ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.south_east_rounded, size: 12, color: c.ink2),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          '${tour.fromCity} → ${tour.toCity}',
+                          style: UgamText.caption
+                              .copyWith(color: c.ink2, fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
+                      ),
+                      const SizedBox(width: UgamSpacing.sm),
+                      Text('·',
+                          style: UgamText.caption
+                              .copyWith(color: c.ink3, fontSize: 11)),
+                      const SizedBox(width: UgamSpacing.sm),
+                      Text(
+                        _formatDate(tour.departureDate),
+                        style: UgamText.tabular(
+                          UgamText.caption
+                              .copyWith(color: c.ink2, fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      if (capacity > 0)
+                        UgamReqChip(
+                          label: seatsLeft <= 0
+                              ? 'TOUR FULL'
+                              : '$seatsLeft SEATS LEFT',
+                          variant: seatsLeft <= 0
+                              ? UgamChipVariant.warm
+                              : UgamChipVariant.good,
+                        )
+                      else
+                        const UgamReqChip(
+                          label: 'OPEN FOR REQUESTS',
+                          variant: UgamChipVariant.accent,
+                        ),
+                      const SizedBox(width: 5),
+                      UgamReqChip(
+                        label: WhatsAppService.tourCode(tour.id).toUpperCase(),
+                        variant: UgamChipVariant.neutral,
                       ),
                     ],
                   ),
@@ -323,17 +289,28 @@ class _HeroSection extends StatelessWidget {
       ),
     );
   }
+
+  static String _formatDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${d.day} ${months[d.month - 1]}';
+  }
 }
 
-class _HeroBtn extends StatelessWidget {
+class _ChromeCircle extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _HeroBtn({required this.icon, required this.onTap});
+  const _ChromeCircle({required this.icon, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: 42,
@@ -349,93 +326,95 @@ class _HeroBtn extends StatelessWidget {
   }
 }
 
-class _TabPills extends StatelessWidget {
-  final _DetailTab current;
-  final ValueChanged<_DetailTab> onChanged;
-  final UgamColorSet c;
+// ─── TAB BAR ──────────────────────────────────────────────────────────
 
-  const _TabPills({
-    required this.current,
-    required this.onChanged,
-    required this.c,
-  });
+class _TabBar extends StatelessWidget {
+  final int index;
+  final ValueChanged<int> onChanged;
+
+  const _TabBar({required this.index, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
-    final items = const [
-      (_DetailTab.deals, Icons.local_offer_rounded, 'Deals'),
-      (_DetailTab.details, Icons.list_alt_rounded, 'Details'),
-      (_DetailTab.reviews, Icons.star_outline_rounded, 'Reviews'),
-    ];
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: items.length,
-        padding: EdgeInsets.zero,
-        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
-        itemBuilder: (_, i) {
-          final (tab, icon, label) = items[i];
-          final active = tab == current;
-          return GestureDetector(
-            onTap: () => onChanged(tab),
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: UgamMotion.tab,
-              curve: UgamMotion.easeOut,
-              padding: const EdgeInsets.fromLTRB(4, 4, UgamSpacing.md, 4),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: active ? c.accent : Colors.transparent,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(icon,
-                        size: 16, color: active ? c.onAccent : c.ink2),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: active ? c.ink : c.ink2,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+    return UgamTabPills(
+      currentIndex: index,
+      onChanged: onChanged,
+      items: const [
+        UgamTabItem(label: 'About'),
+        UgamTabItem(label: 'Schedule'),
+      ],
     );
   }
 }
 
-class _BusOptionCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final double price;
-  final UgamColorSet c;
-  final String seed;
+// ─── ABOUT TAB ────────────────────────────────────────────────────────
 
-  const _BusOptionCard({
-    required this.title,
-    required this.subtitle,
-    required this.price,
-    required this.c,
-    required this.seed,
-  });
+class _AboutTab extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _AboutTab({required this.tour, required this.c});
 
   @override
   Widget build(BuildContext context) {
+    return SliverList(
+      delegate: SliverChildListDelegate.fixed([
+        _SectionEyebrow(label: 'TRIP SUMMARY', c: c),
+        const SizedBox(height: UgamSpacing.md),
+        _InfoCard(
+          c: c,
+          rows: [
+            ('Route', '${tour.fromCity} → ${tour.toCity}'),
+            ('Departure', _formatLongDate(tour.departureDate)),
+            if (tour.returnDate != null)
+              ('Return', _formatLongDate(tour.returnDate!)),
+            ('Price', '₹${tour.pricePerSeat.toStringAsFixed(0)} / seat'),
+            ('Tour ID', WhatsAppService.tourCode(tour.id)),
+          ],
+        ),
+        if (tour.description != null && tour.description!.isNotEmpty) ...[
+          const SizedBox(height: UgamSpacing.xl),
+          _SectionEyebrow(label: 'ABOUT THIS TOUR', c: c),
+          const SizedBox(height: UgamSpacing.md),
+          Container(
+            padding: const EdgeInsets.all(UgamSpacing.lg),
+            decoration: BoxDecoration(
+              color: c.cardElev,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Text(
+              tour.description!,
+              style: UgamText.body
+                  .copyWith(color: c.ink, fontSize: 14, height: 1.55),
+            ),
+          ),
+        ],
+        if (tour.buses.isNotEmpty) ...[
+          const SizedBox(height: UgamSpacing.xl),
+          _SectionEyebrow(label: 'BUS', c: c),
+          const SizedBox(height: UgamSpacing.md),
+          _BusCard(tour: tour, c: c),
+        ],
+      ]),
+    );
+  }
+
+  static String _formatLongDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
+}
+
+class _BusCard extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _BusCard({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final bus = tour.buses.first;
     return Container(
       padding: const EdgeInsets.all(UgamSpacing.sm),
       decoration: BoxDecoration(
@@ -449,7 +428,7 @@ class _BusOptionCard extends StatelessWidget {
             child: SizedBox(
               width: 84,
               height: 84,
-              child: UgamBusBackdrop(seed: seed),
+              child: UgamBusBackdrop(seed: '${bus.id}-bus'),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
@@ -458,86 +437,27 @@ class _BusOptionCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: UgamText.titleS
-                            .copyWith(color: c.ink, fontSize: 14),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: c.warm,
-                        borderRadius:
-                            BorderRadius.circular(UgamRadius.chip),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.star_rounded,
-                              size: 10, color: Colors.white),
-                          const SizedBox(width: 2),
-                          Text(
-                            '4.6',
-                            style: UgamText.bodyStrong.copyWith(
-                              color: Colors.white,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
                 Text(
-                  subtitle,
-                  style: UgamText.caption
-                      .copyWith(color: c.ink2, fontSize: 11),
+                  bus.busNumber.isNotEmpty ? bus.busNumber : bus.name,
+                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 2),
+                Text(
+                  bus.busType,
+                  style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                ),
+                const SizedBox(height: UgamSpacing.sm),
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      '₹${price.toStringAsFixed(0)}',
-                      style: UgamText.tabular(
-                        UgamText.titleM.copyWith(
-                          color: c.accent,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 3),
-                      child: Text(
-                        '/ seat',
-                        style: UgamText.caption
-                            .copyWith(color: c.ink3, fontSize: 10),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: c.card,
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(Icons.arrow_forward_rounded,
-                          size: 16, color: c.ink),
+                    if (bus.isAC) ...[
+                      const UgamReqChip(label: 'AC'),
+                      const SizedBox(width: 5),
+                    ],
+                    UgamReqChip(
+                      label: '${bus.totalSeats} SEATS',
+                      variant: UgamChipVariant.neutral,
                     ),
                   ],
                 ),
@@ -550,16 +470,169 @@ class _BusOptionCard extends StatelessWidget {
   }
 }
 
+// ─── SCHEDULE TAB ─────────────────────────────────────────────────────
+
+class _ScheduleTab extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _ScheduleTab({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final events = _events();
+    return SliverList(
+      delegate: SliverChildListDelegate.fixed([
+        _SectionEyebrow(label: 'TIMELINE', c: c),
+        const SizedBox(height: UgamSpacing.md),
+        for (var i = 0; i < events.length; i++)
+          _TimelineRow(
+            event: events[i],
+            isFirst: i == 0,
+            isLast: i == events.length - 1,
+            c: c,
+          ),
+      ]),
+    );
+  }
+
+  List<_ScheduleEvent> _events() {
+    final out = <_ScheduleEvent>[
+      _ScheduleEvent(
+        icon: Icons.directions_bus_rounded,
+        title: 'Departure from ${tour.fromCity}',
+        time: tour.departureDate,
+      ),
+      _ScheduleEvent(
+        icon: Icons.location_on_rounded,
+        title: 'Arrive in ${tour.toCity}',
+        time: tour.departureDate,
+      ),
+    ];
+    if (tour.returnDate != null) {
+      out.add(_ScheduleEvent(
+        icon: Icons.flag_rounded,
+        title: 'Return to ${tour.fromCity}',
+        time: tour.returnDate!,
+      ));
+    }
+    return out;
+  }
+}
+
+class _ScheduleEvent {
+  final IconData icon;
+  final String title;
+  final DateTime time;
+  const _ScheduleEvent({
+    required this.icon,
+    required this.title,
+    required this.time,
+  });
+}
+
+class _TimelineRow extends StatelessWidget {
+  final _ScheduleEvent event;
+  final bool isFirst;
+  final bool isLast;
+  final UgamColorSet c;
+
+  const _TimelineRow({
+    required this.event,
+    required this.isFirst,
+    required this.isLast,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 36,
+            child: Column(
+              children: [
+                if (isFirst)
+                  const SizedBox(height: 8)
+                else
+                  Expanded(
+                    child: Container(width: 2, color: c.border),
+                  ),
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: c.accentFill,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: c.accent, width: 1.5),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(event.icon, size: 13, color: c.accent),
+                ),
+                if (isLast)
+                  const SizedBox(height: 8)
+                else
+                  Expanded(
+                    child: Container(width: 2, color: c.border),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm),
+              child: Container(
+                padding: const EdgeInsets.all(UgamSpacing.md - 2),
+                decoration: BoxDecoration(
+                  color: c.cardElev,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      event.title,
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.ink, fontSize: 13),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatDate(event.time),
+                      style: UgamText.tabular(
+                        UgamText.caption
+                            .copyWith(color: c.ink3, fontSize: 11),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${d.day} ${months[d.month - 1]} ${d.year}';
+  }
+}
+
+// ─── INFO CARD ────────────────────────────────────────────────────────
+
 class _InfoCard extends StatelessWidget {
   final UgamColorSet c;
-  final String title;
   final List<(String, String)> rows;
-
-  const _InfoCard({
-    required this.c,
-    required this.title,
-    required this.rows,
-  });
+  const _InfoCard({required this.c, required this.rows});
 
   @override
   Widget build(BuildContext context) {
@@ -573,8 +646,6 @@ class _InfoCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(title, style: UgamText.titleM.copyWith(color: c.ink)),
-          const SizedBox(height: UgamSpacing.md),
           for (final (label, value) in rows) ...[
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -602,191 +673,61 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
-class _ReviewsEmpty extends StatelessWidget {
+class _SectionEyebrow extends StatelessWidget {
+  final String label;
   final UgamColorSet c;
-  const _ReviewsEmpty({required this.c});
+  const _SectionEyebrow({required this.label, required this.c});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.huge),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Column(
-        children: [
-          Icon(Icons.star_outline_rounded, size: 40, color: c.ink3),
-          const SizedBox(height: UgamSpacing.sm),
-          Text('No reviews yet',
-              style: UgamText.titleS.copyWith(color: c.ink2)),
-          const SizedBox(height: 4),
-          Text(
-            'Be the first to travel and review.',
-            style: UgamText.caption.copyWith(color: c.ink3),
-          ),
-        ],
-      ),
-    );
+    return Text(label, style: UgamText.micro.copyWith(color: c.ink3));
   }
 }
 
-class _StickyBookBar extends StatelessWidget {
-  final int seats;
-  final double total;
-  final UgamColorSet c;
-  final VoidCallback? onMinus;
-  final VoidCallback onPlus;
-  final VoidCallback onBook;
+// ─── STICKY CTA ───────────────────────────────────────────────────────
 
-  const _StickyBookBar({
-    required this.seats,
-    required this.total,
-    required this.c,
-    required this.onMinus,
-    required this.onPlus,
-    required this.onBook,
-  });
+class _StickyBookCta extends StatelessWidget {
+  final Tour tour;
+  const _StickyBookCta({required this.tour});
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          UgamSpacing.gutter,
-          UgamSpacing.md,
-          UgamSpacing.gutter,
-          UgamSpacing.md,
-        ),
-        child: Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: c.accent,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: c.onAccent,
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.person_outline_rounded,
-                    size: 19, color: c.accent),
-              ),
-              const SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _SeatStep(
-                          icon: Icons.remove_rounded,
-                          enabled: onMinus != null,
-                          onTap: onMinus,
-                          c: c,
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Text(
-                            '$seats Seats',
-                            style: UgamText.tabular(
-                              UgamText.bodyStrong.copyWith(
-                                color: c.onAccent,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        ),
-                        _SeatStep(
-                          icon: Icons.add_rounded,
-                          enabled: true,
-                          onTap: onPlus,
-                          c: c,
-                        ),
-                      ],
-                    ),
-                    Text(
-                      '₹${total.toStringAsFixed(0)}',
-                      style: UgamText.tabular(
-                        UgamText.titleM.copyWith(
-                          color: c.onAccent,
-                          fontSize: 17,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              GestureDetector(
-                onTap: onBook,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.lg + 2,
-                    vertical: UgamSpacing.md - 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: c.onAccent,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                  ),
-                  child: Text(
-                    'Book Now',
-                    style: UgamText.titleS.copyWith(
-                      color: c.accent,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+    final capacity = tour.totalBusSeats;
+    final seatsLeft = capacity - tour.totalSeatsAssigned;
+    final full = capacity > 0 && seatsLeft <= 0;
+    final locked = tour.status == TourStatus.locked ||
+        tour.status == TourStatus.completed;
 
-class _SeatStep extends StatelessWidget {
-  final IconData icon;
-  final bool enabled;
-  final VoidCallback? onTap;
-  final UgamColorSet c;
+    final String label;
+    final IconData icon;
+    final VoidCallback? onTap;
 
-  const _SeatStep({
-    required this.icon,
-    required this.enabled,
-    required this.onTap,
-    required this.c,
-  });
+    if (locked) {
+      label = 'Bookings closed';
+      icon = Icons.lock_outline_rounded;
+      onTap = null;
+    } else if (full) {
+      label = 'Join waitlist';
+      icon = Icons.hourglass_top_rounded;
+      onTap = () => Get.to(
+            () => CustomerBookingRequestScreen(tour: tour),
+            transition: Transition.cupertino,
+          );
+    } else {
+      label = 'Request to book';
+      icon = Icons.send_rounded;
+      onTap = () => Get.to(
+            () => CustomerBookingRequestScreen(tour: tour),
+            transition: Transition.cupertino,
+          );
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 22,
-        height: 22,
-        decoration: BoxDecoration(
-          color: enabled
-              ? c.onAccent.withValues(alpha: 0.18)
-              : c.onAccent.withValues(alpha: 0.08),
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Icon(icon,
-            size: 13,
-            color: enabled
-                ? c.onAccent
-                : c.onAccent.withValues(alpha: 0.4)),
+    return UgamStickyCTA(
+      child: UgamCTA(
+        label: label,
+        leadingIcon: icon,
+        trailingValue: '₹${tour.pricePerSeat.toStringAsFixed(0)}',
+        onPressed: onTap,
       ),
     );
   }

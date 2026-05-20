@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
@@ -11,9 +12,17 @@ import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
 
 /// Customer-facing list of every booking request submitted from this
-/// device. Pull-to-refresh fans out one RPC per row to fetch live
-/// status + seat assignment. Rows in the `pending` state with no seats
-/// expose an Edit affordance; everything else is read-only.
+/// device — image-5 fidelity.
+///
+/// Layout:
+///   [Title row + circle refresh]
+///   [Status pills row (All / Pending / Confirmed / Cancelled)]
+///   [Photo-anchored request rows]
+///
+/// Tap a row → opens the seat-layout sheet when seats are assigned,
+/// otherwise routes to edit when editable. The data layer is preserved:
+/// `CustomerRequestsStore` bootstraps from cache and refreshes per-row
+/// via RPC.
 class CustomerMyRequestsScreen extends StatefulWidget {
   const CustomerMyRequestsScreen({super.key});
 
@@ -22,17 +31,22 @@ class CustomerMyRequestsScreen extends StatefulWidget {
       _CustomerMyRequestsScreenState();
 }
 
+enum _StatusFilter { all, pending, confirmed, cancelled }
+
 class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   final _store = CustomerRequestsStore();
   bool _loading = true;
   bool _refreshing = false;
   List<CustomerRequestEntry> _entries = const [];
+  _StatusFilter _filter = _StatusFilter.all;
 
   @override
   void initState() {
     super.initState();
     _bootstrap();
   }
+
+  // ─── DATA LAYER — PRESERVED ────────────────────────────────────────
 
   Future<void> _bootstrap() async {
     final cached = await _store.list();
@@ -80,6 +94,25 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
         pricePerSeat: e.tourPricePerSeat,
       );
 
+  // ─── UI ────────────────────────────────────────────────────────────
+
+  List<CustomerRequestEntry> get _visible {
+    switch (_filter) {
+      case _StatusFilter.pending:
+        return _entries
+            .where((e) => e.status == 'pending' && !e.hasSeatsAssigned)
+            .toList();
+      case _StatusFilter.confirmed:
+        return _entries
+            .where((e) => e.hasSeatsAssigned || e.status == 'accepted')
+            .toList();
+      case _StatusFilter.cancelled:
+        return _entries.where((e) => e.status == 'rejected').toList();
+      case _StatusFilter.all:
+        return _entries;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -87,13 +120,53 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
     return Scaffold(
       backgroundColor: c.bg,
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             _TopBar(
               c: c,
               refreshing: _refreshing,
               onRefresh: _refreshing ? null : _refresh,
+              onBack: () => Get.back(),
             ),
+            if (!_loading && _entries.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  UgamSpacing.gutter,
+                  0,
+                  UgamSpacing.gutter,
+                  UgamSpacing.md,
+                ),
+                child: UgamTabPills(
+                  currentIndex: _filter.index,
+                  onChanged: (i) =>
+                      setState(() => _filter = _StatusFilter.values[i]),
+                  items: [
+                    UgamTabItem(label: 'All', count: _entries.length),
+                    UgamTabItem(
+                      label: 'Pending',
+                      count: _entries
+                          .where((e) =>
+                              e.status == 'pending' && !e.hasSeatsAssigned)
+                          .length,
+                    ),
+                    UgamTabItem(
+                      label: 'Confirmed',
+                      count: _entries
+                          .where((e) =>
+                              e.hasSeatsAssigned || e.status == 'accepted')
+                          .length,
+                    ),
+                    UgamTabItem(
+                      label: 'Cancelled',
+                      count: _entries
+                          .where((e) => e.status == 'rejected')
+                          .length,
+                    ),
+                  ],
+                ),
+              ),
+            ],
             Expanded(
               child: _loading
                   ? _LoadingShimmer()
@@ -103,81 +176,108 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                           title: tr('customer_my_requests.empty_title'),
                           body: tr('customer_my_requests.empty_body'),
                         )
-                      : RefreshIndicator(
-                          color: c.accent,
-                          onRefresh: _refresh,
-                          child: ListView.separated(
-                            padding: const EdgeInsets.fromLTRB(
-                              UgamSpacing.gutter,
-                              UgamSpacing.sm,
-                              UgamSpacing.gutter,
-                              UgamSpacing.xxl,
+                      : _visible.isEmpty
+                          ? const UgamEmpty(
+                              icon: Icons.filter_alt_off_rounded,
+                              title: 'No matches',
+                              body: 'Nothing in this filter — try All.',
+                            )
+                          : RefreshIndicator(
+                              color: c.accent,
+                              onRefresh: _refresh,
+                              child: ListView.separated(
+                                physics: const AlwaysScrollableScrollPhysics(
+                                  parent: BouncingScrollPhysics(),
+                                ),
+                                padding: const EdgeInsets.fromLTRB(
+                                  UgamSpacing.gutter,
+                                  UgamSpacing.sm,
+                                  UgamSpacing.gutter,
+                                  140,
+                                ),
+                                itemCount: _visible.length,
+                                separatorBuilder: (_, _) => const SizedBox(
+                                    height: UgamSpacing.sm + 2),
+                                itemBuilder: (_, i) => _RequestRow(
+                                  entry: _visible[i],
+                                  onTap: () => _onRowTap(_visible[i]),
+                                  onEdit: () => _openEdit(_visible[i]),
+                                ),
+                              ),
                             ),
-                            itemCount: _entries.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: UgamSpacing.md),
-                            itemBuilder: (_, i) => _RequestCard(
-                              entry: _entries[i],
-                              onEdit: () => _openEdit(_entries[i]),
-                            ),
-                          ),
-                        ),
             ),
           ],
         ),
       ),
     );
   }
+
+  void _onRowTap(CustomerRequestEntry entry) {
+    HapticFeedback.selectionClick();
+    if (entry.hasSeatsAssigned) {
+      showCustomerSeatLayoutSheet(context, entry: entry);
+    } else if (entry.canEdit) {
+      _openEdit(entry);
+    }
+    // Otherwise: read-only, tap is a no-op (status chip + lock copy explain).
+  }
 }
+
+// ─── TOP BAR ──────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
   final UgamColorSet c;
   final bool refreshing;
   final VoidCallback? onRefresh;
+  final VoidCallback onBack;
+
   const _TopBar({
     required this.c,
     required this.refreshing,
     required this.onRefresh,
+    required this.onBack,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.md,
-        UgamSpacing.sm,
-        UgamSpacing.md,
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+        UgamSpacing.gutter,
         UgamSpacing.md,
       ),
       child: Row(
         children: [
           GestureDetector(
-            onTap: () => Get.back(),
+            onTap: onBack,
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 38,
-              height: 38,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color: c.card,
+                color: c.cardElev,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 18, color: c.ink),
+              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Text(
               tr('customer_my_requests.title'),
-              style: UgamText.titleL.copyWith(color: c.ink),
+              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 24),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           GestureDetector(
             onTap: onRefresh,
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 38,
-              height: 38,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: c.cardElev,
                 shape: BoxShape.circle,
@@ -192,7 +292,7 @@ class _TopBar extends StatelessWidget {
                         color: c.ink2,
                       ),
                     )
-                  : Icon(Icons.refresh_rounded, size: 18, color: c.ink2),
+                  : Icon(Icons.refresh_rounded, size: 19, color: c.ink),
             ),
           ),
         ],
@@ -201,178 +301,155 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _RequestCard extends StatelessWidget {
+// ─── REQUEST ROW (photo-anchored) ─────────────────────────────────────
+
+class _RequestRow extends StatelessWidget {
   final CustomerRequestEntry entry;
+  final VoidCallback onTap;
   final VoidCallback onEdit;
 
-  const _RequestCard({required this.entry, required this.onEdit});
+  const _RequestRow({
+    required this.entry,
+    required this.onTap,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final (statusLabel, statusTone) = _statusFor(entry);
 
-    return UgamCard.plain(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              _StatusChip(status: entry.status, hasSeats: entry.hasSeatsAssigned),
-              const SizedBox(width: UgamSpacing.sm),
-              if (entry.wasEdited)
-                const UgamReqChip(
-                  label: 'EDITED',
-                  variant: UgamChipVariant.neutral,
-                ),
-              const Spacer(),
-              Text(
-                _formatDate(entry.tourDepartureDate),
-                style: UgamText.tabular(
-                  UgamText.micro.copyWith(color: c.ink3),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Text(
-            entry.tourTitle,
-            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '${entry.tourFromCity} → ${entry.tourToCity}',
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 13),
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Row(
-            children: [
-              Icon(Icons.event_seat_rounded, size: 16, color: c.ink2),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  _seatsLabel(entry),
-                  style: UgamText.body
-                      .copyWith(color: c.ink, fontSize: 13),
-                ),
-              ),
-            ],
-          ),
-          if (entry.tripType.isOneWay) ...[
-            const SizedBox(height: UgamSpacing.sm),
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.sm),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
             Row(
               children: [
-                Icon(
-                  entry.tripType == TripType.outboundOnly
-                      ? Icons.arrow_forward_rounded
-                      : Icons.arrow_back_rounded,
-                  size: 16,
-                  color: c.warm,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    entry.tripType == TripType.outboundOnly
-                        ? tr('customer_my_requests.trip_outbound', namedArgs: {
-                            'from': entry.tourFromCity,
-                            'to': entry.tourToCity,
-                          })
-                        : tr('customer_my_requests.trip_return', namedArgs: {
-                            'from': entry.tourToCity,
-                            'to': entry.tourFromCity,
-                          }),
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.warm,
-                      fontSize: 12,
+                // Small backdrop + date pill.
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    width: 76,
+                    height: 88,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        UgamBusBackdrop(seed: entry.tourId),
+                        Positioned(
+                          left: 4,
+                          top: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              _formatDate(entry.tourDepartureDate),
+                              style: UgamText.tabular(
+                                UgamText.micro.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 9.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+                ),
+                const SizedBox(width: UgamSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        entry.tourTitle,
+                        style: UgamText.titleS
+                            .copyWith(color: c.ink, fontSize: 14.5),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          Icon(Icons.south_east_rounded,
+                              size: 12, color: c.ink2),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              '${entry.tourFromCity} → ${entry.tourToCity}',
+                              style: UgamText.caption
+                                  .copyWith(color: c.ink2, fontSize: 12),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: UgamSpacing.sm + 2),
+                      Row(
+                        children: [
+                          UgamStatusDot(
+                            label: statusLabel,
+                            tone: statusTone,
+                          ),
+                          const SizedBox(width: UgamSpacing.sm),
+                          Flexible(
+                            child: Text(
+                              _seatsLabel(entry),
+                              style: UgamText.caption.copyWith(
+                                  color: c.ink, fontSize: 11.5),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const Spacer(),
+                          Icon(Icons.chevron_right_rounded,
+                              size: 18, color: c.ink3),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
+            if (entry.wasEdited ||
+                entry.tripType.isOneWay ||
+                entry.canEdit ||
+                entry.hasSeatsAssigned) ...[
+              const SizedBox(height: UgamSpacing.sm + 2),
+              _RowFooter(
+                entry: entry,
+                c: c,
+                onEdit: onEdit,
+              ),
+            ],
           ],
-          if (entry.hasSeatsAssigned) ...[
-            const SizedBox(height: UgamSpacing.md),
-            GestureDetector(
-              onTap: () => showCustomerSeatLayoutSheet(context, entry: entry),
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.md,
-                  vertical: UgamSpacing.sm + 2,
-                ),
-                decoration: BoxDecoration(
-                  color: c.accentFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.input),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.confirmation_number_rounded,
-                        size: 16, color: c.accent),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        tr('customer_my_requests.seats_assigned_label',
-                            namedArgs: {
-                              'seats': entry.assignedSeats
-                                  .map((s) => s.seatId)
-                                  .join(', '),
-                            }),
-                        style: UgamText.bodyStrong
-                            .copyWith(color: c.accent, fontSize: 13),
-                      ),
-                    ),
-                    Icon(Icons.grid_view_rounded, size: 14, color: c.accent),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          if (entry.note != null && entry.note!.isNotEmpty) ...[
-            const SizedBox(height: UgamSpacing.sm),
-            Text(
-              '📝 ${entry.note}',
-              style: UgamText.caption
-                  .copyWith(color: c.ink2, fontSize: 12, height: 1.4),
-            ),
-          ],
-          const SizedBox(height: UgamSpacing.md),
-          if (entry.canEdit)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                onPressed: onEdit,
-                icon: const Icon(Icons.edit_rounded, size: 16),
-                label: Text(tr('customer_my_requests.edit_request_btn')),
-              ),
-            )
-          else
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.md,
-                vertical: UgamSpacing.sm + 2,
-              ),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.input),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.lock_outline_rounded, size: 14, color: c.ink3),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      entry.hasSeatsAssigned
-                          ? tr('customer_my_requests.locked_seats_assigned')
-                          : tr('customer_my_requests.locked_no_edit'),
-                      style: UgamText.caption.copyWith(color: c.ink3),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
+        ),
       ),
     );
+  }
+
+  (String, UgamStatusTone) _statusFor(CustomerRequestEntry e) {
+    if (e.hasSeatsAssigned) return ('Seats assigned', UgamStatusTone.good);
+    if (e.status == 'accepted') return ('Confirmed', UgamStatusTone.good);
+    if (e.status == 'rejected') return ('Cancelled', UgamStatusTone.warm);
+    return ('Pending', UgamStatusTone.warm);
   }
 
   String _seatsLabel(CustomerRequestEntry e) {
@@ -389,9 +466,7 @@ class _RequestCard extends StatelessWidget {
       return tr('customer_my_requests.seats_fallback',
           namedArgs: {'count': e.partySize.toString()});
     }
-    final total = tr('customer_my_requests.seats_total',
-        namedArgs: {'total': e.partySize.toString()});
-    return '${parts.join(' + ')}  ·  $total';
+    return parts.join(' + ');
   }
 
   static String _formatDate(DateTime d) {
@@ -403,42 +478,100 @@ class _RequestCard extends StatelessWidget {
   }
 }
 
-class _StatusChip extends StatelessWidget {
-  final String status;
-  final bool hasSeats;
-  const _StatusChip({required this.status, required this.hasSeats});
+class _RowFooter extends StatelessWidget {
+  final CustomerRequestEntry entry;
+  final UgamColorSet c;
+  final VoidCallback onEdit;
+
+  const _RowFooter({
+    required this.entry,
+    required this.c,
+    required this.onEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final (label, variant) = _palette();
-    return UgamReqChip(label: label, variant: variant);
-  }
+    final widgets = <Widget>[];
 
-  (String, UgamChipVariant) _palette() {
-    if (hasSeats) {
-      return (
-        tr('customer_my_requests.status_seats_assigned').toUpperCase(),
-        UgamChipVariant.good,
-      );
+    if (entry.wasEdited) {
+      widgets.add(const UgamReqChip(
+        label: 'EDITED',
+        variant: UgamChipVariant.neutral,
+      ));
     }
-    switch (status) {
-      case 'accepted':
-        return (
-          tr('customer_my_requests.status_accepted').toUpperCase(),
-          UgamChipVariant.good,
-        );
-      case 'rejected':
-        return (
-          tr('customer_my_requests.status_rejected').toUpperCase(),
-          UgamChipVariant.warm,
-        );
-      case 'pending':
-      default:
-        return (
-          tr('customer_my_requests.status_pending').toUpperCase(),
-          UgamChipVariant.warm,
-        );
+    if (entry.tripType == TripType.outboundOnly) {
+      widgets.add(const UgamReqChip(
+        label: 'ONE-WAY OUT',
+        variant: UgamChipVariant.warm,
+      ));
+    } else if (entry.tripType == TripType.returnOnly) {
+      widgets.add(const UgamReqChip(
+        label: 'ONE-WAY RETURN',
+        variant: UgamChipVariant.warm,
+      ));
     }
+    if (entry.hasSeatsAssigned) {
+      widgets.add(UgamReqChip(
+        label: 'SEATS: ${entry.assignedSeats.map((s) => s.seatId).join(", ")}',
+        variant: UgamChipVariant.good,
+      ));
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.sm,
+        UgamSpacing.sm,
+        UgamSpacing.sm,
+        UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Wrap(
+              spacing: 5,
+              runSpacing: 5,
+              children: widgets,
+            ),
+          ),
+          if (entry.canEdit) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            GestureDetector(
+              onTap: onEdit,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.md,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: c.accent,
+                  borderRadius: BorderRadius.circular(UgamRadius.chip),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.edit_rounded, size: 12, color: c.onAccent),
+                    const SizedBox(width: 4),
+                    Text(
+                      tr('customer_my_requests.edit_request_btn'),
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.onAccent, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ] else if (entry.note != null && entry.note!.isNotEmpty) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            Icon(Icons.sticky_note_2_outlined, size: 14, color: c.ink3),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -449,11 +582,11 @@ class _LoadingShimmer extends StatelessWidget {
       padding: const EdgeInsets.all(UgamSpacing.gutter),
       physics: const NeverScrollableScrollPhysics(),
       children: const [
-        UgamSkeleton(height: 180, radius: UgamRadius.card),
-        SizedBox(height: UgamSpacing.md),
-        UgamSkeleton(height: 180, radius: UgamRadius.card),
-        SizedBox(height: UgamSpacing.md),
-        UgamSkeleton(height: 180, radius: UgamRadius.card),
+        UgamSkeleton(height: 110, radius: 20),
+        SizedBox(height: UgamSpacing.sm),
+        UgamSkeleton(height: 110, radius: 20),
+        SizedBox(height: UgamSpacing.sm),
+        UgamSkeleton(height: 110, radius: 20),
       ],
     );
   }
