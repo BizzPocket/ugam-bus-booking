@@ -3,9 +3,7 @@ import 'dart:math' as math;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
 import '../design/ugam.dart';
 import '../controllers/tour_controller.dart';
 import '../models/passenger.dart';
@@ -16,22 +14,27 @@ import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import 'manage_buses_screen.dart';
 
-/// Bottom-nav "Assign" tab — read-only overview of seat allocations.
+/// Bottom-nav "Assign" tab — the seat-matching workbench.
 ///
-/// Layout philosophy:
-///   1. Compact header (tour title + bus picker chips + deck toggle).
-///   2. The chart itself fills every remaining vertical pixel.
-///   3. Tile widths are computed from the available width via
-///      [LayoutBuilder], so the row ALWAYS fits the screen — no
-///      horizontal scroll, no pinch zoom, no clipped columns.
-///   4. Each booked tile renders the FULL passenger name + FULL local
-///      phone, scaled to fit the tile via [FittedBox].
-///   5. Tapping a booked seat opens a centred occupant dialog with
-///      contact info and admin actions (cancel one seat / unassign all
-///      / jump to that passenger in the dedicated editor).
-///   6. The dedicated TourSeatAssignmentScreen owns actual writes — this
-///      tab only does ad-hoc fixes through the dialog.
+/// Layout philosophy (Ugam rebuild):
+///   1. Clean Ugam topbar — title + Fleet circle button.
+///   2. Tour pills (when >1) and bus pills as horizontal scrollable rows
+///      in Ugam style (solid accent active, cardElev inactive).
+///   3. UgamTabPills deck toggle when an upper deck exists.
+///   4. Seat chart wrapped in `UgamCard.plain` with 22 px radius. The
+///      seat tiles keep their drag/drop business logic intact; only
+///      colours are re-routed through `UgamColors.of(context)`.
+///   5. NEW: a "Pending passengers" dock pinned above the main dock
+///      nav, with horizontal cards (avatar + name + needs-chip) plus a
+///      right-aligned Auto-pick circle + Done pill. Tapping a card
+///      sets a highlighted-passenger state so the matching free seats
+///      pulse with an accent glow inside the chart.
+///
+/// Sacred business logic preserved verbatim: `_handleSeatDrop`,
+/// `_onSeatTap`, paired-double rules, swap/move/consolidate calls,
+/// occupant dialog.
 class SeatAssignmentScreen extends StatefulWidget {
   const SeatAssignmentScreen({super.key});
 
@@ -77,30 +80,54 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
   int _busIdx = 0;
   bool _showUpper = false;
 
+  /// Passenger whose pending lines should make matching free seats
+  /// pulse. Set from the pending dock; cleared on swipe, tap on bg,
+  /// or once they're fully assigned.
+  String? _highlightedPassengerId;
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = UgamColors.of(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: c.bg,
       body: SafeArea(
+        bottom: false,
         child: Obx(() {
           final tours = _tourCtrl.activeTours;
           if (tours.isEmpty) {
-            return _emptyState(
-              icon: Icons.grid_view_rounded,
-              title: tr('seat_assignment.empty.no_tours_title'),
-              body: tr('seat_assignment.empty.no_tours_body'),
+            return Column(
+              children: [
+                _TopBar(title: tr('seat_assignment.title'), c: c),
+                Expanded(
+                  child: UgamEmpty(
+                    icon: Icons.grid_view_rounded,
+                    title: tr('seat_assignment.empty.no_tours_title'),
+                    body: tr('seat_assignment.empty.no_tours_body'),
+                  ),
+                ),
+              ],
             );
           }
           if (_tourIdx >= tours.length) _tourIdx = 0;
           final tour = tours[_tourIdx];
 
           if (tour.buses.isEmpty) {
-            return _emptyState(
-              icon: Icons.directions_bus_outlined,
-              title: 'No buses yet',
-              body: 'Add a bus to this tour to see its seat chart.',
+            return Column(
+              children: [
+                _TopBar(
+                  title: tr('seat_assignment.title'),
+                  c: c,
+                  tourId: tour.id,
+                ),
+                Expanded(
+                  child: UgamEmpty(
+                    icon: Icons.directions_bus_outlined,
+                    title: 'No buses yet',
+                    body: 'Add a bus to this tour to see its seat chart.',
+                  ),
+                ),
+              ],
             );
           }
           if (_busIdx >= tour.buses.length) _busIdx = 0;
@@ -135,54 +162,89 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
             for (final e in occupantsBySeat.entries) e.key: e.value.length,
           };
 
-          final assigned = nameBySeat.length;
-          final total = bus.totalSeats;
-          final pct = total > 0 ? (assigned * 100 ~/ total) : 0;
           final hasUpperDeck =
               bus.layout?.upperDeck.any((c) => c.hasSeat) ?? false;
 
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Column(
-              children: [
-                const SizedBox(height: 10),
-                _Header(tourTitle: tour.title),
-                const SizedBox(height: 10),
-                // Tour picker — only shows when there's more than one
-                // active tour. Same chip style as the bus strip below
-                // for visual rhyme. Switching tours resets the bus +
-                // deck selection so we don't carry "Bus 3" into a tour
-                // that only has two buses.
-                if (tours.length > 1) ...[
-                  _TourChipStrip(
-                    tours: tours,
-                    selected: _tourIdx,
-                    onSelect: (i) => setState(() {
-                      _tourIdx = i;
-                      _busIdx = 0;
-                      _showUpper = false;
-                    }),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                _BusChipStrip(
-                  buses: tour.buses,
-                  passengers: tour.passengers,
-                  selected: _busIdx,
+          // Pending passengers across the whole tour — anyone who isn't
+          // fully assigned and isn't waitlisted. The dock surfaces them
+          // so the agent can tap → highlight matching seats.
+          final pending = tour.passengers
+              .where((p) => !p.isFullyAssigned && !p.isWaitlisted)
+              .toList();
+
+          // Once the highlighted passenger is fully assigned (or gone),
+          // drop the highlight so the chart stops glowing.
+          final highlighted = _highlightedPassengerId == null
+              ? null
+              : tour.passengers
+                  .where((p) => p.id == _highlightedPassengerId)
+                  .toList()
+                  .firstOrNull;
+          final glowSeatTypes = highlighted == null
+              ? const <SeatType>{}
+              : highlighted.requestLines.map((l) => l.seatType).toSet();
+
+          return Column(
+            children: [
+              _TopBar(
+                title: tr('seat_assignment.title'),
+                c: c,
+                tourId: tour.id,
+              ),
+              // Tour pills — only shown when more than one active tour.
+              if (tours.length > 1) ...[
+                _TourPills(
+                  tours: tours,
+                  selected: _tourIdx,
                   onSelect: (i) => setState(() {
-                    _busIdx = i;
+                    _tourIdx = i;
+                    _busIdx = 0;
                     _showUpper = false;
+                    _highlightedPassengerId = null;
                   }),
+                  c: c,
                 ),
-                const SizedBox(height: 10),
-                if (hasUpperDeck) ...[
-                  _DeckToggle(
-                    showUpper: _showUpper,
-                    onChange: (v) => setState(() => _showUpper = v),
+                const SizedBox(height: UgamSpacing.md),
+              ] else
+                const SizedBox(height: UgamSpacing.xs),
+              _BusPills(
+                buses: tour.buses,
+                passengers: tour.passengers,
+                selected: _busIdx,
+                onSelect: (i) => setState(() {
+                  _busIdx = i;
+                  _showUpper = false;
+                }),
+                c: c,
+              ),
+              if (hasUpperDeck) ...[
+                const SizedBox(height: UgamSpacing.md),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.gutter,
                   ),
-                  const SizedBox(height: 10),
-                ],
-                Expanded(
+                  child: UgamTabPills(
+                    currentIndex: _showUpper ? 1 : 0,
+                    onChanged: (i) => setState(() => _showUpper = i == 1),
+                    items: [
+                      UgamTabItem(
+                        label: tr('seat_assignment.lower_deck'),
+                        icon: Icons.event_seat_rounded,
+                      ),
+                      UgamTabItem(
+                        label: tr('seat_assignment.upper_deck'),
+                        icon: Icons.single_bed_rounded,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: UgamSpacing.md),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.gutter,
+                  ),
                   child: _SeatChartCard(
                     layout: bus.layout,
                     showUpper: _showUpper,
@@ -192,6 +254,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                     berthsBySeat: berthsBySeat,
                     occupantsBySeat: occupantsBySeat,
                     busId: bus.id,
+                    glowSeatTypes: glowSeatTypes,
                     onSeatDrop: (data, targetCell) => _handleSeatDrop(
                       data: data,
                       targetCell: targetCell,
@@ -210,57 +273,43 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                     ),
                   ),
                 ),
-                _ChartStatusBar(
-                  busLabel:
-                      '${bus.name}'
-                      '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
-                  assigned: assigned,
-                  total: total,
-                  pct: pct,
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
+              ),
+              _PendingDock(
+                c: c,
+                pending: pending,
+                highlightedId: _highlightedPassengerId,
+                onTapPassenger: (id) {
+                  setState(() {
+                    _highlightedPassengerId =
+                        _highlightedPassengerId == id ? null : id;
+                  });
+                },
+                onAutoPick: pending.isEmpty
+                    ? null
+                    : () {
+                        // Placeholder gesture — surfaces the next pending
+                        // passenger and highlights their matching seats.
+                        setState(() {
+                          _highlightedPassengerId = pending.first.id;
+                        });
+                        AppSnackBar.info(
+                          'Highlighted ${pending.first.displayName} — '
+                          'tap a matching seat to assign.',
+                          title: 'Auto-pick',
+                        );
+                      },
+                onDone: pending.isEmpty
+                    ? null
+                    : () => setState(() {
+                          _highlightedPassengerId = null;
+                        }),
+              ),
+              SizedBox(
+                height: MediaQuery.of(context).padding.bottom + UgamSpacing.xs,
+              ),
+            ],
           );
         }),
-      ),
-    );
-  }
-
-  Widget _emptyState({
-    required IconData icon,
-    required String title,
-    required String body,
-  }) {
-    final cs = Theme.of(context).colorScheme;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 56, color: cs.onSurfaceVariant),
-            const SizedBox(height: 16),
-            Text(
-              title,
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: cs.onSurface,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: cs.onSurfaceVariant,
-                height: 1.5,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -547,30 +596,52 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
   }
 }
 
-// ─── Header ────────────────────────────────────────────────────────────
+// ─── Top bar ───────────────────────────────────────────────────────────
 
-class _Header extends StatelessWidget {
-  final String tourTitle;
-  const _Header({required this.tourTitle});
+class _TopBar extends StatelessWidget {
+  final String title;
+  final UgamColorSet c;
+  final String? tourId;
+
+  const _TopBar({required this.title, required this.c, this.tourId});
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(0, UgamSpacing.sm, 0, UgamSpacing.sm),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+        UgamSpacing.gutter,
+        UgamSpacing.sm,
+      ),
       child: Row(
         children: [
-          Text(
-            tr('seat_assignment.title'),
-            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
-          ),
-          const SizedBox(width: UgamSpacing.sm + 2),
           Expanded(
             child: Text(
-              tourTitle,
+              title,
+              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 26),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: UgamText.caption.copyWith(color: c.ink2),
+            ),
+          ),
+          GestureDetector(
+            onTap: tourId == null
+                ? null
+                : () => Get.to(() => ManageBusesScreen(tourId: tourId!)),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.directions_bus_filled_rounded,
+                size: 19,
+                color: tourId == null ? c.ink3 : c.ink,
+              ),
             ),
           ),
         ],
@@ -579,54 +650,52 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ─── Tour chip strip ───────────────────────────────────────────────────
-//
-// Horizontal strip of active tours. Renders ONLY when the agent runs
-// more than one tour concurrently — when there's a single tour we
-// hide the strip entirely so the chart gets the vertical space.
-class _TourChipStrip extends StatelessWidget {
+// ─── Tour pills ────────────────────────────────────────────────────────
+
+class _TourPills extends StatelessWidget {
   final List<Tour> tours;
   final int selected;
   final ValueChanged<int> onSelect;
+  final UgamColorSet c;
 
-  const _TourChipStrip({
+  const _TourPills({
     required this.tours,
     required this.selected,
     required this.onSelect,
+    required this.c,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return SizedBox(
-      height: 38,
+      height: 36,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
         itemCount: tours.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
         itemBuilder: (ctx, i) {
           final t = tours[i];
-          final isActive = i == selected;
+          final active = i == selected;
           return GestureDetector(
             onTap: () => onSelect(i),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.lg,
+                vertical: UgamSpacing.sm,
+              ),
               decoration: BoxDecoration(
-                color: isActive ? AppTheme.brand : cs.surface,
-                borderRadius: BorderRadius.circular(20),
-                border: isActive
-                    ? null
-                    : Border.all(color: AppTheme.borderLight),
+                color: active ? c.accent : c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
               ),
               alignment: Alignment.center,
               child: Text(
                 t.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.inter(
+                style: UgamText.bodyStrong.copyWith(
+                  color: active ? c.onAccent : c.ink,
                   fontSize: 12,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
-                  color: isActive ? Colors.white : cs.onSurface,
                 ),
               ),
             ),
@@ -637,30 +706,32 @@ class _TourChipStrip extends StatelessWidget {
   }
 }
 
-// ─── Bus chip strip ────────────────────────────────────────────────────
+// ─── Bus pills ─────────────────────────────────────────────────────────
 
-class _BusChipStrip extends StatelessWidget {
+class _BusPills extends StatelessWidget {
   final List<dynamic> buses; // List<Bus>
   final List<Passenger> passengers;
   final int selected;
   final ValueChanged<int> onSelect;
+  final UgamColorSet c;
 
-  const _BusChipStrip({
+  const _BusPills({
     required this.buses,
     required this.passengers,
     required this.selected,
     required this.onSelect,
+    required this.c,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return SizedBox(
-      height: 56,
+      height: 44,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
         itemCount: buses.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
         itemBuilder: (ctx, i) {
           final b = buses[i];
           final busId = b.id as String;
@@ -669,39 +740,49 @@ class _BusChipStrip extends StatelessWidget {
             (sum, p) =>
                 sum + p.assignedSeats.where((a) => a.busId == busId).length,
           );
-          final isActive = i == selected;
+          final active = i == selected;
           return GestureDetector(
             onTap: () => onSelect(i),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: isActive ? AppTheme.brand : cs.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: isActive
-                    ? null
-                    : Border.all(color: AppColors.border(context)),
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.lg,
+                vertical: UgamSpacing.sm,
               ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+              decoration: BoxDecoration(
+                color: active ? c.accent : c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     b.name as String,
-                    style: GoogleFonts.inter(
+                    style: UgamText.bodyStrong.copyWith(
+                      color: active ? c.onAccent : c.ink,
                       fontSize: 12,
-                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
-                      color: isActive ? Colors.white : cs.onSurface,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '$assigned/${b.totalSeats} · '
-                    '${b.isAC ? tr('seat_assignment.ac') : tr('seat_assignment.non_ac')}',
-                    style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w500,
-                      color: isActive
-                          ? Colors.white.withValues(alpha: 0.85)
-                          : cs.onSurfaceVariant,
+                  const SizedBox(width: UgamSpacing.sm),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? c.onAccent.withValues(alpha: 0.18)
+                          : c.card,
+                      borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    ),
+                    child: Text(
+                      '$assigned/${b.totalSeats}',
+                      style: UgamText.tabular(
+                        UgamText.caption.copyWith(
+                          color: active ? c.onAccent : c.ink2,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10.5,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -714,72 +795,9 @@ class _BusChipStrip extends StatelessWidget {
   }
 }
 
-// ─── Deck toggle ───────────────────────────────────────────────────────
-
-class _DeckToggle extends StatelessWidget {
-  final bool showUpper;
-  final ValueChanged<bool> onChange;
-
-  const _DeckToggle({required this.showUpper, required this.onChange});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 36,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppTheme.brandLight,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Row(
-        children: [
-          _seg(
-            label: tr('seat_assignment.lower_deck'),
-            active: !showUpper,
-            onTap: () => onChange(false),
-          ),
-          _seg(
-            label: tr('seat_assignment.upper_deck'),
-            active: showUpper,
-            onTap: () => onChange(true),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _seg({
-    required String label,
-    required bool active,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          decoration: BoxDecoration(
-            color: active ? AppTheme.brand : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-              color: active ? Colors.white : AppTheme.brand,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Seat chart card ───────────────────────────────────────────────────
 
-/// The white rounded card containing the bus chart.
+/// The rounded card containing the bus chart.
 ///
 /// Uses [LayoutBuilder] to discover the available width, then divides
 /// it among the row's logical columns so a tile always fits. Aisle
@@ -794,6 +812,7 @@ class _SeatChartCard extends StatelessWidget {
   final Map<String, int> berthsBySeat;
   final Map<String, List<String>> occupantsBySeat;
   final String busId;
+  final Set<SeatType> glowSeatTypes;
   final ValueChanged<String> onSeatTap;
   final void Function(_SeatDragData data, SeatCell targetCell) onSeatDrop;
 
@@ -806,21 +825,20 @@ class _SeatChartCard extends StatelessWidget {
     required this.berthsBySeat,
     required this.occupantsBySeat,
     required this.busId,
+    required this.glowSeatTypes,
     required this.onSeatTap,
     required this.onSeatDrop,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final c = UgamColors.of(context);
     if (layout == null) {
-      return _card(
-        cs,
-        context,
+      return UgamCard.plain(
         child: Center(
           child: Text(
             tr('seat_assignment.no_layout'),
-            style: GoogleFonts.inter(fontSize: 14, color: cs.onSurfaceVariant),
+            style: UgamText.body.copyWith(color: c.ink2),
           ),
         ),
       );
@@ -829,13 +847,11 @@ class _SeatChartCard extends StatelessWidget {
     final deck = showUpper ? layout!.upperDeck : layout!.lowerDeck;
     final seatCells = deck.where((c) => c.hasSeat).toList();
     if (seatCells.isEmpty) {
-      return _card(
-        cs,
-        context,
+      return UgamCard.plain(
         child: Center(
           child: Text(
             tr('seat_assignment.no_seats_on_deck'),
-            style: GoogleFonts.inter(fontSize: 13, color: cs.onSurfaceVariant),
+            style: UgamText.body.copyWith(color: c.ink2),
           ),
         ),
       );
@@ -844,15 +860,13 @@ class _SeatChartCard extends StatelessWidget {
     final maxRow = seatCells.map((c) => c.row).reduce((a, b) => a > b ? a : b);
     final cols = layout!.cols;
     final leftCols = cols ~/ 2;
-    // Logical row width = cols cells separated by inter-cell gaps with
-    // an aisle in the middle. We compute tile width from the LayoutBuilder
-    // constraints below so the whole row sums to the chart width.
-    return _card(
-      cs,
-      context,
+    return UgamCard.plain(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.lg,
+      ),
       child: LayoutBuilder(
         builder: (ctx, constraints) {
-          const horizontalPadding = 10.0;
           const cellGap = 4.0;
           const aisleGap = 12.0;
           // Each `_SeatTile` is wrapped in a DragTarget's
@@ -862,12 +876,7 @@ class _SeatChartCard extends StatelessWidget {
           // Subtract `cols * 4` from the budget here, otherwise the
           // Row overflows by ~cols × 4 px (~8-16 px depending on cols).
           const dragOutlinePerTile = 4.0;
-          // Sub the chart padding + gaps + aisle + per-tile drag outline
-          // from the available width to get the width actually available
-          // for the tile's inner box. cols tiles, (leftCols - 1) gaps
-          // on the left half, 1 aisle, (cols - leftCols - 1) gaps on the
-          // right half.
-          final innerWidth = constraints.maxWidth - 2 * horizontalPadding;
+          final innerWidth = constraints.maxWidth;
           final leftGapCount = math.max(0, leftCols - 1);
           final rightGapCount = math.max(0, (cols - leftCols) - 1);
           final usableWidth = innerWidth -
@@ -880,53 +889,42 @@ class _SeatChartCard extends StatelessWidget {
           // a 10-row bus still fits on a single screen.
           final tileHeight = math.min(84.0, cellWidth * 1.05);
 
-          return Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: horizontalPadding,
-              vertical: 14,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Front-of-bus driver indicator.
-                  _front(cs, cellWidth: cellWidth),
-                  const SizedBox(height: 10),
-                  for (int r = 0; r <= maxRow; r++) ...[
-                    _SeatRow(
-                      row: r,
-                      cols: cols,
-                      leftCols: leftCols,
-                      deck: deck,
-                      cellWidth: cellWidth,
-                      cellHeight: tileHeight,
-                      aisleGap: aisleGap,
-                      cellGap: cellGap,
-                      busId: busId,
-                      idBySeat: idBySeat,
-                      berthsBySeat: berthsBySeat,
-                      occupantsBySeat: occupantsBySeat,
-                      onSeatDrop: onSeatDrop,
-                      nameBySeat: nameBySeat,
-                      phoneBySeat: phoneBySeat,
-                      onSeatTap: onSeatTap,
-                    ),
-                    if (r < maxRow) const SizedBox(height: 6),
-                  ],
-                  const SizedBox(height: 10),
-                  Divider(height: 1, color: AppColors.border(context)),
-                  const SizedBox(height: 4),
-                  Text(
-                    'REAR',
-                    style: GoogleFonts.inter(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.4,
-                      color: cs.onSurfaceVariant,
-                    ),
+          return SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _frontLabel(c),
+                const SizedBox(height: UgamSpacing.sm),
+                for (int r = 0; r <= maxRow; r++) ...[
+                  _SeatRow(
+                    row: r,
+                    cols: cols,
+                    leftCols: leftCols,
+                    deck: deck,
+                    cellWidth: cellWidth,
+                    cellHeight: tileHeight,
+                    aisleGap: aisleGap,
+                    cellGap: cellGap,
+                    busId: busId,
+                    idBySeat: idBySeat,
+                    berthsBySeat: berthsBySeat,
+                    occupantsBySeat: occupantsBySeat,
+                    glowSeatTypes: glowSeatTypes,
+                    onSeatDrop: onSeatDrop,
+                    nameBySeat: nameBySeat,
+                    phoneBySeat: phoneBySeat,
+                    onSeatTap: onSeatTap,
                   ),
+                  if (r < maxRow) const SizedBox(height: 6),
                 ],
-              ),
+                const SizedBox(height: UgamSpacing.sm),
+                Container(height: 1, color: c.border),
+                const SizedBox(height: UgamSpacing.xs),
+                Text(
+                  'REAR',
+                  style: UgamText.micro.copyWith(color: c.ink3),
+                ),
+              ],
             ),
           );
         },
@@ -934,39 +932,20 @@ class _SeatChartCard extends StatelessWidget {
     );
   }
 
-  Widget _card(ColorScheme cs, BuildContext context, {required Widget child}) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border(context)),
-      ),
-      child: child,
-    );
-  }
-
-  /// Front-of-bus row: steering-wheel icon on the right (driver side).
-  Widget _front(ColorScheme cs, {required double cellWidth}) {
+  Widget _frontLabel(UgamColorSet c) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         Icon(
           Icons.directions_bus_filled_rounded,
-          size: 16,
-          color: cs.onSurfaceVariant,
+          size: 14,
+          color: c.ink3,
         ),
-        const SizedBox(width: 6),
+        const SizedBox(width: 4),
         Text(
           tr('seat_assignment.driver_label'),
-          style: GoogleFonts.inter(
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.4,
-            color: cs.onSurfaceVariant,
-          ),
+          style: UgamText.micro.copyWith(color: c.ink3),
         ),
-        const SizedBox(height: 8),
       ],
     );
   }
@@ -993,6 +972,7 @@ class _SeatRow extends StatelessWidget {
   /// (1 = shared, 2 = whole-double), and (b) whether the seat is a
   /// paired double, in which case the drag-data carries the partner.
   final Map<String, List<String>> occupantsBySeat;
+  final Set<SeatType> glowSeatTypes;
   final String busId;
   final ValueChanged<String> onSeatTap;
   final void Function(_SeatDragData data, SeatCell targetCell) onSeatDrop;
@@ -1011,6 +991,7 @@ class _SeatRow extends StatelessWidget {
     required this.idBySeat,
     required this.berthsBySeat,
     required this.occupantsBySeat,
+    required this.glowSeatTypes,
     required this.busId,
     required this.onSeatTap,
     required this.onSeatDrop,
@@ -1051,6 +1032,11 @@ class _SeatRow extends StatelessWidget {
         final partnerId = (distinct.length == 2 && ownerId != null)
             ? distinct.firstWhere((id) => id != ownerId)
             : null;
+        // Glow only on free seats whose physical type matches one of the
+        // highlighted passenger's pending request lines.
+        final glow = ownerId == null &&
+            cell.seatType != null &&
+            glowSeatTypes.contains(cell.seatType);
         // RepaintBoundary isolates each tile's paint surface — drag
         // hover highlights and selection ripples no longer invalidate
         // the whole chart layer.
@@ -1066,6 +1052,7 @@ class _SeatRow extends StatelessWidget {
               berths: ownerBerths > 0 ? ownerBerths : 1,
               partnerId: partnerId,
               busId: busId,
+              glow: glow,
               onTap: () => onSeatTap(seatId),
               onDropped: (data) => onSeatDrop(data, cell),
             ),
@@ -1102,6 +1089,12 @@ class _SeatTile extends StatelessWidget {
   final String? partnerId;
 
   final String busId;
+
+  /// When true, the free tile pulses with an accent glow (signals to
+  /// the agent that this seat matches the highlighted passenger's
+  /// pending request type).
+  final bool glow;
+
   final VoidCallback onTap;
   final void Function(_SeatDragData data) onDropped;
 
@@ -1115,6 +1108,7 @@ class _SeatTile extends StatelessWidget {
     required this.berths,
     required this.partnerId,
     required this.busId,
+    required this.glow,
     required this.onTap,
     required this.onDropped,
   });
@@ -1154,26 +1148,27 @@ class _SeatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     final Color bg;
     final Color fg;
     final Color border;
 
     if (_isBooked) {
-      bg = AppTheme.brand;
-      fg = Colors.white;
-      border = AppTheme.brand;
+      bg = c.accent;
+      fg = c.onAccent;
+      border = c.accent;
     } else if (_isDouble) {
-      bg = const Color(0xFFE0F2FE); // pale blue
-      fg = AppColors.text(context);
-      border = const Color(0xFF0EA5E9);
+      bg = c.accentFill;
+      fg = c.ink;
+      border = c.accent.withValues(alpha: 0.45);
     } else if (seatType == SeatType.singleSofa) {
-      bg = const Color(0xFFE7F8EE); // pale green
-      fg = AppColors.text(context);
-      border = const Color(0xFF22C55E);
+      bg = c.goodFill;
+      fg = c.ink;
+      border = c.good.withValues(alpha: 0.55);
     } else {
-      bg = const Color(0xFFF1F5F9);
-      fg = AppColors.text(context);
-      border = AppColors.border(context);
+      bg = c.cardElev;
+      fg = c.ink;
+      border = c.border;
     }
 
     Widget tile(Color drawBg, Color drawBorder, double drawBorderWidth) {
@@ -1182,29 +1177,43 @@ class _SeatTile extends StatelessWidget {
         height: height,
         decoration: BoxDecoration(
           color: drawBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(UgamRadius.seat + 2),
           border: Border.all(color: drawBorder, width: drawBorderWidth),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: _isBooked ? _bookedBody(fg) : _freeBody(fg),
+        child: _isBooked ? _bookedBody(fg) : _freeBody(fg, c),
       );
     }
 
-    // Every tile is a DragTarget — hover paints an amber outline so the
-    // agent knows where they're about to drop.
+    // Every tile is a DragTarget — hover paints a warm outline so the
+    // agent knows where they're about to drop. When `glow` is set we
+    // also pulse the outline in accent to telegraph "this seat matches
+    // the highlighted passenger".
     Widget content = DragTarget<_SeatDragData>(
       onWillAcceptWithDetails: (details) => details.data.seatId != seatId,
       onAcceptWithDetails: (details) => onDropped(details.data),
       builder: (context, candidate, _) {
         final hovering = candidate.isNotEmpty;
+        final Color outlineColor;
+        final double outlineWidth;
+        if (hovering) {
+          outlineColor = c.warm;
+          outlineWidth = 2;
+        } else if (glow) {
+          outlineColor = c.accent;
+          outlineWidth = 2;
+        } else {
+          outlineColor = Colors.transparent;
+          outlineWidth = 2;
+        }
         return AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
+          duration: UgamMotion.tapIn,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: hovering ? AppTheme.brandAccent : Colors.transparent,
-              width: 2,
-            ),
+            borderRadius: BorderRadius.circular(UgamRadius.seat + 4),
+            border: Border.all(color: outlineColor, width: outlineWidth),
+            color: glow && !hovering
+                ? c.accent.withValues(alpha: 0.10)
+                : Colors.transparent,
           ),
           child: tile(bg, border, _isBooked ? 0 : 1.2),
         );
@@ -1228,7 +1237,7 @@ class _SeatTile extends StatelessWidget {
         data: data,
         delay: const Duration(milliseconds: 220),
         hapticFeedbackOnStart: true,
-        feedback: _DragFeedback(passengerName: name!, seatId: seatId),
+        feedback: _DragFeedback(passengerName: name!, seatId: seatId, c: c),
         childWhenDragging: Opacity(opacity: 0.25, child: content),
         child: content,
       );
@@ -1240,8 +1249,7 @@ class _SeatTile extends StatelessWidget {
   Widget _bookedBody(Color fg) {
     final phoneText = _phoneDisplay;
     // FittedBox(scaleDown) keeps long names + 10-digit phones readable
-    // on the smallest tile size the LayoutBuilder may produce (~36 px
-    // wide on tiny phones with many cols).
+    // on the smallest tile size the LayoutBuilder may produce.
     return Column(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1251,12 +1259,9 @@ class _SeatTile extends StatelessWidget {
           children: [
             Text(
               seatId,
-              style: GoogleFonts.inter(
-                fontSize: 8.5,
-                fontWeight: FontWeight.w700,
+              style: UgamText.micro.copyWith(
                 color: fg.withValues(alpha: 0.75),
-                height: 1,
-                letterSpacing: 0.4,
+                fontSize: 8.5,
               ),
             ),
             Icon(_icon, size: 11, color: fg.withValues(alpha: 0.75)),
@@ -1268,11 +1273,11 @@ class _SeatTile extends StatelessWidget {
             name!,
             maxLines: 1,
             textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
+            style: UgamText.bodyStrong.copyWith(
               color: fg,
+              fontSize: 11,
               height: 1.1,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ),
@@ -1282,12 +1287,12 @@ class _SeatTile extends StatelessWidget {
             child: Text(
               phoneText,
               maxLines: 1,
-              style: GoogleFonts.inter(
-                fontSize: 9.5,
-                fontWeight: FontWeight.w600,
-                color: fg.withValues(alpha: 0.85),
-                height: 1,
-                letterSpacing: 0.2,
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(
+                  color: fg.withValues(alpha: 0.85),
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -1295,7 +1300,7 @@ class _SeatTile extends StatelessWidget {
     );
   }
 
-  Widget _freeBody(Color fg) {
+  Widget _freeBody(Color fg, UgamColorSet c) {
     if (_isSleeper) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1303,10 +1308,9 @@ class _SeatTile extends StatelessWidget {
           Icon(_icon, size: 18, color: fg.withValues(alpha: 0.8)),
           Text(
             seatId,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+            style: UgamText.bodyStrong.copyWith(
               color: fg,
+              fontSize: 12,
               height: 1,
             ),
           ),
@@ -1323,10 +1327,9 @@ class _SeatTile extends StatelessWidget {
         Center(
           child: Text(
             seatId,
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
+            style: UgamText.bodyStrong.copyWith(
               color: fg,
+              fontSize: 11,
             ),
           ),
         ),
@@ -1335,106 +1338,260 @@ class _SeatTile extends StatelessWidget {
   }
 }
 
-// ─── Status bar ────────────────────────────────────────────────────────
+// ─── Pending passengers dock ───────────────────────────────────────────
 
-class _ChartStatusBar extends StatelessWidget {
-  final String busLabel;
-  final int assigned;
-  final int total;
-  final int pct;
+class _PendingDock extends StatelessWidget {
+  final UgamColorSet c;
+  final List<Passenger> pending;
+  final String? highlightedId;
+  final ValueChanged<String> onTapPassenger;
+  final VoidCallback? onAutoPick;
+  final VoidCallback? onDone;
 
-  const _ChartStatusBar({
-    required this.busLabel,
-    required this.assigned,
-    required this.total,
-    required this.pct,
+  const _PendingDock({
+    required this.c,
+    required this.pending,
+    required this.highlightedId,
+    required this.onTapPassenger,
+    required this.onAutoPick,
+    required this.onDone,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final free = (total - assigned).clamp(0, total);
+    // Cap to 8 visible cards. Anything past that is rolled into a
+    // single "+N more" tile.
+    const cap = 8;
+    final visible = pending.take(cap).toList();
+    final overflow = pending.length - visible.length;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border(context)),
+        color: c.card,
+        border: Border(top: BorderSide(color: c.border)),
+      ),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.sm + 2,
+        UgamSpacing.gutter,
+        UgamSpacing.sm + 2,
       ),
       child: Row(
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  busLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: cs.onSurface,
+            child: pending.isEmpty
+                ? Row(
+                    children: [
+                      Icon(
+                        Icons.check_circle_rounded,
+                        size: 16,
+                        color: c.good,
+                      ),
+                      const SizedBox(width: UgamSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          'All passengers assigned.',
+                          style: UgamText.bodyStrong
+                              .copyWith(color: c.ink, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  )
+                : SizedBox(
+                    height: 64,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: visible.length + (overflow > 0 ? 1 : 0),
+                      separatorBuilder: (_, _) =>
+                          const SizedBox(width: UgamSpacing.sm),
+                      itemBuilder: (ctx, i) {
+                        if (i >= visible.length) {
+                          // Overflow tile.
+                          return Container(
+                            width: 70,
+                            decoration: BoxDecoration(
+                              color: c.cardElev,
+                              borderRadius:
+                                  BorderRadius.circular(UgamRadius.row),
+                              border: Border.all(color: c.border),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '+$overflow',
+                              style: UgamText.bodyStrong
+                                  .copyWith(color: c.ink2, fontSize: 13),
+                            ),
+                          );
+                        }
+                        final p = visible[i];
+                        final active = highlightedId == p.id;
+                        return _PendingCard(
+                          c: c,
+                          passenger: p,
+                          active: active,
+                          onTap: () => onTapPassenger(p.id),
+                        );
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$assigned assigned · $free free · $pct% full',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
           ),
-          const SizedBox(width: 8),
-          _swatch(cs, context, color: AppTheme.brand, label: 'Booked'),
-          const SizedBox(width: 6),
-          _swatch(
-            cs,
-            context,
-            color: Colors.white,
-            borderColor: AppColors.border(context),
-            label: 'Free',
+          const SizedBox(width: UgamSpacing.sm),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              GestureDetector(
+                onTap: onAutoPick,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: onAutoPick == null ? c.cardElev : c.accent,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 18,
+                    color: onAutoPick == null ? c.ink3 : c.onAccent,
+                  ),
+                ),
+              ),
+              const SizedBox(height: UgamSpacing.xs + 2),
+              GestureDetector(
+                onTap: onDone,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.md,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: onDone == null ? c.cardElev : c.goodFill,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  ),
+                  child: Text(
+                    'Done',
+                    style: UgamText.bodyStrong.copyWith(
+                      color: onDone == null ? c.ink3 : c.good,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _swatch(
-    ColorScheme cs,
-    BuildContext context, {
-    required Color color,
-    Color? borderColor,
-    required String label,
-  }) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2),
-            border: borderColor != null ? Border.all(color: borderColor) : null,
+class _PendingCard extends StatelessWidget {
+  final UgamColorSet c;
+  final Passenger passenger;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _PendingCard({
+    required this.c,
+    required this.passenger,
+    required this.active,
+    required this.onTap,
+  });
+
+  String get _initials {
+    final name = passenger.displayName.trim();
+    if (name.isEmpty) return '?';
+    final parts =
+        name.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    return parts.first[0].toUpperCase();
+  }
+
+  String get _needsLabel {
+    final remaining =
+        passenger.totalSeatsRequested - passenger.totalSeatsAssigned;
+    if (remaining <= 0) return passenger.requestSummary;
+    final firstLine = passenger.requestLines.isNotEmpty
+        ? passenger.requestLines.first.shortLabel
+        : '$remaining seat';
+    if (passenger.requestLines.length <= 1) return firstLine;
+    return '$firstLine +${passenger.requestLines.length - 1}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 104,
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.sm,
+          vertical: UgamSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: active ? c.accentFill : c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+          border: Border.all(
+            color: active ? c.accent : c.border,
+            width: active ? 1.2 : 1,
           ),
         ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: cs.onSurfaceVariant,
-          ),
+        child: Row(
+          children: [
+            Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: active ? c.accent : c.card,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                _initials,
+                style: UgamText.bodyStrong.copyWith(
+                  color: active ? c.onAccent : c.ink,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    passenger.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 11,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _needsLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: UgamText.caption.copyWith(
+                      color: active ? c.accent : c.ink2,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -1494,8 +1651,7 @@ class _OccupantDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final c = UgamColors.of(context);
 
     final seatsOnThisBus = occupant.assignedSeats
         .where((a) => a.busId == busId)
@@ -1512,8 +1668,10 @@ class _OccupantDialog extends StatelessWidget {
     final maxHeight = MediaQuery.of(context).size.height * 0.9;
 
     return Dialog(
-      backgroundColor: AppColors.surface(context),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: c.card,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: maxHeight, maxWidth: 420),
@@ -1531,7 +1689,7 @@ class _OccupantDialog extends StatelessWidget {
                     icon: Icon(
                       Icons.close_rounded,
                       size: 20,
-                      color: cs.onSurfaceVariant,
+                      color: c.ink2,
                     ),
                     padding: EdgeInsets.zero,
                     visualDensity: VisualDensity.compact,
@@ -1545,16 +1703,15 @@ class _OccupantDialog extends StatelessWidget {
                       width: 48,
                       height: 48,
                       alignment: Alignment.center,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.brand,
+                      decoration: BoxDecoration(
+                        color: c.accent,
                         shape: BoxShape.circle,
                       ),
                       child: Text(
                         _initials,
-                        style: GoogleFonts.inter(
+                        style: UgamText.titleM.copyWith(
+                          color: c.onAccent,
                           fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
                         ),
                       ),
                     ),
@@ -1568,33 +1725,27 @@ class _OccupantDialog extends StatelessWidget {
                             occupant.displayName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.inter(
+                            style: UgamText.titleM.copyWith(
+                              color: c.ink,
                               fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurface,
                             ),
                           ),
                           if (occupant.phone.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
                               occupant.phone,
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                color: cs.onSurfaceVariant,
-                              ),
+                              style: UgamText.body.copyWith(color: c.ink2),
                             ),
                           ],
                         ],
                       ),
                     ),
                     // Quick-call CTA. Hides itself when the passenger
-                    // record has no phone (anon imports, manual entries
-                    // without a number). Tapping launches the system
-                    // dialer pre-filled — agent confirms + presses
-                    // call, so this is a read-only handoff.
+                    // record has no phone. Tapping launches the system
+                    // dialer pre-filled.
                     if (occupant.phone.isNotEmpty) ...[
                       const SizedBox(width: 8),
-                      _CallButton(phone: occupant.phone),
+                      _CallButton(phone: occupant.phone, c: c),
                     ],
                   ],
                 ),
@@ -1605,18 +1756,18 @@ class _OccupantDialog extends StatelessWidget {
                     vertical: 12,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.brandLight,
-                    borderRadius: BorderRadius.circular(10),
+                    color: c.accentFill,
+                    borderRadius: BorderRadius.circular(UgamRadius.input),
                     border: Border.all(
-                      color: AppTheme.brand.withValues(alpha: 0.25),
+                      color: c.accent.withValues(alpha: 0.25),
                     ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.event_seat_rounded,
                         size: 18,
-                        color: AppTheme.brand,
+                        color: c.accent,
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1626,21 +1777,17 @@ class _OccupantDialog extends StatelessWidget {
                           children: [
                             Text(
                               'Seat $tappedSeatId',
-                              style: GoogleFonts.inter(
+                              style: UgamText.titleM.copyWith(
+                                color: c.accent,
                                 fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: AppTheme.brandDark,
                               ),
                             ),
                             Text(
                               '$busName · ${tour.title}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: GoogleFonts.inter(
-                                fontSize: 11,
-                                color: AppTheme.brandDark.withValues(
-                                  alpha: 0.75,
-                                ),
+                              style: UgamText.caption.copyWith(
+                                color: c.accent.withValues(alpha: 0.85),
                               ),
                             ),
                           ],
@@ -1650,7 +1797,7 @@ class _OccupantDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _sectionLabel('SEATS ON THIS BUS', cs),
+                _sectionLabel('SEATS ON THIS BUS', c),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -1659,22 +1806,22 @@ class _OccupantDialog extends StatelessWidget {
                       ? [
                           Text(
                             'No seats on $busName.',
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              color: cs.onSurfaceVariant,
-                            ),
+                            style: UgamText.caption.copyWith(color: c.ink2),
                           ),
                         ]
                       : seatsOnThisBus
-                            .map(
-                              (id) =>
-                                  _seatBadge(id, highlight: id == tappedSeatId),
-                            )
-                            .toList(),
+                          .map(
+                            (id) => _seatBadge(
+                              id,
+                              c: c,
+                              highlight: id == tappedSeatId,
+                            ),
+                          )
+                          .toList(),
                 ),
                 if (seatsElsewhere.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  _sectionLabel('OTHER BUSES', cs),
+                  _sectionLabel('OTHER BUSES', c),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
@@ -1687,13 +1834,13 @@ class _OccupantDialog extends StatelessWidget {
                       final label = otherBus != null
                           ? '${otherBus.name} · ${a.seatId}'
                           : a.seatId;
-                      return _seatBadge(label, highlight: false);
+                      return _seatBadge(label, c: c, highlight: false);
                     }).toList(),
                   ),
                 ],
                 if (requestLines.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  _sectionLabel('REQUESTED', cs),
+                  _sectionLabel('REQUESTED', c),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
@@ -1706,15 +1853,14 @@ class _OccupantDialog extends StatelessWidget {
                               vertical: 5,
                             ),
                             decoration: BoxDecoration(
-                              color: cs.surfaceContainerHighest,
+                              color: c.cardElev,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               line,
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
+                              style: UgamText.caption.copyWith(
+                                color: c.ink,
                                 fontWeight: FontWeight.w600,
-                                color: cs.onSurface,
                               ),
                             ),
                           ),
@@ -1724,15 +1870,11 @@ class _OccupantDialog extends StatelessWidget {
                 ],
                 if (occupant.note != null && occupant.note!.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  _sectionLabel('NOTE', cs),
+                  _sectionLabel('NOTE', c),
                   const SizedBox(height: 8),
                   Text(
                     occupant.note!,
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      color: cs.onSurfaceVariant,
-                      height: 1.4,
-                    ),
+                    style: UgamText.body.copyWith(color: c.ink2),
                   ),
                 ],
                 const SizedBox(height: 22),
@@ -1746,14 +1888,14 @@ class _OccupantDialog extends StatelessWidget {
                       'Switch to ${occupant.displayName}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
+                      style: UgamText.titleS.copyWith(
+                        color: c.onAccent,
                         fontSize: 14,
-                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.brand,
-                      foregroundColor: Colors.white,
+                      backgroundColor: c.accent,
+                      foregroundColor: c.onAccent,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -1762,10 +1904,6 @@ class _OccupantDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Free this seat (single, full-width) — keep the
-                // passenger's request line, just drop them off this
-                // specific seat. Most common ad-hoc fix during
-                // shuffling.
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
@@ -1777,9 +1915,9 @@ class _OccupantDialog extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.brand,
+                      foregroundColor: c.accent,
                       side: BorderSide(
-                        color: AppTheme.brand.withValues(alpha: 0.5),
+                        color: c.accent.withValues(alpha: 0.5),
                       ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
@@ -1789,10 +1927,6 @@ class _OccupantDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // Cancel (this seat) + Unassign all — both destructive,
-                // both reduce the passenger's footprint on the tour.
-                // Cancel ALSO trims their request line so the booking
-                // shrinks; Unassign all just clears their seats.
                 Row(
                   children: [
                     Expanded(
@@ -1805,9 +1939,9 @@ class _OccupantDialog extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.danger,
+                          foregroundColor: c.danger,
                           side: BorderSide(
-                            color: AppTheme.danger.withValues(alpha: 0.5),
+                            color: c.danger.withValues(alpha: 0.5),
                           ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
@@ -1828,9 +1962,9 @@ class _OccupantDialog extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: AppTheme.danger,
+                            foregroundColor: c.danger,
                             side: BorderSide(
-                              color: AppTheme.danger.withValues(alpha: 0.5),
+                              color: c.danger.withValues(alpha: 0.5),
                             ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
@@ -1850,43 +1984,33 @@ class _OccupantDialog extends StatelessWidget {
     );
   }
 
-  Widget _sectionLabel(String label, ColorScheme cs) {
-    return Text(
-      label,
-      style: GoogleFonts.inter(
-        fontSize: 10.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.0,
-        color: cs.onSurfaceVariant,
-      ),
-    );
+  Widget _sectionLabel(String label, UgamColorSet c) {
+    return Text(label, style: UgamText.micro.copyWith(color: c.ink2));
   }
 
-  Widget _seatBadge(String id, {required bool highlight}) {
+  Widget _seatBadge(String id, {required UgamColorSet c, required bool highlight}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: highlight ? AppTheme.brandAccent : AppTheme.brand,
+        color: highlight ? c.warm : c.accent,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         id,
-        style: GoogleFonts.inter(
+        style: UgamText.bodyStrong.copyWith(
+          color: c.onAccent,
           fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: Colors.white,
         ),
       ),
     );
   }
 }
 
-/// Circular brand-tinted "call" pill. Used in the occupant dialog and
-/// re-exported via the shared phone-dialer util so future surfaces can
-/// drop it in the same way.
+/// Circular accent-tinted "call" pill.
 class _CallButton extends StatelessWidget {
   final String phone;
-  const _CallButton({required this.phone});
+  final UgamColorSet c;
+  const _CallButton({required this.phone, required this.c});
 
   @override
   Widget build(BuildContext context) {
@@ -1899,15 +2023,15 @@ class _CallButton extends StatelessWidget {
         child: Container(
           width: 40,
           height: 40,
-          decoration: const BoxDecoration(
-            color: AppTheme.brandLight,
+          decoration: BoxDecoration(
+            color: c.accentFill,
             shape: BoxShape.circle,
           ),
           alignment: Alignment.center,
-          child: const Icon(
+          child: Icon(
             Icons.phone_rounded,
             size: 18,
-            color: AppTheme.brand,
+            color: c.accent,
           ),
         ),
       ),
@@ -1925,8 +2049,13 @@ class _CallButton extends StatelessWidget {
 class _DragFeedback extends StatelessWidget {
   final String passengerName;
   final String seatId;
+  final UgamColorSet c;
 
-  const _DragFeedback({required this.passengerName, required this.seatId});
+  const _DragFeedback({
+    required this.passengerName,
+    required this.seatId,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1935,12 +2064,12 @@ class _DragFeedback extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: AppTheme.brandAccent,
+          color: c.warm,
           borderRadius: BorderRadius.circular(8),
-          boxShadow: [
+          boxShadow: const [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              offset: const Offset(0, 4),
+              color: Color(0x40000000),
+              offset: Offset(0, 4),
               blurRadius: 12,
             ),
           ],
@@ -1950,20 +2079,18 @@ class _DragFeedback extends StatelessWidget {
           children: [
             Text(
               seatId,
-              style: GoogleFonts.inter(
+              style: UgamText.micro.copyWith(
+                color: c.onAccent.withValues(alpha: 0.85),
                 fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: Colors.white.withValues(alpha: 0.85),
-                letterSpacing: 0.4,
               ),
             ),
             const SizedBox(width: 6),
             Text(
               passengerName,
-              style: GoogleFonts.inter(
+              style: UgamText.bodyStrong.copyWith(
+                color: c.onAccent,
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
-                color: Colors.white,
               ),
             ),
           ],
