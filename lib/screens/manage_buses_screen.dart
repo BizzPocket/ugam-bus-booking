@@ -1,18 +1,17 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/tour.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
 
-/// List of buses attached to a tour. Mirrors the Pencil "Manage Buses"
-/// screen: header with tour context, capacity tally, and a card per bus
-/// with occupancy bar.
+/// List of buses attached to a tour. Topbar + capacity stat tiles +
+/// photo-anchored bus cards (matching image-5 list pattern) + sticky
+/// bottom CTA to add a new bus.
 class ManageBusesScreen extends StatelessWidget {
   final String tourId;
 
@@ -21,7 +20,7 @@ class ManageBusesScreen extends StatelessWidget {
   TourController get _tourCtrl => Get.find<TourController>();
 
   String _formatDateRange(Tour tour) {
-    final months = [
+    const months = [
       'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
@@ -33,16 +32,28 @@ class ManageBusesScreen extends StatelessWidget {
     return label;
   }
 
+  int _seatsAssignedForBus(Tour tour, String busId) {
+    return tour.passengers.fold<int>(
+      0,
+      (sum, p) =>
+          sum + p.assignedSeats.where((a) => a.busId == busId).length,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = UgamColors.of(context);
+
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: c.bg,
       body: SafeArea(
         child: Obx(() {
           final tour = _tourCtrl.getTour(tourId);
           if (tour == null) {
-            return Center(child: Text(tr('manage_buses.tour_not_found')));
+            return UgamEmpty(
+              icon: Icons.search_off_rounded,
+              title: tr('manage_buses.tour_not_found'),
+            );
           }
 
           final assigned = tour.totalSeatsAssigned;
@@ -50,47 +61,78 @@ class ManageBusesScreen extends StatelessWidget {
 
           return Column(
             children: [
-              _Header(
+              _TopBar(
+                c: c,
                 title: tour.title,
                 subtitle: _formatDateRange(tour),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-                child: _Tally(
-                  busCount: tour.buses.length,
-                  totalSeats: totalCapacity,
-                  assignedSeats: assigned,
+                padding: const EdgeInsets.fromLTRB(
+                  UgamSpacing.gutter,
+                  UgamSpacing.md,
+                  UgamSpacing.gutter,
+                  UgamSpacing.lg,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: UgamStatTile(
+                        icon: Icons.directions_bus_rounded,
+                        value: '${tour.buses.length}',
+                        label: 'Buses',
+                      ),
+                    ),
+                    const SizedBox(width: UgamSpacing.md),
+                    Expanded(
+                      child: UgamStatTile(
+                        icon: Icons.event_seat_rounded,
+                        value: totalCapacity > 0 ? '$assigned' : '—',
+                        ofTotal: totalCapacity > 0 ? '/$totalCapacity' : null,
+                        label: 'Seats',
+                        variant: UgamStatVariant.good,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               Expanded(
                 child: tour.buses.isEmpty
-                    ? const _EmptyState()
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    ? UgamEmpty(
+                        icon: Icons.directions_bus_outlined,
+                        title: tr('manage_buses.empty_title'),
+                        body: tr('manage_buses.empty_body'),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(
+                          UgamSpacing.gutter,
+                          0,
+                          UgamSpacing.gutter,
+                          120,
+                        ),
                         itemCount: tour.buses.length,
-                        itemBuilder: (ctx, i) {
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(height: UgamSpacing.md),
+                        itemBuilder: (_, i) {
                           final bus = tour.buses[i];
-                          final assignedForBus = _seatsAssignedForBus(
-                            tour,
-                            bus.id,
-                          );
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: GestureDetector(
-                              onTap: () => Get.to(
-                                () => BusStatusScreen(
-                                  tourId: tourId,
-                                  busId: bus.id,
-                                ),
-                                transition: Transition.cupertino,
+                          final assignedForBus =
+                              _seatsAssignedForBus(tour, bus.id);
+                          return _BusListItem(
+                            c: c,
+                            bus: bus,
+                            assigned: assignedForBus,
+                            onOpen: () => Get.to(
+                              () => BusStatusScreen(
+                                tourId: tourId,
+                                busId: bus.id,
                               ),
-                              child: _BusCard(
-                                bus: bus,
-                                assigned: assignedForBus,
-                                onEdit: () {
-                                  // Edit flow lands in a later phase.
-                                },
+                              transition: Transition.cupertino,
+                            ),
+                            onEdit: () => Get.to(
+                              () => AddBusScreen(
+                                tourId: tourId,
+                                existing: bus,
                               ),
+                              transition: Transition.cupertino,
                             ),
                           );
                         },
@@ -100,43 +142,65 @@ class ManageBusesScreen extends StatelessWidget {
           );
         }),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        heroTag: 'manage_buses_fab',
-        onPressed: () => Get.to(() => AddBusScreen(tourId: tourId)),
-        icon: const Icon(Icons.add_rounded),
-        label: Text(tr('manage_buses.add_bus')),
-        backgroundColor: AppTheme.brand,
-        foregroundColor: Colors.white,
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            UgamSpacing.gutter,
+            UgamSpacing.sm,
+            UgamSpacing.gutter,
+            UgamSpacing.md,
+          ),
+          child: UgamCTA(
+            label: tr('manage_buses.add_bus'),
+            leadingIcon: Icons.add_rounded,
+            onPressed: () =>
+                Get.to(() => AddBusScreen(tourId: tourId)),
+          ),
+        ),
       ),
-    );
-  }
-
-  int _seatsAssignedForBus(Tour tour, String busId) {
-    return tour.passengers.fold<int>(
-      0,
-      (sum, p) =>
-          sum + p.assignedSeats.where((a) => a.busId == busId).length,
     );
   }
 }
 
-class _Header extends StatelessWidget {
+class _TopBar extends StatelessWidget {
+  final UgamColorSet c;
   final String title;
   final String subtitle;
 
-  const _Header({required this.title, required this.subtitle});
+  const _TopBar({
+    required this.c,
+    required this.title,
+    required this.subtitle,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 20, 0),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.md,
+        UgamSpacing.sm,
+        UgamSpacing.md,
+        UgamSpacing.sm,
+      ),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(Icons.arrow_back, color: theme.colorScheme.onSurface),
-            onPressed: () => Get.back(),
+          GestureDetector(
+            onTap: () => Get.back(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child:
+                  Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
+            ),
           ),
+          const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,19 +208,11 @@ class _Header extends StatelessWidget {
               children: [
                 Text(
                   tr('manage_buses.title'),
-                  style: GoogleFonts.inter(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface,
-                  ),
+                  style: UgamText.titleL.copyWith(color: c.ink),
                 ),
                 Text(
-                  tr('manage_buses.tour_context',
-                      namedArgs: {'tourTitle': title, 'dateRange': subtitle}),
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppColors.textMuted(context),
-                  ),
+                  '$title · $subtitle',
+                  style: UgamText.caption.copyWith(color: c.ink2),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -169,280 +225,133 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _Tally extends StatelessWidget {
-  final int busCount;
-  final int totalSeats;
-  final int assignedSeats;
-
-  const _Tally({
-    required this.busCount,
-    required this.totalSeats,
-    required this.assignedSeats,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final busLabel = busCount == 1
-        ? tr('manage_buses.tally_bus_one',
-            namedArgs: {'count': busCount.toString()})
-        : tr('manage_buses.tally_bus_other',
-            namedArgs: {'count': busCount.toString()});
-    final seatsLabel = tr('manage_buses.tally_total_seats',
-        namedArgs: {'count': totalSeats.toString()});
-    final assignedLabel = tr('manage_buses.tally_assigned',
-        namedArgs: {'count': assignedSeats.toString()});
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.brandLight,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.directions_bus_rounded,
-            size: 16,
-            color: AppTheme.brand,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              '$busLabel · $seatsLabel · $assignedLabel',
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.brandDark,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.directions_bus_outlined,
-              size: 56,
-              color: AppColors.textMuted(context).withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              tr('manage_buses.empty_title'),
-              style: GoogleFonts.inter(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              tr('manage_buses.empty_body'),
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppColors.textMuted(context),
-                height: 1.4,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BusCard extends StatelessWidget {
+class _BusListItem extends StatelessWidget {
+  final UgamColorSet c;
   final Bus bus;
   final int assigned;
+  final VoidCallback onOpen;
   final VoidCallback onEdit;
 
-  const _BusCard({
+  const _BusListItem({
+    required this.c,
     required this.bus,
     required this.assigned,
+    required this.onOpen,
     required this.onEdit,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final capacity = bus.totalSeats;
-    final ratio = capacity > 0 ? (assigned / capacity).clamp(0.0, 1.0) : 0.0;
+    final cap = bus.totalSeats;
+    final pct = cap > 0 ? (assigned / cap).clamp(0.0, 1.0) : 0.0;
 
-    final busNumberLabel = bus.busNumber.isEmpty
-        ? tr('manage_buses.bus_number_blank')
-        : tr('manage_buses.bus_number',
-            namedArgs: {'number': bus.busNumber});
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppColors.border(context),
+    return GestureDetector(
+      onTap: onOpen,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.sm),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(20),
         ),
-        boxShadow: theme.brightness == Brightness.dark ? [] : AppTheme.subtleShadow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppTheme.brandLight,
-                  borderRadius: BorderRadius.circular(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: SizedBox(
+                    width: 76,
+                    height: 76,
+                    child: UgamBusBackdrop(seed: bus.id),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.directions_bus_rounded,
-                  size: 18,
-                  color: AppTheme.brand,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      busNumberLabel,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.onSurface,
-                      ),
-                    ),
-                    if (bus.driverName.isNotEmpty)
+                const SizedBox(width: UgamSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       Text(
-                        bus.driverName,
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppColors.textMuted(context),
+                        bus.busNumber,
+                        style: UgamText.titleS
+                            .copyWith(color: c.ink, fontSize: 15),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${bus.driverName} · ${bus.driverPhone}',
+                        style: UgamText.caption
+                            .copyWith(color: c.ink2, fontSize: 12),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: UgamSpacing.sm),
+                      Row(
+                        children: [
+                          if (bus.isAC) const UgamReqChip(label: 'AC'),
+                          if (bus.isAC) const SizedBox(width: 5),
+                          UgamReqChip(
+                            label: '$cap SEATS',
+                            variant: UgamChipVariant.neutral,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: onEdit,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: c.card,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.edit_rounded, size: 16, color: c.ink),
+                  ),
+                ),
+              ],
+            ),
+            if (cap > 0) ...[
+              const SizedBox(height: UgamSpacing.md),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.sm,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: pct,
+                          minHeight: 6,
+                          backgroundColor: c.card,
+                          valueColor: AlwaysStoppedAnimation(c.accent),
                         ),
                       ),
+                    ),
+                    const SizedBox(width: UgamSpacing.md),
+                    Text(
+                      '$assigned/$cap',
+                      style: UgamText.tabular(
+                        UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              IconButton(
-                onPressed: onEdit,
-                visualDensity: VisualDensity.compact,
-                icon: Icon(
-                  Icons.edit_outlined,
-                  size: 18,
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                ),
-              ),
+              const SizedBox(height: UgamSpacing.xs),
             ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _Tag(
-                label: bus.isAC
-                    ? tr('manage_buses.tag_ac')
-                    : tr('manage_buses.tag_non_ac'),
-                color: bus.isAC ? AppTheme.success : AppTheme.warning,
-              ),
-              const SizedBox(width: 6),
-              _Tag(
-                label: bus.busTypeEnum.displayName,
-                color: AppTheme.brand,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _OccupancyBar(ratio: ratio),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                tr('manage_buses.occupancy_label'),
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppColors.textMuted(context),
-                ),
-              ),
-              Text(
-                tr('manage_buses.occupancy_count', namedArgs: {
-                  'assigned': assigned.toString(),
-                  'capacity': capacity.toString(),
-                }),
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onSurface,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Tag extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _Tag({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: color,
-          letterSpacing: 0.4,
+          ],
         ),
-      ),
-    );
-  }
-}
-
-class _OccupancyBar extends StatelessWidget {
-  final double ratio;
-
-  const _OccupancyBar({required this.ratio});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = ratio < 0.5
-        ? AppTheme.success
-        : ratio < 0.85
-            ? AppTheme.warning
-            : AppTheme.danger;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(4),
-      child: LinearProgressIndicator(
-        value: ratio,
-        minHeight: 6,
-        backgroundColor: AppColors.border(context),
-        valueColor: AlwaysStoppedAnimation<Color>(color),
       ),
     );
   }
