@@ -15,19 +15,19 @@ class UgamColors {
   const UgamColors._();
 
   static const UgamColorSet dark = UgamColorSet(
-    bg: Color(0xFF0A0A0A),
-    card: Color(0xFF161616),
-    cardElev: Color(0xFF1F1F1F),
-    border: Color(0xFF2A2A2A),
-    ink: Color(0xFFFAFAFA),
-    ink2: Color(0xFFA0A0A0),
-    ink3: Color(0xFF5E5E5E),
+    bg: Color(0xFF000000),          // pure black, image 5
+    card: Color(0xFF141414),        // very dark surface
+    cardElev: Color(0xFF1C1C1C),    // raised surface
+    border: Color(0xFF222222),
+    ink: Color(0xFFFFFFFF),
+    ink2: Color(0xFFA8A8A8),
+    ink3: Color(0xFF5C5C5C),
     accent: Color(0xFF3B82F6),
-    accentFill: Color(0x293B82F6), // 16% alpha
+    accentFill: Color(0x293B82F6),  // 16% alpha
     good: Color(0xFF34D399),
     goodFill: Color(0x2934D399),
     warm: Color(0xFFFB923C),
-    warmFill: Color(0x2EFB923C), // 18% alpha
+    warmFill: Color(0x2EFB923C),    // 18% alpha
     danger: Color(0xFFF87171),
     onAccent: Color(0xFFFFFFFF),
   );

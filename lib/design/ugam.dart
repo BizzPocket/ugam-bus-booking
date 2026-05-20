@@ -7,6 +7,7 @@ export 'text_styles.dart';
 export 'theme.dart';
 export 'tokens.dart';
 
+export 'components/ugam_bus_backdrop.dart';
 export 'components/ugam_card.dart';
 export 'components/ugam_cta.dart';
 export 'components/ugam_date_pill.dart';
