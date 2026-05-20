@@ -1,9 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
@@ -64,7 +64,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                     const SizedBox(height: 16),
                     Text(
                       tr('notify.no_active_tours_title'),
-                      style: GoogleFonts.inter(
+                      style: TextStyle(fontFamily: 'Inter', 
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
                         color: AppColors.text(context),
@@ -74,7 +74,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                     Text(
                       tr('notify.no_active_tours_body'),
                       textAlign: TextAlign.center,
-                      style: GoogleFonts.inter(
+                      style: TextStyle(fontFamily: 'Inter', 
                         fontSize: 14,
                         color: AppColors.textMuted(context),
                       ),
@@ -129,7 +129,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                 if (activeTours.length > 1) ...[
                   Text(
                     tr('notify.section_label'),
-                    style: GoogleFonts.inter(
+                    style: TextStyle(fontFamily: 'Inter', 
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                       letterSpacing: 1,
@@ -167,7 +167,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                             child: Center(
                               child: Text(
                                 t.title,
-                                style: GoogleFonts.inter(
+                                style: TextStyle(fontFamily: 'Inter', 
                                   fontSize: 12,
                                   fontWeight: isActive
                                       ? FontWeight.w600
@@ -199,7 +199,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                     children: [
                       Text(
                         tourName,
-                        style: GoogleFonts.inter(
+                        style: TextStyle(fontFamily: 'Inter', 
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
                           color: AppColors.text(context),
@@ -273,7 +273,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
               const SizedBox(width: 8),
               Text(
                 tr('notify.lock_gate_title'),
-                style: GoogleFonts.inter(
+                style: TextStyle(fontFamily: 'Inter', 
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1,
@@ -285,7 +285,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
           const SizedBox(height: 10),
           Text(
             tr('notify.lock_gate_body'),
-            style: GoogleFonts.inter(
+            style: TextStyle(fontFamily: 'Inter', 
               fontSize: 13,
               color: AppColors.textMuted(context),
               height: 1.4,
@@ -308,30 +308,12 @@ class _NotifyScreenState extends State<NotifyScreen> {
             label: tr('notify.check_has_handler'),
           ),
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton.icon(
-              onPressed: canLock ? () => _lockTour(tour) : null,
-              icon: const Icon(Icons.lock_rounded, size: 18),
-              label: Text(
-                canLock ? tr('notify.lock_btn') : tr('notify.lock_btn_disabled'),
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.brand,
-                foregroundColor: Colors.white,
-                disabledBackgroundColor: AppColors.bg(context),
-                disabledForegroundColor: AppColors.textMuted(context),
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
+          UgamCTA(
+            label: canLock
+                ? tr('notify.lock_btn')
+                : tr('notify.lock_btn_disabled'),
+            leadingIcon: Icons.lock_rounded,
+            onPressed: canLock ? () => _lockTour(tour) : null,
           ),
         ],
       ),
@@ -391,7 +373,7 @@ class _Check extends StatelessWidget {
         Expanded(
           child: Text(
             label,
-            style: GoogleFonts.inter(
+            style: TextStyle(fontFamily: 'Inter', 
               fontSize: 13,
               fontWeight: FontWeight.w500,
               color: done ? AppColors.text(context) : AppColors.textMuted(context),
@@ -423,7 +405,7 @@ class _SummaryBox extends StatelessWidget {
           children: [
             Text(
               label,
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 9,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.8,
@@ -433,7 +415,7 @@ class _SummaryBox extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               value,
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
                 color: AppColors.text(context),
@@ -554,7 +536,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
             const SizedBox(height: 8),
             Text(
               tr('notify.empty_no_seats'),
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 13,
                 color: AppColors.textMuted(context),
               ),
@@ -576,7 +558,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
           children: [
             Text(
               'NOTIFY PASSENGERS',
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1,
@@ -586,7 +568,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
             const Spacer(),
             Text(
               '$sentCount / ${all.length}',
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: AppColors.text(context),
@@ -640,12 +622,12 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                     isDense: true,
                     border: InputBorder.none,
                     hintText: tr('notify.search_hint'),
-                    hintStyle: GoogleFonts.inter(
+                    hintStyle: TextStyle(fontFamily: 'Inter', 
                       fontSize: 13,
                       color: AppColors.textMuted(context),
                     ),
                   ),
-                  style: GoogleFonts.inter(
+                  style: TextStyle(fontFamily: 'Inter', 
                     fontSize: 14,
                     color: AppColors.text(context),
                   ),
@@ -688,7 +670,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
             child: Center(
               child: Text(
                 tr('notify.no_matches', namedArgs: {'query': _query}),
-                style: GoogleFonts.inter(
+                style: TextStyle(fontFamily: 'Inter', 
                   fontSize: 13,
                   color: AppColors.textMuted(context),
                 ),
@@ -745,7 +727,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
         // Tappable compact list below
         Text(
           'ALL PASSENGERS',
-          style: GoogleFonts.inter(
+          style: TextStyle(fontFamily: 'Inter', 
             fontSize: 10,
             fontWeight: FontWeight.w600,
             letterSpacing: 1,
@@ -796,7 +778,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                         children: [
                           Text(
                             p.displayName,
-                            style: GoogleFonts.inter(
+                            style: TextStyle(fontFamily: 'Inter', 
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
                               color: AppColors.text(context),
@@ -805,7 +787,7 @@ class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
                           if (seats.isNotEmpty)
                             Text(
                               'Seat $seats',
-                              style: GoogleFonts.inter(
+                              style: TextStyle(fontFamily: 'Inter', 
                                 fontSize: 11,
                                 color: AppColors.textMuted(context),
                               ),
@@ -869,7 +851,7 @@ class _PassengerCard extends StatelessWidget {
                   children: [
                     Text(
                       passenger.displayName,
-                      style: GoogleFonts.inter(
+                      style: TextStyle(fontFamily: 'Inter', 
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
                         color: AppColors.text(context),
@@ -880,7 +862,7 @@ class _PassengerCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       passenger.phone,
-                      style: GoogleFonts.inter(
+                      style: TextStyle(fontFamily: 'Inter', 
                         fontSize: 12,
                         color: AppColors.textMuted(context),
                       ),
@@ -904,7 +886,7 @@ class _PassengerCard extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text(
                         'SENT',
-                        style: GoogleFonts.inter(
+                        style: TextStyle(fontFamily: 'Inter', 
                           fontSize: 9,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1,
@@ -932,7 +914,7 @@ class _PassengerCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     seats.isEmpty ? '—' : 'Seat $seats',
-                    style: GoogleFonts.inter(
+                    style: TextStyle(fontFamily: 'Inter', 
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: AppColors.text(context),
@@ -945,7 +927,7 @@ class _PassengerCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Text(
                     busNo,
-                    style: GoogleFonts.inter(
+                    style: TextStyle(fontFamily: 'Inter', 
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
                       color: AppColors.textMuted(context),
@@ -964,7 +946,7 @@ class _PassengerCard extends StatelessWidget {
               icon: const Icon(Icons.chat_rounded, size: 16),
               label: Text(
                 isSent ? tr('notify.cta_send_again') : tr('notify.cta_send_first'),
-                style: GoogleFonts.inter(
+                style: TextStyle(fontFamily: 'Inter', 
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                 ),

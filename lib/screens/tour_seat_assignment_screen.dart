@@ -1,9 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
+import '../design/ugam.dart';
 import '../controllers/tour_controller.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
@@ -639,36 +639,56 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = UgamColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 16, 4),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.md,
+        UgamSpacing.sm,
+        UgamSpacing.md,
+        UgamSpacing.md,
+      ),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(Icons.arrow_back, color: theme.colorScheme.onSurface),
-            onPressed: () => Get.back(),
+          GestureDetector(
+            onTap: () => Get.back(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
+            ),
           ),
+          const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Text(
               title,
-              style: GoogleFonts.inter(
-                fontSize: 19,
-                fontWeight: FontWeight.w700,
-                color: theme.colorScheme.onSurface,
-              ),
+              style: UgamText.titleL.copyWith(color: c.ink, fontSize: 19),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
           GestureDetector(
-            onTap: () => Get.to(() => ManageBusesScreen(tourId: tourId)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+            onTap: () =>
+                Get.to(() => ManageBusesScreen(tourId: tourId)),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.md,
+                vertical: UgamSpacing.sm,
+              ),
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
               child: Text(
                 tr('tour_seat_assignment.fleet_link'),
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppTheme.brand,
-                ),
+                style: UgamText.bodyStrong
+                    .copyWith(color: c.accent, fontSize: 12),
               ),
             ),
           ),
@@ -1148,7 +1168,7 @@ class _SeatTile extends StatelessWidget {
             Center(
               child: Text(
                 cell.seatId ?? '',
-                style: GoogleFonts.inter(
+                style: TextStyle(fontFamily: 'Inter', 
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: textColor,
@@ -1314,7 +1334,7 @@ class _PassengerCard extends StatelessWidget {
                             ),
                             child: Text(
                               tr('tour_seat_assignment.badge_handler'),
-                              style: GoogleFonts.inter(
+                              style: TextStyle(fontFamily: 'Inter', 
                                 fontSize: 8,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 0.6,
@@ -1406,7 +1426,7 @@ class _PassengerCard extends StatelessWidget {
                 child: Text(
                   tr('tour_seat_assignment.seats_label',
                       namedArgs: {'seats': selectedSeats}),
-                  style: GoogleFonts.inter(
+                  style: TextStyle(fontFamily: 'Inter', 
                     fontSize: 12,
                     color: AppColors.textMuted(context),
                   ),
@@ -1417,7 +1437,7 @@ class _PassengerCard extends StatelessWidget {
                 Text(
                   tr('tour_seat_assignment.more_needed',
                       namedArgs: {'count': stillNeeded.toString()}),
-                  style: GoogleFonts.inter(
+                  style: TextStyle(fontFamily: 'Inter', 
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: AppTheme.warning,
@@ -1447,7 +1467,7 @@ class _PassengerCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       tr('tour_seat_assignment.hint_pick_handler'),
-                      style: GoogleFonts.inter(
+                      style: TextStyle(fontFamily: 'Inter', 
                         fontSize: 11,
                         color: AppTheme.warning,
                       ),
@@ -1503,7 +1523,7 @@ class _NoBuses extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               tr('tour_seat_assignment.no_buses_title'),
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
@@ -1512,7 +1532,7 @@ class _NoBuses extends StatelessWidget {
             Text(
               tr('tour_seat_assignment.no_buses_body'),
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 12,
                 color: AppColors.textMuted(context),
               ),
@@ -1553,7 +1573,7 @@ class _NoPassengers extends StatelessWidget {
             const SizedBox(height: 14),
             Text(
               tr('tour_seat_assignment.no_passengers_title'),
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
@@ -1562,7 +1582,7 @@ class _NoPassengers extends StatelessWidget {
             Text(
               tr('tour_seat_assignment.no_passengers_body'),
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 12,
                 color: AppColors.textMuted(context),
               ),
@@ -1583,7 +1603,7 @@ class _NoLayout extends StatelessWidget {
       child: Text(
         tr('tour_seat_assignment.no_layout'),
         textAlign: TextAlign.center,
-        style: GoogleFonts.inter(fontSize: 12, color: AppColors.textMuted(context)),
+        style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: AppColors.textMuted(context)),
       ),
     );
   }

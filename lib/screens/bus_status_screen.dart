@@ -1,10 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
@@ -155,7 +155,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                     children: [
                       Text(
                         passenger.displayName,
-                        style: GoogleFonts.inter(
+                        style: TextStyle(fontFamily: 'Inter', 
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                           color: AppColors.text(context),
@@ -165,7 +165,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                         const SizedBox(height: 4),
                         Text(
                           passenger.phone,
-                          style: GoogleFonts.inter(
+                          style: TextStyle(fontFamily: 'Inter', 
                             fontSize: 13,
                             color: AppColors.textMuted(context),
                           ),
@@ -222,33 +222,42 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 20, 8),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.md,
+        UgamSpacing.sm,
+        UgamSpacing.md,
+        UgamSpacing.md,
+      ),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => Get.back(),
+          GestureDetector(
+            onTap: () => Get.back(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
+            ),
           ),
+          const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  bus.name,
-                  style: GoogleFonts.inter(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                Text(bus.name,
+                    style: UgamText.titleL.copyWith(color: c.ink)),
                 Text(
                   '$tourTitle'
                   '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppColors.textMuted(context),
-                  ),
+                  style: UgamText.caption.copyWith(color: c.ink2),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -284,7 +293,7 @@ class _Tally extends StatelessWidget {
             children: [
               Text(
                 tr('bus_status.seats_assigned', namedArgs: {'assigned': '$assigned', 'total': '$total'}),
-                style: GoogleFonts.inter(
+                style: TextStyle(fontFamily: 'Inter', 
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
                   color: AppColors.text(context),
@@ -293,7 +302,7 @@ class _Tally extends StatelessWidget {
               const Spacer(),
               Text(
                 '${(ratio * 100).round()}%',
-                style: GoogleFonts.inter(
+                style: TextStyle(fontFamily: 'Inter', 
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                   color: AppColors.textMuted(context),
@@ -368,7 +377,7 @@ class _SeatGrid extends StatelessWidget {
               const SizedBox(width: 6),
               Text(
                 tr('bus_status.driver_label'),
-                style: GoogleFonts.inter(
+                style: TextStyle(fontFamily: 'Inter', 
                   fontSize: 9,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1,
@@ -450,7 +459,7 @@ class _DeckPanel extends StatelessWidget {
       children: [
         Text(
           title,
-          style: GoogleFonts.inter(
+          style: TextStyle(fontFamily: 'Inter', 
             fontSize: 10,
             fontWeight: FontWeight.w700,
             letterSpacing: 1,
@@ -813,7 +822,7 @@ class _LegendDot extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           label,
-          style: GoogleFonts.inter(
+          style: TextStyle(fontFamily: 'Inter', 
             fontSize: 11,
             fontWeight: FontWeight.w500,
             color: AppColors.textMuted(context),
@@ -840,7 +849,7 @@ class _SheetRow extends StatelessWidget {
             width: 130,
             child: Text(
               label,
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
                 color: AppColors.textMuted(context),
@@ -850,7 +859,7 @@ class _SheetRow extends StatelessWidget {
           Expanded(
             child: Text(
               value.isEmpty ? '—' : value,
-              style: GoogleFonts.inter(
+              style: TextStyle(fontFamily: 'Inter', 
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: AppColors.text(context),
@@ -882,7 +891,7 @@ class _HandlerBadge extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             tr('bus_status.handler_badge'),
-            style: GoogleFonts.inter(
+            style: TextStyle(fontFamily: 'Inter', 
               fontSize: 11,
               fontWeight: FontWeight.w700,
               color: const Color(0xFFB45309),

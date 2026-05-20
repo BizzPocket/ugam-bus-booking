@@ -6,20 +6,37 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/bus_type.dart';
 import '../models/seat_layout.dart';
 import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
 
-/// Form for adding a bus to a tour. Mirrors the Pencil "Add Bus" screen:
-/// bus number / driver / driver phone / AC toggle / total seats stepper /
-/// bus type chips. For Mixed buses, an extra sleeper-vs-seater split row
-/// appears so the auto-layout knows what mix to generate.
+/// Form for adding OR editing a bus on a tour.
+///
+/// Add mode (`existing == null`): full Pencil "Add Bus" layout — slot
+/// label, bus number, driver fields, AC toggle, total seats stepper,
+/// bus type chips, single-sofa split, seater split for Mixed buses.
+/// All fields are editable and the auto-layout is generated on save.
+///
+/// Edit mode (`existing != null`): the seat *layout* is locked because
+/// passengers may already hold seat IDs on this bus — regenerating the
+/// layout would invalidate every assignment. So we hide the structural
+/// controls (total seats / bus type / single-sofa / mixed split) and
+/// only let the agent fix metadata: slot label, bus number, driver
+/// name + phone, AC toggle, price per seat.
 class AddBusScreen extends StatefulWidget {
   final String tourId;
+  final Bus? existing;
 
-  const AddBusScreen({super.key, required this.tourId});
+  const AddBusScreen({
+    super.key,
+    required this.tourId,
+    this.existing,
+  });
+
+  bool get isEditing => existing != null;
 
   @override
   State<AddBusScreen> createState() => _AddBusScreenState();
@@ -42,6 +59,29 @@ class _AddBusScreenState extends State<AddBusScreen> {
   bool _saving = false;
   bool _priceInitialized = false;
   bool _slotLabelInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    if (e != null) {
+      _slotLabel.text = e.name;
+      _busNumber.text = e.busNumber;
+      _driverName.text = e.driverName;
+      _driverPhone.text = e.driverPhone;
+      _price.text = e.pricePerSeat > 0
+          ? e.pricePerSeat.toStringAsFixed(0)
+          : '';
+      _isAC = e.isAC;
+      _totalSeats = e.totalSeats;
+      _busType = BusType.fromString(e.busType);
+      // Seat-by-seat reverse-engineering of single/seater splits isn't
+      // worth the complexity — these fields are hidden in edit mode
+      // (the layout is locked) so any stale value here is harmless.
+      _priceInitialized = true;
+      _slotLabelInitialized = true;
+    }
+  }
 
   TourController get _tourCtrl => Get.find<TourController>();
 
@@ -125,13 +165,18 @@ class _AddBusScreenState extends State<AddBusScreen> {
   }
 
   Future<void> _save() async {
-    if (_busType == BusType.mixed && _seaterCountForMixed >= _totalSeats) {
-      AppSnackBar.error(tr('add_bus.snackbar.error_seater_count'));
-      return;
-    }
-    if (_singleSofaCount > _sleeperSeats) {
-      AppSnackBar.error(tr('add_bus.snackbar.error_single_sofa'));
-      return;
+    // Structural validations only apply when we're regenerating the
+    // layout — i.e. add mode. Edit mode keeps the original layout, so
+    // these stepper-driven checks are skipped.
+    if (!widget.isEditing) {
+      if (_busType == BusType.mixed && _seaterCountForMixed >= _totalSeats) {
+        AppSnackBar.error(tr('add_bus.snackbar.error_seater_count'));
+        return;
+      }
+      if (_singleSofaCount > _sleeperSeats) {
+        AppSnackBar.error(tr('add_bus.snackbar.error_single_sofa'));
+        return;
+      }
     }
 
     final tour = _tour;
@@ -139,13 +184,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
       AppSnackBar.error(tr('add_bus.snackbar.error_tour_not_found'));
       return;
     }
-
-    final layout = BusLayout.generate(
-      busType: _busType,
-      totalSeats: _totalSeats,
-      seaterCount: _busType == BusType.mixed ? _seaterCountForMixed : 0,
-      singleSofaCount: _singleSofaCount,
-    );
 
     final priceText = _price.text.trim();
     final pricePerSeat = priceText.isEmpty
@@ -156,20 +194,50 @@ class _AddBusScreenState extends State<AddBusScreen> {
         ? _defaultSlotLabel
         : _slotLabel.text.trim();
 
-    final bus = Bus(
-      name: slotLabel,
-      busNumber: _busNumber.text.trim(),
-      driverName: _driverName.text.trim(),
-      driverPhone: _driverPhone.text.trim(),
-      isAC: _isAC,
-      busType: _busType.displayName,
-      totalSeatsLegacy: _totalSeats,
-      pricePerSeat: pricePerSeat,
-      layout: layout,
-    );
-
     setState(() => _saving = true);
     try {
+      if (widget.isEditing) {
+        // EDIT MODE — preserve layout / totalSeats / busType so we
+        // don't clobber existing seat assignments. Only metadata
+        // changes propagate.
+        final source = widget.existing!;
+        final updated = source.copyWith(
+          name: slotLabel,
+          busNumber: _busNumber.text.trim(),
+          driverName: _driverName.text.trim(),
+          driverPhone: _driverPhone.text.trim(),
+          isAC: _isAC,
+          pricePerSeat: pricePerSeat,
+        );
+        await _tourCtrl.updateBus(widget.tourId, updated);
+        if (!mounted) return;
+        AppSnackBar.success(
+          'Updated ${updated.name}.',
+        );
+        Get.back();
+        return;
+      }
+
+      // ADD MODE — generate a fresh layout from the stepper values.
+      final layout = BusLayout.generate(
+        busType: _busType,
+        totalSeats: _totalSeats,
+        seaterCount: _busType == BusType.mixed ? _seaterCountForMixed : 0,
+        singleSofaCount: _singleSofaCount,
+      );
+
+      final bus = Bus(
+        name: slotLabel,
+        busNumber: _busNumber.text.trim(),
+        driverName: _driverName.text.trim(),
+        driverPhone: _driverPhone.text.trim(),
+        isAC: _isAC,
+        busType: _busType.displayName,
+        totalSeatsLegacy: _totalSeats,
+        pricePerSeat: pricePerSeat,
+        layout: layout,
+      );
+
       await _tourCtrl.addBus(widget.tourId, bus);
       if (!mounted) return;
       AppSnackBar.success(
@@ -224,7 +292,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _Header(subtitle: _subtitle),
+            _Header(
+              title: widget.isEditing ? 'Edit Bus' : tr('add_bus.title'),
+              subtitle: _subtitle,
+            ),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -325,23 +396,64 @@ class _AddBusScreenState extends State<AddBusScreen> {
                   ),
                   const SizedBox(height: 18),
 
-                  _FieldLabel(tr('add_bus.label.total_seats')),
-                  const SizedBox(height: 8),
-                  _Stepper(
-                    value: _totalSeats,
-                    min: 1,
-                    max: 100,
-                    onChanged: (v) => setState(() {
-                      _totalSeats = v;
-                      if (_seaterCountForMixed >= v) {
-                        _seaterCountForMixed = (v - 1).clamp(0, v);
-                      }
-                      if (_singleSofaCount > _sleeperSeats) {
-                        _singleSofaCount = _sleeperSeats;
-                      }
-                    }),
-                  ),
-                  const SizedBox(height: 18),
+                  // Structural fields are only editable in ADD mode —
+                  // changing total seats / bus type / sofa splits on an
+                  // existing bus would regenerate the layout and
+                  // invalidate every assigned seat ID.
+                  if (!widget.isEditing) ...[
+                    _FieldLabel(tr('add_bus.label.total_seats')),
+                    const SizedBox(height: 8),
+                    _Stepper(
+                      value: _totalSeats,
+                      min: 1,
+                      max: 100,
+                      onChanged: (v) => setState(() {
+                        _totalSeats = v;
+                        if (_seaterCountForMixed >= v) {
+                          _seaterCountForMixed = (v - 1).clamp(0, v);
+                        }
+                        if (_singleSofaCount > _sleeperSeats) {
+                          _singleSofaCount = _sleeperSeats;
+                        }
+                      }),
+                    ),
+                    const SizedBox(height: 18),
+                  ] else ...[
+                    // Read-only summary of the locked layout so the
+                    // agent can still see what they're editing.
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.brandLight,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color:
+                                AppTheme.brand.withValues(alpha: 0.18)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_outline_rounded,
+                              size: 16, color: AppTheme.brand),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Seat layout locked: $_totalSeats seats · '
+                              '${_busType.displayName}. '
+                              'Delete and re-add the bus to redesign.',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: AppTheme.brandDark,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                  ],
 
                   _FieldLabel(tr('add_bus.label.price_per_seat')),
                   const SizedBox(height: 8),
@@ -368,110 +480,79 @@ class _AddBusScreenState extends State<AddBusScreen> {
                   ),
                   const SizedBox(height: 18),
 
-                  _FieldLabel(tr('add_bus.label.bus_type')),
-                  const SizedBox(height: 8),
-                  _BusTypeChips(
-                    value: _busType,
-                    onChanged: (t) => setState(() => _busType = t),
-                  ),
-
-                  if (_busType == BusType.mixed) ...[
-                    const SizedBox(height: 18),
-                    _FieldLabel(tr('add_bus.label.seater_count')),
+                  if (!widget.isEditing) ...[
+                    _FieldLabel(tr('add_bus.label.bus_type')),
                     const SizedBox(height: 8),
-                    _Stepper(
-                      value: _seaterCountForMixed,
-                      min: 1,
-                      max: _totalSeats - 1,
-                      onChanged: (v) => setState(() {
-                        _seaterCountForMixed = v;
-                        if (_singleSofaCount > _sleeperSeats) {
-                          _singleSofaCount = _sleeperSeats;
-                        }
-                      }),
+                    _BusTypeChips(
+                      value: _busType,
+                      onChanged: (t) => setState(() => _busType = t),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _mixedSummary,
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppColors.textMuted(context),
-                      ),
-                    ),
-                  ],
 
-                  // Single vs Double Sofa split — only meaningful when the
-                  // bus actually has sleeper berths. Without this, every
-                  // sleeper seat defaults to Double Sofa and customers
-                  // requesting a Single Sofa have nothing to be assigned to.
-                  if (_sleeperSeats > 0) ...[
-                    const SizedBox(height: 18),
-                    _FieldLabel(tr('add_bus.label.single_sofa_count')),
-                    const SizedBox(height: 8),
-                    _Stepper(
-                      value: _singleSofaCount,
-                      min: 0,
-                      max: _sleeperSeats,
-                      onChanged: (v) =>
-                          setState(() => _singleSofaCount = v),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _singleSofaSummary,
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppColors.textMuted(context),
+                    if (_busType == BusType.mixed) ...[
+                      const SizedBox(height: 18),
+                      _FieldLabel(tr('add_bus.label.seater_count')),
+                      const SizedBox(height: 8),
+                      _Stepper(
+                        value: _seaterCountForMixed,
+                        min: 1,
+                        max: _totalSeats - 1,
+                        onChanged: (v) => setState(() {
+                          _seaterCountForMixed = v;
+                          if (_singleSofaCount > _sleeperSeats) {
+                            _singleSofaCount = _sleeperSeats;
+                          }
+                        }),
                       ),
-                    ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _mixedSummary,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppColors.textMuted(context),
+                        ),
+                      ),
+                    ],
+
+                    // Single vs Double Sofa split — only meaningful when
+                    // the bus actually has sleeper berths.
+                    if (_sleeperSeats > 0) ...[
+                      const SizedBox(height: 18),
+                      _FieldLabel(tr('add_bus.label.single_sofa_count')),
+                      const SizedBox(height: 8),
+                      _Stepper(
+                        value: _singleSofaCount,
+                        min: 0,
+                        max: _sleeperSeats,
+                        onChanged: (v) =>
+                            setState(() => _singleSofaCount = v),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _singleSofaSummary,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppColors.textMuted(context),
+                        ),
+                      ),
+                    ],
                   ],
 
                   const SizedBox(height: 28),
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                border: Border(
-                  top: BorderSide(
-                    color: AppColors.border(context),
-                  ),
-                ),
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton.icon(
-                  onPressed: _saving ? null : _save,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.add_rounded, size: 20),
-                  label: Text(
-                    _saving
-                        ? tr('add_bus.action.saving')
-                        : tr('add_bus.action.save'),
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.brand,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
+            UgamStickyCTA(
+              child: UgamCTA(
+                label: _saving
+                    ? tr('add_bus.action.saving')
+                    : (widget.isEditing
+                        ? 'Save changes'
+                        : tr('add_bus.action.save')),
+                leadingIcon: widget.isEditing
+                    ? Icons.check_rounded
+                    : Icons.add_rounded,
+                loading: _saving,
+                onPressed: _save,
               ),
             ),
           ],
@@ -482,41 +563,48 @@ class _AddBusScreenState extends State<AddBusScreen> {
 }
 
 class _Header extends StatelessWidget {
+  final String title;
   final String subtitle;
 
-  const _Header({required this.subtitle});
+  const _Header({required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = UgamColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 20, 8),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.md,
+        UgamSpacing.sm,
+        UgamSpacing.md,
+        UgamSpacing.md,
+      ),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(Icons.arrow_back, color: theme.colorScheme.onSurface),
-            onPressed: () => Get.back(),
+          GestureDetector(
+            onTap: () => Get.back(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
+            ),
           ),
+          const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  tr('add_bus.title'),
-                  style: GoogleFonts.inter(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
+                Text(title, style: UgamText.titleL.copyWith(color: c.ink)),
                 if (subtitle.isNotEmpty)
                   Text(
                     subtitle,
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: AppColors.textMuted(context),
-                    ),
+                    style: UgamText.caption.copyWith(color: c.ink2),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
