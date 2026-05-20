@@ -1,16 +1,23 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import '../config/theme.dart';
+
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
-import '../services/whatsapp_service.dart';
 
+/// Notify tab — lock gate + post-lock notification tracker.
+///
+/// Two distinct modes, switched by `tour.status`:
+///   * NOT LOCKED → lock gate (checklist + sticky "Lock tour" CTA)
+///   * LOCKED → tracker (hero summary card, progress bar, filter pills,
+///     collapsible search, flat passenger list, bulk send CTA)
 class NotifyScreen extends StatefulWidget {
   const NotifyScreen({super.key});
 
@@ -18,31 +25,106 @@ class NotifyScreen extends StatefulWidget {
   State<NotifyScreen> createState() => _NotifyScreenState();
 }
 
+enum _NotifyFilter { all, pending, notified }
+
 class _NotifyScreenState extends State<NotifyScreen> {
-  /// Passenger ids the agent has already sent a confirmation to in this
-  /// session. Reset on app restart — kept in-memory by design.
+  /// Passenger ids already sent in this session. Reset on app restart.
   final Set<String> _sentIds = <String>{};
 
-  /// Currently selected tour. Null until the agent picks one (or the list
-  /// has only one active tour and we auto-select it).
+  final TextEditingController _searchCtrl = TextEditingController();
+  bool _searchVisible = false;
+  String _query = '';
+
   String? _selectedTourId;
+  _NotifyFilter _filter = _NotifyFilter.all;
 
   @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggleSearch() {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _searchVisible = !_searchVisible;
+      if (!_searchVisible) {
+        _searchCtrl.clear();
+        _query = '';
+      }
+    });
+  }
+
+  void _onSent(String id) => setState(() => _sentIds.add(id));
+  void _resetSent() => setState(_sentIds.clear);
+
+  Future<void> _sendOne(
+    Passenger p, {
+    required Tour tour,
+    required String busNo,
+    required String driverName,
+    required String? driverPhone,
+  }) async {
+    final ok = await WhatsAppService().sendToPassenger(
+      passenger: p,
+      tour: tour,
+      busNumber: busNo,
+      driverName: driverName,
+      driverPhone: driverPhone,
+      handlerPhone: tour.handler?.phone,
+    );
+    if (!mounted) return;
+    if (ok) {
+      _onSent(p.id);
+      AppSnackBar.success(
+        tr('notify.send_now_help'),
+        title: tr('notify.send_now_opened_title',
+            namedArgs: {'name': p.displayName}),
+      );
+    } else {
+      AppSnackBar.error(tr('notify.whatsapp_unavailable'));
+    }
+  }
+
+  Future<void> _sendAllPending({
+    required Tour tour,
+    required List<Passenger> assigned,
+    required String busNo,
+    required String driverName,
+    required String? driverPhone,
+  }) async {
+    final pending =
+        assigned.where((p) => !_sentIds.contains(p.id)).toList();
+    if (pending.isEmpty) return;
+    HapticFeedback.lightImpact();
+    for (final p in pending) {
+      await _sendOne(
+        p,
+        tour: tour,
+        busNo: busNo,
+        driverName: driverName,
+        driverPhone: driverPhone,
+      );
+      if (!mounted) return;
+    }
+  }
+
+  // ── Build ─────────────────────────────────────────────────────
+  @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     final tourCtrl = Get.find<TourController>();
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: c.bg,
       body: SafeArea(
+        bottom: false,
         child: Obx(() {
-          // All non-completed tours, newest first.
           final activeTours = tourCtrl.tours
               .where((t) => t.status != TourStatus.completed)
               .toList()
             ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-          // Auto-select the first active tour if nothing is selected, or
-          // if the previously selected tour disappeared from the list.
           final selected = _selectedTourId != null
               ? activeTours.firstWhereOrNull((t) => t.id == _selectedTourId)
               : null;
@@ -50,273 +132,310 @@ class _NotifyScreenState extends State<NotifyScreen> {
               (activeTours.isEmpty ? null : activeTours.first);
 
           if (tour == null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(40),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.notifications_off_rounded,
-                      size: 48,
-                      color: AppColors.textMuted(context),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      tr('notify.no_active_tours_title'),
-                      style: TextStyle(fontFamily: 'Inter', 
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.text(context),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      tr('notify.no_active_tours_body'),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontFamily: 'Inter', 
-                        fontSize: 14,
-                        color: AppColors.textMuted(context),
-                      ),
-                    ),
-                  ],
+            return Column(
+              children: [
+                _TopBar(
+                  c: c,
+                  searchActive: false,
+                  onToggleSearch: () {},
+                  showSearch: false,
+                  onReset: null,
+                  showReset: false,
                 ),
-              ),
+                Expanded(
+                  child: UgamEmpty(
+                    icon: Icons.notifications_off_rounded,
+                    title: tr('notify.no_active_tours_title'),
+                    body: tr('notify.no_active_tours_body'),
+                  ),
+                ),
+              ],
             );
           }
 
-          final tourName = tour.title;
-          final String busNo;
-          final String totalSeats;
-          final String driverName;
-          final String? driverPhone;
-          
-          if (tour.buses.isNotEmpty) {
-            busNo = tour.buses.map((b) => b.busNumber).join(', ');
-            totalSeats = tour.totalBusSeats.toString();
-            driverName = tour.buses.map((b) => b.driverName).join(', ');
-            driverPhone = tour.buses.first.driverPhone; // Simplified for broadcast
-          } else {
-            busNo = tr('notify.not_assigned');
-            totalSeats = '-';
-            driverName = tr('notify.not_assigned');
-            driverPhone = null;
-          }
-
-          // Format date range
-          final months = [
-            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-          ];
-          final depDate = tour.departureDate;
-          String tourDate = '${months[depDate.month - 1]} ${depDate.day}';
-          if (tour.returnDate != null) {
-            final ret = tour.returnDate!;
-            tourDate += '–${ret.day}';
-          }
-
-          // Passengers with assigned seats
-          final assignedPassengers = tour.passengers
+          final isLocked = tour.status == TourStatus.locked;
+          final assigned = tour.passengers
               .where((p) => p.assignedSeats.isNotEmpty)
               .toList();
+          final sentCount =
+              assigned.where((p) => _sentIds.contains(p.id)).length;
+          final pendingCount = assigned.length - sentCount;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // -- Tour picker --
-                if (activeTours.length > 1) ...[
-                  Text(
-                    tr('notify.section_label'),
-                    style: TextStyle(fontFamily: 'Inter', 
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 1,
-                      color: AppColors.textMuted(context),
-                    ),
+          final busInfo = _resolveBusInfo(tour);
+
+          return Stack(
+            children: [
+              Column(
+                children: [
+                  _TopBar(
+                    c: c,
+                    searchActive: _searchVisible,
+                    onToggleSearch: _toggleSearch,
+                    showSearch: isLocked,
+                    onReset: _resetSent,
+                    showReset: isLocked && _sentIds.isNotEmpty,
                   ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: 40,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: activeTours.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (context, i) {
-                        final t = activeTours[i];
-                        final isActive = t.id == tour.id;
-                        return GestureDetector(
-                          onTap: () =>
-                              setState(() {
-                                _selectedTourId = t.id;
-                                _sentIds.clear();
-                              }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: isActive ? AppTheme.brand : AppColors.surface(context),
-                              borderRadius: BorderRadius.circular(9999),
-                              border: isActive
-                                  ? null
-                                  : Border.all(color: AppColors.border(context)),
-                            ),
-                            child: Center(
-                              child: Text(
-                                t.title,
-                                style: TextStyle(fontFamily: 'Inter', 
-                                  fontSize: 12,
-                                  fontWeight: isActive
-                                      ? FontWeight.w600
-                                      : FontWeight.w500,
-                                  color: isActive
-                                      ? Colors.white
-                                      : AppColors.textMuted(context),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                  if (isLocked)
+                    AnimatedSize(
+                      duration: UgamMotion.tab,
+                      curve: UgamMotion.easeOut,
+                      child: _searchVisible
+                          ? _SearchField(
+                              c: c,
+                              controller: _searchCtrl,
+                              onChanged: (v) =>
+                                  setState(() => _query = v.trim()),
+                            )
+                          : const SizedBox.shrink(),
                     ),
+                  if (activeTours.length > 1)
+                    _TourSelector(
+                      c: c,
+                      tours: activeTours,
+                      selectedId: tour.id,
+                      onSelect: (id) => setState(() {
+                        _selectedTourId = id;
+                        _sentIds.clear();
+                        _filter = _NotifyFilter.all;
+                      }),
+                    ),
+                  const SizedBox(height: UgamSpacing.md),
+                  Expanded(
+                    child: isLocked
+                        ? _buildTracker(
+                            tour: tour,
+                            assigned: assigned,
+                            sentCount: sentCount,
+                            pendingCount: pendingCount,
+                            busInfo: busInfo,
+                            c: c,
+                          )
+                        : _buildLockGate(tour: tour, c: c),
                   ),
-                  const SizedBox(height: 16),
                 ],
-
-                // -- Summary Card --
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface(context),
-                    borderRadius: BorderRadius.circular(6),
-                    boxShadow: AppTheme.cardShadow,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        tourName,
-                        style: TextStyle(fontFamily: 'Inter', 
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.text(context),
-                        ),
+              ),
+              if (isLocked && pendingCount > 0)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: UgamStickyCTA(
+                    child: UgamCTA(
+                      label: 'Send to all pending',
+                      leadingIcon: Icons.chat_rounded,
+                      trailingValue: '$pendingCount',
+                      onPressed: () => _sendAllPending(
+                        tour: tour,
+                        assigned: assigned,
+                        busNo: busInfo.busNo,
+                        driverName: busInfo.driverName,
+                        driverPhone: busInfo.driverPhone,
                       ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          _SummaryBox(label: tr('notify.summary_date'), value: tourDate),
-                          const SizedBox(width: 10),
-                          _SummaryBox(label: tr('notify.summary_bus_no'), value: busNo),
-                          const SizedBox(width: 10),
-                          _SummaryBox(label: tr('notify.summary_seats'), value: totalSeats),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-
-                const SizedBox(height: 24),
-
-                // -- Lock gate or Person-wise notifier --
-                if (tour.status != TourStatus.locked)
-                  _buildLockGate(tour: tour)
-                else
-                  _PersonWiseNotifier(
-                    tour: tour,
-                    busNo: busNo,
-                    driverName: driverName,
-                    driverPhone: driverPhone,
-                    passengers: assignedPassengers,
-                    sentIds: _sentIds,
-                    onSent: (id) => setState(() => _sentIds.add(id)),
-                    onReset: () => setState(_sentIds.clear),
-                  ),
-
-                const SizedBox(height: 20),
-              ],
-            ),
+              if (!isLocked)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _LockStickyCTA(tour: tour, c: c, onLock: _lockTour),
+                ),
+            ],
           );
         }),
       ),
     );
   }
 
-  // ── Lock Gate: shown before tour is locked ────────────────
-  Widget _buildLockGate({required Tour tour}) {
+  // ── Tracker (post-lock) ────────────────────────────────────────
+  Widget _buildTracker({
+    required Tour tour,
+    required List<Passenger> assigned,
+    required int sentCount,
+    required int pendingCount,
+    required _BusInfo busInfo,
+    required UgamColorSet c,
+  }) {
+    if (assigned.isEmpty) {
+      return UgamEmpty(
+        icon: Icons.event_seat_outlined,
+        title: tr('notify.empty_no_seats'),
+        body: tr('notify.assign_first'),
+      );
+    }
+
+    final q = _query.toLowerCase();
+    final baseByFilter = switch (_filter) {
+      _NotifyFilter.all => assigned,
+      _NotifyFilter.pending =>
+        assigned.where((p) => !_sentIds.contains(p.id)).toList(),
+      _NotifyFilter.notified =>
+        assigned.where((p) => _sentIds.contains(p.id)).toList(),
+    };
+    final filtered = q.isEmpty
+        ? baseByFilter
+        : baseByFilter
+            .where((p) =>
+                p.displayName.toLowerCase().contains(q) ||
+                p.phone.toLowerCase().contains(q))
+            .toList();
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        0,
+        UgamSpacing.gutter,
+        pendingCount > 0 ? 140 : 24,
+      ),
+      children: [
+        _HeroSummaryCard(tour: tour, busInfo: busInfo, c: c),
+        const SizedBox(height: UgamSpacing.md),
+        _ProgressCard(
+          c: c,
+          sent: sentCount,
+          total: assigned.length,
+        ),
+        const SizedBox(height: UgamSpacing.md),
+        UgamTabPills(
+          currentIndex: _filter.index,
+          onChanged: (i) =>
+              setState(() => _filter = _NotifyFilter.values[i]),
+          items: [
+            UgamTabItem(label: 'All', count: assigned.length),
+            UgamTabItem(label: 'Pending', count: pendingCount),
+            UgamTabItem(label: 'Notified', count: sentCount),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.md),
+        if (filtered.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xxl),
+            child: Center(
+              child: Text(
+                _query.isNotEmpty
+                    ? tr('notify.no_matches', namedArgs: {'query': _query})
+                    : 'Nothing here',
+                style: UgamText.body.copyWith(color: c.ink2),
+              ),
+            ),
+          )
+        else
+          for (var i = 0; i < filtered.length; i++) ...[
+            _NotifyRow(
+              passenger: filtered[i],
+              busInfo: busInfo,
+              isSent: _sentIds.contains(filtered[i].id),
+              c: c,
+              onSend: () => _sendOne(
+                filtered[i],
+                tour: tour,
+                busNo: busInfo.busNo,
+                driverName: busInfo.driverName,
+                driverPhone: busInfo.driverPhone,
+              ),
+            ),
+            if (i != filtered.length - 1)
+              const SizedBox(height: UgamSpacing.sm + 2),
+          ],
+      ],
+    );
+  }
+
+  // ── Lock gate (pre-lock) ───────────────────────────────────────
+  Widget _buildLockGate({required Tour tour, required UgamColorSet c}) {
     final allAssigned = tour.allSeatsAssigned;
     final hasHandler = tour.handlerId != null;
     final hasPassengers = tour.passengers.isNotEmpty;
-    final canLock = allAssigned && hasHandler && hasPassengers;
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: AppTheme.cardShadow,
-        border: Border.all(color: AppColors.border(context)),
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        0,
+        UgamSpacing.gutter,
+        160,
+      ),
+      children: [
+        _HeroSummaryCard(
+          tour: tour,
+          busInfo: _resolveBusInfo(tour),
+          c: c,
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        UgamCard.plain(
+          padding: const EdgeInsets.fromLTRB(
+            UgamSpacing.lg,
+            UgamSpacing.lg,
+            UgamSpacing.lg,
+            UgamSpacing.lg,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.lock_outline_rounded,
-                size: 20,
-                color: AppTheme.brand,
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.lock_outline_rounded,
+                        size: 19, color: c.accent),
+                  ),
+                  const SizedBox(width: UgamSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Ready to lock?',
+                          style: UgamText.titleM
+                              .copyWith(color: c.ink, fontSize: 17),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          tr('notify.lock_gate_body'),
+                          style: UgamText.caption
+                              .copyWith(color: c.ink2, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                tr('notify.lock_gate_title'),
-                style: TextStyle(fontFamily: 'Inter', 
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1,
-                  color: AppTheme.brand,
-                ),
+              const SizedBox(height: UgamSpacing.lg),
+              _Check(
+                done: hasPassengers,
+                label: tr('notify.check_has_passengers'),
+                c: c,
+              ),
+              const SizedBox(height: UgamSpacing.sm),
+              _Check(
+                done: allAssigned,
+                label: tr('notify.check_all_assigned'),
+                c: c,
+              ),
+              const SizedBox(height: UgamSpacing.sm),
+              _Check(
+                done: hasHandler,
+                label: tr('notify.check_has_handler'),
+                c: c,
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            tr('notify.lock_gate_body'),
-            style: TextStyle(fontFamily: 'Inter', 
-              fontSize: 13,
-              color: AppColors.textMuted(context),
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Pre-flight checklist
-          _Check(
-            done: hasPassengers,
-            label: tr('notify.check_has_passengers'),
-          ),
-          const SizedBox(height: 6),
-          _Check(
-            done: allAssigned,
-            label: tr('notify.check_all_assigned'),
-          ),
-          const SizedBox(height: 6),
-          _Check(
-            done: hasHandler,
-            label: tr('notify.check_has_handler'),
-          ),
-          const SizedBox(height: 16),
-          UgamCTA(
-            label: canLock
-                ? tr('notify.lock_btn')
-                : tr('notify.lock_btn_disabled'),
-            leadingIcon: Icons.lock_rounded,
-            onPressed: canLock ? () => _lockTour(tour) : null,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -337,7 +456,6 @@ class _NotifyScreenState extends State<NotifyScreen> {
           ),
           TextButton(
             onPressed: () => Get.back(result: true),
-            style: TextButton.styleFrom(foregroundColor: AppTheme.brand),
             child: Text(tr('notify.lock_dialog_lock')),
           ),
         ],
@@ -351,74 +469,169 @@ class _NotifyScreenState extends State<NotifyScreen> {
       title: tr('notify.locked_snack_title'),
     );
   }
-}
 
-
-class _Check extends StatelessWidget {
-  final bool done;
-  final String label;
-
-  const _Check({required this.done, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(
-          done ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
-          size: 18,
-          color: done ? AppTheme.success : AppColors.textMuted(context),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(fontFamily: 'Inter', 
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              color: done ? AppColors.text(context) : AppColors.textMuted(context),
-            ),
-          ),
-        ),
-      ],
+  _BusInfo _resolveBusInfo(Tour tour) {
+    if (tour.buses.isEmpty) {
+      return _BusInfo(
+        busNo: tr('notify.not_assigned'),
+        driverName: tr('notify.not_assigned'),
+        driverPhone: null,
+      );
+    }
+    return _BusInfo(
+      busNo: tour.buses.map((b) => b.busNumber).join(', '),
+      driverName: tour.buses.map((b) => b.driverName).join(', '),
+      driverPhone: tour.buses.first.driverPhone,
     );
   }
 }
 
-class _SummaryBox extends StatelessWidget {
-  final String label;
-  final String value;
+class _BusInfo {
+  final String busNo;
+  final String driverName;
+  final String? driverPhone;
+  _BusInfo({
+    required this.busNo,
+    required this.driverName,
+    required this.driverPhone,
+  });
+}
 
-  const _SummaryBox({required this.label, required this.value});
+// ─── Top bar ──────────────────────────────────────────────────────────
+
+class _TopBar extends StatelessWidget {
+  final UgamColorSet c;
+  final bool searchActive;
+  final VoidCallback onToggleSearch;
+  final bool showSearch;
+  final VoidCallback? onReset;
+  final bool showReset;
+
+  const _TopBar({
+    required this.c,
+    required this.searchActive,
+    required this.onToggleSearch,
+    required this.showSearch,
+    required this.onReset,
+    required this.showReset,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-        decoration: BoxDecoration(
-          color: AppColors.bg(context),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(fontFamily: 'Inter', 
-                fontSize: 9,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-                color: AppColors.textMuted(context),
-              ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+        UgamSpacing.gutter,
+        UgamSpacing.md,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Notify',
+              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
             ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(fontFamily: 'Inter', 
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.text(context),
+          ),
+          if (showReset)
+            _CircleBtn(
+              icon: Icons.refresh_rounded,
+              c: c,
+              onTap: onReset!,
+            ),
+          if (showReset && showSearch) const SizedBox(width: UgamSpacing.sm),
+          if (showSearch)
+            _CircleBtn(
+              icon: searchActive
+                  ? Icons.close_rounded
+                  : Icons.search_rounded,
+              c: c,
+              onTap: onToggleSearch,
+              active: searchActive,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CircleBtn extends StatelessWidget {
+  final IconData icon;
+  final UgamColorSet c;
+  final VoidCallback onTap;
+  final bool active;
+  const _CircleBtn({
+    required this.icon,
+    required this.c,
+    required this.onTap,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: active ? c.accentFill : c.cardElev,
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        child: Icon(icon, size: 19, color: active ? c.accent : c.ink),
+      ),
+    );
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  final UgamColorSet c;
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  const _SearchField({
+    required this.c,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        0,
+        UgamSpacing.gutter,
+        UgamSpacing.md,
+      ),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.search_rounded, size: 18, color: c.ink2),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                autofocus: true,
+                onChanged: onChanged,
+                style: UgamText.body.copyWith(color: c.ink, fontSize: 14),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  hintText: tr('notify.search_hint'),
+                  hintStyle:
+                      UgamText.body.copyWith(color: c.ink3, fontSize: 14),
+                ),
               ),
             ),
           ],
@@ -428,416 +641,100 @@ class _SummaryBox extends StatelessWidget {
   }
 }
 
-// ── Person-wise notifier ──────────────────────────────────────
-// Replaces the old sequential queue. Gives the agent:
-//   - a search bar to find a passenger by name or phone
-//   - a swipeable carousel of full passenger cards (one Send button each)
-//   - a tappable list below for quick jumping
-// The carousel and list are linked: tapping a row jumps the carousel,
-// and the highlighted row tracks the current page.
-class _PersonWiseNotifier extends StatefulWidget {
-  final Tour tour;
-  final String busNo;
-  final String driverName;
-  final String? driverPhone;
-  final List<Passenger> passengers;
-  final Set<String> sentIds;
-  final void Function(String passengerId) onSent;
-  final VoidCallback onReset;
+// ─── Tour selector ────────────────────────────────────────────────────
 
-  const _PersonWiseNotifier({
-    required this.tour,
-    required this.busNo,
-    required this.driverName,
-    required this.driverPhone,
-    required this.passengers,
-    required this.sentIds,
-    required this.onSent,
-    required this.onReset,
+class _TourSelector extends StatelessWidget {
+  final UgamColorSet c;
+  final List<Tour> tours;
+  final String selectedId;
+  final ValueChanged<String> onSelect;
+
+  const _TourSelector({
+    required this.c,
+    required this.tours,
+    required this.selectedId,
+    required this.onSelect,
   });
 
   @override
-  State<_PersonWiseNotifier> createState() => _PersonWiseNotifierState();
-}
-
-class _PersonWiseNotifierState extends State<_PersonWiseNotifier> {
-  final TextEditingController _search = TextEditingController();
-  late final PageController _pageController =
-      PageController(viewportFraction: 0.92);
-  int _currentPage = 0;
-  String _query = '';
-
-  @override
-  void dispose() {
-    _search.dispose();
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  List<Passenger> get _filtered {
-    final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return widget.passengers;
-    return widget.passengers.where((p) {
-      final name = p.displayName.toLowerCase();
-      final phone = p.phone.toLowerCase();
-      return name.contains(q) || phone.contains(q);
-    }).toList();
-  }
-
-  Future<void> _sendTo(Passenger p) async {
-    final ok = await WhatsAppService().sendToPassenger(
-      passenger: p,
-      tour: widget.tour,
-      busNumber: widget.busNo,
-      driverName: widget.driverName,
-      driverPhone: widget.driverPhone,
-      handlerPhone: widget.tour.handler?.phone,
-    );
-    if (!mounted) return;
-    if (ok) {
-      widget.onSent(p.id);
-      AppSnackBar.success(
-        tr('notify.send_now_help'),
-        title: tr('notify.send_now_opened_title', namedArgs: {'name': p.displayName}),
-      );
-    } else {
-      AppSnackBar.error(tr('notify.whatsapp_unavailable'));
-    }
-  }
-
-  void _jumpTo(int idx) {
-    if (!_pageController.hasClients) {
-      setState(() => _currentPage = idx);
-      return;
-    }
-    _pageController.animateToPage(
-      idx,
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeInOut,
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final all = widget.passengers;
-    if (all.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: AppColors.bg(context),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.border(context)),
-        ),
-        child: Column(
-          children: [
-            Icon(Icons.info_outline_rounded,
-                size: 22, color: AppColors.textMuted(context)),
-            const SizedBox(height: 8),
-            Text(
-              tr('notify.empty_no_seats'),
-              style: TextStyle(fontFamily: 'Inter', 
-                fontSize: 13,
-                color: AppColors.textMuted(context),
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+        itemCount: tours.length,
+        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
+        itemBuilder: (_, i) {
+          final t = tours[i];
+          final isActive = t.id == selectedId;
+          return GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onSelect(t.id);
+            },
+            behavior: HitTestBehavior.opaque,
+            child: AnimatedContainer(
+              duration: UgamMotion.tab,
+              curve: UgamMotion.easeOut,
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.lg,
+                vertical: UgamSpacing.sm,
               ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final list = _filtered;
-    final sentCount = widget.sentIds.length;
-    final allDone = sentCount >= all.length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Progress + reset
-        Row(
-          children: [
-            Text(
-              'NOTIFY PASSENGERS',
-              style: TextStyle(fontFamily: 'Inter', 
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1,
-                color: allDone ? AppTheme.success : AppTheme.brand,
+              decoration: BoxDecoration(
+                color: isActive ? c.accent : c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
               ),
-            ),
-            const Spacer(),
-            Text(
-              '$sentCount / ${all.length}',
-              style: TextStyle(fontFamily: 'Inter', 
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: AppColors.text(context),
-              ),
-            ),
-            if (sentCount > 0) ...[
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: widget.onReset,
-                child: Icon(
-                  Icons.refresh_rounded,
-                  size: 16,
-                  color: AppColors.textMuted(context),
-                ),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 8),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: all.isEmpty ? 0 : sentCount / all.length,
-            minHeight: 6,
-            backgroundColor: AppColors.bg(context),
-            valueColor: AlwaysStoppedAnimation(
-              allDone ? AppTheme.success : AppTheme.brand,
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // Search bar
-        Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: AppColors.surface(context),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.border(context)),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.search_rounded,
-                  size: 18, color: AppColors.textMuted(context)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _search,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    border: InputBorder.none,
-                    hintText: tr('notify.search_hint'),
-                    hintStyle: TextStyle(fontFamily: 'Inter', 
-                      fontSize: 13,
-                      color: AppColors.textMuted(context),
-                    ),
-                  ),
-                  style: TextStyle(fontFamily: 'Inter', 
-                    fontSize: 14,
-                    color: AppColors.text(context),
-                  ),
-                  onChanged: (v) {
-                    setState(() {
-                      _query = v;
-                      _currentPage = 0;
-                    });
-                    if (_pageController.hasClients && list.isNotEmpty) {
-                      _pageController.jumpToPage(0);
-                    }
-                  },
-                ),
-              ),
-              if (_query.isNotEmpty)
-                GestureDetector(
-                  onTap: () {
-                    _search.clear();
-                    setState(() => _query = '');
-                  },
-                  child: Icon(Icons.close_rounded,
-                      size: 16, color: AppColors.textMuted(context)),
-                ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 14),
-
-        // Carousel of passenger cards
-        if (list.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppColors.bg(context),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.border(context)),
-            ),
-            child: Center(
+              alignment: Alignment.center,
               child: Text(
-                tr('notify.no_matches', namedArgs: {'query': _query}),
-                style: TextStyle(fontFamily: 'Inter', 
-                  fontSize: 13,
-                  color: AppColors.textMuted(context),
-                ),
-              ),
-            ),
-          )
-        else
-          SizedBox(
-            height: 200,
-            child: PageView.builder(
-              controller: _pageController,
-              onPageChanged: (i) => setState(() => _currentPage = i),
-              itemCount: list.length,
-              itemBuilder: (ctx, i) {
-                final p = list[i];
-                final isSent = widget.sentIds.contains(p.id);
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: _PassengerCard(
-                    passenger: p,
-                    busNo: widget.busNo,
-                    isSent: isSent,
-                    onSend: () => _sendTo(p),
-                  ),
-                );
-              },
-            ),
-          ),
-
-        if (list.length > 1) ...[
-          const SizedBox(height: 8),
-          Center(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(list.length.clamp(0, 10), (i) {
-                final active = i == (_currentPage.clamp(0, list.length - 1));
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: active ? 18 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: active ? AppTheme.brand : AppColors.border(context),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                );
-              }),
-            ),
-          ),
-        ],
-
-        const SizedBox(height: 16),
-
-        // Tappable compact list below
-        Text(
-          'ALL PASSENGERS',
-          style: TextStyle(fontFamily: 'Inter', 
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1,
-            color: AppColors.textMuted(context),
-          ),
-        ),
-        const SizedBox(height: 8),
-        ...List.generate(list.length, (i) {
-          final p = list[i];
-          final isSent = widget.sentIds.contains(p.id);
-          final isCurrent = i == _currentPage;
-          final seats = p.assignedSeats.map((a) => a.seatId).join(', ');
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: GestureDetector(
-              onTap: () => _jumpTo(i),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSent
-                      ? AppTheme.successLight
-                      : (isCurrent ? AppTheme.brandLight : AppColors.surface(context)),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isCurrent
-                        ? AppTheme.brand
-                        : (isSent
-                            ? AppTheme.success
-                            : AppColors.border(context)),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      isSent
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
-                      size: 16,
-                      color: isSent
-                          ? AppTheme.success
-                          : AppColors.textMuted(context),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            p.displayName,
-                            style: TextStyle(fontFamily: 'Inter', 
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.text(context),
-                            ),
-                          ),
-                          if (seats.isNotEmpty)
-                            Text(
-                              'Seat $seats',
-                              style: TextStyle(fontFamily: 'Inter', 
-                                fontSize: 11,
-                                color: AppColors.textMuted(context),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 18,
-                      color: AppColors.textMuted(context),
-                    ),
-                  ],
+                t.title,
+                style: UgamText.bodyStrong.copyWith(
+                  color: isActive ? c.onAccent : c.ink2,
+                  fontSize: 12.5,
                 ),
               ),
             ),
           );
-        }),
-      ],
+        },
+      ),
     );
   }
 }
 
-class _PassengerCard extends StatelessWidget {
-  final Passenger passenger;
-  final String busNo;
-  final bool isSent;
-  final VoidCallback onSend;
+// ─── Hero summary card ────────────────────────────────────────────────
 
-  const _PassengerCard({
-    required this.passenger,
-    required this.busNo,
-    required this.isSent,
-    required this.onSend,
+class _HeroSummaryCard extends StatelessWidget {
+  final Tour tour;
+  final _BusInfo busInfo;
+  final UgamColorSet c;
+
+  const _HeroSummaryCard({
+    required this.tour,
+    required this.busInfo,
+    required this.c,
   });
+
+  String _formatDate(DateTime d) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    String s = '${d.day} ${months[d.month - 1]}';
+    return s;
+  }
+
+  String _formatTime(DateTime d) {
+    final h = d.hour.toString().padLeft(2, '0');
+    final m = d.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final seats = passenger.assignedSeats.map((a) => a.seatId).join(', ');
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isSent ? AppTheme.success : AppColors.border(context),
-          width: isSent ? 1.5 : 1,
-        ),
-        boxShadow: AppTheme.cardShadow,
-      ),
+    final isLocked = tour.status == TourStatus.locked;
+    final handler = tour.handler;
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -845,124 +742,402 @@ class _PassengerCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+                child: Text(
+                  tour.title,
+                  style: UgamText.titleL.copyWith(color: c.ink, fontSize: 19),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              UgamStatusDot(
+                label: isLocked ? 'LOCKED' : tour.status.displayName,
+                tone: isLocked
+                    ? UgamStatusTone.good
+                    : UgamStatusTone.accent,
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            '${tour.fromCity} → ${tour.toCity}',
+            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _InfoCell(
+                  c: c,
+                  icon: Icons.event_rounded,
+                  label: 'Departure',
+                  value:
+                      '${_formatDate(tour.departureDate)} · ${_formatTime(tour.departureDate)}',
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: _InfoCell(
+                  c: c,
+                  icon: Icons.directions_bus_rounded,
+                  label: 'Bus',
+                  value: busInfo.busNo,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: _InfoCell(
+                  c: c,
+                  icon: Icons.badge_outlined,
+                  label: 'Driver',
+                  value: busInfo.driverName,
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: _InfoCell(
+                  c: c,
+                  icon: Icons.person_pin_rounded,
+                  label: 'Handler',
+                  value: handler?.displayName ?? tr('notify.not_assigned'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoCell extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _InfoCell({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm + 2,
+      ),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.input),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 12, color: c.ink3),
+              const SizedBox(width: 4),
+              Text(
+                label.toUpperCase(),
+                style: UgamText.micro.copyWith(color: c.ink3, fontSize: 9.5),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Progress card ────────────────────────────────────────────────────
+
+class _ProgressCard extends StatelessWidget {
+  final UgamColorSet c;
+  final int sent;
+  final int total;
+
+  const _ProgressCard({
+    required this.c,
+    required this.sent,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total == 0 ? 0.0 : (sent / total).clamp(0.0, 1.0);
+    final done = sent >= total && total > 0;
+    final color = done ? c.good : c.accent;
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Text(
+                done ? 'ALL NOTIFIED' : 'NOTIFICATION PROGRESS',
+                style: UgamText.micro.copyWith(color: color, fontSize: 10),
+              ),
+              const Spacer(),
+              Text(
+                '$sent / $total',
+                style: UgamText.tabular(
+                  UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm + 2),
+          Text(
+            done
+                ? 'Every passenger has been notified.'
+                : '$sent of $total passengers notified',
+            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: pct,
+              minHeight: 8,
+              backgroundColor: c.cardElev,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Notify passenger row ─────────────────────────────────────────────
+
+class _NotifyRow extends StatelessWidget {
+  final Passenger passenger;
+  final _BusInfo busInfo;
+  final bool isSent;
+  final UgamColorSet c;
+  final VoidCallback onSend;
+
+  const _NotifyRow({
+    required this.passenger,
+    required this.busInfo,
+    required this.isSent,
+    required this.c,
+    required this.onSend,
+  });
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final seats = passenger.assignedSeats.map((a) => a.seatId).join(', ');
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      radius: UgamRadius.row,
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: c.cardElev,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              _initials(passenger.name),
+              style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md - 2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
                   children: [
-                    Text(
-                      passenger.displayName,
-                      style: TextStyle(fontFamily: 'Inter', 
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.text(context),
+                    Expanded(
+                      child: Text(
+                        passenger.displayName,
+                        style: UgamText.bodyStrong
+                            .copyWith(color: c.ink, fontSize: 13.5),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      passenger.phone,
-                      style: TextStyle(fontFamily: 'Inter', 
-                        fontSize: 12,
-                        color: AppColors.textMuted(context),
+                    const SizedBox(width: 6),
+                    UgamStatusDot(
+                      label: isSent ? 'SENT' : 'PENDING',
+                      tone: isSent
+                          ? UgamStatusTone.good
+                          : UgamStatusTone.warm,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Icon(Icons.event_seat_rounded,
+                        size: 11, color: c.ink3),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        seats.isEmpty ? '—' : 'Seat $seats',
+                        style: UgamText.tabular(
+                          UgamText.caption
+                              .copyWith(color: c.ink2, fontSize: 11.5),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
                 ),
-              ),
-              if (isSent)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.successLight,
-                    borderRadius: BorderRadius.circular(9999),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_rounded,
-                          size: 12, color: AppTheme.success),
-                      const SizedBox(width: 4),
-                      Text(
-                        'SENT',
-                        style: TextStyle(fontFamily: 'Inter', 
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1,
-                          color: AppTheme.success,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.bg(context),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.event_seat_rounded,
-                    size: 14, color: AppColors.textMuted(context)),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    seats.isEmpty ? '—' : 'Seat $seats',
-                    style: TextStyle(fontFamily: 'Inter', 
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.text(context),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (busNo != 'Not assigned' && busNo.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    busNo,
-                    style: TextStyle(fontFamily: 'Inter', 
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.textMuted(context),
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            height: 44,
-            child: ElevatedButton.icon(
-              onPressed: onSend,
-              icon: const Icon(Icons.chat_rounded, size: 16),
-              label: Text(
-                isSent ? tr('notify.cta_send_again') : tr('notify.cta_send_first'),
-                style: TextStyle(fontFamily: 'Inter', 
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
+          const SizedBox(width: UgamSpacing.sm),
+          GestureDetector(
+            onTap: onSend,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: isSent ? c.goodFill : c.accent,
+                shape: BoxShape.circle,
               ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF25D366),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.chat_rounded,
+                size: 17,
+                color: isSent ? c.good : c.onAccent,
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Sticky CTAs ──────────────────────────────────────────────────────
+
+class _LockStickyCTA extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  final Future<void> Function(Tour) onLock;
+  const _LockStickyCTA({
+    required this.tour,
+    required this.c,
+    required this.onLock,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final allAssigned = tour.allSeatsAssigned;
+    final hasHandler = tour.handlerId != null;
+    final hasPassengers = tour.passengers.isNotEmpty;
+    final canLock = allAssigned && hasHandler && hasPassengers;
+
+    String? reason;
+    if (!hasPassengers) {
+      reason = 'Add at least one passenger first';
+    } else if (!allAssigned) {
+      reason = 'Some seats are still unassigned';
+    } else if (!hasHandler) {
+      reason = 'Pick a handler before locking';
+    }
+
+    return UgamStickyCTA(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!canLock && reason != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+              child: Text(
+                reason,
+                style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+              ),
+            ),
+          UgamCTA(
+            label: canLock
+                ? tr('notify.lock_btn')
+                : tr('notify.lock_btn_disabled'),
+            leadingIcon: Icons.lock_rounded,
+            onPressed: canLock ? () => onLock(tour) : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Check extends StatelessWidget {
+  final bool done;
+  final String label;
+  final UgamColorSet c;
+
+  const _Check({
+    required this.done,
+    required this.label,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: done ? c.goodFill : c.cardElev,
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Icon(
+            done ? Icons.check_rounded : Icons.circle_outlined,
+            size: 14,
+            color: done ? c.good : c.ink3,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.md - 2),
+        Expanded(
+          child: Text(
+            label,
+            style: UgamText.body.copyWith(
+              color: done ? c.ink : c.ink2,
+              fontSize: 13.5,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
