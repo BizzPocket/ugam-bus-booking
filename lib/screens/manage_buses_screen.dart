@@ -1,11 +1,13 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/tour.dart';
+import '../utils/app_snackbar.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
 
@@ -38,6 +40,136 @@ class ManageBusesScreen extends StatelessWidget {
       (sum, p) =>
           sum + p.assignedSeats.where((a) => a.busId == busId).length,
     );
+  }
+
+  /// Opens a sheet with the per-bus actions: edit, view status,
+  /// re-broadcast to driver via WhatsApp, delete.
+  void _openBusMenu(BuildContext context, Tour tour, Bus bus) {
+    UgamSheet.show<void>(
+      context,
+      title: bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+      builder: (ctx) {
+        final c = UgamColors.of(ctx);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _BusMenuTile(
+              c: c,
+              icon: Icons.edit_rounded,
+              label: 'Edit bus details',
+              onTap: () {
+                Navigator.of(ctx).pop();
+                Get.to(
+                  () => AddBusScreen(tourId: tourId, existing: bus),
+                  transition: Transition.cupertino,
+                );
+              },
+            ),
+            _BusMenuTile(
+              c: c,
+              icon: Icons.event_seat_rounded,
+              label: 'View seat status',
+              onTap: () {
+                Navigator.of(ctx).pop();
+                Get.to(
+                  () => BusStatusScreen(tourId: tourId, busId: bus.id),
+                  transition: Transition.cupertino,
+                );
+              },
+            ),
+            _BusMenuTile(
+              c: c,
+              icon: Icons.chat_rounded,
+              label: 'Re-broadcast to driver via WhatsApp',
+              tint: c.good,
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _broadcastToDriver(tour, bus);
+              },
+            ),
+            _BusMenuTile(
+              c: c,
+              icon: Icons.delete_outline_rounded,
+              label: 'Delete bus',
+              tint: c.danger,
+              danger: true,
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _confirmDelete(context, tour, bus);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _broadcastToDriver(Tour tour, Bus bus) async {
+    final phone = bus.driverPhone.replaceAll(RegExp(r'[^\d+]'), '');
+    if (phone.isEmpty) {
+      AppSnackBar.error('Driver phone is missing on this bus.');
+      return;
+    }
+    var wa = phone.startsWith('+') ? phone.substring(1) : phone;
+    if (!phone.startsWith('+') && wa.length == 10) wa = '91$wa';
+    final msg = StringBuffer()
+      ..writeln('Bus assignment — ${tour.title}')
+      ..writeln('Bus: ${bus.busNumber.isEmpty ? bus.name : bus.busNumber}')
+      ..writeln(
+          'Departure: ${tour.departureDate.day}/${tour.departureDate.month}/${tour.departureDate.year}')
+      ..writeln('From: ${tour.fromCity}')
+      ..writeln('To: ${tour.toCity}');
+    final uri = Uri.parse(
+        'https://wa.me/$wa?text=${Uri.encodeComponent(msg.toString())}');
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) {
+        AppSnackBar.error('Could not open WhatsApp.');
+      }
+    } catch (e) {
+      AppSnackBar.error('Could not open WhatsApp. $e');
+    }
+  }
+
+  Future<void> _confirmDelete(
+      BuildContext context, Tour tour, Bus bus) async {
+    final c = UgamColors.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+        ),
+        title: Text('Delete bus?',
+            style: UgamText.titleM.copyWith(color: c.ink)),
+        content: Text(
+          'This will remove ${bus.busNumber.isEmpty ? bus.name : bus.busNumber} '
+          'from this tour. Seat assignments tied to this bus will be lost.',
+          style: UgamText.body.copyWith(color: c.ink2),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel',
+                style: UgamText.bodyStrong.copyWith(color: c.ink2)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text('Delete',
+                style: UgamText.bodyStrong.copyWith(color: c.danger)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await _tourCtrl.removeBus(tour.id, bus.id);
+      AppSnackBar.success('Bus deleted.');
+    } catch (e) {
+      AppSnackBar.error('Could not delete bus. $e');
+    }
   }
 
   @override
@@ -112,7 +244,7 @@ class ManageBusesScreen extends StatelessWidget {
                         itemCount: tour.buses.length,
                         separatorBuilder: (_, _) =>
                             const SizedBox(height: UgamSpacing.md),
-                        itemBuilder: (_, i) {
+                        itemBuilder: (ctx, i) {
                           final bus = tour.buses[i];
                           final assignedForBus =
                               _seatsAssignedForBus(tour, bus.id);
@@ -127,13 +259,7 @@ class ManageBusesScreen extends StatelessWidget {
                               ),
                               transition: Transition.cupertino,
                             ),
-                            onEdit: () => Get.to(
-                              () => AddBusScreen(
-                                tourId: tourId,
-                                existing: bus,
-                              ),
-                              transition: Transition.cupertino,
-                            ),
+                            onMore: () => _openBusMenu(ctx, tour, bus),
                           );
                         },
                       ),
@@ -230,14 +356,14 @@ class _BusListItem extends StatelessWidget {
   final Bus bus;
   final int assigned;
   final VoidCallback onOpen;
-  final VoidCallback onEdit;
+  final VoidCallback onMore;
 
   const _BusListItem({
     required this.c,
     required this.bus,
     required this.assigned,
     required this.onOpen,
-    required this.onEdit,
+    required this.onMore,
   });
 
   @override
@@ -304,7 +430,7 @@ class _BusListItem extends StatelessWidget {
                   ),
                 ),
                 GestureDetector(
-                  onTap: onEdit,
+                  onTap: onMore,
                   behavior: HitTestBehavior.opaque,
                   child: Container(
                     width: 38,
@@ -314,7 +440,8 @@ class _BusListItem extends StatelessWidget {
                       shape: BoxShape.circle,
                     ),
                     alignment: Alignment.center,
-                    child: Icon(Icons.edit_rounded, size: 16, color: c.ink),
+                    child: Icon(Icons.more_vert_rounded,
+                        size: 18, color: c.ink),
                   ),
                 ),
               ],
@@ -350,6 +477,60 @@ class _BusListItem extends StatelessWidget {
               ),
               const SizedBox(height: UgamSpacing.xs),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BusMenuTile extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final Color? tint;
+  final bool danger;
+  final VoidCallback onTap;
+
+  const _BusMenuTile({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.tint,
+    this.danger = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final iconColor = tint ?? c.ink;
+    final labelColor = danger ? c.danger : c.ink;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: danger ? c.warmFill : c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 18, color: iconColor),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Text(
+                label,
+                style: UgamText.bodyStrong
+                    .copyWith(color: labelColor, fontSize: 14),
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
           ],
         ),
       ),

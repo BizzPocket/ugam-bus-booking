@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
@@ -9,8 +10,11 @@ import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
+import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import 'add_bus_screen.dart';
+import 'tour_seat_assignment_screen.dart';
 
 /// Read-only seat layout for a single bus on a tour. Renders each seat
 /// in the layout grid with the assigned passenger's initials overlaid
@@ -79,6 +83,10 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
               _Header(bus: bus, tourTitle: tour.title),
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: _DriverHeroCard(bus: bus),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 child: _Tally(
                   assigned: assignedCount,
                   total: totalSeats,
@@ -103,6 +111,8 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                 ),
               ),
               const _Legend(),
+              const SizedBox(height: 10),
+              _BottomActions(tourId: tour.id, bus: bus),
               const SizedBox(height: 12),
             ],
           );
@@ -867,6 +877,241 @@ class _SheetRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Hero card at the top of the bus status screen. Bus backdrop + bus
+/// number + driver name/phone with quick-call and WhatsApp circle
+/// buttons on the right.
+class _DriverHeroCard extends StatelessWidget {
+  final Bus bus;
+
+  const _DriverHeroCard({required this.bus});
+
+  Future<void> _openWhatsApp(String phone) async {
+    final cleaned = phone.replaceAll(RegExp(r'[^\d+]'), '');
+    if (cleaned.isEmpty) return;
+    // Normalize to international form (default +91 for 10-digit local).
+    var wa = cleaned.startsWith('+') ? cleaned.substring(1) : cleaned;
+    if (!cleaned.startsWith('+') && wa.length == 10) wa = '91$wa';
+    final uri = Uri.parse('https://wa.me/$wa');
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) {
+        AppSnackBar.error('Could not open WhatsApp for $phone.',
+            title: 'WhatsApp failed');
+      }
+    } catch (e) {
+      AppSnackBar.error('Could not open WhatsApp. $e',
+          title: 'WhatsApp failed');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final phone = bus.driverPhone;
+    final hasPhone = phone.trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.sm),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(UgamRadius.photo),
+            child: SizedBox(
+              width: 84,
+              height: 84,
+              child: UgamBusBackdrop(seed: bus.id),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+                  style: UgamText.titleM.copyWith(color: c.ink),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  bus.driverName.isEmpty ? 'Driver pending' : bus.driverName,
+                  style: UgamText.bodyStrong
+                      .copyWith(color: c.ink2, fontSize: 13),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (hasPhone)
+                  Text(
+                    phone,
+                    style: UgamText.tabular(
+                      UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          _CircleAction(
+            icon: Icons.phone_rounded,
+            tint: c.accent,
+            fill: c.accentFill,
+            enabled: hasPhone,
+            onTap: () => PhoneDialer.call(phone),
+          ),
+          const SizedBox(width: 6),
+          _CircleAction(
+            icon: Icons.chat_rounded,
+            tint: c.good,
+            fill: c.goodFill,
+            enabled: hasPhone,
+            onTap: () => _openWhatsApp(phone),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CircleAction extends StatelessWidget {
+  final IconData icon;
+  final Color tint;
+  final Color fill;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _CircleAction({
+    required this.icon,
+    required this.tint,
+    required this.fill,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return GestureDetector(
+      onTap: enabled ? onTap : null,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: 42,
+        height: 42,
+        decoration: BoxDecoration(
+          color: enabled ? fill : c.card,
+          shape: BoxShape.circle,
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          icon,
+          size: 18,
+          color: enabled ? tint : c.ink3,
+        ),
+      ),
+    );
+  }
+}
+
+/// Below-the-grid row with two outlined pill links: "Edit bus details"
+/// and "Open seat assignment". Surfaces the next contextual actions an
+/// agent typically wants after eyeballing the chart.
+class _BottomActions extends StatelessWidget {
+  final String tourId;
+  final Bus bus;
+
+  const _BottomActions({required this.tourId, required this.bus});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          Expanded(
+            child: _OutlinedPill(
+              c: c,
+              icon: Icons.edit_rounded,
+              label: 'Edit bus details',
+              onTap: () => Get.to(
+                () => AddBusScreen(tourId: tourId, existing: bus),
+                transition: Transition.cupertino,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _OutlinedPill(
+              c: c,
+              icon: Icons.grid_view_rounded,
+              label: 'Open seat assignment',
+              onTap: () => Get.to(
+                () => TourSeatAssignmentScreen(tourId: tourId),
+                transition: Transition.cupertino,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OutlinedPill extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _OutlinedPill({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 15, color: c.ink),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                style:
+                    UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12.5),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
