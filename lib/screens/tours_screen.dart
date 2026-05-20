@@ -1,163 +1,164 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
+
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
+import '../models/tour.dart';
 import '../models/tour_status.dart';
-import '../components/tour_card.dart';
-import '../config/theme.dart';
 import 'tour_detail_screen.dart';
 
-class ToursScreen extends StatelessWidget {
+class ToursScreen extends StatefulWidget {
   const ToursScreen({super.key});
+
+  @override
+  State<ToursScreen> createState() => _ToursScreenState();
+}
+
+enum _Filter { active, collecting, locked, completed }
+
+class _ToursScreenState extends State<ToursScreen> {
+  _Filter _filter = _Filter.active;
 
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
+    final c = UgamColors.of(context);
+
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      // Lift the FAB above MainShell's floating pill bottom nav (~104px tall
-      // with extendBody: true). Without this it disappears behind the nav.
-      floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 90),
-        child: FloatingActionButton(
-          heroTag: 'tours_fab',
-          onPressed: () => Get.toNamed('/create-tour'),
-          child: const Icon(Icons.add),
-        ),
-      ),
+      backgroundColor: c.bg,
       body: SafeArea(
         bottom: false,
         child: Column(
           children: [
-            // ── Header ──────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.gutter,
+                UgamSpacing.lg,
+                UgamSpacing.gutter,
+                UgamSpacing.md,
+              ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
-                    tr('tours.title'),
-                    style: GoogleFonts.inter(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.text(context),
+                  Expanded(
+                    child: Text(
+                      tr('tours.title'),
+                      style: UgamText.titleXl.copyWith(color: c.ink),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => Get.toNamed('/create-tour'),
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: c.accent,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.add_rounded,
+                          size: 22, color: c.onAccent),
                     ),
                   ),
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.gutter,
+              ),
+              child: Obx(() {
+                final activeCount = tourCtrl.activeTours.length;
+                final collectingCount = tourCtrl
+                    .toursByStatus(TourStatus.collecting)
+                    .length;
+                final lockedCount =
+                    tourCtrl.toursByStatus(TourStatus.locked).length;
+                final completedCount = tourCtrl.completedTours.length;
 
-            const SizedBox(height: 20),
-
-            // ── Quick Stats Row ─────────────────────────────────────
-            Obx(() => Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Row(
-                    children: [
-                      _StatChip(
-                        label: tr('tours.stat.active'),
-                        count: tourCtrl.activeTours.length,
-                        color: AppTheme.brand,
-                      ),
-                      const SizedBox(width: 8),
-                      _StatChip(
-                        label: tr('tours.stat.collecting'),
-                        count: tourCtrl
-                            .toursByStatus(TourStatus.collecting)
-                            .length,
-                        color: AppTheme.warning,
-                      ),
-                      const SizedBox(width: 8),
-                      _StatChip(
-                        label: tr('tours.stat.locked'),
-                        count:
-                            tourCtrl.toursByStatus(TourStatus.locked).length,
-                        color: AppTheme.success,
-                      ),
-                      const SizedBox(width: 8),
-                      _StatChip(
-                        label: tr('tours.stat.completed'),
-                        count: tourCtrl.completedTours.length,
-                        color: const Color(0xFF6B7280),
-                      ),
-                    ],
-                  ),
-                )),
-
-            const SizedBox(height: 20),
-
-            // ── Tour List / Empty State ─────────────────────────────
+                return UgamTabPills(
+                  currentIndex: _Filter.values.indexOf(_filter),
+                  onChanged: (i) =>
+                      setState(() => _filter = _Filter.values[i]),
+                  items: [
+                    UgamTabItem(
+                      label: tr('tours.stat.active'),
+                      count: activeCount,
+                    ),
+                    UgamTabItem(
+                      label: tr('tours.stat.collecting'),
+                      count: collectingCount,
+                    ),
+                    UgamTabItem(
+                      label: tr('tours.stat.locked'),
+                      count: lockedCount,
+                    ),
+                    UgamTabItem(
+                      label: tr('tours.stat.completed'),
+                      count: completedCount,
+                    ),
+                  ],
+                );
+              }),
+            ),
+            const SizedBox(height: UgamSpacing.lg),
             Expanded(
               child: Obx(() {
                 if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
+                  return _LoadingShimmer();
                 }
-
                 if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.cloud_off_rounded,
-                              size: 48,
-                              color: AppColors.textMuted(context)),
-                          const SizedBox(height: 16),
-                          Text(
-                            tourCtrl.errorMessage.value,
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.inter(
-                              fontSize: 15,
-                              color: AppColors.textMuted(context),
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          OutlinedButton.icon(
-                            onPressed: tourCtrl.refreshTours,
-                            icon: const Icon(Icons.refresh_rounded, size: 18),
-                            label: Text(tr('app.action.retry')),
-                          ),
-                        ],
-                      ),
+                  return UgamEmpty(
+                    icon: Icons.cloud_off_rounded,
+                    title: tr('tours.title'),
+                    body: tourCtrl.errorMessage.value,
+                    cta: UgamCTA(
+                      label: tr('app.action.retry'),
+                      leadingIcon: Icons.refresh_rounded,
+                      onPressed: tourCtrl.refreshTours,
                     ),
                   );
                 }
 
-                final tours = tourCtrl.tours;
-
-                if (tours.isEmpty) {
-                  return _EmptyState(
-                    onCreateTour: () => Get.toNamed('/create-tour'),
+                final filtered = _applyFilter(tourCtrl);
+                if (filtered.isEmpty) {
+                  return UgamEmpty(
+                    icon: Icons.explore_rounded,
+                    title: tr('tours.empty.title'),
+                    body: tr('tours.empty.subtitle'),
+                    cta: UgamCTA(
+                      label: tr('tours.empty.cta'),
+                      leadingIcon: Icons.add_rounded,
+                      onPressed: () => Get.toNamed('/create-tour'),
+                    ),
                   );
                 }
 
                 return RefreshIndicator(
+                  color: c.accent,
                   onRefresh: tourCtrl.refreshTours,
-                  color: AppTheme.brand,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 100),
+                  child: ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(
                       parent: BouncingScrollPhysics(),
                     ),
-                    itemCount: tours.length,
-                    itemBuilder: (ctx, i) {
-                      final tour = tours[tours.length - 1 - i]; // newest first
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: TourCard(
-                          tour: tour,
-                          onTap: () => Get.to(
-                            () => TourDetailScreen(tourId: tour.id),
-                            transition: Transition.cupertino,
-                          ),
-                        ),
-                      );
-                    },
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.gutter,
+                      0,
+                      UgamSpacing.gutter,
+                      120,
+                    ),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: UgamSpacing.md),
+                    itemBuilder: (_, i) => _TourRow(
+                      tour: filtered[i],
+                      onTap: () => Get.to(
+                        () => TourDetailScreen(tourId: filtered[i].id),
+                        transition: Transition.cupertino,
+                      ),
+                      c: c,
+                    ),
                   ),
                 );
               }),
@@ -167,137 +168,149 @@ class ToursScreen extends StatelessWidget {
       ),
     );
   }
-}
 
-// ── Stat Chip ──────────────────────────────────────────────────────
-
-class _StatChip extends StatelessWidget {
-  final String label;
-  final int count;
-  final Color color;
-
-  const _StatChip({
-    required this.label,
-    required this.count,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-        decoration: BoxDecoration(
-          color: AppColors.surface(context),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: AppColors.border(context),
-          ),
-          boxShadow: AppTheme.subtleShadow,
-        ),
-        child: Column(
-          children: [
-            Text(
-              count.toString(),
-              style: GoogleFonts.inter(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: color,
-                height: 1,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textMuted(context),
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
+  List<Tour> _applyFilter(TourController ctrl) {
+    final list = switch (_filter) {
+      _Filter.active => ctrl.activeTours,
+      _Filter.collecting => ctrl.toursByStatus(TourStatus.collecting),
+      _Filter.locked => ctrl.toursByStatus(TourStatus.locked),
+      _Filter.completed => ctrl.completedTours,
+    };
+    final sorted = [...list]
+      ..sort((a, b) => b.departureDate.compareTo(a.departureDate));
+    return sorted;
   }
 }
 
-// ── Empty State ────────────────────────────────────────────────────
-
-class _EmptyState extends StatelessWidget {
-  final VoidCallback onCreateTour;
-
-  const _EmptyState({required this.onCreateTour});
+class _TourRow extends StatelessWidget {
+  final Tour tour;
+  final VoidCallback onTap;
+  final UgamColorSet c;
+  const _TourRow({required this.tour, required this.onTap, required this.c});
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.brand.withAlpha(20),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.explore_rounded,
-                size: 40,
-                color: AppTheme.brand.withAlpha(150),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              tr('tours.empty.title'),
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: AppColors.text(context),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              tr('tours.empty.subtitle'),
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: AppColors.textMuted(context),
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: ElevatedButton.icon(
-                onPressed: onCreateTour,
-                icon: const Icon(Icons.add_rounded, size: 20),
-                label: Text(
-                  tr('tours.empty.cta'),
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.brand,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  elevation: 0,
+    final assignedTotal = tour.totalSeatsAssigned;
+    final capacity = tour.totalBusSeats;
+    final tone = _toneFor(tour.status);
+
+    return UgamCard.plain(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(tour.title,
+                        style: UgamText.titleS
+                            .copyWith(color: c.ink, fontSize: 16),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${tour.fromCity} → ${tour.toCity}',
+                      style: UgamText.caption
+                          .copyWith(color: c.ink2, fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(height: 80),
-          ],
-        ),
+              const SizedBox(width: UgamSpacing.md),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.sm + 2,
+                  vertical: UgamSpacing.xs + 1,
+                ),
+                decoration: BoxDecoration(
+                  color: c.accentFill,
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
+                ),
+                child: Text(
+                  _formatDate(tour.departureDate),
+                  style: UgamText.tabular(
+                    UgamText.micro.copyWith(color: c.accent, fontSize: 10.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          Row(
+            children: [
+              UgamStatusDot(label: tour.status.displayName, tone: tone),
+              const Spacer(),
+              Text(
+                tr('dashboard.pax',
+                    namedArgs: {'count': '${tour.passengerCount}'}),
+                style: UgamText.tabular(
+                  UgamText.caption.copyWith(color: c.ink2),
+                ),
+              ),
+              if (capacity > 0) ...[
+                const SizedBox(width: UgamSpacing.md),
+                Text('· ',
+                    style: UgamText.caption.copyWith(color: c.ink3)),
+                Text(
+                  '$assignedTotal/$capacity',
+                  style: UgamText.tabular(
+                    UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
       ),
+    );
+  }
+
+  UgamStatusTone _toneFor(TourStatus s) {
+    switch (s) {
+      case TourStatus.planning:
+        return UgamStatusTone.accent;
+      case TourStatus.collecting:
+        return UgamStatusTone.warm;
+      case TourStatus.busBooked:
+      case TourStatus.assigning:
+        return UgamStatusTone.accent;
+      case TourStatus.locked:
+        return UgamStatusTone.good;
+      case TourStatus.completed:
+        return UgamStatusTone.neutral;
+    }
+  }
+
+  static String _formatDate(DateTime d) {
+    const months = [
+      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+    ];
+    return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
+  }
+}
+
+class _LoadingShimmer extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(UgamSpacing.gutter),
+      physics: const NeverScrollableScrollPhysics(),
+      children: const [
+        UgamSkeleton(height: 96, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 96, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 96, radius: UgamRadius.card),
+      ],
     );
   }
 }

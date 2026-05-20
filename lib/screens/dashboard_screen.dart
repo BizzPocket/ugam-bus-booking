@@ -1,11 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../routes/app_routes.dart';
@@ -14,9 +13,8 @@ import 'main_shell.dart';
 import 'settings_screen.dart';
 import 'tour_detail_screen.dart';
 
-/// Admin home screen. Mirrors the Pencil "Admin Home" layout:
-/// greeting + avatar, 2x2 stat grid, "Upcoming Tours" list with status
-/// pills, and a floating "+" CTA that opens Create Tour.
+/// Admin home / cockpit. Greeting + 2×2 stat grid + upcoming tours.
+/// Floating dock nav lives on the [MainShell] beneath this surface.
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
@@ -25,132 +23,117 @@ class DashboardScreen extends StatelessWidget {
     final tourCtrl = Get.find<TourController>();
     final authCtrl = Get.find<AuthController>();
     final shell = Get.find<ShellController>();
-    final theme = Theme.of(context);
+    final c = UgamColors.of(context);
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: c.bg,
       body: SafeArea(
         bottom: false,
-        child: Stack(
-          children: [
-            // The full-screen empty-state branches (loading / error) still
-            // need to gate the whole tree, so this outer Obx watches
-            // `isLoading` + `hasError` + `tours` for emptiness only. Once
-            // we render the list, the inner sections each carry their
-            // own Obx scope so an auth-name update doesn't repaint stats,
-            // and a stats-recomputation doesn't repaint every tour card.
-            Obx(() {
-              if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-                return _ErrorState(
-                  message: tourCtrl.errorMessage.value,
-                  onRetry: tourCtrl.refreshTours,
-                );
-              }
-              return RefreshIndicator(
-                onRefresh: tourCtrl.refreshTours,
-                color: AppTheme.brand,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(
-                    parent: BouncingScrollPhysics(),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 140),
-                  children: [
-                    // Greeting — depends on auth state only. Lifted into
-                    // its own Obx so a tour write doesn't re-render the
-                    // avatar or the user's display name.
-                    Obx(() => _Greeting(
-                          name: authCtrl.userName.value,
-                          initials: authCtrl.initials,
-                        )),
-                    const SizedBox(height: 28),
-                    _SectionLabel(tr('dashboard.section_overview')),
-                    const SizedBox(height: 12),
-                    // Stats — derived from tours. Recomputes only when
-                    // the tours list itself emits.
-                    Obx(() {
-                      final tours = tourCtrl.tours;
-                      final activeTours = tourCtrl.activeTours;
-                      final pendingRequests = tourCtrl
-                          .toursByStatus(TourStatus.collecting)
-                          .length;
-                      final totalPassengers = tours.fold<int>(
-                          0, (s, t) => s + t.passengerCount);
-                      final revenue = tours.fold<double>(
-                          0,
-                          (s, t) =>
-                              s + (t.pricePerSeat * t.totalSeatsRequested));
-                      return _StatRow(
-                        activeCount: activeTours.length,
-                        pendingRequests: pendingRequests,
-                        totalPassengers: totalPassengers,
-                        revenue: revenue,
-                      );
-                    }),
-                    const SizedBox(height: 28),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          tr('dashboard.section_upcoming'),
-                          style: AppText.sectionTitle.copyWith(
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () => shell.switchTab(1),
-                          child: Text(
-                            tr('dashboard.see_all'),
-                            style: AppText.link.copyWith(color: AppTheme.brand),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    // Tours list — its own Obx so stat recomputations
-                    // never trigger card rebuilds and vice-versa. Uses
-                    // ListView.builder (shrink-wrapped, non-scrollable —
-                    // the outer ListView owns the scroll) so each card
-                    // is built lazily as it scrolls into view instead of
-                    // up-front on first paint.
-                    Obx(() {
-                      final activeTours = tourCtrl.activeTours;
-                      if (activeTours.isEmpty) return const _EmptyTours();
-                      return ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: EdgeInsets.zero,
-                        itemCount: activeTours.length,
-                        itemBuilder: (context, i) {
-                          final tour = activeTours[i];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _TourCard(
-                              tour: tour,
-                              onTap: () => Get.to(
-                                () => TourDetailScreen(tourId: tour.id),
-                                transition: Transition.cupertino,
-                              ),
-                            ),
-                          );
-                        },
-                      );
-                    }),
-                  ],
+        child: Obx(() {
+          if (tourCtrl.isLoading.value && tourCtrl.tours.isEmpty) {
+            return _LoadingShimmer();
+          }
+          if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
+            return UgamEmpty(
+              icon: Icons.cloud_off_rounded,
+              title: tr('dashboard.section_overview'),
+              body: tourCtrl.errorMessage.value,
+              cta: UgamCTA(
+                label: tr('app.action.retry'),
+                leadingIcon: Icons.refresh_rounded,
+                onPressed: tourCtrl.refreshTours,
+              ),
+            );
+          }
+          return RefreshIndicator(
+            onRefresh: tourCtrl.refreshTours,
+            color: c.accent,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.gutter,
+                UgamSpacing.lg,
+                UgamSpacing.gutter,
+                120, // clear the dock nav
+              ),
+              children: [
+                Obx(() => _Greeting(
+                      name: authCtrl.userName.value,
+                      initials: authCtrl.initials,
+                      c: c,
+                    )),
+                const SizedBox(height: UgamSpacing.xl),
+                Obx(() {
+                  final tours = tourCtrl.tours;
+                  final activeTours = tourCtrl.activeTours;
+                  final pendingRequests = tourCtrl
+                      .toursByStatus(TourStatus.collecting)
+                      .length;
+                  final totalPassengers = tours.fold<int>(
+                      0, (s, t) => s + t.passengerCount);
+                  final revenue = tours.fold<double>(
+                      0,
+                      (s, t) =>
+                          s + (t.pricePerSeat * t.totalSeatsRequested));
+                  return _StatGrid(
+                    activeCount: activeTours.length,
+                    pendingRequests: pendingRequests,
+                    totalPassengers: totalPassengers,
+                    revenue: revenue,
+                  );
+                }),
+                const SizedBox(height: UgamSpacing.xl),
+                _SectionHeader(
+                  title: tr('dashboard.section_upcoming'),
+                  action: tr('dashboard.see_all'),
+                  onAction: () => shell.switchTab(1),
+                  c: c,
                 ),
-              );
-            }),
-
-            // Floating "+" — sits clear of the pill bottom nav (~104px tall).
-            Positioned(
-              right: 20,
-              bottom: 110,
-              child: _Fab(onTap: () => Get.to(() => const CreateTourScreen())),
+                const SizedBox(height: UgamSpacing.md),
+                Obx(() {
+                  final activeTours = tourCtrl.activeTours;
+                  if (activeTours.isEmpty) {
+                    return UgamCard.plain(
+                      padding:
+                          const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+                      child: Column(
+                        children: [
+                          Icon(Icons.map_outlined, size: 40, color: c.ink3),
+                          const SizedBox(height: UgamSpacing.sm),
+                          Text(
+                            tr('dashboard.empty_tours'),
+                            style: UgamText.body.copyWith(color: c.ink2),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: EdgeInsets.zero,
+                    itemCount: activeTours.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: UgamSpacing.md),
+                    itemBuilder: (_, i) {
+                      final tour = activeTours[i];
+                      return _TourCard(
+                        tour: tour,
+                        onTap: () => Get.to(
+                          () => TourDetailScreen(tourId: tour.id),
+                          transition: Transition.cupertino,
+                        ),
+                        c: c,
+                      );
+                    },
+                  );
+                }),
+              ],
             ),
-          ],
-        ),
+          );
+        }),
       ),
     );
   }
@@ -159,14 +142,19 @@ class DashboardScreen extends StatelessWidget {
 class _Greeting extends StatelessWidget {
   final String name;
   final String initials;
+  final UgamColorSet c;
 
-  const _Greeting({required this.name, required this.initials});
+  const _Greeting({
+    required this.name,
+    required this.initials,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final greeting = _greetingForHour(DateTime.now().hour);
-    final displayName = name.isNotEmpty ? name : tr('dashboard.welcome_fallback');
+    final displayName =
+        name.isNotEmpty ? name : tr('dashboard.welcome_fallback');
     final displayInitials = initials.isNotEmpty ? initials : '👋';
 
     return Row(
@@ -176,26 +164,27 @@ class _Greeting extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                greeting,
-                style: AppText.bodyMd.copyWith(
-                  color: AppColors.textMuted(context),
-                ),
-              ),
-              const SizedBox(height: 4),
+              Text(greeting,
+                  style: UgamText.body.copyWith(color: c.ink2, fontSize: 13)),
+              const SizedBox(height: 2),
               Text(
                 displayName,
-                style: GoogleFonts.inter(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onSurface,
-                ),
+                style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 24),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
         ),
+        _CircleIcon(
+          icon: Icons.add_rounded,
+          tooltip: tr('dashboard.section_upcoming'),
+          c: c,
+          accent: true,
+          onTap: () =>
+              Get.to(() => const CreateTourScreen(), transition: Transition.cupertino),
+        ),
+        const SizedBox(width: UgamSpacing.sm),
         GestureDetector(
           onTap: () => Get.to(
             () => const SettingsScreen(),
@@ -205,18 +194,14 @@ class _Greeting extends StatelessWidget {
           child: Container(
             width: 44,
             height: 44,
-            decoration: const BoxDecoration(
-              color: AppTheme.brand,
+            decoration: BoxDecoration(
+              color: c.accent,
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
-            child: Text(
-              displayInitials,
-              style: AppText.chipText.copyWith(
-                fontSize: 14,
-                color: Colors.white,
-              ),
-            ),
+            child: Text(displayInitials,
+                style: UgamText.bodyStrong
+                    .copyWith(color: c.onAccent, fontSize: 14)),
           ),
         ),
       ],
@@ -230,31 +215,82 @@ class _Greeting extends StatelessWidget {
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel(this.text);
+class _CircleIcon extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final UgamColorSet c;
+  final bool accent;
+  final VoidCallback onTap;
+  const _CircleIcon({
+    required this.icon,
+    required this.tooltip,
+    required this.c,
+    required this.onTap,
+    this.accent = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: AppText.labelCaps.copyWith(color: AppColors.textMuted(context)),
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: accent ? c.accentFill : c.cardElev,
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 20, color: accent ? c.accent : c.ink2),
+        ),
+      ),
     );
   }
 }
 
-/// Horizontal pill row of compact stats. Replaces the old 2×2 stat
-/// grid — that grid ate ~200px of vertical real estate showing mostly
-/// zeros while the agent's actual work (tour cards) was pushed down.
-/// Pills scroll horizontally so we can grow the set later without
-/// stealing more vertical space.
-class _StatRow extends StatelessWidget {
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final String? action;
+  final VoidCallback? onAction;
+  final UgamColorSet c;
+
+  const _SectionHeader({
+    required this.title,
+    required this.c,
+    this.action,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(title, style: UgamText.titleM.copyWith(color: c.ink)),
+        if (action != null)
+          GestureDetector(
+            onTap: onAction,
+            child: Text(
+              action!,
+              style: UgamText.bodyStrong
+                  .copyWith(color: c.accent, fontSize: 12),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _StatGrid extends StatelessWidget {
   final int activeCount;
   final int pendingRequests;
   final int totalPassengers;
   final double revenue;
 
-  const _StatRow({
+  const _StatGrid({
     required this.activeCount,
     required this.pendingRequests,
     required this.totalPassengers,
@@ -263,47 +299,37 @@ class _StatRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final pills = <Widget>[
-      _StatPill(
-        icon: Icons.map_rounded,
-        accent: AppTheme.brand,
-        accentBg: AppTheme.brandLight,
-        value: '$activeCount',
-        label: tr('dashboard.stat_active_tours'),
-      ),
-      _StatPill(
-        icon: Icons.access_time_rounded,
-        accent: AppTheme.warning,
-        accentBg: AppTheme.warningLight,
-        value: '$pendingRequests',
-        label: tr('dashboard.stat_pending_requests'),
-      ),
-      _StatPill(
-        icon: Icons.people_rounded,
-        accent: AppTheme.success,
-        accentBg: AppTheme.successLight,
-        value: '$totalPassengers',
-        label: tr('dashboard.stat_total_passengers'),
-      ),
-      _StatPill(
-        icon: Icons.currency_rupee_rounded,
-        accent: AppTheme.info,
-        accentBg: AppTheme.infoLight,
-        value: _formatRevenue(revenue),
-        label: tr('dashboard.stat_revenue'),
-      ),
-    ];
-
-    return SizedBox(
-      height: 64,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: EdgeInsets.zero,
-        itemCount: pills.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 10),
-        itemBuilder: (_, i) => pills[i],
-      ),
+    return GridView.count(
+      crossAxisCount: 2,
+      crossAxisSpacing: UgamSpacing.md,
+      mainAxisSpacing: UgamSpacing.md,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 1.55,
+      children: [
+        UgamStatTile(
+          icon: Icons.map_rounded,
+          value: '$activeCount',
+          label: tr('dashboard.stat_active_tours'),
+        ),
+        UgamStatTile(
+          icon: Icons.access_time_rounded,
+          value: '$pendingRequests',
+          label: tr('dashboard.stat_pending_requests'),
+          variant: UgamStatVariant.warm,
+        ),
+        UgamStatTile(
+          icon: Icons.people_rounded,
+          value: '$totalPassengers',
+          label: tr('dashboard.stat_total_passengers'),
+          variant: UgamStatVariant.good,
+        ),
+        UgamStatTile(
+          icon: Icons.currency_rupee_rounded,
+          value: _formatRevenue(revenue),
+          label: tr('dashboard.stat_revenue'),
+        ),
+      ],
     );
   }
 
@@ -324,219 +350,155 @@ class _StatRow extends StatelessWidget {
   }
 }
 
-class _StatPill extends StatelessWidget {
-  final IconData icon;
-  final Color accent;
-  final Color accentBg;
-  final String value;
-  final String label;
-
-  const _StatPill({
-    required this.icon,
-    required this.accent,
-    required this.accentBg,
-    required this.value,
-    required this.label,
-  });
+class _TourCard extends StatelessWidget {
+  final Tour tour;
+  final VoidCallback onTap;
+  final UgamColorSet c;
+  const _TourCard({required this.tour, required this.onTap, required this.c});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border(context)),
-        boxShadow: AppTheme.subtleShadow,
-      ),
-      child: Row(
+    final assignedTotal = tour.totalSeatsAssigned;
+    final capacity = tour.totalBusSeats;
+    final pct =
+        capacity > 0 ? (assignedTotal / capacity).clamp(0.0, 1.0) : 0.0;
+    final tone = _toneFor(tour.status);
+
+    return UgamCard.plain(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: accentBg,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 16, color: accent),
-          ),
-          const SizedBox(width: 10),
-          Column(
-            mainAxisSize: MainAxisSize.min,
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                value,
-                style: AppText.statValue.copyWith(
-                  color: AppColors.text(context),
+              Expanded(
+                child: Text(
+                  tour.title,
+                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 16),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Text(
-                label,
-                style: AppText.cardLabel.copyWith(
-                  color: AppColors.textMuted(context),
-                ),
-              ),
+              const SizedBox(width: UgamSpacing.sm),
+              UgamStatusDot(label: tour.status.displayName, tone: tone),
             ],
           ),
+          const SizedBox(height: UgamSpacing.sm + 2),
+          Wrap(
+            spacing: UgamSpacing.gutter,
+            runSpacing: 4,
+            children: [
+              _MetaItem(
+                icon: Icons.calendar_today_outlined,
+                text: _formatDate(tour.departureDate, tour.returnDate),
+                c: c,
+              ),
+              _MetaItem(
+                icon: Icons.people_outline_rounded,
+                text: tr('dashboard.pax',
+                    namedArgs: {'count': '${tour.passengerCount}'}),
+                c: c,
+              ),
+              if (tour.fromCity.isNotEmpty || tour.toCity.isNotEmpty)
+                _MetaItem(
+                  icon: Icons.south_east_rounded,
+                  text: '${tour.fromCity} → ${tour.toCity}',
+                  c: c,
+                ),
+            ],
+          ),
+          if (capacity > 0) ...[
+            const SizedBox(height: UgamSpacing.md),
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: pct,
+                      minHeight: 6,
+                      backgroundColor: c.cardElev,
+                      valueColor: AlwaysStoppedAnimation(c.accent),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: UgamSpacing.sm + 2),
+                Text(
+                  '$assignedTotal/$capacity',
+                  style: UgamText.tabular(
+                    UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (_actionFor(tour.status) != null) ...[
+            const SizedBox(height: UgamSpacing.md),
+            GestureDetector(
+              onTap: () => Get.toNamed(
+                AppRoutes.seatAssignment,
+                arguments: {'tourId': tour.id},
+              ),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                height: 36,
+                decoration: BoxDecoration(
+                  color: c.accentFill,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.event_seat_rounded, size: 14, color: c.accent),
+                    const SizedBox(width: 6),
+                    Text(
+                      tr('dashboard.action_assign_seats'),
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.accent, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
-}
 
-class _TourCard extends StatelessWidget {
-  final Tour tour;
-  final VoidCallback onTap;
-
-  const _TourCard({required this.tour, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = _statusColors(context, tour.status);
-    final assignedTotal = tour.totalSeatsAssigned;
-    final capacity = tour.totalBusSeats;
-    final pct = capacity > 0
-        ? (assignedTotal / capacity).clamp(0.0, 1.0)
-        : 0.0;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface(context),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border(context)),
-          boxShadow: AppTheme.subtleShadow,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── Title row: name on the left, status pill on the right
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    tour.title,
-                    style: AppText.cardTitle.copyWith(
-                      color: AppColors.text(context),
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.$1,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    tour.status.displayName,
-                    style: AppText.badge.copyWith(color: colors.$2),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            // ── Meta row: route, date, pax
-            Wrap(
-              spacing: 14,
-              runSpacing: 4,
-              children: [
-                _MetaItem(
-                  icon: Icons.calendar_today_outlined,
-                  text: _formatDate(tour.departureDate, tour.returnDate),
-                ),
-                _MetaItem(
-                  icon: Icons.people_outline_rounded,
-                  text: tr('dashboard.pax',
-                      namedArgs: {'count': '${tour.passengerCount}'}),
-                ),
-                if (tour.fromCity.isNotEmpty || tour.toCity.isNotEmpty)
-                  _MetaItem(
-                    icon: Icons.south_east_rounded,
-                    text: '${tour.fromCity} → ${tour.toCity}',
-                  ),
-              ],
-            ),
-            // ── Seats progress bar (only when buses are booked + capacity > 0)
-            if (capacity > 0) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: pct,
-                        minHeight: 6,
-                        backgroundColor: AppColors.bg(context),
-                        valueColor: AlwaysStoppedAnimation(colors.$2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    '$assignedTotal/$capacity',
-                    style: AppText.cardMeta.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textMuted(context),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            // ── Inline quick actions, status-aware
-            ..._buildQuickActions(context),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Status-aware row of quick actions. Returns an empty list when no
-  /// action fits the current status — keeps the card tight for terminal
-  /// states like `locked` / `completed`.
-  List<Widget> _buildQuickActions(BuildContext context) {
-    final actions = <_QuickAction>[];
-    switch (tour.status) {
+  String? _actionFor(TourStatus s) {
+    switch (s) {
       case TourStatus.planning:
       case TourStatus.collecting:
       case TourStatus.busBooked:
       case TourStatus.assigning:
-        actions.add(_QuickAction(
-          icon: Icons.event_seat_rounded,
-          label: tr('dashboard.action_assign_seats'),
-          onTap: () => Get.toNamed(
-            AppRoutes.seatAssignment,
-            arguments: {'tourId': tour.id},
-          ),
-        ));
-        break;
+        return 'assign';
       case TourStatus.locked:
       case TourStatus.completed:
-        break;
+        return null;
     }
-    if (actions.isEmpty) return const [];
-    return [
-      const SizedBox(height: 12),
-      Row(
-        children: [
-          for (var i = 0; i < actions.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(child: actions[i]),
-          ],
-        ],
-      ),
-    ];
+  }
+
+  UgamStatusTone _toneFor(TourStatus s) {
+    switch (s) {
+      case TourStatus.planning:
+        return UgamStatusTone.accent;
+      case TourStatus.collecting:
+        return UgamStatusTone.warm;
+      case TourStatus.busBooked:
+      case TourStatus.assigning:
+        return UgamStatusTone.accent;
+      case TourStatus.locked:
+        return UgamStatusTone.good;
+      case TourStatus.completed:
+        return UgamStatusTone.neutral;
+    }
   }
 
   String _formatDate(DateTime departure, DateTime? returnDate) {
@@ -546,185 +508,53 @@ class _TourCard extends StatelessWidget {
     }
     return fmt.format(departure);
   }
-
-  (Color, Color) _statusColors(BuildContext context, TourStatus status) {
-    switch (status) {
-      case TourStatus.planning:
-        return (AppTheme.infoLight, AppTheme.info);
-      case TourStatus.collecting:
-        return (AppTheme.warningLight, AppTheme.warning);
-      case TourStatus.busBooked:
-        return (AppTheme.brandLight, AppTheme.brand);
-      case TourStatus.assigning:
-        return (AppTheme.brandLight, AppTheme.brand);
-      case TourStatus.locked:
-        return (AppTheme.successLight, AppTheme.success);
-      case TourStatus.completed:
-        return (AppColors.surfaceAlt(context), AppColors.textMuted(context));
-    }
-  }
 }
 
-/// One key/value meta row item used inside `_TourCard` — small icon +
-/// muted text. Lives in a Wrap so it flows to a second line on narrow
-/// screens instead of overflowing.
 class _MetaItem extends StatelessWidget {
   final IconData icon;
   final String text;
-  const _MetaItem({required this.icon, required this.text});
+  final UgamColorSet c;
+  const _MetaItem({required this.icon, required this.text, required this.c});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 12, color: AppColors.textMuted(context)),
+        Icon(icon, size: 12, color: c.ink3),
         const SizedBox(width: 4),
-        Text(
-          text,
-          style: AppText.cardMeta.copyWith(color: AppColors.textMuted(context)),
-        ),
+        Text(text,
+            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11)),
       ],
     );
   }
 }
 
-/// Inline brand-tinted action chip stamped on `_TourCard`. Tapping
-/// stops the outer card's onTap (we route to the action's own target
-/// instead of opening tour details).
-class _QuickAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  const _QuickAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
+class _LoadingShimmer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 36,
-        decoration: BoxDecoration(
-          color: AppTheme.brandLight,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        alignment: Alignment.center,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 14, color: AppTheme.brand),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: AppText.buttonInline.copyWith(color: AppTheme.brand),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Fab extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _Fab({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 56,
-        height: 56,
-        decoration: BoxDecoration(
-          color: AppTheme.brand,
-          borderRadius: BorderRadius.circular(28),
-          boxShadow: [
-            BoxShadow(
-              color: AppTheme.brand.withValues(alpha: 0.35),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        alignment: Alignment.center,
-        child: const Icon(Icons.add, size: 24, color: Colors.white),
-      ),
-    );
-  }
-}
-
-class _EmptyTours extends StatelessWidget {
-  const _EmptyTours();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 40),
-      decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border(context)),
-        boxShadow: AppTheme.subtleShadow,
-      ),
-      child: Column(
-        children: [
-          Icon(Icons.map_outlined, size: 40, color: AppColors.textMuted(context)),
-          const SizedBox(height: 8),
-          Text(
-            tr('dashboard.empty_tours'),
-            style: AppText.bodyMd.copyWith(color: AppColors.textMuted(context)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  final String message;
-  final Future<void> Function() onRetry;
-
-  const _ErrorState({required this.message, required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.cloud_off_rounded,
-              size: 48,
-              color: AppColors.textMuted(context),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: AppText.bodyMd.copyWith(
-                fontSize: 14,
-                color: AppColors.textMuted(context),
-              ),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: Text(tr('app.action.retry')),
-            ),
-          ],
-        ),
-      ),
+    return ListView(
+      padding: const EdgeInsets.all(UgamSpacing.gutter),
+      physics: const NeverScrollableScrollPhysics(),
+      children: const [
+        UgamSkeleton(height: 56, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.xl),
+        Row(children: [
+          Expanded(child: UgamSkeleton(height: 88, radius: UgamRadius.stat)),
+          SizedBox(width: UgamSpacing.md),
+          Expanded(child: UgamSkeleton(height: 88, radius: UgamRadius.stat)),
+        ]),
+        SizedBox(height: UgamSpacing.md),
+        Row(children: [
+          Expanded(child: UgamSkeleton(height: 88, radius: UgamRadius.stat)),
+          SizedBox(width: UgamSpacing.md),
+          Expanded(child: UgamSkeleton(height: 88, radius: UgamRadius.stat)),
+        ]),
+        SizedBox(height: UgamSpacing.xl),
+        UgamSkeleton(height: 140, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 140, radius: UgamRadius.card),
+      ],
     );
   }
 }
