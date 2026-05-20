@@ -194,81 +194,100 @@ class _TourRow extends StatelessWidget {
     final capacity = tour.totalBusSeats;
     final tone = _toneFor(tour.status);
 
-    return UgamCard.plain(
+    return GestureDetector(
       onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(tour.title,
-                        style: UgamText.titleS
-                            .copyWith(color: c.ink, fontSize: 16),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${tour.fromCity} → ${tour.toCity}',
-                      style: UgamText.caption
-                          .copyWith(color: c.ink2, fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.sm),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: SizedBox(
+                width: 84,
+                height: 84,
+                child: UgamBusBackdrop(seed: tour.id),
               ),
-              const SizedBox(width: UgamSpacing.md),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.sm + 2,
-                  vertical: UgamSpacing.xs + 1,
-                ),
-                decoration: BoxDecoration(
-                  color: c.accentFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.input),
-                ),
-                child: Text(
-                  _formatDate(tour.departureDate),
-                  style: UgamText.tabular(
-                    UgamText.micro.copyWith(color: c.accent, fontSize: 10.5),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          tour.title,
+                          style: UgamText.titleS
+                              .copyWith(color: c.ink, fontSize: 15),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: c.card,
+                          borderRadius:
+                              BorderRadius.circular(UgamRadius.chip),
+                        ),
+                        child: Text(
+                          _formatDate(tour.departureDate),
+                          style: UgamText.tabular(
+                            UgamText.micro
+                                .copyWith(color: c.ink, fontSize: 10),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Row(
-            children: [
-              UgamStatusDot(label: tour.status.displayName, tone: tone),
-              const Spacer(),
-              Text(
-                tr('dashboard.pax',
-                    namedArgs: {'count': '${tour.passengerCount}'}),
-                style: UgamText.tabular(
-                  UgamText.caption.copyWith(color: c.ink2),
-                ),
-              ),
-              if (capacity > 0) ...[
-                const SizedBox(width: UgamSpacing.md),
-                Text('· ',
-                    style: UgamText.caption.copyWith(color: c.ink3)),
-                Text(
-                  '$assignedTotal/$capacity',
-                  style: UgamText.tabular(
-                    UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${tour.fromCity} → ${tour.toCity}',
+                    style: UgamText.caption
+                        .copyWith(color: c.ink2, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
-            ],
-          ),
-        ],
+                  const SizedBox(height: UgamSpacing.sm),
+                  Row(
+                    children: [
+                      UgamStatusDot(
+                          label: tour.status.displayName, tone: tone),
+                      const Spacer(),
+                      if (capacity > 0)
+                        Text(
+                          '$assignedTotal/$capacity',
+                          style: UgamText.tabular(
+                            UgamText.bodyStrong
+                                .copyWith(color: c.ink, fontSize: 12),
+                          ),
+                        )
+                      else
+                        Text(
+                          tr('dashboard.pax', namedArgs: {
+                            'count': '${tour.passengerCount}'
+                          }),
+                          style: UgamText.tabular(
+                            UgamText.caption.copyWith(color: c.ink2),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

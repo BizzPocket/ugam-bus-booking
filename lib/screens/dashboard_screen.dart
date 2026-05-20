@@ -364,110 +364,172 @@ class _TourCard extends StatelessWidget {
         capacity > 0 ? (assignedTotal / capacity).clamp(0.0, 1.0) : 0.0;
     final tone = _toneFor(tour.status);
 
-    return UgamCard.plain(
+    return GestureDetector(
       onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  tour.title,
-                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 16),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: UgamSpacing.sm),
-              UgamStatusDot(label: tour.status.displayName, tone: tone),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.sm + 2),
-          Wrap(
-            spacing: UgamSpacing.gutter,
-            runSpacing: 4,
-            children: [
-              _MetaItem(
-                icon: Icons.calendar_today_outlined,
-                text: _formatDate(tour.departureDate, tour.returnDate),
-                c: c,
-              ),
-              _MetaItem(
-                icon: Icons.people_outline_rounded,
-                text: tr('dashboard.pax',
-                    namedArgs: {'count': '${tour.passengerCount}'}),
-                c: c,
-              ),
-              if (tour.fromCity.isNotEmpty || tour.toCity.isNotEmpty)
-                _MetaItem(
-                  icon: Icons.south_east_rounded,
-                  text: '${tour.fromCity} → ${tour.toCity}',
-                  c: c,
-                ),
-            ],
-          ),
-          if (capacity > 0) ...[
-            const SizedBox(height: UgamSpacing.md),
-            Row(
-              children: [
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: pct,
-                      minHeight: 6,
-                      backgroundColor: c.cardElev,
-                      valueColor: AlwaysStoppedAnimation(c.accent),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.sm + 2),
-                Text(
-                  '$assignedTotal/$capacity',
-                  style: UgamText.tabular(
-                    UgamText.caption.copyWith(
-                      color: c.ink2,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (_actionFor(tour.status) != null) ...[
-            const SizedBox(height: UgamSpacing.md),
-            GestureDetector(
-              onTap: () => Get.toNamed(
-                AppRoutes.seatAssignment,
-                arguments: {'tourId': tour.id},
-              ),
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                height: 36,
-                decoration: BoxDecoration(
-                  color: c.accentFill,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                alignment: Alignment.center,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.sm),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: SizedBox(
+                height: 130,
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    Icon(Icons.event_seat_rounded, size: 14, color: c.accent),
-                    const SizedBox(width: 6),
-                    Text(
-                      tr('dashboard.action_assign_seats'),
-                      style: UgamText.bodyStrong
-                          .copyWith(color: c.accent, fontSize: 12),
+                    UgamBusBackdrop(seed: tour.id),
+                    Positioned(
+                      top: UgamSpacing.md,
+                      left: UgamSpacing.md,
+                      child: UgamStatusDot(
+                        label: tour.status.displayName,
+                        tone: tone,
+                      ),
+                    ),
+                    Positioned(
+                      top: UgamSpacing.md - 4,
+                      right: UgamSpacing.md - 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: UgamSpacing.sm + 2,
+                          vertical: UgamSpacing.xs + 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(UgamRadius.chip),
+                        ),
+                        child: Text(
+                          _formatDate(tour.departureDate, tour.returnDate),
+                          style: UgamText.tabular(
+                            UgamText.bodyStrong.copyWith(
+                              color: Colors.white,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: UgamSpacing.md,
+                      right: UgamSpacing.md,
+                      bottom: UgamSpacing.md,
+                      child: Text(
+                        tour.title,
+                        style: UgamText.titleL.copyWith(
+                          color: Colors.white,
+                          fontSize: 20,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.sm + 2,
+                UgamSpacing.md,
+                UgamSpacing.sm + 2,
+                UgamSpacing.xs,
+              ),
+              child: Row(
+                children: [
+                  _MetaItem(
+                    icon: Icons.people_outline_rounded,
+                    text: tr('dashboard.pax',
+                        namedArgs: {'count': '${tour.passengerCount}'}),
+                    c: c,
+                  ),
+                  const SizedBox(width: UgamSpacing.md),
+                  if (tour.fromCity.isNotEmpty || tour.toCity.isNotEmpty)
+                    Expanded(
+                      child: _MetaItem(
+                        icon: Icons.south_east_rounded,
+                        text: '${tour.fromCity} → ${tour.toCity}',
+                        c: c,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (capacity > 0) ...[
+              const SizedBox(height: UgamSpacing.sm),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.sm + 2,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: pct,
+                          minHeight: 6,
+                          backgroundColor: c.card,
+                          valueColor: AlwaysStoppedAnimation(c.accent),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: UgamSpacing.sm + 2),
+                    Text(
+                      '$assignedTotal/$capacity',
+                      style: UgamText.tabular(
+                        UgamText.caption.copyWith(
+                          color: c.ink2,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            if (_actionFor(tour.status) != null) ...[
+              const SizedBox(height: UgamSpacing.md),
+              GestureDetector(
+                onTap: () => Get.toNamed(
+                  AppRoutes.seatAssignment,
+                  arguments: {'tourId': tour.id},
+                ),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  height: 42,
+                  margin: const EdgeInsets.symmetric(
+                      horizontal: UgamSpacing.sm + 2),
+                  decoration: BoxDecoration(
+                    color: c.accent,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  ),
+                  alignment: Alignment.center,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.event_seat_rounded,
+                          size: 14, color: c.onAccent),
+                      const SizedBox(width: 8),
+                      Text(
+                        tr('dashboard.action_assign_seats'),
+                        style: UgamText.bodyStrong
+                            .copyWith(color: c.onAccent, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: UgamSpacing.xs),
           ],
-        ],
+        ),
       ),
     );
   }
