@@ -1,17 +1,18 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/tour.dart';
-import '../models/tour_status.dart';
 import '../models/payment_status.dart';
 import 'edit_tour_screen.dart';
 import 'manage_buses_screen.dart';
 import 'tour_seat_assignment_screen.dart';
 
+/// Admin's view of a single tour. Hero photo header + overlay summary
+/// card + stat tiles + bus list + sticky CTA — same image-5 pattern as
+/// the customer-side detail screen, with admin actions instead.
 class TourDetailScreen extends StatelessWidget {
   final String tourId;
   const TourDetailScreen({super.key, required this.tourId});
@@ -19,13 +20,25 @@ class TourDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
+    final c = UgamColors.of(context);
 
     return Obx(() {
       final tour = tourCtrl.getTour(tourId);
       if (tour == null) {
         return Scaffold(
-          appBar: AppBar(title: Text(tr('tour_detail.not_found_title'))),
-          body: Center(child: Text(tr('tour_detail.not_found_body'))),
+          backgroundColor: c.bg,
+          body: SafeArea(
+            child: UgamEmpty(
+              icon: Icons.search_off_rounded,
+              title: tr('tour_detail.not_found_title'),
+              body: tr('tour_detail.not_found_body'),
+              cta: UgamCTA(
+                label: 'Back',
+                leadingIcon: Icons.arrow_back_rounded,
+                onPressed: () => Get.back(),
+              ),
+            ),
+          ),
         );
       }
 
@@ -35,314 +48,213 @@ class TourDetailScreen extends StatelessWidget {
       final pending = tour.passengers
           .where((p) => p.paymentStatus == PaymentStatus.notPaid)
           .length;
-      final declined = 0; // Logic for declined not yet in model, keeping 0
 
       return Scaffold(
-        backgroundColor: AppColors.bg(context),
-        appBar: AppBar(
-          backgroundColor: AppColors.surface(context),
-          elevation: 0,
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: AppColors.text(context)),
-            onPressed: () => Get.back(),
-          ),
-          title: Text(
-            tr('tour_detail.title'),
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.text(context),
-            ),
-          ),
-          centerTitle: true,
-          actions: [
-            IconButton(
-              icon: Icon(Icons.edit_outlined,
-                  color: AppColors.text(context)),
-              tooltip: tr('tour_detail.tooltip_edit'),
-              onPressed: () => Get.to(
-                () => EditTourScreen(tourId: tourId),
-                transition: Transition.cupertino,
-              ),
-            ),
-          ],
-        ),
-        body: RefreshIndicator(
-          onRefresh: tourCtrl.refreshTours,
-          color: AppTheme.brand,
-          child: SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(
-            parent: BouncingScrollPhysics(),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 16),
-
-              // ── Tour Title & Basic Info ──────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface(context),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.border(context)),
-                    boxShadow: [AppTheme.subtleShadow[0]],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              tour.title,
-                              style: GoogleFonts.inter(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.text(context),
-                              ),
-                            ),
-                          ),
-                          _StatusBadge(status: tour.status),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _InfoItem(
-                              label: tr('tour_detail.label_date_range'),
-                              value: _formatDateRange(tour),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: _InfoItem(
-                              label: tr('tour_detail.label_route'),
-                              value: tour.route,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      _InfoItem(
-                        label: tr('tour_detail.label_price'),
-                        value: tr('tour_detail.price_per_seat', namedArgs: {'price': tour.pricePerSeat.toStringAsFixed(0)}),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // ── Passenger Summary Header ────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  tr('tour_detail.section_passenger_summary'),
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.text(context),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // ── Passenger Summary Cards ────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _SummaryStatCard(
-                        count: booked,
-                        label: tr('tour_detail.stat_booked'),
-                        color: AppTheme.success,
-                        bgColor: AppTheme.successLight,
-                      ),
+        backgroundColor: c.bg,
+        extendBody: true,
+        body: SafeArea(
+          bottom: false,
+          child: RefreshIndicator(
+            color: c.accent,
+            onRefresh: tourCtrl.refreshTours,
+            child: CustomScrollView(
+              physics: const BouncingScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(child: _HeroSection(tour: tour, c: c)),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.gutter,
+                      UgamSpacing.huge,
+                      UgamSpacing.gutter,
+                      UgamSpacing.md,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _SummaryStatCard(
-                        count: pending,
-                        label: tr('tour_detail.stat_pending'),
-                        color: AppTheme.warning,
-                        bgColor: AppTheme.warningLight,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _SummaryStatCard(
-                        count: declined,
-                        label: tr('tour_detail.stat_declined'),
-                        color: AppTheme.danger,
-                        bgColor: AppTheme.dangerLight,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // ── Bus Information Header ────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  tr('tour_detail.section_bus_information'),
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.text(context),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // ── Bus Info List ────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: tour.buses.isEmpty
-                    ? _EmptyBusInfo()
-                    : Column(
-                        children: tour.buses.map((bus) => _BusInfoCard(bus: bus)).toList(),
-                      ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // ── Manage Buses CTA ──────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton.icon(
-                    onPressed: () => Get.to(
-                      () => ManageBusesScreen(tourId: tourId),
-                      transition: Transition.cupertino,
-                    ),
-                    icon: const Icon(Icons.directions_bus_rounded, size: 18),
-                    label: Text(
-                      tour.buses.isEmpty
-                          ? tr('tour_detail.btn_add_bus')
-                          : tr('tour_detail.btn_manage_buses', namedArgs: {'count': tour.buses.length.toString()}),
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        height: 1.2,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.brand,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                    child: _StatsRow(
+                      booked: booked,
+                      pending: pending,
+                      assigned: tour.totalSeatsAssigned,
+                      capacity: tour.totalBusSeats,
                     ),
                   ),
                 ),
-              ),
-
-              if (tour.buses.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 52,
-                    child: OutlinedButton.icon(
-                      onPressed: () => Get.to(
-                        () => TourSeatAssignmentScreen(tourId: tourId),
-                        transition: Transition.cupertino,
-                      ),
-                      icon: const Icon(
-                        Icons.grid_view_rounded,
-                        size: 18,
-                      ),
-                      label: Text(
-                        tr('tour_detail.btn_assign_seats', namedArgs: {'assigned': tour.totalSeatsAssigned.toString(), 'total': tour.totalSeatsRequested.toString()}),
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.brand,
-                          height: 1.2,
+                SliverToBoxAdapter(
+                  child: _SectionLabel(label: 'Tour info', c: c),
+                ),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: UgamSpacing.gutter,
+                    ),
+                    child: _InfoCard(tour: tour, c: c),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: _SectionLabel(
+                    label: tour.buses.isEmpty
+                        ? 'Buses'
+                        : 'Buses · ${tour.buses.length}',
+                    c: c,
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    0,
+                    UgamSpacing.gutter,
+                    140,
+                  ),
+                  sliver: tour.buses.isEmpty
+                      ? SliverToBoxAdapter(child: _EmptyBusInfo(c: c))
+                      : SliverList.separated(
+                          itemCount: tour.buses.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: UgamSpacing.md),
+                          itemBuilder: (_, i) =>
+                              _BusCard(bus: tour.buses[i], c: c),
                         ),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(
-                          color: AppTheme.brand,
-                          width: 1.5,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ),
                 ),
               ],
-
-              const SizedBox(height: 32),
-            ],
+            ),
           ),
+        ),
+        bottomNavigationBar: _StickyAction(
+          tour: tour,
+          c: c,
+          onManage: () => Get.to(
+            () => ManageBusesScreen(tourId: tourId),
+            transition: Transition.cupertino,
+          ),
+          onAssign: () => Get.to(
+            () => TourSeatAssignmentScreen(tourId: tourId),
+            transition: Transition.cupertino,
+          ),
+          onEdit: () => Get.to(
+            () => EditTourScreen(tourId: tourId),
+            transition: Transition.cupertino,
           ),
         ),
       );
     });
   }
-
-  String _formatDateRange(Tour tour) {
-    final fmt = DateFormat('MMM d, yyyy');
-    final start = fmt.format(tour.departureDate);
-    if (tour.returnDate != null) {
-      final end = fmt.format(tour.returnDate!);
-      return '$start - $end';
-    }
-    return start;
-  }
 }
 
-class _StatusBadge extends StatelessWidget {
-  final TourStatus status;
-  const _StatusBadge({required this.status});
+class _HeroSection extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _HeroSection({required this.tour, required this.c});
 
   @override
   Widget build(BuildContext context) {
-    final isActive = status != TourStatus.completed;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: isActive ? AppTheme.successLight : AppColors.border(context),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return SizedBox(
+      height: 320,
+      child: Stack(
         children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: isActive ? AppTheme.success : AppColors.textMuted(context),
-              shape: BoxShape.circle,
+          Positioned.fill(child: UgamBusBackdrop(seed: tour.id)),
+          Positioned(
+            left: UgamSpacing.gutter,
+            right: UgamSpacing.gutter,
+            top: UgamSpacing.md,
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () => Get.back(),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.arrow_back_rounded,
+                        size: 19, color: Colors.white),
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.md,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  ),
+                  child: Text(
+                    tour.status.displayName.toUpperCase(),
+                    style: UgamText.micro
+                        .copyWith(color: Colors.white, fontSize: 10),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 6),
-          Text(
-            isActive ? tr('tour_detail.status_active') : tr('tour_detail.status_completed'),
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: isActive ? AppTheme.success : AppColors.textMuted(context),
+          Positioned(
+            left: UgamSpacing.gutter,
+            right: UgamSpacing.gutter,
+            bottom: -28,
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.lg,
+                UgamSpacing.md,
+                UgamSpacing.md,
+                UgamSpacing.md,
+              ),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(tour.title,
+                            style: UgamText.titleM
+                                .copyWith(color: c.ink, fontSize: 18),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(Icons.south_east_rounded,
+                                size: 12, color: c.ink2),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                '${tour.fromCity} → ${tour.toCity}',
+                                style: UgamText.caption.copyWith(
+                                    color: c.ink2, fontSize: 11),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '₹${tour.pricePerSeat.toStringAsFixed(0)}',
+                        style: UgamText.tabular(
+                          UgamText.titleM
+                              .copyWith(color: c.accent, fontSize: 18),
+                        ),
+                      ),
+                      Text('/ seat',
+                          style: UgamText.caption
+                              .copyWith(color: c.ink3, fontSize: 10)),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -351,33 +263,47 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-class _InfoItem extends StatelessWidget {
-  final String label;
-  final String value;
+class _StatsRow extends StatelessWidget {
+  final int booked;
+  final int pending;
+  final int assigned;
+  final int capacity;
 
-  const _InfoItem({required this.label, required this.value});
+  const _StatsRow({
+    required this.booked,
+    required this.pending,
+    required this.assigned,
+    required this.capacity,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textMuted(context),
-            letterSpacing: 0.5,
+        Expanded(
+          child: UgamStatTile(
+            icon: Icons.check_circle_rounded,
+            value: '$booked',
+            label: tr('tour_detail.stat_booked'),
+            variant: UgamStatVariant.good,
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: GoogleFonts.inter(
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-            color: AppColors.textMuted(context),
+        const SizedBox(width: UgamSpacing.md),
+        Expanded(
+          child: UgamStatTile(
+            icon: Icons.access_time_rounded,
+            value: '$pending',
+            label: tr('tour_detail.stat_pending'),
+            variant: UgamStatVariant.warm,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.md),
+        Expanded(
+          child: UgamStatTile(
+            icon: Icons.event_seat_rounded,
+            value: capacity > 0 ? '$assigned' : '—',
+            ofTotal: capacity > 0 ? '/$capacity' : null,
+            label: 'Assigned',
           ),
         ),
       ],
@@ -385,98 +311,157 @@ class _InfoItem extends StatelessWidget {
   }
 }
 
-class _SummaryStatCard extends StatelessWidget {
-  final int count;
+class _SectionLabel extends StatelessWidget {
   final String label;
-  final Color color;
-  final Color bgColor;
-
-  const _SummaryStatCard({
-    required this.count,
-    required this.label,
-    required this.color,
-    required this.bgColor,
-  });
+  final UgamColorSet c;
+  const _SectionLabel({required this.label, required this.c});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.xl,
+        UgamSpacing.gutter,
+        UgamSpacing.md,
       ),
-      child: Column(
-        children: [
-          Text(
-            count.toString(),
-            style: GoogleFonts.inter(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              color: color,
-            ),
-          ),
-        ],
+      child: Text(
+        label.toUpperCase(),
+        style: UgamText.micro.copyWith(color: UgamColors.of(context).ink3),
       ),
     );
   }
 }
 
-class _BusInfoCard extends StatelessWidget {
-  final dynamic bus; // Replace with actual Bus model if available
+class _InfoCard extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _InfoCard({required this.tour, required this.c});
 
-  const _BusInfoCard({required this.bus});
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('MMM d, yyyy');
+    final start = fmt.format(tour.departureDate);
+    final dateRange = tour.returnDate != null
+        ? '$start – ${fmt.format(tour.returnDate!)}'
+        : start;
+
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _row(c, Icons.calendar_today_rounded,
+              tr('tour_detail.label_date_range'), dateRange),
+          const SizedBox(height: UgamSpacing.md),
+          _row(c, Icons.south_east_rounded,
+              tr('tour_detail.label_route'), tour.route),
+          const SizedBox(height: UgamSpacing.md),
+          _row(
+            c,
+            Icons.currency_rupee_rounded,
+            tr('tour_detail.label_price'),
+            tr('tour_detail.price_per_seat', namedArgs: {
+              'price': tour.pricePerSeat.toStringAsFixed(0)
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _row(UgamColorSet c, IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: c.accentFill,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 16, color: c.accent),
+        ),
+        const SizedBox(width: UgamSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label.toUpperCase(),
+                  style: UgamText.micro.copyWith(color: c.ink3)),
+              const SizedBox(height: 2),
+              Text(value,
+                  style: UgamText.bodyStrong
+                      .copyWith(color: c.ink, fontSize: 14)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BusCard extends StatelessWidget {
+  final dynamic bus;
+  final UgamColorSet c;
+  const _BusCard({required this.bus, required this.c});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(UgamSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border(context)),
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppTheme.brandLight,
-              borderRadius: BorderRadius.circular(8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: SizedBox(
+              width: 76,
+              height: 76,
+              child: UgamBusBackdrop(seed: '${bus.id ?? bus.busNumber}-bus'),
             ),
-            child: const Icon(Icons.directions_bus_rounded, color: AppTheme.brand),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  bus.name ?? 'GJ-01-AB-1234',
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text(context),
-                  ),
+                  bus.busNumber ?? 'Bus',
+                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  tr('tour_detail.driver_label', namedArgs: {'name': bus.driverName ?? ''}),
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppColors.textMuted(context),
-                  ),
+                  tr('tour_detail.driver_label',
+                      namedArgs: {'name': bus.driverName ?? ''}),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: UgamSpacing.sm),
+                Row(
+                  children: [
+                    if (bus.isAC == true)
+                      const UgamReqChip(label: 'AC'),
+                    if (bus.isAC == true) const SizedBox(width: 5),
+                    UgamReqChip(
+                      label: '${bus.totalSeats ?? 0} SEATS',
+                      variant: UgamChipVariant.neutral,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -488,14 +473,16 @@ class _BusInfoCard extends StatelessWidget {
 }
 
 class _EmptyBusInfo extends StatelessWidget {
+  final UgamColorSet c;
+  const _EmptyBusInfo({required this.c});
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(UgamSpacing.xl),
       decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border(context)),
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         children: [
@@ -503,20 +490,84 @@ class _EmptyBusInfo extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: AppColors.bg(context),
-              borderRadius: BorderRadius.circular(8),
+              color: c.card,
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(Icons.bus_alert_rounded, color: AppColors.textMuted(context)),
+            child: Icon(Icons.bus_alert_rounded, color: c.ink3),
           ),
-          const SizedBox(width: 14),
-          Text(
-            tr('tour_detail.no_bus_assigned'),
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: AppColors.textMuted(context),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Text(
+              tr('tour_detail.no_bus_assigned'),
+              style: UgamText.body.copyWith(color: c.ink2),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _StickyAction extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  final VoidCallback onManage;
+  final VoidCallback onAssign;
+  final VoidCallback onEdit;
+
+  const _StickyAction({
+    required this.tour,
+    required this.c,
+    required this.onManage,
+    required this.onAssign,
+    required this.onEdit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasBus = tour.buses.isNotEmpty;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          UgamSpacing.gutter,
+          UgamSpacing.md,
+          UgamSpacing.gutter,
+          UgamSpacing.md,
+        ),
+        child: Row(
+          children: [
+            GestureDetector(
+              onTap: onEdit,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: c.cardElev,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.edit_rounded, size: 20, color: c.ink),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: UgamCTA(
+                label: hasBus
+                    ? tr('tour_detail.btn_assign_seats', namedArgs: {
+                        'assigned': tour.totalSeatsAssigned.toString(),
+                        'total': tour.totalSeatsRequested.toString(),
+                      })
+                    : tr('tour_detail.btn_add_bus'),
+                leadingIcon: hasBus
+                    ? Icons.grid_view_rounded
+                    : Icons.directions_bus_rounded,
+                onPressed: hasBus ? onAssign : onManage,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
