@@ -1,9 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
+
 import '../controllers/tour_controller.dart';
-import '../config/theme.dart';
+import '../design/ugam.dart';
 import '../utils/app_snackbar.dart';
 import 'tour_detail_screen.dart';
 
@@ -70,10 +70,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
     setState(() => _saving = true);
     try {
       final tourCtrl = Get.find<TourController>();
-      // Await the insert so by the time we navigate, the row is committed
-      // to Supabase (when online) and present in the local list. Otherwise
-      // a background refetch can clobber the local-only tour before the
-      // detail screen reads it.
       final newTour = await tourCtrl.createTour(
         title: _titleCtrl.text.trim(),
         fromCity: _fromCtrl.text.trim(),
@@ -87,7 +83,8 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
 
       if (!mounted) return;
       AppSnackBar.success(
-        tr('create_tour.snackbar.created_body', namedArgs: {'route': newTour.route}),
+        tr('create_tour.snackbar.created_body',
+            namedArgs: {'route': newTour.route}),
         title: tr('create_tour.snackbar.created_title'),
       );
       Get.off(
@@ -95,9 +92,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
         transition: Transition.cupertino,
       );
     } catch (_) {
-      if (mounted) {
-        AppSnackBar.error(tr('create_tour.snackbar.error'));
-      }
+      if (mounted) AppSnackBar.error(tr('create_tour.snackbar.error'));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -105,258 +100,166 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.bg(context),
+      backgroundColor: c.bg,
       body: SafeArea(
         child: Column(
           children: [
-            // ── Custom Header ────────────────────────────────────
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.surface(context),
-                border: Border(
-                  bottom: BorderSide(color: AppColors.border(context), width: 1),
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.md,
+                UgamSpacing.sm,
+                UgamSpacing.md,
+                UgamSpacing.md,
               ),
               child: Row(
                 children: [
-                  IconButton(
-                    icon: Icon(
-                      Icons.arrow_back,
-                      color: AppColors.text(context),
+                  GestureDetector(
+                    onTap: () => Get.back(),
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: c.cardElev,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.arrow_back_rounded,
+                          size: 19, color: c.ink),
                     ),
-                    onPressed: () => Get.back(),
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    tr('create_tour.title'),
-                    style: GoogleFonts.inter(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.text(context),
+                  const SizedBox(width: UgamSpacing.md),
+                  Expanded(
+                    child: Text(
+                      tr('create_tour.title'),
+                      style: UgamText.titleL.copyWith(color: c.ink),
                     ),
                   ),
                 ],
               ),
             ),
-
-            // ── Form Body ────────────────────────────────────────
             Expanded(
               child: Form(
                 key: _formKey,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    UgamSpacing.sm,
+                    UgamSpacing.gutter,
+                    UgamSpacing.xl,
+                  ),
                   physics: const BouncingScrollPhysics(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Tour Name
-                      _buildLabel(context, tr('create_tour.label.tour_name')),
-                      const SizedBox(height: 8),
-                      _buildInput(
-                        context: context,
-                        controller: _titleCtrl,
-                        hint: tr('create_tour.hint.tour_name'),
-                        validator: (v) => v == null || v.trim().isEmpty
-                            ? tr('app.error.required')
-                            : null,
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // Route
-                      _buildLabel(context, tr('create_tour.label.route')),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildInput(
-                              context: context,
-                              controller: _fromCtrl,
-                              hint: tr('create_tour.hint.from_city'),
-                              prefixIcon: Icons.location_on_outlined,
-                              validator: (v) => v == null || v.trim().isEmpty
-                                  ? tr('app.error.required')
-                                  : null,
-                            ),
-                          ),
-                          Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 12),
-                            child: Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 18,
-                              color: AppColors.textMuted(context),
-                            ),
-                          ),
-                          Expanded(
-                            child: _buildInput(
-                              context: context,
-                              controller: _toCtrl,
-                              hint: tr('create_tour.hint.to_city'),
-                              prefixIcon: Icons.location_on_outlined,
-                              validator: (v) => v == null || v.trim().isEmpty
-                                  ? tr('app.error.required')
-                                  : null,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // Date Range
-                      _buildLabel(context, tr('create_tour.label.date_range')),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DatePickerField(
-                              hint: tr('create_tour.hint.start_date'),
-                              date: _departureDate,
-                              onTap: () => _pickDate(false),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _DatePickerField(
-                              hint: tr('create_tour.hint.end_date'),
-                              date: _returnDate,
-                              onTap: () => _pickDate(true),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // Price Per Seat (optional — can be set per bus later)
-                      Row(
-                        children: [
-                          _buildLabel(context, tr('create_tour.label.price_per_seat')),
-                          const SizedBox(width: 6),
-                          Text(
-                            tr('create_tour.label.optional'),
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontStyle: FontStyle.italic,
-                              color: AppColors.textMuted(context),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      _buildInput(
-                        context: context,
-                        controller: _priceCtrl,
-                        hint: tr('create_tour.hint.price'),
-                        prefixText: '₹ ',
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) return null;
-                          if (double.tryParse(v) == null) {
-                            return tr('create_tour.validation.invalid_amount');
-                          }
-                          return null;
-                        },
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      // Tour Description
-                      _buildLabel(context, tr('create_tour.label.tour_description')),
-                      const SizedBox(height: 8),
-                      _buildInput(
-                        context: context,
-                        controller: _descCtrl,
-                        hint: tr('create_tour.hint.description'),
-                        maxLines: 4,
-                        minHeight: 100,
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      // ── CTA Button ─────────────────────────────
-                      SizedBox(
-                        width: double.infinity,
-                        height: 54,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: _saving
-                                ? AppTheme.brand.withValues(alpha: 0.7)
-                                : AppTheme.brand,
-                            borderRadius: BorderRadius.circular(6),
-                            boxShadow:
-                                _saving ? null : AppTheme.brandShadow,
-                          ),
-                          child: MaterialButton(
-                            onPressed: _saving ? null : _submit,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                if (_saving)
-                                  const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                else
-                                  const Icon(
-                                    Icons.send_rounded,
-                                    size: 18,
-                                    color: Colors.white,
-                                  ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  _saving
-                                      ? tr('create_tour.action.creating')
-                                      : tr('create_tour.action.create_broadcast'),
-                                  style: GoogleFonts.inter(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
+                  children: [
+                    UgamInput(
+                      label: tr('create_tour.label.tour_name'),
+                      hint: tr('create_tour.hint.tour_name'),
+                      controller: _titleCtrl,
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    Text(
+                      tr('create_tour.label.route').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: UgamInput(
+                            hint: tr('create_tour.hint.from_city'),
+                            controller: _fromCtrl,
                           ),
                         ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      // ── WhatsApp Note ──────────────────────────
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.chat_bubble_outline_rounded,
-                            size: 14,
-                            color: AppColors.textMuted(context),
+                        Container(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: UgamSpacing.sm + 2),
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: c.accentFill,
+                            shape: BoxShape.circle,
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            tr('create_tour.broadcast_note'),
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              color: AppColors.textMuted(context),
-                            ),
+                          alignment: Alignment.center,
+                          child: Icon(Icons.arrow_forward_rounded,
+                              size: 14, color: c.accent),
+                        ),
+                        Expanded(
+                          child: UgamInput(
+                            hint: tr('create_tour.hint.to_city'),
+                            controller: _toCtrl,
                           ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 40),
-                    ],
-                  ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    Text(
+                      tr('create_tour.label.date_range').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _DateField(
+                            c: c,
+                            hint: tr('create_tour.hint.start_date'),
+                            date: _departureDate,
+                            onTap: () => _pickDate(false),
+                          ),
+                        ),
+                        const SizedBox(width: UgamSpacing.md),
+                        Expanded(
+                          child: _DateField(
+                            c: c,
+                            hint: tr('create_tour.hint.end_date'),
+                            date: _returnDate,
+                            onTap: () => _pickDate(true),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    UgamInput(
+                      label:
+                          '${tr('create_tour.label.price_per_seat')} (${tr('create_tour.label.optional')})',
+                      hint: tr('create_tour.hint.price'),
+                      controller: _priceCtrl,
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    UgamInput(
+                      label: tr('create_tour.label.tour_description'),
+                      hint: tr('create_tour.hint.description'),
+                      controller: _descCtrl,
+                      maxLength: 300,
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.chat_bubble_outline_rounded,
+                            size: 14, color: c.ink3),
+                        const SizedBox(width: 6),
+                        Text(
+                          tr('create_tour.broadcast_note'),
+                          style: UgamText.caption.copyWith(color: c.ink3),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
+              ),
+            ),
+            UgamStickyCTA(
+              child: UgamCTA(
+                label: _saving
+                    ? tr('create_tour.action.creating')
+                    : tr('create_tour.action.create_broadcast'),
+                leadingIcon: Icons.send_rounded,
+                loading: _saving,
+                onPressed: _submit,
               ),
             ),
           ],
@@ -364,92 +267,16 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
       ),
     );
   }
-
-  // ── Helpers ──────────────────────────────────────────────────────
-
-  Widget _buildLabel(BuildContext context, String text) {
-    return Text(
-      text,
-      style: GoogleFonts.inter(
-        fontSize: 12,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.5,
-        color: AppColors.text(context),
-      ),
-    );
-  }
-
-  Widget _buildInput({
-    required BuildContext context,
-    required TextEditingController controller,
-    required String hint,
-    IconData? prefixIcon,
-    String? prefixText,
-    int maxLines = 1,
-    double? minHeight,
-    TextInputType? keyboardType,
-    String? Function(String?)? validator,
-  }) {
-    return SizedBox(
-      height: minHeight,
-      child: TextFormField(
-        controller: controller,
-        maxLines: maxLines,
-        keyboardType: keyboardType,
-        validator: validator,
-        style: GoogleFonts.inter(
-          fontSize: 15,
-          color: AppColors.text(context),
-        ),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: GoogleFonts.inter(
-            fontSize: 15,
-            color: AppColors.textMuted(context),
-          ),
-          prefixIcon: prefixIcon != null
-              ? Icon(prefixIcon, size: 18, color: AppColors.textMuted(context))
-              : null,
-          prefixText: prefixText,
-          prefixStyle: GoogleFonts.inter(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: AppColors.text(context),
-          ),
-          filled: true,
-          fillColor: AppColors.surface(context),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: AppColors.border(context)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: AppColors.border(context)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppTheme.brand, width: 1.5),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppTheme.danger, width: 1.5),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
-// ── Date Picker Field ──────────────────────────────────────────────
-
-class _DatePickerField extends StatelessWidget {
+class _DateField extends StatelessWidget {
+  final UgamColorSet c;
   final String hint;
   final DateTime? date;
   final VoidCallback onTap;
 
-  const _DatePickerField({
+  const _DateField({
+    required this.c,
     required this.hint,
     required this.date,
     required this.onTap,
@@ -459,30 +286,24 @@ class _DatePickerField extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
         decoration: BoxDecoration(
-          color: AppColors.surface(context),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: AppColors.border(context)),
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
         ),
         child: Row(
           children: [
-            Icon(
-              Icons.calendar_today_outlined,
-              size: 16,
-              color: AppColors.textMuted(context),
-            ),
-            const SizedBox(width: 8),
+            Icon(Icons.calendar_today_rounded, size: 16, color: c.ink2),
+            const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: Text(
                 date != null ? DateFormat('MMM d, yyyy').format(date!) : hint,
-                style: GoogleFonts.inter(
+                style: UgamText.body.copyWith(
+                  color: date != null ? c.ink : c.ink3,
                   fontSize: 14,
-                  color: date != null
-                      ? AppColors.text(context)
-                      : AppColors.textMuted(context),
                 ),
                 overflow: TextOverflow.ellipsis,
               ),

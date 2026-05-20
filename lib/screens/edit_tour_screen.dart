@@ -1,9 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
+
 import '../controllers/tour_controller.dart';
-import '../config/theme.dart';
+import '../design/ugam.dart';
 import '../utils/app_snackbar.dart';
 
 class EditTourScreen extends StatefulWidget {
@@ -55,7 +55,8 @@ class _EditTourScreenState extends State<EditTourScreen> {
         ? (_returnDate ?? _departureDate ?? DateTime.now())
         : (_departureDate ?? DateTime.now());
     final first = isReturn
-        ? (_departureDate ?? DateTime.now().subtract(const Duration(days: 365)))
+        ? (_departureDate ??
+            DateTime.now().subtract(const Duration(days: 365)))
         : DateTime.now().subtract(const Duration(days: 365));
 
     final picked = await showDatePicker(
@@ -100,44 +101,115 @@ class _EditTourScreenState extends State<EditTourScreen> {
       );
       AppSnackBar.success(tr('edit_tour.snack_updated'));
       Get.back();
-    } catch (e) {
+    } catch (_) {
       AppSnackBar.error(tr('edit_tour.snack_save_failed'));
       setState(() => _saving = false);
     }
   }
 
+  Future<void> _confirmAndDelete() async {
+    final tour = Get.find<TourController>().getTour(widget.tourId);
+    if (tour == null) return;
+
+    final pCount = tour.passengers.length;
+    final bCount = tour.buses.length;
+    final detailParts = <String>[
+      '"${tour.title}"',
+      if (pCount > 0) '$pCount passenger${pCount == 1 ? '' : 's'}',
+      if (bCount > 0)
+        '$bCount bus${bCount == 1 ? '' : 'es'} will be unlinked',
+    ];
+    final detail = detailParts.join(' · ');
+
+    final c = UgamColors.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.card,
+        title: const Text('Delete this tour?'),
+        content: Text(
+          'This will permanently delete $detail and every booking '
+          'request tied to it. This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: c.danger),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _saving = true);
+    try {
+      await Get.find<TourController>().deleteTour(widget.tourId);
+      if (!mounted) return;
+      AppSnackBar.success('Tour "${tour.title}" deleted.');
+      Get.until((route) => route.isFirst);
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+
     return Scaffold(
-      backgroundColor: AppColors.bg(context),
+      backgroundColor: c.bg,
       body: SafeArea(
         child: Column(
           children: [
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.surface(context),
-                border: Border(
-                  bottom: BorderSide(color: AppColors.border(context), width: 1),
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.md,
+                UgamSpacing.sm,
+                UgamSpacing.md,
+                UgamSpacing.md,
               ),
               child: Row(
                 children: [
-                  IconButton(
-                    icon: Icon(
-                      Icons.arrow_back,
-                      color: AppColors.text(context),
+                  GestureDetector(
+                    onTap: () => Get.back(),
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: c.cardElev,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.arrow_back_rounded,
+                          size: 19, color: c.ink),
                     ),
-                    onPressed: () => Get.back(),
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    tr('edit_tour.title'),
-                    style: GoogleFonts.inter(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.text(context),
+                  const SizedBox(width: UgamSpacing.md),
+                  Expanded(
+                    child: Text(
+                      tr('edit_tour.title'),
+                      style: UgamText.titleL.copyWith(color: c.ink),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _saving ? null : _confirmAndDelete,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: c.danger.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(Icons.delete_outline_rounded,
+                          size: 19, color: c.danger),
                     ),
                   ),
                 ],
@@ -146,162 +218,93 @@ class _EditTourScreenState extends State<EditTourScreen> {
             Expanded(
               child: Form(
                 key: _formKey,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(20),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    UgamSpacing.sm,
+                    UgamSpacing.gutter,
+                    UgamSpacing.xl,
+                  ),
                   physics: const BouncingScrollPhysics(),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel(context, tr('edit_tour.label_tour_name')),
-                      const SizedBox(height: 8),
-                      _buildInput(
-                        context: context,
-                        controller: _titleCtrl,
-                        hint: tr('edit_tour.hint_tour_name'),
-                        validator: (v) =>
-                            v == null || v.trim().isEmpty ? tr('app.error.required') : null,
-                      ),
-                      const SizedBox(height: 20),
-                      _buildLabel(context, tr('edit_tour.label_route')),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildInput(
-                              context: context,
-                              controller: _fromCtrl,
-                              hint: tr('edit_tour.hint_from_city'),
-                              prefixIcon: Icons.location_on_outlined,
-                              validator: (v) => v == null || v.trim().isEmpty
-                                  ? tr('app.error.required')
-                                  : null,
-                            ),
-                          ),
-                          Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 12),
-                            child: Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 18,
-                              color: AppColors.textMuted(context),
-                            ),
-                          ),
-                          Expanded(
-                            child: _buildInput(
-                              context: context,
-                              controller: _toCtrl,
-                              hint: tr('edit_tour.hint_to_city'),
-                              prefixIcon: Icons.location_on_outlined,
-                              validator: (v) => v == null || v.trim().isEmpty
-                                  ? tr('app.error.required')
-                                  : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      _buildLabel(context, tr('edit_tour.label_date_range')),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DatePickerField(
-                              hint: tr('edit_tour.hint_start_date'),
-                              date: _departureDate,
-                              onTap: () => _pickDate(false),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _DatePickerField(
-                              hint: tr('edit_tour.hint_end_date'),
-                              date: _returnDate,
-                              onTap: () => _pickDate(true),
-                              onClear: _returnDate != null
-                                  ? () => setState(() => _returnDate = null)
-                                  : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 20),
-                      _buildLabel(context, tr('edit_tour.label_price_per_seat')),
-                      const SizedBox(height: 8),
-                      _buildInput(
-                        context: context,
-                        controller: _priceCtrl,
-                        hint: '0.00',
-                        prefixText: '₹ ',
-                        keyboardType: TextInputType.number,
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) return tr('app.error.required');
-                          if (double.tryParse(v) == null) {
-                            return tr('edit_tour.error_invalid_amount');
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      _buildLabel(context, tr('edit_tour.label_description')),
-                      const SizedBox(height: 8),
-                      _buildInput(
-                        context: context,
-                        controller: _descCtrl,
-                        hint: tr('edit_tour.hint_description'),
-                        maxLines: 4,
-                        minHeight: 100,
-                      ),
-                      const SizedBox(height: 32),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 54,
-                        child: DecoratedBox(
+                  children: [
+                    UgamInput(
+                      label: tr('create_tour.label.tour_name'),
+                      controller: _titleCtrl,
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    Text(
+                      tr('create_tour.label.route').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(child: UgamInput(controller: _fromCtrl)),
+                        Container(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: UgamSpacing.sm + 2),
+                          width: 30,
+                          height: 30,
                           decoration: BoxDecoration(
-                            color: AppTheme.brand,
-                            borderRadius: BorderRadius.circular(6),
-                            boxShadow: AppTheme.brandShadow,
+                            color: c.accentFill,
+                            shape: BoxShape.circle,
                           ),
-                          child: MaterialButton(
-                            onPressed: _saving ? null : _save,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: _saving
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.center,
-                                    children: [
-                                      const Icon(
-                                        Icons.check_rounded,
-                                        size: 18,
-                                        color: Colors.white,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Text(
-                                        tr('edit_tour.btn_save_changes'),
-                                        style: GoogleFonts.inter(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                          alignment: Alignment.center,
+                          child: Icon(Icons.arrow_forward_rounded,
+                              size: 14, color: c.accent),
+                        ),
+                        Expanded(child: UgamInput(controller: _toCtrl)),
+                      ],
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    Text(
+                      tr('create_tour.label.date_range').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _DateField(
+                            c: c,
+                            hint: tr('create_tour.hint.start_date'),
+                            date: _departureDate,
+                            onTap: () => _pickDate(false),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 40),
-                    ],
-                  ),
+                        const SizedBox(width: UgamSpacing.md),
+                        Expanded(
+                          child: _DateField(
+                            c: c,
+                            hint: tr('create_tour.hint.end_date'),
+                            date: _returnDate,
+                            onTap: () => _pickDate(true),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    UgamInput(
+                      label: tr('create_tour.label.price_per_seat'),
+                      controller: _priceCtrl,
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    UgamInput(
+                      label: tr('create_tour.label.tour_description'),
+                      controller: _descCtrl,
+                      maxLength: 300,
+                    ),
+                  ],
                 ),
+              ),
+            ),
+            UgamStickyCTA(
+              child: UgamCTA(
+                label: _saving ? 'Saving…' : tr('edit_tour.btn_save'),
+                leadingIcon: Icons.save_rounded,
+                loading: _saving,
+                onPressed: _save,
               ),
             ),
           ],
@@ -309,136 +312,47 @@ class _EditTourScreenState extends State<EditTourScreen> {
       ),
     );
   }
-
-  Widget _buildLabel(BuildContext context, String text) {
-    return Text(
-      text,
-      style: GoogleFonts.inter(
-        fontSize: 12,
-        fontWeight: FontWeight.w500,
-        letterSpacing: 0.5,
-        color: AppColors.text(context),
-      ),
-    );
-  }
-
-  Widget _buildInput({
-    required BuildContext context,
-    required TextEditingController controller,
-    required String hint,
-    IconData? prefixIcon,
-    String? prefixText,
-    int maxLines = 1,
-    double? minHeight,
-    TextInputType? keyboardType,
-    String? Function(String?)? validator,
-  }) {
-    return SizedBox(
-      height: minHeight,
-      child: TextFormField(
-        controller: controller,
-        maxLines: maxLines,
-        keyboardType: keyboardType,
-        validator: validator,
-        style: GoogleFonts.inter(
-          fontSize: 15,
-          color: AppColors.text(context),
-        ),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: GoogleFonts.inter(
-            fontSize: 15,
-            color: AppColors.textMuted(context),
-          ),
-          prefixIcon: prefixIcon != null
-              ? Icon(prefixIcon, size: 18, color: AppColors.textMuted(context))
-              : null,
-          prefixText: prefixText,
-          prefixStyle: GoogleFonts.inter(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: AppColors.text(context),
-          ),
-          filled: true,
-          fillColor: AppColors.surface(context),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: AppColors.border(context)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: AppColors.border(context)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppTheme.brand, width: 1.5),
-          ),
-          errorBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppTheme.danger, width: 1.5),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
-class _DatePickerField extends StatelessWidget {
+class _DateField extends StatelessWidget {
+  final UgamColorSet c;
   final String hint;
   final DateTime? date;
   final VoidCallback onTap;
-  final VoidCallback? onClear;
 
-  const _DatePickerField({
+  const _DateField({
+    required this.c,
     required this.hint,
     required this.date,
     required this.onTap,
-    this.onClear,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
         decoration: BoxDecoration(
-          color: AppColors.surface(context),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: AppColors.border(context)),
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
         ),
         child: Row(
           children: [
-            Icon(
-              Icons.calendar_today_outlined,
-              size: 16,
-              color: AppColors.textMuted(context),
-            ),
-            const SizedBox(width: 8),
+            Icon(Icons.calendar_today_rounded, size: 16, color: c.ink2),
+            const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: Text(
                 date != null ? DateFormat('MMM d, yyyy').format(date!) : hint,
-                style: GoogleFonts.inter(
+                style: UgamText.body.copyWith(
+                  color: date != null ? c.ink : c.ink3,
                   fontSize: 14,
-                  color: date != null
-                      ? AppColors.text(context)
-                      : AppColors.textMuted(context),
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (onClear != null)
-              GestureDetector(
-                onTap: onClear,
-                child: Icon(
-                  Icons.close_rounded,
-                  size: 16,
-                  color: AppColors.textMuted(context),
-                ),
-              ),
           ],
         ),
       ),
