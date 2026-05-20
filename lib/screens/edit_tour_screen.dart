@@ -25,29 +25,83 @@ class _EditTourScreenState extends State<EditTourScreen> {
   final _formKey = GlobalKey<FormState>();
   bool _saving = false;
 
+  // Originals captured at initState — used to detect dirty state and
+  // to power the "Cancel changes" action.
+  late final String _origTitle;
+  late final String _origFrom;
+  late final String _origTo;
+  late final String _origPrice;
+  late final String _origDesc;
+  DateTime? _origDeparture;
+  DateTime? _origReturn;
+
   @override
   void initState() {
     super.initState();
     final tour = Get.find<TourController>().getTour(widget.tourId);
-    _titleCtrl = TextEditingController(text: tour?.title ?? '');
-    _fromCtrl = TextEditingController(text: tour?.fromCity ?? '');
-    _toCtrl = TextEditingController(text: tour?.toCity ?? '');
-    _priceCtrl = TextEditingController(
-      text: tour != null ? tour.pricePerSeat.toStringAsFixed(0) : '',
-    );
-    _descCtrl = TextEditingController(text: tour?.description ?? '');
-    _departureDate = tour?.departureDate;
-    _returnDate = tour?.returnDate;
+    _origTitle = tour?.title ?? '';
+    _origFrom = tour?.fromCity ?? '';
+    _origTo = tour?.toCity ?? '';
+    _origPrice = tour != null ? tour.pricePerSeat.toStringAsFixed(0) : '';
+    _origDesc = tour?.description ?? '';
+    _origDeparture = tour?.departureDate;
+    _origReturn = tour?.returnDate;
+
+    _titleCtrl = TextEditingController(text: _origTitle);
+    _fromCtrl = TextEditingController(text: _origFrom);
+    _toCtrl = TextEditingController(text: _origTo);
+    _priceCtrl = TextEditingController(text: _origPrice);
+    _descCtrl = TextEditingController(text: _origDesc);
+    _departureDate = _origDeparture;
+    _returnDate = _origReturn;
+
+    _titleCtrl.addListener(_onFieldChanged);
+    _fromCtrl.addListener(_onFieldChanged);
+    _toCtrl.addListener(_onFieldChanged);
+    _priceCtrl.addListener(_onFieldChanged);
+    _descCtrl.addListener(_onFieldChanged);
+  }
+
+  void _onFieldChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _titleCtrl.removeListener(_onFieldChanged);
+    _fromCtrl.removeListener(_onFieldChanged);
+    _toCtrl.removeListener(_onFieldChanged);
+    _priceCtrl.removeListener(_onFieldChanged);
+    _descCtrl.removeListener(_onFieldChanged);
     _titleCtrl.dispose();
     _fromCtrl.dispose();
     _toCtrl.dispose();
     _priceCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
+  }
+
+  bool get _isDirty {
+    if (_titleCtrl.text != _origTitle) return true;
+    if (_fromCtrl.text != _origFrom) return true;
+    if (_toCtrl.text != _origTo) return true;
+    if (_priceCtrl.text != _origPrice) return true;
+    if (_descCtrl.text != _origDesc) return true;
+    if (_departureDate != _origDeparture) return true;
+    if (_returnDate != _origReturn) return true;
+    return false;
+  }
+
+  void _cancelChanges() {
+    setState(() {
+      _titleCtrl.text = _origTitle;
+      _fromCtrl.text = _origFrom;
+      _toCtrl.text = _origTo;
+      _priceCtrl.text = _origPrice;
+      _descCtrl.text = _origDesc;
+      _departureDate = _origDeparture;
+      _returnDate = _origReturn;
+    });
   }
 
   Future<void> _pickDate(bool isReturn) async {
@@ -160,6 +214,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final dirty = _isDirty;
 
     return Scaffold(
       backgroundColor: c.bg,
@@ -227,6 +282,15 @@ class _EditTourScreenState extends State<EditTourScreen> {
                   ),
                   physics: const BouncingScrollPhysics(),
                   children: [
+                    _TourPreviewCard(
+                      c: c,
+                      title: _titleCtrl.text.trim(),
+                      fromCity: _fromCtrl.text.trim(),
+                      toCity: _toCtrl.text.trim(),
+                      departureDate: _departureDate,
+                      price: _priceCtrl.text.trim(),
+                    ),
+                    const SizedBox(height: UgamSpacing.xl),
                     UgamInput(
                       label: tr('create_tour.label.tour_name'),
                       controller: _titleCtrl,
@@ -300,15 +364,232 @@ class _EditTourScreenState extends State<EditTourScreen> {
               ),
             ),
             UgamStickyCTA(
-              child: UgamCTA(
-                label: _saving ? 'Saving…' : tr('edit_tour.btn_save'),
-                leadingIcon: Icons.save_rounded,
-                loading: _saving,
-                onPressed: _save,
+              child: Row(
+                children: [
+                  if (dirty) ...[
+                    _CancelChangesPill(
+                      c: c,
+                      onPressed: _saving ? null : _cancelChanges,
+                    ),
+                    const SizedBox(width: UgamSpacing.sm),
+                  ],
+                  Expanded(
+                    child: UgamCTA(
+                      label: _saving ? 'Saving…' : tr('edit_tour.btn_save'),
+                      leadingIcon: Icons.save_rounded,
+                      loading: _saving,
+                      onPressed: _save,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _CancelChangesPill extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback? onPressed;
+
+  const _CancelChangesPill({required this.c, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null;
+    return GestureDetector(
+      onTap: onPressed,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.close_rounded,
+              size: 16,
+              color: enabled ? c.ink : c.ink3,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Cancel changes',
+              style: UgamText.titleS.copyWith(
+                color: enabled ? c.ink : c.ink3,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TourPreviewCard extends StatelessWidget {
+  final UgamColorSet c;
+  final String title;
+  final String fromCity;
+  final String toCity;
+  final DateTime? departureDate;
+  final String price;
+
+  const _TourPreviewCard({
+    required this.c,
+    required this.title,
+    required this.fromCity,
+    required this.toCity,
+    required this.departureDate,
+    required this.price,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final shownTitle = title.isNotEmpty ? title : 'Untitled tour';
+    final from = fromCity.isNotEmpty ? fromCity : 'From city';
+    final to = toCity.isNotEmpty ? toCity : 'To city';
+    final route = '$from → $to';
+    final dateText = departureDate != null
+        ? DateFormat('MMM d, yyyy').format(departureDate!)
+        : 'Pick date';
+    final priceText = () {
+      final n = double.tryParse(price);
+      if (n == null || n <= 0) return 'Set price';
+      return '₹${n.toStringAsFixed(0)}/seat';
+    }();
+
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(UgamRadius.photo),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: UgamBusBackdrop(
+                seed: 'preview-${fromCity}_$toCity',
+              ),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const UgamReqChip(label: 'PREVIEW'),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'as customer sees it',
+                        style: UgamText.caption.copyWith(color: c.ink3),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  shownTitle,
+                  style: UgamText.titleM.copyWith(
+                    color: title.isNotEmpty ? c.ink : c.ink3,
+                    fontSize: 16,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  route,
+                  style: UgamText.caption.copyWith(
+                    color: (fromCity.isNotEmpty && toCity.isNotEmpty)
+                        ? c.ink2
+                        : c.ink3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _PreviewPill(
+                      c: c,
+                      icon: Icons.calendar_today_rounded,
+                      label: dateText,
+                      muted: departureDate == null,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: _PreviewPill(
+                        c: c,
+                        icon: Icons.currency_rupee_rounded,
+                        label: priceText,
+                        muted: priceText == 'Set price',
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PreviewPill extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final bool muted;
+
+  const _PreviewPill({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.muted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: muted ? c.cardElev : c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: muted ? c.ink3 : c.accent),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(
+                  color: muted ? c.ink3 : c.accent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }

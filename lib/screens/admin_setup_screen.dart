@@ -1,47 +1,39 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../design/ugam.dart';
 import '../utils/app_snackbar.dart';
 
 /// Post-Supabase: admin accounts are provisioned via the Supabase
-/// dashboard, not from the app. This screen exists for legacy routes;
-/// submit shows an "unavailable" toast and the form acts as a friendly
-/// explainer.
-class AdminSetupScreen extends StatefulWidget {
+/// dashboard, not from the app. This screen is now a single explainer
+/// card that points the user at the Ugam support team.
+class AdminSetupScreen extends StatelessWidget {
   const AdminSetupScreen({super.key});
 
-  @override
-  State<AdminSetupScreen> createState() => _AdminSetupScreenState();
-}
+  static const _supportEmail = 'support@ugambooking.com';
 
-class _AdminSetupScreenState extends State<AdminSetupScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _name = TextEditingController();
-  final _phone = TextEditingController();
-  final _whatsapp = TextEditingController();
-  final _password = TextEditingController();
-  final _confirm = TextEditingController();
-  final bool _busy = false;
-  bool _obscurePassword = true;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _phone.dispose();
-    _whatsapp.dispose();
-    _password.dispose();
-    _confirm.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    AppSnackBar.error(
-      tr('admin_setup.snackbar_unavailable_body'),
-      title: tr('admin_setup.snackbar_unavailable_title'),
+  Future<void> _contactSupport() async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: _supportEmail,
+      query: 'subject=Admin%20Access%20Request',
     );
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) {
+        AppSnackBar.error(
+          'Could not open your mail app. Please email $_supportEmail.',
+          title: 'Mail unavailable',
+        );
+      }
+    } catch (_) {
+      AppSnackBar.error(
+        'Could not open your mail app. Please email $_supportEmail.',
+        title: 'Mail unavailable',
+      );
+    }
   }
 
   @override
@@ -88,74 +80,112 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
               ),
             ),
             Expanded(
-              child: Form(
-                key: _formKey,
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    UgamSpacing.xxl,
-                    UgamSpacing.md,
-                    UgamSpacing.xxl,
-                    UgamSpacing.xxl,
-                  ),
-                  children: [
-                    Text(
-                      tr('admin_setup.heading'),
-                      style: UgamText.titleL.copyWith(color: c.ink),
-                    ),
-                    const SizedBox(height: UgamSpacing.sm),
-                    Text(
-                      tr('admin_setup.subtitle'),
-                      style: UgamText.body
-                          .copyWith(color: c.ink2, fontSize: 14, height: 1.5),
-                    ),
-                    const SizedBox(height: UgamSpacing.huge),
-                    UgamInput(
-                      label: tr('admin_setup.label_name'),
-                      hint: tr('admin_setup.hint_name'),
-                      controller: _name,
-                    ),
-                    const SizedBox(height: UgamSpacing.xl),
-                    UgamPhoneInput(
-                      controller: _phone,
-                      label: tr('admin_setup.label_phone'),
-                    ),
-                    const SizedBox(height: UgamSpacing.xl),
-                    UgamPhoneInput(
-                      controller: _whatsapp,
-                      label: tr('admin_setup.label_whatsapp'),
-                    ),
-                    const SizedBox(height: UgamSpacing.xl),
-                    UgamInput(
-                      label: tr('admin_setup.label_password'),
-                      hint: tr('admin_setup.hint_password'),
-                      controller: _password,
-                      obscure: _obscurePassword,
-                      inputFormatters: const [],
-                      suffix: IconButton(
-                        icon: Icon(_obscurePassword
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined),
-                        onPressed: () =>
-                            setState(() => _obscurePassword = !_obscurePassword),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(
+                  UgamSpacing.gutter,
+                  UgamSpacing.md,
+                  UgamSpacing.gutter,
+                  UgamSpacing.xxl,
+                ),
+                child: UgamCard.media(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ClipRRect(
+                        borderRadius:
+                            BorderRadius.circular(UgamRadius.photo),
+                        child: const SizedBox(
+                          height: 120,
+                          width: double.infinity,
+                          child: UgamBusBackdrop(seed: 'admin-setup'),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: UgamSpacing.xl),
-                    UgamInput(
-                      label: tr('admin_setup.label_confirm_password'),
-                      hint: tr('admin_setup.hint_confirm_password'),
-                      controller: _confirm,
-                      obscure: _obscurePassword,
-                    ),
-                  ],
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          UgamSpacing.md,
+                          UgamSpacing.lg,
+                          UgamSpacing.md,
+                          UgamSpacing.md,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: c.accentFill,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.support_agent_rounded,
+                                size: 24,
+                                color: c.accent,
+                              ),
+                            ),
+                            const SizedBox(height: UgamSpacing.md),
+                            Text(
+                              'Admin accounts are managed by the Ugam team',
+                              style: UgamText.titleL.copyWith(
+                                color: c.ink,
+                                fontSize: 20,
+                              ),
+                            ),
+                            const SizedBox(height: UgamSpacing.sm),
+                            Text(
+                              "Contact our support team to add or modify admin access. "
+                              "You'll be added to the system within 24 hours.",
+                              style: UgamText.body.copyWith(
+                                color: c.ink2,
+                                fontSize: 14,
+                                height: 1.55,
+                              ),
+                            ),
+                            const SizedBox(height: UgamSpacing.md),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: UgamSpacing.md,
+                                vertical: UgamSpacing.sm,
+                              ),
+                              decoration: BoxDecoration(
+                                color: c.cardElev,
+                                borderRadius: BorderRadius.circular(
+                                    UgamRadius.input),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.mail_outline_rounded,
+                                      size: 16, color: c.ink2),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      _supportEmail,
+                                      style: UgamText.bodyStrong.copyWith(
+                                        color: c.ink,
+                                        fontSize: 13,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
             UgamStickyCTA(
               child: UgamCTA(
-                label: tr('admin_setup.btn_create'),
-                leadingIcon: Icons.check_rounded,
-                loading: _busy,
-                onPressed: _submit,
+                label: 'Contact support',
+                leadingIcon: Icons.mail_outline_rounded,
+                onPressed: _contactSupport,
               ),
             ),
           ],
@@ -164,8 +194,3 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
     );
   }
 }
-
-// Suppress unused import lint; FilteringTextInputFormatter is part of
-// the standard form toolkit even if not directly referenced here.
-// ignore: unused_element
-void _kKeepServices() => FilteringTextInputFormatter.digitsOnly;

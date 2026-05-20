@@ -23,28 +23,30 @@ class LoginScreen extends GetView<AuthController> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: UgamSpacing.xxl),
-              Row(
-                children: [
-                  Text(tr('splash.brand_name'),
-                      style: UgamText.titleL.copyWith(color: c.ink)),
-                  const Spacer(),
-                  Text(
-                    tr('login.tagline'),
-                    style: UgamText.micro.copyWith(color: c.ink3),
-                  ),
-                ],
-              ),
-              const SizedBox(height: UgamSpacing.xxl + UgamSpacing.lg),
-              Text(
-                tr('login.hero'),
-                style: UgamText.display.copyWith(color: c.ink),
-              ),
               const SizedBox(height: UgamSpacing.lg),
+              // Hero illustration — deterministic gradient + bus silhouette.
+              ClipRRect(
+                borderRadius: BorderRadius.circular(UgamRadius.card),
+                child: const SizedBox(
+                  height: 200,
+                  width: double.infinity,
+                  child: UgamBusBackdrop(seed: 'ugam-login'),
+                ),
+              ),
+              const SizedBox(height: UgamSpacing.xxl),
               Text(
-                tr('login.description'),
+                'UGAM',
+                style: UgamText.display.copyWith(
+                  color: c.ink,
+                  fontSize: 52,
+                  letterSpacing: -1.2,
+                ),
+              ),
+              const SizedBox(height: UgamSpacing.sm),
+              Text(
+                tr('login.tagline'),
                 style: UgamText.body
-                    .copyWith(color: c.ink2, fontSize: 16, height: 1.55),
+                    .copyWith(color: c.ink2, fontSize: 15, height: 1.45),
               ),
               const SizedBox(height: UgamSpacing.huge),
               UgamPhoneInput(

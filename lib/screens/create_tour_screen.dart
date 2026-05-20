@@ -26,7 +26,25 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   bool _saving = false;
 
   @override
+  void initState() {
+    super.initState();
+    // Live preview rebuilds on every keystroke.
+    _titleCtrl.addListener(_previewListener);
+    _fromCtrl.addListener(_previewListener);
+    _toCtrl.addListener(_previewListener);
+    _priceCtrl.addListener(_previewListener);
+  }
+
+  void _previewListener() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   void dispose() {
+    _titleCtrl.removeListener(_previewListener);
+    _fromCtrl.removeListener(_previewListener);
+    _toCtrl.removeListener(_previewListener);
+    _priceCtrl.removeListener(_previewListener);
     _titleCtrl.dispose();
     _fromCtrl.dispose();
     _toCtrl.dispose();
@@ -153,6 +171,15 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                   ),
                   physics: const BouncingScrollPhysics(),
                   children: [
+                    _TourPreviewCard(
+                      c: c,
+                      title: _titleCtrl.text.trim(),
+                      fromCity: _fromCtrl.text.trim(),
+                      toCity: _toCtrl.text.trim(),
+                      departureDate: _departureDate,
+                      price: _priceCtrl.text.trim(),
+                    ),
+                    const SizedBox(height: UgamSpacing.xl),
                     UgamInput(
                       label: tr('create_tour.label.tour_name'),
                       hint: tr('create_tour.hint.tour_name'),
@@ -264,6 +291,169 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Compact live-preview card that mirrors a tour list row. Updates as
+/// the agent types so they see what the customer will see.
+class _TourPreviewCard extends StatelessWidget {
+  final UgamColorSet c;
+  final String title;
+  final String fromCity;
+  final String toCity;
+  final DateTime? departureDate;
+  final String price;
+
+  const _TourPreviewCard({
+    required this.c,
+    required this.title,
+    required this.fromCity,
+    required this.toCity,
+    required this.departureDate,
+    required this.price,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final shownTitle = title.isNotEmpty ? title : 'Untitled tour';
+    final from = fromCity.isNotEmpty ? fromCity : 'From city';
+    final to = toCity.isNotEmpty ? toCity : 'To city';
+    final route = '$from → $to';
+    final dateText = departureDate != null
+        ? DateFormat('MMM d, yyyy').format(departureDate!)
+        : 'Pick date';
+    final priceText = () {
+      final n = double.tryParse(price);
+      if (n == null || n <= 0) return 'Set price';
+      return '₹${n.toStringAsFixed(0)}/seat';
+    }();
+
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(UgamRadius.photo),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: UgamBusBackdrop(
+                seed: 'preview-${fromCity}_$toCity',
+              ),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    const UgamReqChip(label: 'PREVIEW'),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'as customer sees it',
+                        style: UgamText.caption.copyWith(color: c.ink3),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  shownTitle,
+                  style: UgamText.titleM.copyWith(
+                    color: title.isNotEmpty ? c.ink : c.ink3,
+                    fontSize: 16,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  route,
+                  style: UgamText.caption.copyWith(
+                    color: (fromCity.isNotEmpty && toCity.isNotEmpty)
+                        ? c.ink2
+                        : c.ink3,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    _PreviewPill(
+                      c: c,
+                      icon: Icons.calendar_today_rounded,
+                      label: dateText,
+                      muted: departureDate == null,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: _PreviewPill(
+                        c: c,
+                        icon: Icons.currency_rupee_rounded,
+                        label: priceText,
+                        muted: priceText == 'Set price',
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PreviewPill extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final bool muted;
+
+  const _PreviewPill({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.muted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: muted ? c.cardElev : c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: muted ? c.ink3 : c.accent),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(
+                  color: muted ? c.ink3 : c.accent,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
