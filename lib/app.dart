@@ -1,7 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'config/theme.dart';
+import 'design/theme.dart';
 import 'routes/app_routes.dart';
 import 'controllers/tour_controller.dart';
 import 'controllers/theme_controller.dart';
@@ -40,9 +40,9 @@ class _MyAppState extends State<MyApp> {
       return GetMaterialApp(
         title: 'Ugam Booking',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme,
-        darkTheme: AppTheme.darkTheme,
-        themeMode: themeCtrl.isDarkMode.value ? ThemeMode.dark : ThemeMode.light,
+        theme: UgamTheme.light(),
+        darkTheme: UgamTheme.dark(),
+        themeMode: themeCtrl.themeMode.value,
         localizationsDelegates: context.localizationDelegates,
         supportedLocales: context.supportedLocales,
         locale: context.locale,
