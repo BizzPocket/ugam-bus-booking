@@ -142,23 +142,26 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                   onChanged: (i) =>
                       setState(() => _filter = _StatusFilter.values[i]),
                   items: [
-                    UgamTabItem(label: 'All', count: _entries.length),
                     UgamTabItem(
-                      label: 'Pending',
+                      label: tr('customer_my_requests.tab_all'),
+                      count: _entries.length,
+                    ),
+                    UgamTabItem(
+                      label: tr('customer_my_requests.tab_pending'),
                       count: _entries
                           .where((e) =>
                               e.status == 'pending' && !e.hasSeatsAssigned)
                           .length,
                     ),
                     UgamTabItem(
-                      label: 'Confirmed',
+                      label: tr('customer_my_requests.tab_confirmed'),
                       count: _entries
                           .where((e) =>
                               e.hasSeatsAssigned || e.status == 'accepted')
                           .length,
                     ),
                     UgamTabItem(
-                      label: 'Cancelled',
+                      label: tr('customer_my_requests.tab_cancelled'),
                       count: _entries
                           .where((e) => e.status == 'rejected')
                           .length,
@@ -177,10 +180,10 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                           body: tr('customer_my_requests.empty_body'),
                         )
                       : _visible.isEmpty
-                          ? const UgamEmpty(
+                          ? UgamEmpty(
                               icon: Icons.filter_alt_off_rounded,
-                              title: 'No matches',
-                              body: 'Nothing in this filter — try All.',
+                              title: tr('customer_my_requests.empty_filter_title'),
+                              body: tr('customer_my_requests.empty_filter_body'),
                             )
                           : RefreshIndicator(
                               color: c.accent,
@@ -446,10 +449,16 @@ class _RequestRow extends StatelessWidget {
   }
 
   (String, UgamStatusTone) _statusFor(CustomerRequestEntry e) {
-    if (e.hasSeatsAssigned) return ('Seats assigned', UgamStatusTone.good);
-    if (e.status == 'accepted') return ('Confirmed', UgamStatusTone.good);
-    if (e.status == 'rejected') return ('Cancelled', UgamStatusTone.warm);
-    return ('Pending', UgamStatusTone.warm);
+    if (e.hasSeatsAssigned) {
+      return (tr('customer_my_requests.chip_seats_assigned'), UgamStatusTone.good);
+    }
+    if (e.status == 'accepted') {
+      return (tr('customer_my_requests.chip_confirmed'), UgamStatusTone.good);
+    }
+    if (e.status == 'rejected') {
+      return (tr('customer_my_requests.chip_cancelled'), UgamStatusTone.warm);
+    }
+    return (tr('customer_my_requests.chip_pending'), UgamStatusTone.warm);
   }
 
   String _seatsLabel(CustomerRequestEntry e) {

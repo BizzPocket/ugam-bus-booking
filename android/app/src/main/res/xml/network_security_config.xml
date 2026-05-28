@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS-only: reject all cleartext (HTTP) traffic app-wide. The backend
+     (Supabase) is HTTPS, so no cleartext is ever needed. Explicit config so
+     a Play security review sees the intent, not just the targetSdk default. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

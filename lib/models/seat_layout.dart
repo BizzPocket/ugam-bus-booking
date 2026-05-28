@@ -110,16 +110,28 @@ class BusLayout {
     );
   }
 
-  /// Generate a layout from a [busType] and total seat count, plus an
-  /// optional [seaterCount] used only for `mixed`. Lays cells out 4 columns
-  /// wide. Sleepers split half lower / half upper as `doubleSofa`. Seaters
-  /// live on the lower deck only with `null` position.
+  /// Generate a layout from a [busType] and total seat count, plus optional
+  /// per-class counts:
+  ///   - [seaterCount]      — number of seater berths (only used for `mixed`).
+  ///   - [singleSofaCount]  — how many sleeper berths should be Single Sofa
+  ///     (1-person berth). The remaining sleeper berths become Double Sofa
+  ///     (2-person shared berth). Defaults to 0 so legacy callers get the
+  ///     previous all-double-sofa behaviour.
+  ///
+  /// Layout mimics a real Indian sleeper bus (2x1 berth split):
+  ///   col 0      : Single Sofa lane (1-wide berths, one per row)
+  ///   col 1      : aisle (always empty)
+  ///   col 2, 3   : Double Sofa lane (2-wide berths, two per row)
+  /// Seaters (mixed buses) fill row-major below the sleeper rows.
+  /// If only one type exists (all-double or all-single), the layout
+  /// fills row-by-row to avoid one-column waste.
   factory BusLayout.generate({
     required BusType busType,
     required int totalSeats,
     int seaterCount = 0,
+    int singleSofaCount = 0,
   }) {
-    const cols = 4;
+    final int cols = busType == BusType.seater ? 5 : 4;
 
     int sleeperTotal;
     int seaterTotal;
@@ -138,64 +150,168 @@ class BusLayout {
         break;
     }
 
-    final sleeperLower = (sleeperTotal / 2).ceil();
-    final sleeperUpper = sleeperTotal - sleeperLower;
+    final singleTotal = singleSofaCount.clamp(0, sleeperTotal);
+    final doubleTotal = sleeperTotal - singleTotal;
+
+    // Distribute sleepers ~evenly across the two decks. Lower deck gets the
+    // ceiling so single-row buses still produce a valid layout.
+    final singleLower = (singleTotal / 2).ceil();
+    final singleUpper = singleTotal - singleLower;
+    final doubleLower = (doubleTotal / 2).ceil();
+    final doubleUpper = doubleTotal - doubleLower;
+    final seaterLower = seaterTotal; // seaters stay on lower deck
+
+    /// Lay out sleeper berths in two lanes (singles col 0, doubles cols 2-3)
+    /// when BOTH types are present. When only one type exists, we still
+    /// preserve the aisle (col 1) to prevent blocked walking paths.
+    void fillSleeperDeck(
+      List<SeatCell> cells,
+      int singles,
+      int doubles,
+      SeatPosition position,
+      String idPrefix,
+      int Function() nextId,
+    ) {
+      if (singles > 0 && doubles > 0) {
+        // Mixed deck — left lane = singles (col 0), right lane = doubles (cols 2-3)
+        for (var i = 0; i < singles; i++) {
+          cells.add(SeatCell(
+            row: i,
+            col: 0,
+            seatType: SeatType.singleSofa,
+            position: position,
+            seatId: '$idPrefix${nextId()}',
+          ));
+        }
+        for (var i = 0; i < doubles; i++) {
+          cells.add(SeatCell(
+            row: i ~/ 2,
+            col: 2 + (i % 2),
+            seatType: SeatType.doubleSofa,
+            position: position,
+            seatId: '$idPrefix${nextId()}',
+          ));
+        }
+      } else if (singles > 0) {
+        // Only singles — 2+1 layout with aisle at col 1 (singles at col 0, 2, 3)
+        for (var i = 0; i < singles; i++) {
+          final row = i ~/ 3;
+          final cInRow = i % 3;
+          cells.add(SeatCell(
+            row: row,
+            col: cInRow == 0 ? 0 : cInRow + 1,
+            seatType: SeatType.singleSofa,
+            position: position,
+            seatId: '$idPrefix${nextId()}',
+          ));
+        }
+      } else if (doubles > 0) {
+        // Only doubles — 2+1 layout with aisle at col 1 (doubles at col 2, 3)
+        for (var i = 0; i < doubles; i++) {
+          cells.add(SeatCell(
+            row: i ~/ 2,
+            col: 2 + (i % 2),
+            seatType: SeatType.doubleSofa,
+            position: position,
+            seatId: '$idPrefix${nextId()}',
+          ));
+        }
+      }
+    }
 
     final lowerCells = <SeatCell>[];
     final upperCells = <SeatCell>[];
+    var lowerIdCounter = 0;
+    var upperIdCounter = 0;
 
-    var idCounter = 0;
-    for (var i = 0; i < sleeperLower; i++) {
-      idCounter++;
-      lowerCells.add(SeatCell(
-        row: i ~/ cols,
-        col: i % cols,
-        seatType: SeatType.doubleSofa,
-        position: SeatPosition.lower,
-        seatId: 'L$idCounter',
-      ));
-    }
-    for (var i = 0; i < seaterTotal; i++) {
-      idCounter++;
-      final seq = sleeperLower + i;
-      lowerCells.add(SeatCell(
-        row: seq ~/ cols,
-        col: seq % cols,
-        seatType: SeatType.seater,
-        position: null,
-        seatId: 'L$idCounter',
-      ));
-    }
-    for (var i = 0; i < sleeperUpper; i++) {
-      upperCells.add(SeatCell(
-        row: i ~/ cols,
-        col: i % cols,
-        seatType: SeatType.doubleSofa,
-        position: SeatPosition.upper,
-        seatId: 'U${i + 1}',
-      ));
+    fillSleeperDeck(
+      lowerCells,
+      singleLower,
+      doubleLower,
+      SeatPosition.lower,
+      'L',
+      () => ++lowerIdCounter,
+    );
+    fillSleeperDeck(
+      upperCells,
+      singleUpper,
+      doubleUpper,
+      SeatPosition.upper,
+      'U',
+      () => ++upperIdCounter,
+    );
+
+    // Sleeper rows occupied on the lower deck, so seaters can sit below.
+    int sleeperLowerRows;
+    if (singleLower > 0 && doubleLower > 0) {
+      final singleRows = singleLower;
+      final doubleRows = (doubleLower / 2).ceil();
+      sleeperLowerRows = singleRows > doubleRows ? singleRows : doubleRows;
+    } else if (singleLower > 0) {
+      sleeperLowerRows = (singleLower / 3).ceil();
+    } else if (doubleLower > 0) {
+      sleeperLowerRows = (doubleLower / 2).ceil();
+    } else {
+      sleeperLowerRows = 0;
     }
 
-    final lowerRows = sleeperLower + seaterTotal == 0
-        ? 1
-        : ((sleeperLower + seaterTotal - 1) ~/ cols) + 1;
-    final upperRows =
-        sleeperUpper == 0 ? 0 : ((sleeperUpper - 1) ~/ cols) + 1;
+    if (busType == BusType.seater) {
+      // Standard 2+2 layout (cols = 5, aisle = 2, seats = 0, 1, 3, 4)
+      for (var i = 0; i < seaterLower; i++) {
+        final rowOffset = i ~/ 4;
+        final cInRow = i % 4;
+        lowerCells.add(SeatCell(
+          row: rowOffset,
+          col: cInRow < 2 ? cInRow : cInRow + 1,
+          seatType: SeatType.seater,
+          position: null,
+          seatId: 'L${++lowerIdCounter}',
+        ));
+      }
+    } else {
+      // Mixed seater rows — 2+1 layout (cols = 4, aisle = 1, seats = 0, 2, 3)
+      for (var i = 0; i < seaterLower; i++) {
+        final rowOffset = i ~/ 3;
+        final cInRow = i % 3;
+        lowerCells.add(SeatCell(
+          row: sleeperLowerRows + rowOffset,
+          col: cInRow == 0 ? 0 : cInRow + 1,
+          seatType: SeatType.seater,
+          position: null,
+          seatId: 'L${++lowerIdCounter}',
+        ));
+      }
+    }
+
+    int rowsFor(List<SeatCell> cells) {
+      var maxRow = -1;
+      for (final c in cells) {
+        if (c.row > maxRow) maxRow = c.row;
+      }
+      return maxRow + 1;
+    }
+
+    final lowerRows = rowsFor(lowerCells);
+    final upperRows = rowsFor(upperCells);
     final maxRows = lowerRows > upperRows ? lowerRows : upperRows;
 
     return BusLayout(
-      rows: maxRows,
+      rows: maxRows == 0 ? 1 : maxRows,
       cols: cols,
       lowerDeck: lowerCells,
       upperDeck: upperCells,
-    );
+    )._regenerateIds();
   }
 
   /// Get a cell from the lower deck by position.
-  SeatCell getLowerCell(int row, int col) => lowerDeck[row * cols + col];
+  SeatCell getLowerCell(int row, int col) =>
+      lowerDeck.firstWhere((c) => c.row == row && c.col == col,
+          orElse: () => SeatCell(row: row, col: col));
 
   /// Get a cell from the upper deck by position.
-  SeatCell getUpperCell(int row, int col) => upperDeck[row * cols + col];
+  SeatCell getUpperCell(int row, int col) =>
+      upperDeck.firstWhere((c) => c.row == row && c.col == col,
+          orElse: () => SeatCell(row: row, col: col));
 
   /// Count of seats (non-empty cells) across both decks.
   int get totalSeats =>
@@ -230,7 +346,12 @@ class BusLayout {
     final deck = isUpperDeck
         ? List<SeatCell>.from(upperDeck)
         : List<SeatCell>.from(lowerDeck);
-    deck[row * cols + col] = newCell;
+    final idx = deck.indexWhere((c) => c.row == row && c.col == col);
+    if (idx >= 0) {
+      deck[idx] = newCell;
+    } else {
+      deck.add(newCell);
+    }
 
     final updatedLayout = BusLayout(
       rows: rows,

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/tour_status.dart';
-import '../config/theme.dart';
+import '../design/tokens.dart';
 
 class TourStatusBadge extends StatelessWidget {
   final TourStatus status;
@@ -14,14 +14,21 @@ class TourStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (Color color, Color bg, IconData icon) = switch (status) {
-      TourStatus.planning   => (AppTheme.info,    AppTheme.info.withAlpha(15),    Icons.edit_note_rounded),
-      TourStatus.collecting => (AppTheme.brand,   AppTheme.brand.withAlpha(15),   Icons.people_alt_rounded),
-      TourStatus.busBooked     => (AppTheme.warning, AppTheme.warningLight,           Icons.directions_bus_rounded),
-      TourStatus.assigning  => (const Color(0xFFEC4899), const Color(0xFFFDF2F8), Icons.event_seat_rounded),
-      TourStatus.locked     => (AppTheme.success, AppTheme.successLight,          Icons.lock_rounded),
-      TourStatus.completed  => (const Color(0xFF6B7280), const Color(0xFFF3F4F6), Icons.check_circle_rounded),
+    final c = UgamColors.of(context);
+    // Status hues resolve from the active token set so they flip with the
+    // theme. `assigning` keeps a dedicated rose — it's a distinct status
+    // signal, not a brand colour — and reads on both light and dark.
+    final (Color color, IconData icon) = switch (status) {
+      TourStatus.planning   => (c.ink2,               Icons.edit_note_rounded),
+      TourStatus.collecting => (c.accent,             Icons.people_alt_rounded),
+      TourStatus.busBooked  => (c.warm,               Icons.directions_bus_rounded),
+      TourStatus.assigning  => (const Color(0xFFEC4899), Icons.event_seat_rounded),
+      TourStatus.locked     => (c.good,               Icons.lock_rounded),
+      TourStatus.completed  => (c.ink3,               Icons.check_circle_rounded),
     };
+    // Tint derived from the hue itself (~14% alpha) instead of a baked
+    // light-mode swatch, so the chip background works in either theme.
+    final bg = color.withAlpha(36);
 
     if (compact) {
       return Container(

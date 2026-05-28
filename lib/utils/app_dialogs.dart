@@ -1,7 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../config/theme.dart';
+import '../design/tokens.dart';
 
 /// Production-ready dialog utilities.
 class AppDialogs {
@@ -23,12 +23,10 @@ class AppDialogs {
     final result = await Get.dialog<bool>(
       Builder(
         builder: (context) {
-          final theme = Theme.of(context);
-          final isDark = theme.brightness == Brightness.dark;
-          final colorScheme = theme.colorScheme;
+          final colorScheme = Theme.of(context).colorScheme;
 
           return AlertDialog(
-            backgroundColor: isDark ? AppTheme.cardDark : Colors.white,
+            backgroundColor: UgamColors.of(context).card,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -63,7 +61,7 @@ class AppDialogs {
                 onPressed: () => Get.back(result: true),
                 style: TextButton.styleFrom(
                   foregroundColor: isDestructive
-                      ? AppTheme.danger
+                      ? colorScheme.error
                       : colorScheme.primary,
                 ),
                 child: Text(
@@ -88,18 +86,16 @@ class AppDialogs {
     await Get.dialog(
       Builder(
         builder: (context) {
-          final theme = Theme.of(context);
-          final isDark = theme.brightness == Brightness.dark;
-          final colorScheme = theme.colorScheme;
+          final colorScheme = Theme.of(context).colorScheme;
 
           return AlertDialog(
-            backgroundColor: isDark ? AppTheme.cardDark : Colors.white,
+            backgroundColor: UgamColors.of(context).card,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
-            icon: const Icon(
+            icon: Icon(
               Icons.error_outline_rounded,
-              color: AppTheme.danger,
+              color: colorScheme.error,
               size: 40,
             ),
             title: Text(

@@ -1,10 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
 import '../controllers/tour_controller.dart';
+import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
@@ -14,20 +13,8 @@ import '../models/trip_type.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 
-/// Bottom sheet for editing an existing passenger's seat request.
-///
-/// Why this exists: customers often call back after submitting to switch
-/// "2 sofa" → "1 single + 1 double" etc. The admin needs to update the
-/// underlying request lines without retyping the name/phone/note.
-///
-/// Behaviour notes:
-/// - Phone is shown but not editable — it is the (tour_id, phone)
-///   idempotency key in Postgres. Changing it would either create a
-///   duplicate row or hit the unique-index violation.
-/// - If the admin reduces the total seat count below what is currently
-///   assigned, the extra `assigned_seats` entries are auto-trimmed from
-///   the tail of the list and the admin is shown a snackbar so they know
-///   which seats need re-assigning.
+/// Bottom sheet for editing an existing passenger's seat request, fully styled
+/// under the Ugam Design System.
 class EditRequestSheet extends StatefulWidget {
   final Tour tour;
   final Passenger passenger;
@@ -43,10 +30,9 @@ class EditRequestSheet extends StatefulWidget {
     required Tour tour,
     required Passenger passenger,
   }) {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+    return UgamSheet.show<void>(
+      context,
+      title: tr('edit_request.title'),
       builder: (_) => EditRequestSheet(tour: tour, passenger: passenger),
     );
   }
@@ -78,11 +64,6 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
       } else if (line.seatType == SeatType.singleSofa) {
         _singleSofa += line.qty;
       }
-      // Seater requests aren't expressible in this sheet today; the
-      // existing _AddRequestSheet only captures Double/Single Sofa, so
-      // mirroring that here keeps the edit UX consistent. If a passenger
-      // has a Seater line, it stays untouched (we add the sofa lines we
-      // captured back in onto whatever non-sofa lines already exist).
     }
   }
 
@@ -106,7 +87,6 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
 
     setState(() => _saving = true);
     try {
-      // Preserve any non-sofa lines (e.g. Seater) the sheet didn't render.
       final preservedLines = widget.passenger.requestLines.where(
         (l) => l.seatType != SeatType.doubleSofa &&
             l.seatType != SeatType.singleSofa,
@@ -119,9 +99,6 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
           RequestLine(seatType: SeatType.singleSofa, qty: _singleSofa),
       ];
 
-      // If admin reduced the request below what is currently assigned,
-      // trim extra assignments from the tail so the schema stays
-      // consistent (totalSeatsAssigned <= totalSeatsRequested).
       final preservedSeatCount = preservedLines.fold<int>(0, (s, l) => s + l.qty);
       final newTotalRequested = preservedSeatCount + _totalSeats;
       List<SeatAssignment> newAssignedSeats = widget.passenger.assignedSeats;
@@ -166,137 +143,81 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    final c = UgamColors.of(context);
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: viewInsets),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface(context),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.border(context),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              Text(
-                tr('edit_request.title'),
-                style: GoogleFonts.inter(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.text(context),
-                ),
-              ),
-              Text(
-                tr(
-                  'edit_request.subtitle',
-                  namedArgs: {'name': widget.passenger.displayName},
-                ),
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppColors.textMuted(context),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _name,
-                textCapitalization: TextCapitalization.words,
-                decoration: InputDecoration(
-                  labelText: tr('edit_request.name_label'),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                enabled: false,
-                controller: TextEditingController(text: widget.passenger.phone),
-                decoration: InputDecoration(
-                  labelText: tr('edit_request.phone_label'),
-                ),
-              ),
-              const SizedBox(height: 16),
-              _EditTripTypeSegmented(
-                value: _tripType,
-                fromCity: widget.tour.fromCity,
-                toCity: widget.tour.toCity,
-                onChanged: (v) => setState(() => _tripType = v),
-              ),
-              const SizedBox(height: 12),
-              _EditSeatCounter(
-                label: tr('requests.sheet.double_sofa'),
-                value: _doubleSofa,
-                onChanged: (v) => setState(() => _doubleSofa = v),
-              ),
-              const SizedBox(height: 8),
-              _EditSeatCounter(
-                label: tr('requests.sheet.single_sofa'),
-                value: _singleSofa,
-                onChanged: (v) => setState(() => _singleSofa = v),
-              ),
-              if (_alreadyAssigned > 0) ...[
-                const SizedBox(height: 8),
-                Text(
-                  '$_alreadyAssigned / ${widget.passenger.totalSeatsRequested} ${tr('requests.seat_chip.seats', namedArgs: {'count': ''}).trim()}',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: AppColors.textMuted(context),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 16),
-              TextField(
-                controller: _note,
-                maxLines: 2,
-                maxLength: 160,
-                decoration: InputDecoration(
-                  labelText: tr('requests.sheet.note_label'),
-                  hintText: tr('requests.sheet.note_hint'),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 48,
-                child: ElevatedButton.icon(
-                  onPressed: _saving ? null : _submit,
-                  icon: _saving
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.check_rounded, size: 18),
-                  label: Text(
-                    _saving ? tr('edit_request.saving') : tr('edit_request.save'),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.brand,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr(
+              'edit_request.subtitle',
+              namedArgs: {'name': widget.passenger.displayName},
+            ),
+            style: UgamText.caption.copyWith(
+              color: c.ink2,
+            ),
           ),
-        ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('edit_request.name_label'),
+            controller: _name,
+            keyboardType: TextInputType.text,
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          UgamInput(
+            label: tr('edit_request.phone_label'),
+            controller: TextEditingController(text: widget.passenger.phone),
+            enabled: false,
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          _EditTripTypeSegmented(
+            value: _tripType,
+            fromCity: widget.tour.fromCity,
+            toCity: widget.tour.toCity,
+            onChanged: (v) => setState(() => _tripType = v),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          _EditSeatCounter(
+            label: tr('requests.sheet.double_sofa'),
+            value: _doubleSofa,
+            onChanged: (v) => setState(() => _doubleSofa = v),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          _EditSeatCounter(
+            label: tr('requests.sheet.single_sofa'),
+            value: _singleSofa,
+            onChanged: (v) => setState(() => _singleSofa = v),
+          ),
+          if (_alreadyAssigned > 0) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Text(
+                '$_alreadyAssigned / ${widget.passenger.totalSeatsRequested} ${tr('requests.seat_chip.seats', namedArgs: {'count': ''}).trim()}',
+                style: UgamText.caption.copyWith(
+                  color: c.ink2,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('requests.sheet.note_label'),
+            hint: tr('requests.sheet.note_hint'),
+            controller: _note,
+            maxLength: 160,
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          UgamCTA(
+            label: _saving ? tr('edit_request.saving') : tr('edit_request.save'),
+            leadingIcon: Icons.check_rounded,
+            loading: _saving,
+            onPressed: _saving ? null : _submit,
+          ),
+        ],
       ),
     );
   }
@@ -317,18 +238,15 @@ class _EditTripTypeSegmented extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          tr('requests.sheet.trip_type_label'),
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textMuted(context),
-          ),
+          tr('requests.sheet.trip_type_label').toUpperCase(),
+          style: UgamText.micro.copyWith(color: c.ink2),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: UgamSpacing.sm),
         Row(
           children: [
             Expanded(
@@ -339,7 +257,7 @@ class _EditTripTypeSegmented extends StatelessWidget {
                 onTap: () => onChanged(TripType.roundTrip),
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: _EditTripChip(
                 icon: Icons.arrow_forward_rounded,
@@ -351,7 +269,7 @@ class _EditTripTypeSegmented extends StatelessWidget {
                 onTap: () => onChanged(TripType.outboundOnly),
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: _EditTripChip(
                 icon: Icons.arrow_back_rounded,
@@ -385,17 +303,19 @@ class _EditTripChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final c = UgamColors.of(context);
+    return GestureDetector(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        duration: UgamMotion.tab,
+        curve: UgamMotion.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? AppTheme.brandLight : AppColors.surfaceAlt(context),
-          borderRadius: BorderRadius.circular(8),
+          color: selected ? c.accentFill : c.cardElev,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? AppTheme.brand : AppColors.border(context),
+            color: selected ? c.accent : c.border,
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -405,19 +325,19 @@ class _EditTripChip extends StatelessWidget {
             Icon(
               icon,
               size: 16,
-              color: selected ? AppTheme.brand : AppColors.textMuted(context),
+              color: selected ? c.accent : c.ink3,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               label,
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: GoogleFonts.inter(
-                fontSize: 10,
+              style: UgamText.caption.copyWith(
+                fontSize: 9,
                 height: 1.2,
-                fontWeight: FontWeight.w600,
-                color: selected ? AppTheme.brandDark : AppColors.text(context),
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? c.ink : c.ink2,
               ),
             ),
           ],
@@ -430,59 +350,103 @@ class _EditTripChip extends StatelessWidget {
 class _EditSeatCounter extends StatelessWidget {
   final String label;
   final int value;
+  final int minVal;
+  final int maxVal;
   final ValueChanged<int> onChanged;
 
   const _EditSeatCounter({
     required this.label,
     required this.value,
+    this.minVal = 0,
+    this.maxVal = 10,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final canMinus = value > minVal;
+    final canPlus = value < maxVal;
+
     return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 14),
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: AppColors.surfaceAlt(context),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border(context)),
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.input),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               label,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: AppColors.text(context),
-              ),
+              style: UgamText.bodyStrong.copyWith(color: c.ink),
             ),
           ),
-          IconButton.outlined(
-            visualDensity: VisualDensity.compact,
-            onPressed: value > 0 ? () => onChanged(value - 1) : null,
-            icon: const Icon(Icons.remove_rounded, size: 18),
+          _CounterButton(
+            icon: Icons.remove_rounded,
+            enabled: canMinus,
+            onTap: canMinus ? () => onChanged(value - 1) : null,
           ),
           SizedBox(
-            width: 32,
+            width: 40,
             child: Text(
               '$value',
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: AppColors.text(context),
+              style: UgamText.tabular(
+                UgamText.titleM.copyWith(
+                  color: c.ink,
+                  fontSize: 16,
+                ),
               ),
             ),
           ),
-          IconButton.outlined(
-            visualDensity: VisualDensity.compact,
-            onPressed: value < 10 ? () => onChanged(value + 1) : null,
-            icon: const Icon(Icons.add_rounded, size: 18),
+          _CounterButton(
+            icon: Icons.add_rounded,
+            enabled: canPlus,
+            onTap: canPlus ? () => onChanged(value + 1) : null,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CounterButton extends StatelessWidget {
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  const _CounterButton({
+    required this.icon,
+    required this.enabled,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: UgamMotion.tapIn,
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: enabled ? c.card : c.card.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: enabled ? c.border : c.border.withValues(alpha: 0.5),
+          ),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          icon,
+          size: 16,
+          color: enabled ? c.ink : c.ink3,
+        ),
       ),
     );
   }

@@ -34,6 +34,22 @@
       "phase_book": "બુક",
       "phase_lock": "લૉક",
       "phase_done": "થઈ ગયું"
+    },
+    "month": {
+      "short": {
+        "jan": "જાન્યુ",
+        "feb": "ફેબ્રુ",
+        "mar": "માર્ચ",
+        "apr": "એપ્રિ",
+        "may": "મે",
+        "jun": "જૂન",
+        "jul": "જુલા",
+        "aug": "ઑગ",
+        "sep": "સપ્ટે",
+        "oct": "ઑક્ટો",
+        "nov": "નવે",
+        "dec": "ડિસે"
+      }
     }
   },
   "settings": {
@@ -58,6 +74,13 @@
     "logout": "લૉગ આઉટ",
     "logout_subtitle": "અકાઉન્ટ બહાર",
     "logout_confirm_message": "ખરેખર લૉગ આઉટ કરવું છે?",
+    "delete_account": "એકાઉન્ટ ડિલીટ કરો",
+    "delete_account_subtitle": "તમારું એકાઉન્ટ અને બધો ડેટા કાયમ માટે ભૂંસી નાખો",
+    "delete_account_confirm_title": "એકાઉન્ટ ડિલીટ કરવું છે?",
+    "delete_account_confirm_message": "આનાથી તમારું એકાઉન્ટ અને તમારી માલિકીની દરેક ટૂર, બસ, મુસાફર અને બુકિંગ વિનંતી કાયમ માટે ડિલીટ થઈ જશે. આ પાછું મેળવી શકાશે નહીં.",
+    "delete_account_confirm_cta": "કાયમ માટે ડિલીટ કરો",
+    "delete_account_success": "તમારું એકાઉન્ટ અને બધો ડેટા ડિલીટ થઈ ગયો છે.",
+    "delete_account_error": "એકાઉન્ટ ડિલીટ થઈ શક્યું નહીં. ફરી પ્રયાસ કરો અથવા સપોર્ટનો સંપર્ક કરો.",
     "footer_made_in": "Made with ♥ in Gujarat"
   },
   "language": {
@@ -75,7 +98,37 @@
     "empty_subtitle": "ફરી તપાસો — રૂટ અને તારીખ નક્કી થાય ત્યારે નવી ટૂર દેખાશે.",
     "price_per_seat": "₹{price} / સીટ",
     "bus_to_be_confirmed": "બસ નક્કી નથી",
-    "tap_to_book": "બુક કરવા ટૅપ કરો →"
+    "tap_to_book": "બુક કરવા ટૅપ કરો →",
+    "header_explore": "યાત્રાઓ જુઓ",
+    "search_hint": "રૂટ કે મુકામ થી શોધો…",
+    "group_upcoming": "આગામી",
+    "group_later": "પછી",
+    "pull_to_refresh": "નવી યાત્રાઓ માટે નીચે ખેંચીને રિફ્રેશ કરો.",
+    "no_matches_title": "કંઈ મળ્યું નથી",
+    "no_matches_body": "\"{q}\" માટે કોઈ યાત્રા મળી નથી.",
+    "chip_full": "ભરાઈ ગઈ",
+    "chip_left": "{n} બાકી",
+    "chip_open": "ખુલ્લી",
+    "chip_from_price": "₹{price} થી"
+  },
+  "customer_more": {
+    "title": "વધુ",
+    "section_preferences": "પસંદગીઓ",
+    "language": "ભાષા",
+    "section_about_legal": "વિશે અને કાનૂની",
+    "about": "ઉગમ ફોજ વિશે",
+    "about_subtitle": "આ એપ શું છે અને કોણ બનાવે છે",
+    "privacy": "ગોપનીયતા નીતિ",
+    "privacy_subtitle": "અમે તમારો ડેટા કેવી રીતે સંભાળીએ છીએ",
+    "terms": "સેવાની શરતો",
+    "terms_subtitle": "એપ વાપરવાના નિયમો",
+    "section_support": "સહાય",
+    "contact": "વોટ્સએપ પર સંપર્ક કરો",
+    "contact_subtitle": "બુકિંગ વિશે પ્રશ્ન છે? અમને સંદેશ મોકલો",
+    "contact_error_title": "ચેટ ખોલી શકાઈ નહીં",
+    "contact_error_body": "સંપર્ક લિંક ખોલવા માટે કોઈ એપ ઉપલબ્ધ નથી.",
+    "version": "આવૃત્તિ {version}",
+    "footer_made_by": "Occubit Solution દ્વારા · devam.org"
   },
   "dashboard": {
     "greeting_morning": "સુપ્રભાત",
@@ -129,6 +182,10 @@
     "seat_chip": {
       "seats": "{count} સીટ"
     },
+    "chip": {
+      "trip_outbound": "ફક્ત {from} → {to}",
+      "trip_return": "ફક્ત {from} → {to}"
+    },
     "action": {
       "assign_seats": "સીટ ફાળવો",
       "view_assignment": "ફાળવણી જુઓ",
@@ -172,6 +229,10 @@
       "note_hint": "દા.ત. વૃદ્ધ માતા-પિતા સાથે",
       "single_sofa": "સિંગલ સોફા",
       "double_sofa": "ડબલ સોફા",
+      "trip_type_label": "મુસાફરીની દિશા",
+      "trip_round": "બંને બાજુ",
+      "trip_outbound": "એક બાજુ · {from} → {to}",
+      "trip_return": "એક બાજુ · {from} → {to}",
       "save": "વિનંતી સાચવો",
       "saving": "સાચવી રહ્યા છીએ…"
     },
@@ -210,6 +271,8 @@
     "status_pending": "બાકી",
     "seats_double": "{count} ડબલ",
     "seats_single": "{count} સિંગલ",
+    "trip_outbound": "એક બાજુ · ફક્ત {from} → {to}",
+    "trip_return": "એક બાજુ · ફક્ત {from} → {to}",
     "seats_total": "કુલ {total}",
     "seats_fallback": "{count} સીટ",
     "layout_view_hint": "બસ લેઆઉટ પર તમારી સીટ જોવા ટૅપ કરો",
@@ -226,7 +289,17 @@
     "layout_driver": "ડ્રાઈવર",
     "layout_your_seats": "તમારી સીટ: {seats}",
     "layout_legend_mine": "તમારી સીટ",
-    "layout_legend_other": "બીજી સીટ"
+    "layout_legend_other": "બીજી સીટ",
+    "tab_all": "બધી",
+    "tab_pending": "બાકી",
+    "tab_confirmed": "પુષ્ટિ થયેલ",
+    "tab_cancelled": "રદ થયેલ",
+    "empty_filter_title": "કંઈ મળ્યું નથી",
+    "empty_filter_body": "આ ફિલ્ટરમાં કંઈ નથી — બધી જુઓ.",
+    "chip_seats_assigned": "સીટ ફાળવાઈ",
+    "chip_confirmed": "પુષ્ટિ થયેલ",
+    "chip_cancelled": "રદ થયેલ",
+    "chip_pending": "બાકી"
   },
   "add_bus": {
     "title": "બસ ઉમેરો",
@@ -356,6 +429,13 @@
     "label_your_name": "તમારું નામ",
     "hint_your_name": "જેમ WhatsApp પર છે",
     "label_phone": "ફોન નંબર (WhatsApp પર સંપર્ક કરીશું)",
+    "label_trip_type": "તમે કઈ રીતે મુસાફરી કરશો?",
+    "trip_round_title": "બંને બાજુ (રાઉન્ડ-ટ્રિપ)",
+    "trip_round_sub": "ગ્રુપ સાથે {from} થી {to} અને પાછા {from} આવો.",
+    "trip_outbound_title": "ફક્ત જવાનું — {from} → {to}",
+    "trip_outbound_sub": "જવા સાથે આવીશ, પણ ત્યાં વધુ રહીશ — પાછી બસમાં નહીં આવું.",
+    "trip_return_title": "ફક્ત આવવાનું — {from} → {to}",
+    "trip_return_sub": "હું પહેલેથી જ ત્યાં છું — પાછી જતી બસમાં જોડાઈશ.",
     "label_seat_count": "કેટલી સીટ જોઈએ?",
     "seat_double_sofa_label": "ડબલ સોફા",
     "seat_double_sofa_sub": "પહોળી બર્થ · કપલ કે ફૅમિલી માટે",
@@ -382,7 +462,11 @@
     "route_price": "{from} → {to}  ·  ₹{price} / સીટ",
     "totals_seat_one": "{} સીટ",
     "totals_seat_other": "{} સીટ",
-    "totals_estimated": "અંદાજ: ₹{amount}"
+    "totals_estimated": "અંદાજ: ₹{amount}",
+    "title_edit": "વિનંતી સંપાદન",
+    "section_who_is_booking": "કોણ બુક કરી રહ્યું છે",
+    "button_update": "વિનંતી અપડેટ કરો",
+    "button_submit": "વિનંતી મોકલો"
   },
   "customer_tour_detail": {
     "title": "ટૂર વિગત",
@@ -395,7 +479,24 @@
     "label_tour_status": "ટૂર સ્ટેટસ",
     "bus_confirmed": "બસ કન્ફર્મ",
     "bus_ac": "AC",
-    "bus_non_ac": "Non-AC"
+    "bus_non_ac": "Non-AC",
+    "tab_about": "વિશે",
+    "tab_schedule": "સમય સારણી",
+    "section_trip_summary": "યાત્રા સારાંશ",
+    "section_about_tour": "આ યાત્રા વિશે",
+    "section_bus": "બસ",
+    "section_timeline": "સમય રેખા",
+    "label_route": "રૂટ",
+    "label_price": "કિંમત",
+    "label_tour_id": "યાત્રા ID",
+    "price_per_seat_value": "₹{price} / સીટ",
+    "chip_seats": "{count} સીટ",
+    "schedule_departure_from": "{city} થી પ્રસ્થાન",
+    "schedule_arrive_in": "{city} પહોંચવું",
+    "schedule_return_to": "{city} પાછા આવવું",
+    "cta_bookings_closed": "બુકિંગ બંધ",
+    "cta_join_waitlist": "વેઇટિંગ લિસ્ટમાં જોડાઓ",
+    "cta_request_to_book": "બુકિંગ માટે વિનંતી"
   },
   "edit_tour": {
     "title": "ટૂર બદલો",

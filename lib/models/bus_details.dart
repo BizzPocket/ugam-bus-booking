@@ -9,6 +9,12 @@ import 'seat_layout.dart';
 class Bus {
   final String id;
   final String? ownerId;
+
+  /// Tour this bus is assigned to. Set when an agent adds the bus to a
+  /// specific tour via [TourController.addBus]. Nullable so a bus can
+  /// exist in the fleet without yet being assigned to a tour.
+  final String? tourId;
+
   final String name; // "Bus 1", "Bus 2", …
   final String busNumber; // GJ05HU7162
   final String driverName;
@@ -18,6 +24,11 @@ class Bus {
   final bool isAC;
   final String busType;
   final int totalSeatsLegacy; // legacy field — prefer layout.totalSeats
+
+  /// Per-seat price for this bus. Overrides the tour-level price.
+  /// Defaults to 0; agents may set it when adding the bus.
+  final double pricePerSeat;
+
   final String? notes;
   final BusLayout? layout;
   final DateTime createdAt;
@@ -26,15 +37,17 @@ class Bus {
   Bus({
     String? id,
     this.ownerId,
+    this.tourId,
     required this.name,
-    required this.busNumber,
-    required this.driverName,
+    this.busNumber = '',
+    this.driverName = '',
     this.driverPhone = '',
     this.ownerName,
     this.ownerPhone,
     this.isAC = false,
     this.busType = 'Semi-Sleeper',
     this.totalSeatsLegacy = 0,
+    this.pricePerSeat = 0,
     this.notes,
     this.layout,
     DateTime? createdAt,
@@ -68,8 +81,13 @@ class Bus {
     return {
       'id': id,
       'owner_id': ownerId,
+      'tour_id': tourId,
       'name': name,
-      'registration_no': busNumber,
+      // Empty registration must be NULL, not ''. The partial unique index
+      // `buses(owner_id, registration_no) where registration_no is not null`
+      // treats '' as a real value, so two unfilled buses on the same tour
+      // collide unless we send NULL.
+      'registration_no': busNumber.isEmpty ? null : busNumber,
       'driver_name': driverName,
       'driver_phone': driverPhone,
       'owner_name': ownerName,
@@ -77,6 +95,7 @@ class Bus {
       'is_ac': isAC,
       'bus_type': busType,
       'total_seats': totalSeatsLegacy,
+      'price_per_seat': pricePerSeat,
       'notes': notes,
       'layout': layout?.toMap(),
       'created_at': createdAt.toIso8601String(),
@@ -88,6 +107,7 @@ class Bus {
     return Bus(
       id: ((map['id']) as String?) ?? const Uuid().v4(),
       ownerId: map['owner_id'] as String?,
+      tourId: map['tour_id'] as String?,
       name: (map['name'] as String?)?.trim().isNotEmpty == true
           ? map['name'] as String
           : 'Bus',
@@ -99,6 +119,7 @@ class Bus {
       isAC: map['is_ac'] as bool? ?? false,
       busType: map['bus_type'] as String? ?? 'Semi-Sleeper',
       totalSeatsLegacy: map['total_seats'] as int? ?? 0,
+      pricePerSeat: (map['price_per_seat'] as num?)?.toDouble() ?? 0,
       notes: map['notes'] as String?,
       layout: _parseLayout(map['layout']),
       createdAt: _parseDate(map['created_at']),
@@ -132,6 +153,7 @@ class Bus {
 
   Bus copyWith({
     String? ownerId,
+    String? tourId,
     String? name,
     String? busNumber,
     String? driverName,
@@ -141,12 +163,14 @@ class Bus {
     bool? isAC,
     String? busType,
     int? totalSeatsLegacy,
+    double? pricePerSeat,
     String? notes,
     BusLayout? layout,
   }) {
     return Bus(
       id: id,
       ownerId: ownerId ?? this.ownerId,
+      tourId: tourId ?? this.tourId,
       name: name ?? this.name,
       busNumber: busNumber ?? this.busNumber,
       driverName: driverName ?? this.driverName,
@@ -156,6 +180,7 @@ class Bus {
       isAC: isAC ?? this.isAC,
       busType: busType ?? this.busType,
       totalSeatsLegacy: totalSeatsLegacy ?? this.totalSeatsLegacy,
+      pricePerSeat: pricePerSeat ?? this.pricePerSeat,
       notes: notes ?? this.notes,
       layout: layout ?? this.layout,
       createdAt: createdAt,

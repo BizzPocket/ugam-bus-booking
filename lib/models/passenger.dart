@@ -3,6 +3,7 @@ import 'age_group.dart';
 import 'payment_status.dart';
 import 'request_line.dart';
 import 'seat_assignment.dart';
+import 'trip_type.dart';
 
 /// A passenger (customer) who has requested seats on a tour.
 ///
@@ -28,7 +29,19 @@ class Passenger {
 
   final PaymentStatus paymentStatus;
   final bool isHandler;
+
+  /// Set when the agent holds this request without assigning seats.
+  /// Distinct from "no seats yet" — waitlisted means the agent has
+  /// deliberately deferred them (typically due to capacity).
+  final bool isWaitlisted;
+
   final String? note; // optional note from customer
+
+  /// Which legs of the tour this passenger is travelling on.
+  /// Defaults to round-trip; existing rows missing this column also
+  /// fall back to round-trip via [TripType.fromString].
+  final TripType tripType;
+
   final DateTime createdAt;
 
   Passenger({
@@ -42,7 +55,9 @@ class Passenger {
     this.assignedSeats = const [],
     this.paymentStatus = PaymentStatus.notPaid,
     this.isHandler = false,
+    this.isWaitlisted = false,
     this.note,
+    this.tripType = TripType.roundTrip,
     DateTime? createdAt,
   }) : id = id ?? const Uuid().v4(),
        createdAt = createdAt ?? DateTime.now();
@@ -88,7 +103,9 @@ class Passenger {
       'assigned_seats': assignedSeats.map((a) => a.toMap()).toList(),
       'payment_status': paymentStatus.name,
       'is_handler': isHandler,
+      'is_waitlisted': isWaitlisted,
       'note': note,
+      'trip_type': tripType.storageKey,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -108,7 +125,9 @@ class Passenger {
         orElse: () => PaymentStatus.notPaid,
       ),
       isHandler: map['is_handler'] as bool? ?? false,
+      isWaitlisted: map['is_waitlisted'] as bool? ?? false,
       note: map['note'] as String?,
+      tripType: TripType.fromString(map['trip_type'] as String?),
       createdAt: _parseDate(map['created_at']),
     );
   }
@@ -157,7 +176,9 @@ class Passenger {
     List<SeatAssignment>? assignedSeats,
     PaymentStatus? paymentStatus,
     bool? isHandler,
+    bool? isWaitlisted,
     String? note,
+    TripType? tripType,
   }) {
     return Passenger(
       id: id,
@@ -170,7 +191,9 @@ class Passenger {
       assignedSeats: assignedSeats ?? this.assignedSeats,
       paymentStatus: paymentStatus ?? this.paymentStatus,
       isHandler: isHandler ?? this.isHandler,
+      isWaitlisted: isWaitlisted ?? this.isWaitlisted,
       note: note ?? this.note,
+      tripType: tripType ?? this.tripType,
       createdAt: createdAt,
     );
   }

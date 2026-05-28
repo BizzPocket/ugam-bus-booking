@@ -1,7 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import '../models/tour_status.dart';
-import '../config/theme.dart';
+import '../design/ugam.dart';
 
 class PhaseIndicator extends StatelessWidget {
   final TourStatus currentStatus;
@@ -19,7 +19,7 @@ class PhaseIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = UgamColors.of(context);
     final step = currentStatus.stepIndex;
 
     return SizedBox(
@@ -33,9 +33,7 @@ class PhaseIndicator extends StatelessWidget {
             return Expanded(
               child: Container(
                 height: 2,
-                color: done
-                    ? AppTheme.brand
-                    : AppColors.border(context),
+                color: done ? c.good : c.border,
               ),
             );
           }
@@ -50,8 +48,6 @@ class PhaseIndicator extends StatelessWidget {
             label: tr('app.label.phase_$label'),
             isActive: isActive,
             isDone: isDone,
-            theme: theme,
-            context: context,
           );
         }),
       ),
@@ -64,36 +60,33 @@ class _PhaseNode extends StatelessWidget {
   final String label;
   final bool isActive;
   final bool isDone;
-  final ThemeData theme;
-  final BuildContext context;
 
   const _PhaseNode({
     required this.icon,
     required this.label,
     required this.isActive,
     required this.isDone,
-    required this.theme,
-    required this.context,
   });
 
   @override
-  Widget build(BuildContext ctx) {
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     final Color circleColor;
     final Color iconColor;
     final Color textColor;
 
     if (isActive) {
-      circleColor = AppTheme.brand;
-      iconColor = Colors.white;
-      textColor = AppTheme.brand;
+      circleColor = c.accent;
+      iconColor = c.onAccent;
+      textColor = c.accent;
     } else if (isDone) {
-      circleColor = AppTheme.success;
-      iconColor = Colors.white;
-      textColor = AppTheme.success;
+      circleColor = c.good;
+      iconColor = c.onAccent;
+      textColor = c.good;
     } else {
-      circleColor = AppColors.border(context);
-      iconColor = AppColors.textMuted(context);
-      textColor = AppColors.textMuted(context);
+      circleColor = c.border;
+      iconColor = c.ink3;
+      textColor = c.ink3;
     }
 
     return Column(
@@ -109,7 +102,7 @@ class _PhaseNode extends StatelessWidget {
             boxShadow: isActive
                 ? [
                     BoxShadow(
-                      color: AppTheme.brand.withAlpha(60),
+                      color: c.accent.withValues(alpha: 0.24),
                       blurRadius: 8,
                       offset: const Offset(0, 3),
                     ),
@@ -125,7 +118,7 @@ class _PhaseNode extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           label,
-          style: TextStyle(
+          style: UgamText.micro.copyWith(
             fontSize: 9,
             fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
             color: textColor,

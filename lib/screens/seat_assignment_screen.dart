@@ -17,24 +17,6 @@ import '../utils/phone_dialer.dart';
 import 'manage_buses_screen.dart';
 
 /// Bottom-nav "Assign" tab — the seat-matching workbench.
-///
-/// Layout philosophy (Ugam rebuild):
-///   1. Clean Ugam topbar — title + Fleet circle button.
-///   2. Tour pills (when >1) and bus pills as horizontal scrollable rows
-///      in Ugam style (solid accent active, cardElev inactive).
-///   3. UgamTabPills deck toggle when an upper deck exists.
-///   4. Seat chart wrapped in `UgamCard.plain` with 22 px radius. The
-///      seat tiles keep their drag/drop business logic intact; only
-///      colours are re-routed through `UgamColors.of(context)`.
-///   5. NEW: a "Pending passengers" dock pinned above the main dock
-///      nav, with horizontal cards (avatar + name + needs-chip) plus a
-///      right-aligned Auto-pick circle + Done pill. Tapping a card
-///      sets a highlighted-passenger state so the matching free seats
-///      pulse with an accent glow inside the chart.
-///
-/// Sacred business logic preserved verbatim: `_handleSeatDrop`,
-/// `_onSeatTap`, paired-double rules, swap/move/consolidate calls,
-/// occupant dialog.
 class SeatAssignmentScreen extends StatefulWidget {
   const SeatAssignmentScreen({super.key});
 
@@ -43,10 +25,7 @@ class SeatAssignmentScreen extends StatefulWidget {
 }
 
 /// Payload carried between a long-pressed booked tile (source) and any
-/// drop-target tile. Captures everything the drop handler needs to
-/// validate type compatibility and to construct the right controller
-/// call: which seat, who's on it, how many berths they hold there, and
-/// what physical seat type they're coming from.
+/// drop-target tile.
 class _SeatDragData {
   final String seatId;
   final String passengerId;
@@ -54,12 +33,6 @@ class _SeatDragData {
   final String busId;
   final SeatType? seatType;
   final int berths; // 1 for shared/single, 2 for whole-double
-
-  /// Pair partner — non-null when the source seat is a paired Double
-  /// Sofa (two different passengers, one berth each). Triggers the
-  /// "move both halves together" path in _handleSeatDrop. The dragged
-  /// passenger is still [passengerId]; the partner is the other half
-  /// who needs to travel with them.
   final String? partnerPassengerId;
 
   const _SeatDragData({
@@ -78,12 +51,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
 
   int _tourIdx = 0;
   int _busIdx = 0;
-  bool _showUpper = false;
-
-  /// Passenger whose pending lines should make matching free seats
-  /// pulse. Set from the pending dock; cleared on swipe, tap on bg,
-  /// or once they're fully assigned.
-  String? _highlightedPassengerId;
 
   @override
   Widget build(BuildContext context) {
@@ -134,16 +101,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
           final bus = tour.buses[_busIdx];
 
           // Build booking lookups for the current bus.
-          //
-          // `occupantsBySeat[seatId]` lists one passenger id PER berth
-          // held on that seat (duplicates intentional). Three cases:
-          //   - []      → free seat.
-          //   - [X]     → 1 berth used by X (single sofa, or one half
-          //               of an otherwise-empty double).
-          //   - [X, X]  → whole-double held entirely by X.
-          //   - [X, Y]  → PAIRED double: two different passengers share
-          //               one berth each. Drag moves on a paired double
-          //               must keep the pair together — see _handleSeatDrop.
           final occupantsBySeat = <String, List<String>>{};
           final nameBySeat = <String, String>{};
           final idBySeat = <String, String>{};
@@ -162,28 +119,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
             for (final e in occupantsBySeat.entries) e.key: e.value.length,
           };
 
-          final hasUpperDeck =
-              bus.layout?.upperDeck.any((c) => c.hasSeat) ?? false;
-
-          // Pending passengers across the whole tour — anyone who isn't
-          // fully assigned and isn't waitlisted. The dock surfaces them
-          // so the agent can tap → highlight matching seats.
-          final pending = tour.passengers
-              .where((p) => !p.isFullyAssigned && !p.isWaitlisted)
-              .toList();
-
-          // Once the highlighted passenger is fully assigned (or gone),
-          // drop the highlight so the chart stops glowing.
-          final highlighted = _highlightedPassengerId == null
-              ? null
-              : tour.passengers
-                  .where((p) => p.id == _highlightedPassengerId)
-                  .toList()
-                  .firstOrNull;
-          final glowSeatTypes = highlighted == null
-              ? const <SeatType>{}
-              : highlighted.requestLines.map((l) => l.seatType).toSet();
-
           return Column(
             children: [
               _TopBar(
@@ -199,8 +134,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                   onSelect: (i) => setState(() {
                     _tourIdx = i;
                     _busIdx = 0;
-                    _showUpper = false;
-                    _highlightedPassengerId = null;
                   }),
                   c: c,
                 ),
@@ -213,32 +146,9 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                 selected: _busIdx,
                 onSelect: (i) => setState(() {
                   _busIdx = i;
-                  _showUpper = false;
                 }),
                 c: c,
               ),
-              if (hasUpperDeck) ...[
-                const SizedBox(height: UgamSpacing.md),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.gutter,
-                  ),
-                  child: UgamTabPills(
-                    currentIndex: _showUpper ? 1 : 0,
-                    onChanged: (i) => setState(() => _showUpper = i == 1),
-                    items: [
-                      UgamTabItem(
-                        label: tr('seat_assignment.lower_deck'),
-                        icon: Icons.event_seat_rounded,
-                      ),
-                      UgamTabItem(
-                        label: tr('seat_assignment.upper_deck'),
-                        icon: Icons.single_bed_rounded,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
               const SizedBox(height: UgamSpacing.md),
               Expanded(
                 child: Padding(
@@ -247,14 +157,13 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                   ),
                   child: _SeatChartCard(
                     layout: bus.layout,
-                    showUpper: _showUpper,
+                    tour: tour,
                     nameBySeat: nameBySeat,
                     phoneBySeat: phoneBySeat,
                     idBySeat: idBySeat,
                     berthsBySeat: berthsBySeat,
                     occupantsBySeat: occupantsBySeat,
                     busId: bus.id,
-                    glowSeatTypes: glowSeatTypes,
                     onSeatDrop: (data, targetCell) => _handleSeatDrop(
                       data: data,
                       targetCell: targetCell,
@@ -274,38 +183,8 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                   ),
                 ),
               ),
-              _PendingDock(
-                c: c,
-                pending: pending,
-                highlightedId: _highlightedPassengerId,
-                onTapPassenger: (id) {
-                  setState(() {
-                    _highlightedPassengerId =
-                        _highlightedPassengerId == id ? null : id;
-                  });
-                },
-                onAutoPick: pending.isEmpty
-                    ? null
-                    : () {
-                        // Placeholder gesture — surfaces the next pending
-                        // passenger and highlights their matching seats.
-                        setState(() {
-                          _highlightedPassengerId = pending.first.id;
-                        });
-                        AppSnackBar.info(
-                          'Highlighted ${pending.first.displayName} — '
-                          'tap a matching seat to assign.',
-                          title: 'Auto-pick',
-                        );
-                      },
-                onDone: pending.isEmpty
-                    ? null
-                    : () => setState(() {
-                          _highlightedPassengerId = null;
-                        }),
-              ),
               SizedBox(
-                height: MediaQuery.of(context).padding.bottom + UgamSpacing.xs,
+                height: MediaQuery.of(context).padding.bottom + UgamSpacing.lg,
               ),
             ],
           );
@@ -315,15 +194,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
   }
 
   /// Handle a long-press drag drop. Validation:
-  ///   - Same seat → no-op.
-  ///   - Cross seater↔sleeper → reject (mismatched seat class).
-  ///   - Whole-double (berths == 2) dropped on a 1-berth seat → reject.
-  ///   - PAIRED-DOUBLE source (data.partnerPassengerId != null):
-  ///       target must be a FREE Double Sofa; moves both halves of
-  ///       the pair together. Anything else → block with a snackbar
-  ///       pointing the agent to break the pair from the dialog.
-  ///   - Solo source, free target → moveSeat.
-  ///   - Solo source, booked target → swapSeats.
   Future<void> _handleSeatDrop({
     required _SeatDragData data,
     required SeatCell targetCell,
@@ -364,10 +234,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
     final targetCapacity = targetType == SeatType.doubleSofa ? 2 : 1;
 
     // ── Paired-double source ───────────────────────────────────
-    // Two different passengers share the source seat. Per the pair
-    // rule, they travel together — dropping one of them must move
-    // BOTH onto the target. The only valid target for that is a
-    // free Double Sofa; anything else breaks the pair.
     if (data.partnerPassengerId != null) {
       final targetOccupants = occupantsBySeat[targetSeatId] ?? const [];
       final targetIsFree = targetOccupants.isEmpty;
@@ -380,9 +246,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
         );
         return;
       }
-      // Move dragger first, then partner. Each moveSeat call removes
-      // their 1 berth from the source and adds 1 to the target — net
-      // result: pair travels intact.
       await _tourCtrl.moveSeat(
         tourId: tour.id,
         passengerId: data.passengerId,
@@ -417,17 +280,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
     final targetOwnerId = idBySeat[targetSeatId];
 
     // ── Cross-fill consolidation ──────────────────────────────
-    // A passenger satisfying a doubleSofa request via two singles
-    // (cross-fill) gets "promoted" onto a free Double when the admin
-    // drags one of those singles there. Both singles release and the
-    // passenger ends up owning the whole double. Triggers only when:
-    //   - source is a Single Sofa,
-    //   - target is a FREE Double Sofa,
-    //   - the passenger holds at least one OTHER single sofa berth on
-    //     this bus (the partner that needs to release).
-    // Without this, the agent has to "Free this seat" on one single by
-    // hand and then re-assign — annoying enough to leave passengers
-    // stuck on awkward 2-single allocations even when doubles open up.
     if (data.seatType == SeatType.singleSofa &&
         targetType == SeatType.doubleSofa &&
         targetOwnerId == null) {
@@ -468,8 +320,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
         );
         return;
       }
-      // Falls through to a plain moveSeat below — passenger ends up
-      // owning HALF of the double, leaving the other half bookable.
     }
 
     if (targetOwnerId == null) {
@@ -489,8 +339,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
     }
 
     if (targetOwnerId == data.passengerId) {
-      // Dropping onto another seat the same passenger already holds —
-      // nothing meaningful to do.
       return;
     }
 
@@ -510,12 +358,10 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
     );
   }
 
-  /// Booked-seat → occupant dialog. Free-seat → snack-bar hint pointing
-  /// to the Requests tab (which owns actual write traffic).
   void _onSeatTap({
     required String seatId,
     required Tour tour,
-    required dynamic bus, // Bus from bus_details.dart, avoid extra import
+    required dynamic bus,
     required Map<String, String> nameBySeat,
     required Map<String, String> idBySeat,
   }) {
@@ -523,9 +369,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
     final ownerId = idBySeat[seatId];
 
     if (ownerId == null) {
-      // Free seat — no occupant to show. Hint at the drag/drop
-      // mechanic instead of the old "go to Requests tab" instruction,
-      // since drag-to-move and consolidation now work right here.
       AppSnackBar.info(
         'Long-press an occupied seat and drop it here to move someone in.',
         title: 'Free seat',
@@ -569,9 +412,6 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
         },
         onFreeSeat: () async {
           Navigator.of(dialogCtx).pop();
-          // Free = drop this seat from the passenger's assignedSeats
-          // but keep their request_lines intact. The passenger remains
-          // "outstanding" — the agent can reassign them later.
           final next = occupant.assignedSeats
               .where(
                 (a) => !(a.busId == (bus.id as String) && a.seatId == seatId),
@@ -709,7 +549,7 @@ class _TourPills extends StatelessWidget {
 // ─── Bus pills ─────────────────────────────────────────────────────────
 
 class _BusPills extends StatelessWidget {
-  final List<dynamic> buses; // List<Bus>
+  final List<dynamic> buses;
   final List<Passenger> passengers;
   final int selected;
   final ValueChanged<int> onSelect;
@@ -797,38 +637,127 @@ class _BusPills extends StatelessWidget {
 
 // ─── Seat chart card ───────────────────────────────────────────────────
 
-/// The rounded card containing the bus chart.
-///
-/// Uses [LayoutBuilder] to discover the available width, then divides
-/// it among the row's logical columns so a tile always fits. Aisle
-/// between left-of-aisle and right-of-aisle columns. Each tile renders
-/// at the computed width — no fixed pixel sizes that could overflow.
 class _SeatChartCard extends StatelessWidget {
   final BusLayout? layout;
-  final bool showUpper;
   final Map<String, String> nameBySeat;
   final Map<String, String> phoneBySeat;
   final Map<String, String> idBySeat;
   final Map<String, int> berthsBySeat;
   final Map<String, List<String>> occupantsBySeat;
   final String busId;
-  final Set<SeatType> glowSeatTypes;
+  final Tour tour;
   final ValueChanged<String> onSeatTap;
   final void Function(_SeatDragData data, SeatCell targetCell) onSeatDrop;
 
   const _SeatChartCard({
     required this.layout,
-    required this.showUpper,
     required this.nameBySeat,
     required this.phoneBySeat,
     required this.idBySeat,
     required this.berthsBySeat,
     required this.occupantsBySeat,
     required this.busId,
-    required this.glowSeatTypes,
+    required this.tour,
     required this.onSeatTap,
     required this.onSeatDrop,
   });
+
+  Widget _deckHeader(String title, IconData icon, UgamColorSet c) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        border: Border.all(color: c.accent.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: c.accent),
+          const SizedBox(width: 6),
+          Text(
+            title,
+            style: UgamText.bodyStrong.copyWith(
+              color: c.accent,
+              fontSize: 11,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeckGrid(
+    BuildContext context,
+    List<SeatCell> deck,
+    String title,
+    IconData icon,
+    UgamColorSet c,
+    bool hasUpper,
+    double cellWidth,
+    double tileHeight,
+    bool useScroll,
+  ) {
+    final seatCells = deck.where((c) => c.hasSeat).toList();
+    if (seatCells.isEmpty) return const SizedBox.shrink();
+
+    final maxRow = seatCells.map((c) => c.row).reduce((a, b) => a > b ? a : b);
+    final cols = layout!.cols;
+    final leftCols = cols ~/ 2;
+
+    const cellGap = 4.0;
+    const aisleGap = 12.0;
+
+    final gridContent = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hasUpper) ...[
+          _deckHeader(title, icon, c),
+          const SizedBox(height: UgamSpacing.md),
+        ],
+        _frontLabel(c),
+        const SizedBox(height: UgamSpacing.sm),
+        for (int r = 0; r <= maxRow; r++) ...[
+          _SeatRow(
+            row: r,
+            cols: cols,
+            leftCols: leftCols,
+            deck: deck,
+            cellWidth: cellWidth,
+            cellHeight: tileHeight,
+            aisleGap: aisleGap,
+            cellGap: cellGap,
+            busId: busId,
+            tour: tour,
+            idBySeat: idBySeat,
+            berthsBySeat: berthsBySeat,
+            occupantsBySeat: occupantsBySeat,
+            onSeatDrop: onSeatDrop,
+            nameBySeat: nameBySeat,
+            phoneBySeat: phoneBySeat,
+            onSeatTap: onSeatTap,
+          ),
+          if (r < maxRow) const SizedBox(height: 6),
+        ],
+        const SizedBox(height: UgamSpacing.sm),
+        Container(height: 1, color: c.border),
+        const SizedBox(height: UgamSpacing.xs),
+        Text(
+          'REAR',
+          style: UgamText.micro.copyWith(color: c.ink3),
+        ),
+      ],
+    );
+
+    return useScroll
+        ? SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: gridContent,
+          )
+        : gridContent;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -844,22 +773,8 @@ class _SeatChartCard extends StatelessWidget {
       );
     }
 
-    final deck = showUpper ? layout!.upperDeck : layout!.lowerDeck;
-    final seatCells = deck.where((c) => c.hasSeat).toList();
-    if (seatCells.isEmpty) {
-      return UgamCard.plain(
-        child: Center(
-          child: Text(
-            tr('seat_assignment.no_seats_on_deck'),
-            style: UgamText.body.copyWith(color: c.ink2),
-          ),
-        ),
-      );
-    }
+    final hasUpper = layout!.upperDeck.any((c) => c.hasSeat);
 
-    final maxRow = seatCells.map((c) => c.row).reduce((a, b) => a > b ? a : b);
-    final cols = layout!.cols;
-    final leftCols = cols ~/ 2;
     return UgamCard.plain(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
@@ -867,14 +782,11 @@ class _SeatChartCard extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (ctx, constraints) {
+          final cols = layout!.cols;
+          final leftCols = cols ~/ 2;
+
           const cellGap = 4.0;
           const aisleGap = 12.0;
-          // Each `_SeatTile` is wrapped in a DragTarget's
-          // AnimatedContainer with `Border.all(width: 2)` for the
-          // drop-hover outline — that adds 4 px (2 per side) to every
-          // tile's actual width on top of the `width:` passed in.
-          // Subtract `cols * 4` from the budget here, otherwise the
-          // Row overflows by ~cols × 4 px (~8-16 px depending on cols).
           const dragOutlinePerTile = 4.0;
           final innerWidth = constraints.maxWidth;
           final leftGapCount = math.max(0, leftCols - 1);
@@ -883,47 +795,47 @@ class _SeatChartCard extends StatelessWidget {
               aisleGap -
               (leftGapCount + rightGapCount) * cellGap -
               cols * dragOutlinePerTile;
-          final cellWidth = (usableWidth / cols).clamp(0.0, 120.0);
-          // Tile height = ~1.05 × width on sleeper decks so a booked tile
-          // can stack seatId + name + phone comfortably. Capped at 84 so
-          // a 10-row bus still fits on a single screen.
+          const double minCellWidth = 56.0;
+          final double calculatedCellWidth = usableWidth / cols;
+          final bool useScroll = calculatedCellWidth < minCellWidth;
+          final cellWidth = (useScroll ? minCellWidth : calculatedCellWidth).clamp(0.0, 120.0);
           final tileHeight = math.min(84.0, cellWidth * 1.05);
 
           return SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                _frontLabel(c),
-                const SizedBox(height: UgamSpacing.sm),
-                for (int r = 0; r <= maxRow; r++) ...[
-                  _SeatRow(
-                    row: r,
-                    cols: cols,
-                    leftCols: leftCols,
-                    deck: deck,
-                    cellWidth: cellWidth,
-                    cellHeight: tileHeight,
-                    aisleGap: aisleGap,
-                    cellGap: cellGap,
-                    busId: busId,
-                    idBySeat: idBySeat,
-                    berthsBySeat: berthsBySeat,
-                    occupantsBySeat: occupantsBySeat,
-                    glowSeatTypes: glowSeatTypes,
-                    onSeatDrop: onSeatDrop,
-                    nameBySeat: nameBySeat,
-                    phoneBySeat: phoneBySeat,
-                    onSeatTap: onSeatTap,
-                  ),
-                  if (r < maxRow) const SizedBox(height: 6),
-                ],
-                const SizedBox(height: UgamSpacing.sm),
-                Container(height: 1, color: c.border),
-                const SizedBox(height: UgamSpacing.xs),
-                Text(
-                  'REAR',
-                  style: UgamText.micro.copyWith(color: c.ink3),
+                _buildDeckGrid(
+                  context,
+                  layout!.lowerDeck,
+                  tr('seat_assignment.lower_deck').toUpperCase(),
+                  Icons.event_seat_rounded,
+                  c,
+                  hasUpper,
+                  cellWidth,
+                  tileHeight,
+                  useScroll,
                 ),
+                if (hasUpper) ...[
+                  const SizedBox(height: UgamSpacing.huge),
+                  Container(
+                    height: 1.5,
+                    color: c.border,
+                    margin: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+                  ),
+                  const SizedBox(height: UgamSpacing.huge),
+                  _buildDeckGrid(
+                    context,
+                    layout!.upperDeck,
+                    tr('seat_assignment.upper_deck').toUpperCase(),
+                    Icons.single_bed_rounded,
+                    c,
+                    hasUpper,
+                    cellWidth,
+                    tileHeight,
+                    useScroll,
+                  ),
+                ],
               ],
             ),
           );
@@ -966,13 +878,8 @@ class _SeatRow extends StatelessWidget {
   final Map<String, String> phoneBySeat;
   final Map<String, String> idBySeat;
   final Map<String, int> berthsBySeat;
-
-  /// Per-seat occupant list, one entry per berth. Used by the tile to
-  /// figure out (a) how many berths the OWNER holds on the seat
-  /// (1 = shared, 2 = whole-double), and (b) whether the seat is a
-  /// paired double, in which case the drag-data carries the partner.
   final Map<String, List<String>> occupantsBySeat;
-  final Set<SeatType> glowSeatTypes;
+  final Tour tour;
   final String busId;
   final ValueChanged<String> onSeatTap;
   final void Function(_SeatDragData data, SeatCell targetCell) onSeatDrop;
@@ -991,7 +898,7 @@ class _SeatRow extends StatelessWidget {
     required this.idBySeat,
     required this.berthsBySeat,
     required this.occupantsBySeat,
-    required this.glowSeatTypes,
+    required this.tour,
     required this.busId,
     required this.onSeatTap,
     required this.onSeatDrop,
@@ -1001,7 +908,6 @@ class _SeatRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final children = <Widget>[];
     for (int c = 0; c < cols; c++) {
-      // Insert the aisle right before the first right-of-aisle column.
       if (c == leftCols && c > 0) {
         children.add(SizedBox(width: aisleGap));
       } else if (c > 0) {
@@ -1015,44 +921,16 @@ class _SeatRow extends StatelessWidget {
         children.add(SizedBox(width: cellWidth, height: cellHeight));
       } else {
         final seatId = cell.seatId!;
-        final name = nameBySeat[seatId];
-        final phone = phoneBySeat[seatId];
-        final ownerId = idBySeat[seatId];
         final occupants = occupantsBySeat[seatId] ?? const <String>[];
-        // Per-passenger berth count (NOT the seat's total occupancy).
-        // Determines whether the dragger holds a whole-double or just
-        // their half of a paired/shared seat.
-        final ownerBerths = ownerId == null
-            ? 0
-            : occupants.where((id) => id == ownerId).length;
-        // Pair partner: when two DIFFERENT passengers share the seat,
-        // the one that isn't the displayed owner is the "partner". Used
-        // by _handleSeatDrop to move both halves of a pair together.
-        final distinct = occupants.toSet();
-        final partnerId = (distinct.length == 2 && ownerId != null)
-            ? distinct.firstWhere((id) => id != ownerId)
-            : null;
-        // Glow only on free seats whose physical type matches one of the
-        // highlighted passenger's pending request lines.
-        final glow = ownerId == null &&
-            cell.seatType != null &&
-            glowSeatTypes.contains(cell.seatType);
-        // RepaintBoundary isolates each tile's paint surface — drag
-        // hover highlights and selection ripples no longer invalidate
-        // the whole chart layer.
         children.add(
           RepaintBoundary(
             child: _SeatTile(
               width: cellWidth,
               height: cellHeight,
               cell: cell,
-              name: name,
-              phone: phone,
-              ownerId: ownerId,
-              berths: ownerBerths > 0 ? ownerBerths : 1,
-              partnerId: partnerId,
+              tour: tour,
+              occupantIds: occupants,
               busId: busId,
-              glow: glow,
               onTap: () => onSeatTap(seatId),
               onDropped: (data) => onSeatDrop(data, cell),
             ),
@@ -1065,36 +943,14 @@ class _SeatRow extends StatelessWidget {
 }
 
 // ─── Seat tile ─────────────────────────────────────────────────────────
-//
-// Every tile is a [DragTarget] (so anyone can drop onto it). Booked
-// tiles are additionally wrapped in [LongPressDraggable] so the agent
-// can pick up a passenger and drop them on another seat to move
-// (target free) or swap (target booked).
+
 class _SeatTile extends StatelessWidget {
   final double width;
   final double height;
   final SeatCell cell;
-  final String? name;
-  final String? phone;
-  final String? ownerId;
-
-  /// Berths the owner holds on this seat (NOT the seat's total
-  /// occupancy). 1 for shared/single, 2 for whole-double. The drop
-  /// handler uses this to validate "does this passenger fit here".
-  final int berths;
-
-  /// Pair partner — set when the seat is a paired Double Sofa (two
-  /// different passengers share it). Carried in the drag payload so
-  /// the drop handler can move BOTH halves of the pair together.
-  final String? partnerId;
-
+  final Tour tour;
+  final List<String> occupantIds;
   final String busId;
-
-  /// When true, the free tile pulses with an accent glow (signals to
-  /// the agent that this seat matches the highlighted passenger's
-  /// pending request type).
-  final bool glow;
-
   final VoidCallback onTap;
   final void Function(_SeatDragData data) onDropped;
 
@@ -1102,13 +958,9 @@ class _SeatTile extends StatelessWidget {
     required this.width,
     required this.height,
     required this.cell,
-    required this.name,
-    required this.phone,
-    required this.ownerId,
-    required this.berths,
-    required this.partnerId,
+    required this.tour,
+    required this.occupantIds,
     required this.busId,
-    required this.glow,
     required this.onTap,
     required this.onDropped,
   });
@@ -1116,10 +968,33 @@ class _SeatTile extends StatelessWidget {
   String get seatId => cell.seatId!;
   SeatType? get seatType => cell.seatType;
 
-  bool get _isBooked => name != null && name!.isNotEmpty;
-  bool get _isDouble => seatType == SeatType.doubleSofa;
+  bool get _isBooked => occupantIds.isNotEmpty;
   bool get _isSleeper =>
       seatType == SeatType.singleSofa || seatType == SeatType.doubleSofa;
+
+  String? get name {
+    if (occupantIds.isEmpty) return null;
+    final p = tour.passengers.where((x) => x.id == occupantIds.first).toList().firstOrNull;
+    return p?.displayName;
+  }
+
+  String? get phone {
+    if (occupantIds.isEmpty) return null;
+    final p = tour.passengers.where((x) => x.id == occupantIds.first).toList().firstOrNull;
+    return p?.phone;
+  }
+
+  String? get ownerId => occupantIds.isEmpty ? null : occupantIds.first;
+
+  int get berths => occupantIds.length;
+
+  String? get partnerId {
+    final distinct = occupantIds.toSet().toList();
+    if (distinct.length == 2) {
+      return distinct[1];
+    }
+    return null;
+  }
 
   IconData get _icon {
     switch (seatType) {
@@ -1134,8 +1009,6 @@ class _SeatTile extends StatelessWidget {
     }
   }
 
-  /// Drop +91 / 91 prefix + any non-digits, return the local 10-digit
-  /// number. Falls back to whatever's there.
   String? get _phoneDisplay {
     if (phone == null) return null;
     final digits = phone!.replaceAll(RegExp(r'\D'), '');
@@ -1146,29 +1019,255 @@ class _SeatTile extends StatelessWidget {
     return digits;
   }
 
+  String getInitials(String displayName) {
+    final n = displayName.trim();
+    if (n.isEmpty) return '?';
+    final parts = n.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) {
+      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
+    return parts.first[0].toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+
+    // ── Shared/split Double Sofa rendering ──────────────────────────────────
+    final distinct = occupantIds.toSet().toList();
+    if (seatType == SeatType.doubleSofa && distinct.length == 2) {
+      final occA = tour.passengers.where((p) => p.id == distinct[0]).toList().firstOrNull;
+      final occB = tour.passengers.where((p) => p.id == distinct[1]).toList().firstOrNull;
+      final initA = occA != null ? getInitials(occA.displayName) : '?';
+      final initB = occB != null ? getInitials(occB.displayName) : '?';
+
+      Widget content = DragTarget<_SeatDragData>(
+        onWillAcceptWithDetails: (details) => details.data.seatId != seatId,
+        onAcceptWithDetails: (details) => onDropped(details.data),
+        builder: (context, candidate, _) {
+          final hovering = candidate.isNotEmpty;
+          return AnimatedContainer(
+            duration: UgamMotion.tapIn,
+            width: width,
+            height: height,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(UgamRadius.seat + 2),
+              border: Border.all(
+                color: hovering ? c.warm : c.accent,
+                width: hovering ? 2 : 1.2,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        color: c.accent,
+                        alignment: Alignment.center,
+                        child: Text(
+                          initA,
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.onAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        color: c.accent,
+                        alignment: Alignment.center,
+                        child: Text(
+                          initB,
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.onAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      seatId,
+                      style: UgamText.bodyStrong.copyWith(
+                        color: Colors.white,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (occA != null) {
+        final data = _SeatDragData(
+          seatId: seatId,
+          passengerId: occA.id,
+          passengerName: occA.displayName,
+          busId: busId,
+          seatType: seatType,
+          berths: 1,
+          partnerPassengerId: occB?.id,
+        );
+        content = LongPressDraggable<_SeatDragData>(
+          data: data,
+          delay: const Duration(milliseconds: 220),
+          hapticFeedbackOnStart: true,
+          feedback: _DragFeedback(passengerName: occA.displayName, seatId: seatId, c: c),
+          childWhenDragging: Opacity(opacity: 0.25, child: content),
+          child: content,
+        );
+      }
+
+      return GestureDetector(onTap: onTap, child: content);
+    }
+
+    // ── Half-booked Double Sofa rendering ───────────────────────────────
+    if (seatType == SeatType.doubleSofa && occupantIds.length == 1) {
+      final occ = tour.passengers.where((p) => p.id == occupantIds.first).toList().firstOrNull;
+      final initials = occ != null ? getInitials(occ.displayName) : '?';
+
+      Widget content = DragTarget<_SeatDragData>(
+        onWillAcceptWithDetails: (details) => details.data.seatId != seatId,
+        onAcceptWithDetails: (details) => onDropped(details.data),
+        builder: (context, candidate, _) {
+          final hovering = candidate.isNotEmpty;
+          return AnimatedContainer(
+            duration: UgamMotion.tapIn,
+            width: width,
+            height: height,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(UgamRadius.seat + 2),
+              border: Border.all(
+                color: hovering ? c.warm : c.accent.withValues(alpha: 0.45),
+                width: hovering ? 2 : 1.2,
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        color: c.accent,
+                        alignment: Alignment.center,
+                        child: Text(
+                          initials,
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.onAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        color: c.accentFill,
+                        alignment: Alignment.center,
+                        child: Icon(
+                          _icon,
+                          size: 14,
+                          color: c.accent.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      seatId,
+                      style: UgamText.bodyStrong.copyWith(
+                        color: Colors.white,
+                        fontSize: 9,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (occ != null) {
+        final data = _SeatDragData(
+          seatId: seatId,
+          passengerId: occ.id,
+          passengerName: occ.displayName,
+          busId: busId,
+          seatType: seatType,
+          berths: 1,
+          partnerPassengerId: null,
+        );
+        content = LongPressDraggable<_SeatDragData>(
+          data: data,
+          delay: const Duration(milliseconds: 220),
+          hapticFeedbackOnStart: true,
+          feedback: _DragFeedback(passengerName: occ.displayName, seatId: seatId, c: c),
+          childWhenDragging: Opacity(opacity: 0.25, child: content),
+          child: content,
+        );
+      }
+
+      return GestureDetector(onTap: onTap, child: content);
+    }
+
+    // ── Standard Tile rendering (Free or Fully Booked) ───────────────────
     final Color bg;
     final Color fg;
     final Color border;
 
     if (_isBooked) {
-      bg = c.accent;
-      fg = c.onAccent;
-      border = c.accent;
-    } else if (_isDouble) {
-      bg = c.accentFill;
-      fg = c.ink;
-      border = c.accent.withValues(alpha: 0.45);
-    } else if (seatType == SeatType.singleSofa) {
-      bg = c.goodFill;
-      fg = c.ink;
-      border = c.good.withValues(alpha: 0.55);
+      if (seatType == SeatType.doubleSofa) {
+        bg = c.accent;
+        fg = c.onAccent;
+        border = c.accent;
+      } else if (seatType == SeatType.singleSofa) {
+        bg = c.good;
+        fg = c.onAccent;
+        border = c.good;
+      } else {
+        bg = c.border;
+        fg = c.ink;
+        border = c.border;
+      }
     } else {
-      bg = c.cardElev;
-      fg = c.ink;
-      border = c.border;
+      if (seatType == SeatType.doubleSofa) {
+        bg = c.accentFill;
+        fg = c.accent;
+        border = c.accent.withValues(alpha: 0.35);
+      } else if (seatType == SeatType.singleSofa) {
+        bg = c.goodFill;
+        fg = c.good;
+        border = c.good.withValues(alpha: 0.45);
+      } else {
+        bg = c.cardElev;
+        fg = c.ink2;
+        border = c.border;
+      }
     }
 
     Widget tile(Color drawBg, Color drawBorder, double drawBorderWidth) {
@@ -1185,45 +1284,25 @@ class _SeatTile extends StatelessWidget {
       );
     }
 
-    // Every tile is a DragTarget — hover paints a warm outline so the
-    // agent knows where they're about to drop. When `glow` is set we
-    // also pulse the outline in accent to telegraph "this seat matches
-    // the highlighted passenger".
     Widget content = DragTarget<_SeatDragData>(
       onWillAcceptWithDetails: (details) => details.data.seatId != seatId,
       onAcceptWithDetails: (details) => onDropped(details.data),
       builder: (context, candidate, _) {
         final hovering = candidate.isNotEmpty;
-        final Color outlineColor;
-        final double outlineWidth;
-        if (hovering) {
-          outlineColor = c.warm;
-          outlineWidth = 2;
-        } else if (glow) {
-          outlineColor = c.accent;
-          outlineWidth = 2;
-        } else {
-          outlineColor = Colors.transparent;
-          outlineWidth = 2;
-        }
+        final Color outlineColor = hovering ? c.warm : Colors.transparent;
         return AnimatedContainer(
           duration: UgamMotion.tapIn,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(UgamRadius.seat + 4),
-            border: Border.all(color: outlineColor, width: outlineWidth),
-            color: glow && !hovering
-                ? c.accent.withValues(alpha: 0.10)
-                : Colors.transparent,
+            border: Border.all(color: outlineColor, width: 2),
+            color: Colors.transparent,
           ),
           child: tile(bg, border, _isBooked ? 0 : 1.2),
         );
       },
     );
 
-    // Booked tiles can also be picked up. Long-press initiates the
-    // drag; a tiny chip with the passenger's name + seat hovers under
-    // the finger so the agent can aim.
-    if (_isBooked && ownerId != null) {
+    if (_isBooked && ownerId != null && name != null) {
       final data = _SeatDragData(
         seatId: seatId,
         passengerId: ownerId!,
@@ -1248,8 +1327,6 @@ class _SeatTile extends StatelessWidget {
 
   Widget _bookedBody(Color fg) {
     final phoneText = _phoneDisplay;
-    // FittedBox(scaleDown) keeps long names + 10-digit phones readable
-    // on the smallest tile size the LayoutBuilder may produce.
     return Column(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1338,255 +1415,51 @@ class _SeatTile extends StatelessWidget {
   }
 }
 
-// ─── Pending passengers dock ───────────────────────────────────────────
-
-class _PendingDock extends StatelessWidget {
+class _DragFeedback extends StatelessWidget {
+  final String passengerName;
+  final String seatId;
   final UgamColorSet c;
-  final List<Passenger> pending;
-  final String? highlightedId;
-  final ValueChanged<String> onTapPassenger;
-  final VoidCallback? onAutoPick;
-  final VoidCallback? onDone;
 
-  const _PendingDock({
+  const _DragFeedback({
+    required this.passengerName,
+    required this.seatId,
     required this.c,
-    required this.pending,
-    required this.highlightedId,
-    required this.onTapPassenger,
-    required this.onAutoPick,
-    required this.onDone,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Cap to 8 visible cards. Anything past that is rolled into a
-    // single "+N more" tile.
-    const cap = 8;
-    final visible = pending.take(cap).toList();
-    final overflow = pending.length - visible.length;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        border: Border(top: BorderSide(color: c.border)),
-      ),
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.sm + 2,
-        UgamSpacing.gutter,
-        UgamSpacing.sm + 2,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: pending.isEmpty
-                ? Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle_rounded,
-                        size: 16,
-                        color: c.good,
-                      ),
-                      const SizedBox(width: UgamSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          'All passengers assigned.',
-                          style: UgamText.bodyStrong
-                              .copyWith(color: c.ink, fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  )
-                : SizedBox(
-                    height: 64,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: visible.length + (overflow > 0 ? 1 : 0),
-                      separatorBuilder: (_, _) =>
-                          const SizedBox(width: UgamSpacing.sm),
-                      itemBuilder: (ctx, i) {
-                        if (i >= visible.length) {
-                          // Overflow tile.
-                          return Container(
-                            width: 70,
-                            decoration: BoxDecoration(
-                              color: c.cardElev,
-                              borderRadius:
-                                  BorderRadius.circular(UgamRadius.row),
-                              border: Border.all(color: c.border),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '+$overflow',
-                              style: UgamText.bodyStrong
-                                  .copyWith(color: c.ink2, fontSize: 13),
-                            ),
-                          );
-                        }
-                        final p = visible[i];
-                        final active = highlightedId == p.id;
-                        return _PendingCard(
-                          c: c,
-                          passenger: p,
-                          active: active,
-                          onTap: () => onTapPassenger(p.id),
-                        );
-                      },
-                    ),
-                  ),
-          ),
-          const SizedBox(width: UgamSpacing.sm),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              GestureDetector(
-                onTap: onAutoPick,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: onAutoPick == null ? c.cardElev : c.accent,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.auto_awesome_rounded,
-                    size: 18,
-                    color: onAutoPick == null ? c.ink3 : c.onAccent,
-                  ),
-                ),
-              ),
-              const SizedBox(height: UgamSpacing.xs + 2),
-              GestureDetector(
-                onTap: onDone,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.md,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: onDone == null ? c.cardElev : c.goodFill,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                  ),
-                  child: Text(
-                    'Done',
-                    style: UgamText.bodyStrong.copyWith(
-                      color: onDone == null ? c.ink3 : c.good,
-                      fontSize: 11,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PendingCard extends StatelessWidget {
-  final UgamColorSet c;
-  final Passenger passenger;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _PendingCard({
-    required this.c,
-    required this.passenger,
-    required this.active,
-    required this.onTap,
-  });
-
-  String get _initials {
-    final name = passenger.displayName.trim();
-    if (name.isEmpty) return '?';
-    final parts =
-        name.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return parts.first[0].toUpperCase();
-  }
-
-  String get _needsLabel {
-    final remaining =
-        passenger.totalSeatsRequested - passenger.totalSeatsAssigned;
-    if (remaining <= 0) return passenger.requestSummary;
-    final firstLine = passenger.requestLines.isNotEmpty
-        ? passenger.requestLines.first.shortLabel
-        : '$remaining seat';
-    if (passenger.requestLines.length <= 1) return firstLine;
-    return '$firstLine +${passenger.requestLines.length - 1}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+    return Material(
+      color: Colors.transparent,
       child: Container(
-        width: 104,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.sm,
-          vertical: UgamSpacing.sm,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: active ? c.accentFill : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-          border: Border.all(
-            color: active ? c.accent : c.border,
-            width: active ? 1.2 : 1,
-          ),
+          color: c.warm,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x40000000),
+              offset: Offset(0, 4),
+              blurRadius: 12,
+            ),
+          ],
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: active ? c.accent : c.card,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _initials,
-                style: UgamText.bodyStrong.copyWith(
-                  color: active ? c.onAccent : c.ink,
-                  fontSize: 11,
-                ),
+            Text(
+              seatId,
+              style: UgamText.micro.copyWith(
+                color: c.onAccent.withValues(alpha: 0.85),
+                fontSize: 9,
               ),
             ),
             const SizedBox(width: 6),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    passenger.displayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 11,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _needsLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: UgamText.caption.copyWith(
-                      color: active ? c.accent : c.ink2,
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
+            Text(
+              passengerName,
+              style: UgamText.bodyStrong.copyWith(
+                color: c.onAccent,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
@@ -1598,11 +1471,7 @@ class _PendingCard extends StatelessWidget {
 
 // ─── Occupant detail dialog ────────────────────────────────────────────
 
-/// Centred dialog shown when tapping a booked seat. Surfaces contact
-/// info, every seat the passenger holds (this bus + others), their
-/// request lines and note, and the destructive actions an agent
-/// reaches for from this overview tab (cancel one seat, unassign all,
-/// jump to the dedicated editor).
+/// Centred dialog shown when tapping a booked seat.
 class _OccupantDialog extends StatelessWidget {
   final Passenger occupant;
   final String tappedSeatId;
@@ -1610,18 +1479,8 @@ class _OccupantDialog extends StatelessWidget {
   final String busName;
   final Tour tour;
   final VoidCallback onSwitchToOccupant;
-
-  /// Cancel = unassign seat + decrement matching request line. Use when
-  /// the customer no longer wants this seat (booking shrinks).
   final VoidCallback onCancelSeat;
-
-  /// Free = unassign just this seat but KEEP the request line. The
-  /// passenger still wants the seat; the agent will reassign them
-  /// elsewhere. Used during seat shuffling.
   final VoidCallback onFreeSeat;
-
-  /// Unassign all = strip every seat this passenger holds on this
-  /// tour. Keeps the request count (passenger is still "outstanding").
   final VoidCallback onUnassignAll;
 
   const _OccupantDialog({
@@ -1740,9 +1599,6 @@ class _OccupantDialog extends StatelessWidget {
                         ],
                       ),
                     ),
-                    // Quick-call CTA. Hides itself when the passenger
-                    // record has no phone. Tapping launches the system
-                    // dialer pre-filled.
                     if (occupant.phone.isNotEmpty) ...[
                       const SizedBox(width: 8),
                       _CallButton(phone: occupant.phone, c: c),
@@ -2033,67 +1889,6 @@ class _CallButton extends StatelessWidget {
             size: 18,
             color: c.accent,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Drag feedback ─────────────────────────────────────────────────────
-//
-// Compact floating chip that hovers under the finger during a
-// long-press drag. Shows the dragged passenger's name + source seat
-// so the agent can aim accurately. Wrapped in Material because the
-// drag overlay renders outside the normal widget tree and needs its
-// own typography context.
-class _DragFeedback extends StatelessWidget {
-  final String passengerName;
-  final String seatId;
-  final UgamColorSet c;
-
-  const _DragFeedback({
-    required this.passengerName,
-    required this.seatId,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: c.warm,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x40000000),
-              offset: Offset(0, 4),
-              blurRadius: 12,
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              seatId,
-              style: UgamText.micro.copyWith(
-                color: c.onAccent.withValues(alpha: 0.85),
-                fontSize: 9,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              passengerName,
-              style: UgamText.bodyStrong.copyWith(
-                color: c.onAccent,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
         ),
       ),
     );

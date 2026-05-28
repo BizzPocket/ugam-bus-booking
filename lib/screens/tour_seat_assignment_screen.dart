@@ -54,7 +54,6 @@ class TourSeatAssignmentScreen extends StatefulWidget {
 
 class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   String? _selectedBusId;
-  bool _showUpperDeck = false;
   String? _selectedPassengerId;
 
   @override
@@ -498,8 +497,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                 final assignmentMap = assignmentsByBus[bus.id] ??
                     const <String, List<String>>{};
 
-                final hasUpper =
-                    bus.layout?.upperDeck.any((c) => c.hasSeat) ?? false;
 
                 final canLock = tour.status == TourStatus.assigning &&
                     tour.allSeatsAssigned &&
@@ -520,50 +517,31 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                       onTapBus: (id) {
                         setState(() {
                           _selectedBusId = id;
-                          _showUpperDeck = false;
                         });
                       },
                       c: c,
                     ),
-                    if (hasUpper) ...[
-                      const SizedBox(height: UgamSpacing.md),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: UgamSpacing.gutter),
-                        child: UgamTabPills(
-                          currentIndex: _showUpperDeck ? 1 : 0,
-                          onChanged: (i) =>
-                              setState(() => _showUpperDeck = i == 1),
-                          items: [
-                            UgamTabItem(
-                              label: tr('seat_assignment.lower_deck'),
-                              icon: Icons.event_seat_rounded,
-                            ),
-                            UgamTabItem(
-                              label: tr('seat_assignment.upper_deck'),
-                              icon: Icons.single_bed_rounded,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: UgamSpacing.md),
                     Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(
-                          UgamSpacing.gutter,
-                          0,
-                          UgamSpacing.gutter,
-                          UgamSpacing.sm,
-                        ),
-                        physics: const BouncingScrollPhysics(),
-                        child: _SeatGrid(
-                          layout: bus.layout,
-                          showUpper: _showUpperDeck,
-                          assignmentMap: assignmentMap,
-                          currentPassengerId: passenger?.id,
-                          onTap: (cell) => _onSeatTapped(cell, bus, tour),
-                        ),
+                      child: LayoutBuilder(
+                        builder: (ctx, constraints) {
+                          return SingleChildScrollView(
+                            padding: const EdgeInsets.fromLTRB(
+                              UgamSpacing.gutter,
+                              0,
+                              UgamSpacing.gutter,
+                              UgamSpacing.sm,
+                            ),
+                            physics: const BouncingScrollPhysics(),
+                            child: _SeatGrid(
+                              layout: bus.layout,
+                              assignmentMap: assignmentMap,
+                              currentPassengerId: passenger?.id,
+                              onTap: (cell) => _onSeatTapped(cell, bus, tour),
+                              maxWidth: constraints.maxWidth - 2 * UgamSpacing.gutter,
+                            ),
+                          );
+                        },
                       ),
                     ),
                     if (passenger != null)
@@ -793,35 +771,57 @@ class _BusPills extends StatelessWidget {
 
 class _SeatGrid extends StatelessWidget {
   final BusLayout? layout;
-  final bool showUpper;
   final Map<String, List<String>> assignmentMap;
   final String? currentPassengerId;
   final ValueChanged<SeatCell> onTap;
+  final double maxWidth;
 
   const _SeatGrid({
     required this.layout,
-    required this.showUpper,
     required this.assignmentMap,
     required this.currentPassengerId,
     required this.onTap,
+    required this.maxWidth,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    final l = layout;
-    if (l == null) {
-      return const _NoLayout();
-    }
-    final cells = showUpper ? l.upperDeck : l.lowerDeck;
+  Widget _deckHeader(String title, IconData icon, UgamColorSet c) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        border: Border.all(color: c.accent.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: c.accent),
+          const SizedBox(width: 6),
+          Text(
+            title,
+            style: UgamText.bodyStrong.copyWith(
+              color: c.accent,
+              fontSize: 11,
+              letterSpacing: 0.6,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeckGrid({
+    required List<SeatCell> cells,
+    required String title,
+    required IconData icon,
+    required BusLayout l,
+    required UgamColorSet c,
+  }) {
     final seatCellsForCheck = cells.where((c) => c.hasSeat).toList();
     if (seatCellsForCheck.isEmpty) {
-      return const _NoLayout();
+      return const SizedBox.shrink();
     }
 
-    // Lay seats out by their actual (row, col) so layouts with empty
-    // grid cells (aisles, single-on-left / double-on-right splits)
-    // render the way they were generated.
     final cols = l.cols;
     var maxRow = 0;
     for (final cell in seatCellsForCheck) {
@@ -834,6 +834,90 @@ class _SeatGrid extends StatelessWidget {
         slots[idx] = cell;
       }
     }
+
+    final hasUpper = l.upperDeck.any((c) => c.hasSeat);
+
+    const double minCellWidth = 52.0;
+    const double cellGap = 8.0;
+    final double totalGapsWidth = (cols - 1) * cellGap;
+    final double cardPadding = 2 * UgamSpacing.md;
+    final double innerWidth = maxWidth - cardPadding;
+    final double calculatedCellWidth = (innerWidth - totalGapsWidth) / cols;
+    final bool useScroll = calculatedCellWidth < minCellWidth;
+    final double cellWidth = useScroll ? minCellWidth : calculatedCellWidth;
+    final double cellHeight = cellWidth * 1.05;
+
+    final gridContent = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (int r = 0; r <= maxRow; r++) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (int col = 0; col < cols; col++) ...[
+                Builder(
+                  builder: (ctx) {
+                    final cell = slots[r * cols + col];
+                    if (cell == null) {
+                      return SizedBox(width: cellWidth, height: cellHeight);
+                    }
+                    final owners = assignmentMap[cell.seatId] ?? const <String>[];
+                    final mineCount = currentPassengerId == null
+                        ? 0
+                        : owners.where((id) => id == currentPassengerId).length;
+                    final otherCount = owners.length - mineCount;
+                    return SizedBox(
+                      width: cellWidth,
+                      height: cellHeight,
+                      child: RepaintBoundary(
+                        child: _SeatTile(
+                          cell: cell,
+                          mineCount: mineCount,
+                          otherCount: otherCount,
+                          onTap: () => onTap(cell),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                if (col < cols - 1) SizedBox(width: cellGap),
+              ],
+            ],
+          ),
+          if (r < maxRow) SizedBox(height: cellGap),
+        ],
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasUpper) ...[
+          _deckHeader(title, icon, c),
+          const SizedBox(height: UgamSpacing.md),
+        ],
+        UgamCard.plain(
+          padding: const EdgeInsets.all(UgamSpacing.md),
+          child: useScroll
+              ? SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: gridContent,
+                )
+              : gridContent,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final l = layout;
+    if (l == null) {
+      return const _NoLayout();
+    }
+    final hasUpper = l.upperDeck.any((c) => c.hasSeat);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -848,47 +932,47 @@ class _SeatGrid extends StatelessWidget {
             ),
             const SizedBox(width: 4),
             Text(
-              showUpper
-                  ? tr('tour_seat_assignment.grid_label_upper')
+              hasUpper
+                  ? 'LOWER DECK VIEW'
                   : tr('tour_seat_assignment.grid_label_driver'),
               style: UgamText.micro.copyWith(color: c.ink3),
             ),
           ],
         ),
         const SizedBox(height: UgamSpacing.sm),
-        UgamCard.plain(
-          padding: const EdgeInsets.all(UgamSpacing.md),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 4,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 1.1,
-            ),
-            itemCount: slots.length,
-            itemBuilder: (ctx, i) {
-              final cell = slots[i];
-              if (cell == null) {
-                return const SizedBox.shrink();
-              }
-              final owners = assignmentMap[cell.seatId] ?? const <String>[];
-              final mineCount = currentPassengerId == null
-                  ? 0
-                  : owners.where((id) => id == currentPassengerId).length;
-              final otherCount = owners.length - mineCount;
-              return RepaintBoundary(
-                child: _SeatTile(
-                  cell: cell,
-                  mineCount: mineCount,
-                  otherCount: otherCount,
-                  onTap: () => onTap(cell),
-                ),
-              );
-            },
-          ),
+        _buildDeckGrid(
+          cells: l.lowerDeck,
+          title: tr('seat_assignment.lower_deck').toUpperCase(),
+          icon: Icons.event_seat_rounded,
+          l: l,
+          c: c,
         ),
+        if (hasUpper) ...[
+          const SizedBox(height: UgamSpacing.huge),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Icon(
+                Icons.person_outline_rounded,
+                size: 14,
+                color: c.ink3,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'UPPER DECK VIEW',
+                style: UgamText.micro.copyWith(color: c.ink3),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          _buildDeckGrid(
+            cells: l.upperDeck,
+            title: tr('seat_assignment.upper_deck').toUpperCase(),
+            icon: Icons.single_bed_rounded,
+            l: l,
+            c: c,
+          ),
+        ],
       ],
     );
   }
@@ -896,12 +980,7 @@ class _SeatGrid extends StatelessWidget {
 
 class _SeatTile extends StatelessWidget {
   final SeatCell cell;
-  /// Berths the currently-selected passenger holds on this cell.
-  /// 0 = none, 1 = half (the other half is free or shared), 2 = whole
-  /// double held solo.
   final int mineCount;
-  /// Berths held by OTHER passengers — i.e. everyone except the one
-  /// currently selected at the bottom of the screen.
   final int otherCount;
   final VoidCallback onTap;
 
@@ -914,7 +993,6 @@ class _SeatTile extends StatelessWidget {
 
   bool get isMine => mineCount > 0;
 
-  /// True iff this cell needs the split-rendering path.
   bool get _needsSplit {
     if (cell.seatType != SeatType.doubleSofa) return false;
     final total = mineCount + otherCount;
@@ -924,7 +1002,6 @@ class _SeatTile extends StatelessWidget {
     return true;
   }
 
-  /// 1-letter mark for the seat type.
   String? get _typeMark {
     switch (cell.seatType) {
       case SeatType.singleSofa:
@@ -954,9 +1031,9 @@ class _SeatTile extends StatelessWidget {
   Color _typeBorder(UgamColorSet c) {
     switch (cell.seatType) {
       case SeatType.singleSofa:
-        return c.good.withValues(alpha: 0.55);
+        return c.good.withValues(alpha: 0.45);
       case SeatType.doubleSofa:
-        return c.accent.withValues(alpha: 0.45);
+        return c.accent.withValues(alpha: 0.35);
       case SeatType.seater:
         return c.border;
       case null:
@@ -970,8 +1047,6 @@ class _SeatTile extends StatelessWidget {
     final isOther = otherCount > 0;
     final mark = _typeMark;
 
-    // Partial doubleSofa: render two side-by-side halves so the agent
-    // can see at a glance which berths are taken vs free.
     if (_needsSplit) {
       final Color leftColor;
       final Color rightColor;
@@ -1062,7 +1137,13 @@ class _SeatTile extends StatelessWidget {
     } else {
       bg = _typeTint(c);
       border = _typeBorder(c);
-      textColor = c.ink;
+      if (cell.seatType == SeatType.singleSofa) {
+        textColor = c.good;
+      } else if (cell.seatType == SeatType.doubleSofa) {
+        textColor = c.accent;
+      } else {
+        textColor = c.ink2;
+      }
     }
 
     return GestureDetector(

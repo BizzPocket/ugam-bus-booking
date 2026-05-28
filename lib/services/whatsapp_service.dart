@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/tour.dart';
 import '../models/passenger.dart';
+import '../models/trip_type.dart';
 
 /// Free WhatsApp messaging — two approaches:
 ///
@@ -125,6 +126,50 @@ class WhatsAppService {
     return passenger;
   }
 
+  // ── Request acknowledgment (Phase 3) ──────────────────────
+
+  /// Builds a short ack message the agent sends back to a passenger
+  /// after seeing their request, before bus/seat details exist.
+  String buildAckMessage({
+    required Passenger passenger,
+    required Tour tour,
+  }) {
+    final seatParts = passenger.requestLines
+        .map((l) => '${l.qty} ${l.label.replaceAll(' ×', '')}')
+        .join(' + ');
+
+    final lines = <String>[
+      '✅ *Request Received — Ugam Booking*',
+      '',
+      '🙏 Jai Gurudev',
+      '',
+      'Hi ${passenger.name}, we got your booking request.',
+      '',
+      '🗺 *${tour.title}*',
+      '📍 ${tour.fromCity} → ${tour.toCity}',
+      '📅 ${_formatDate(tour.departureDate)}'
+          '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      if (seatParts.isNotEmpty) '💺 *Seats requested:* $seatParts',
+      '',
+      'We will share final seat numbers and bus details',
+      'once the bus is booked. 🚌',
+      '',
+      '🙏 Thank you!',
+    ];
+
+    return lines.join('\n');
+  }
+
+  /// Opens WhatsApp on the agent's device addressed to [passenger]
+  /// with the ack message pre-filled. Agent taps send.
+  Future<bool> sendAck({
+    required Passenger passenger,
+    required Tour tour,
+  }) async {
+    final msg = buildAckMessage(passenger: passenger, tour: tour);
+    return _openWhatsApp(passenger.phone, msg);
+  }
+
   // ── Customer booking request (Phase 4) ────────────────────
 
   /// Short tour reference shown in customer→admin request messages.
@@ -147,6 +192,8 @@ class WhatsAppService {
     required int singleSofaCount,
     required int doubleSofaCount,
     String? note,
+    bool isUpdate = false,
+    TripType tripType = TripType.roundTrip,
   }) {
     final totalSeats = singleSofaCount + doubleSofaCount;
     final total = tour.pricePerSeat * totalSeats;
@@ -159,11 +206,26 @@ class WhatsAppService {
       seatParts.add('$singleSofaCount Single Sofa');
     }
 
+    final tripLine = switch (tripType) {
+      TripType.roundTrip => '🔁 *Trip:* Round-trip (both legs)',
+      TripType.outboundOnly =>
+          '➡️ *Trip:* One-way — ${tour.fromCity} → ${tour.toCity} (outbound only)',
+      TripType.returnOnly =>
+          '⬅️ *Trip:* One-way — ${tour.toCity} → ${tour.fromCity} (return only)',
+    };
+
     final lines = <String>[
-      '🪷 *Booking Request — Ugam Booking*',
+      if (isUpdate)
+        '🔄 *Updated Booking Request — Ugam Booking*'
+      else
+        '🪷 *Booking Request — Ugam Booking*',
       '',
       '🙏 Jai Gurudev',
       '',
+      if (isUpdate) ...[
+        'I updated my earlier request — please use these new details:',
+        '',
+      ],
       '🗺 *Tour:* ${tour.title}',
       '📍 ${tour.fromCity} → ${tour.toCity}',
       '📅 ${_formatDate(tour.departureDate)}'
@@ -171,6 +233,7 @@ class WhatsAppService {
       '',
       '👤 *Name:* $customerName',
       '💺 *Seats:* ${seatParts.join(' + ')}',
+      tripLine,
     ];
 
     if (total > 0) {
@@ -199,6 +262,8 @@ class WhatsAppService {
     required int singleSofaCount,
     required int doubleSofaCount,
     String? note,
+    bool isUpdate = false,
+    TripType tripType = TripType.roundTrip,
   }) async {
     final msg = buildBookingRequestMessage(
       tour: tour,
@@ -206,6 +271,8 @@ class WhatsAppService {
       singleSofaCount: singleSofaCount,
       doubleSofaCount: doubleSofaCount,
       note: note,
+      isUpdate: isUpdate,
+      tripType: tripType,
     );
     return _openWhatsApp(adminPhone, msg);
   }

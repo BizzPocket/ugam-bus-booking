@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../tokens.dart';
+import 'ugam_glass_container.dart';
 
 /// Floating capsule dock nav. Replaces the prior `_PillBottomNav`.
 ///
@@ -34,21 +35,12 @@ class UgamDockNav extends StatelessWidget {
           UgamSpacing.md,
           UgamSpacing.md,
         ),
-        child: Container(
+        child: UgamGlassContainer(
           padding: const EdgeInsets.all(UgamSpacing.sm),
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-            boxShadow: isDark
-                ? null
-                : [
-                    BoxShadow(
-                      color: const Color(0x14000000),
-                      offset: const Offset(0, 8),
-                      blurRadius: 28,
-                    ),
-                  ],
-          ),
+          radius: UgamRadius.chip,
+          color: isDark 
+              ? c.cardElev.withValues(alpha: 0.65)
+              : c.cardElev.withValues(alpha: 0.75),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: List.generate(items.length, (i) {

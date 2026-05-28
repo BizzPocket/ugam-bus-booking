@@ -34,6 +34,22 @@
       "phase_book": "बुक",
       "phase_lock": "लॉक",
       "phase_done": "पूर्ण"
+    },
+    "month": {
+      "short": {
+        "jan": "जन",
+        "feb": "फर",
+        "mar": "मार्च",
+        "apr": "अप्रै",
+        "may": "मई",
+        "jun": "जून",
+        "jul": "जुला",
+        "aug": "अग",
+        "sep": "सित",
+        "oct": "अक्टू",
+        "nov": "नव",
+        "dec": "दिस"
+      }
     }
   },
   "settings": {
@@ -58,6 +74,13 @@
     "logout": "लॉग आउट",
     "logout_subtitle": "अपने खाते से साइन आउट करें",
     "logout_confirm_message": "क्या आप वाकई अपने खाते से साइन आउट करना चाहते हैं?",
+    "delete_account": "खाता हटाएं",
+    "delete_account_subtitle": "अपना खाता और सारा डेटा स्थायी रूप से मिटाएं",
+    "delete_account_confirm_title": "खाता हटाएं?",
+    "delete_account_confirm_message": "इससे आपका खाता और आपके स्वामित्व वाली हर टूर, बस, यात्री और बुकिंग अनुरोध स्थायी रूप से हट जाएंगे। इसे वापस नहीं लाया जा सकता।",
+    "delete_account_confirm_cta": "हमेशा के लिए हटाएं",
+    "delete_account_success": "आपका खाता और सारा डेटा हटा दिया गया है।",
+    "delete_account_error": "खाता नहीं हटाया जा सका। कृपया पुनः प्रयास करें या सहायता से संपर्क करें।",
     "footer_made_in": "गुजरात में ♥ के साथ बनाया"
   },
   "language": {
@@ -75,7 +98,37 @@
     "empty_subtitle": "थोड़ी देर बाद जाँचें — रूट और तारीख तय होते ही नए टूर की घोषणा की जाती है।",
     "price_per_seat": "₹{price} / सीट",
     "bus_to_be_confirmed": "बस की पुष्टि होनी बाकी है",
-    "tap_to_book": "बुक करने के लिए टैप करें →"
+    "tap_to_book": "बुक करने के लिए टैप करें →",
+    "header_explore": "यात्राएं देखें",
+    "search_hint": "रूट या गंतव्य से खोजें…",
+    "group_upcoming": "आगामी",
+    "group_later": "बाद में",
+    "pull_to_refresh": "नई यात्राओं के लिए नीचे खींचकर रिफ़्रेश करें।",
+    "no_matches_title": "कोई मेल नहीं",
+    "no_matches_body": "\"{q}\" के लिए कोई यात्रा नहीं मिली।",
+    "chip_full": "भर गयी",
+    "chip_left": "{n} बाकी",
+    "chip_open": "खुली",
+    "chip_from_price": "₹{price} से"
+  },
+  "customer_more": {
+    "title": "और",
+    "section_preferences": "प्राथमिकताएँ",
+    "language": "भाषा",
+    "section_about_legal": "परिचय और कानूनी",
+    "about": "उगम फौज के बारे में",
+    "about_subtitle": "यह ऐप क्या है और इसे कौन बनाता है",
+    "privacy": "गोपनीयता नीति",
+    "privacy_subtitle": "हम आपका डेटा कैसे संभालते हैं",
+    "terms": "सेवा की शर्तें",
+    "terms_subtitle": "ऐप उपयोग करने के नियम",
+    "section_support": "सहायता",
+    "contact": "व्हाट्सएप पर संपर्क करें",
+    "contact_subtitle": "बुकिंग के बारे में प्रश्न? हमें संदेश भेजें",
+    "contact_error_title": "चैट नहीं खुल सकी",
+    "contact_error_body": "संपर्क लिंक खोलने के लिए कोई ऐप उपलब्ध नहीं है।",
+    "version": "संस्करण {version}",
+    "footer_made_by": "Occubit Solution द्वारा · devam.org"
   },
   "dashboard": {
     "greeting_morning": "सुप्रभात",
@@ -129,6 +182,10 @@
     "seat_chip": {
       "seats": "{count} सीट"
     },
+    "chip": {
+      "trip_outbound": "केवल {from} → {to}",
+      "trip_return": "केवल {from} → {to}"
+    },
     "action": {
       "assign_seats": "सीट आवंटित करें",
       "view_assignment": "आवंटन देखें",
@@ -172,6 +229,10 @@
       "note_hint": "जैसे बुजुर्ग माता-पिता के साथ यात्रा",
       "single_sofa": "सिंगल सोफा",
       "double_sofa": "डबल सोफा",
+      "trip_type_label": "यात्रा दिशा",
+      "trip_round": "दोनों तरफ",
+      "trip_outbound": "एक तरफ · {from} → {to}",
+      "trip_return": "एक तरफ · {from} → {to}",
       "save": "अनुरोध सहेजें",
       "saving": "सहेज रहे हैं…"
     },
@@ -210,6 +271,8 @@
     "status_pending": "लंबित",
     "seats_double": "{count} डबल",
     "seats_single": "{count} सिंगल",
+    "trip_outbound": "एक तरफ · केवल {from} → {to}",
+    "trip_return": "एक तरफ · केवल {from} → {to}",
     "seats_total": "{total} कुल",
     "seats_fallback": "{count} सीट",
     "layout_view_hint": "बस के नक्शे पर अपनी सीटें देखने के लिए टैप करें",
@@ -226,7 +289,17 @@
     "layout_driver": "ड्राइवर",
     "layout_your_seats": "आपकी सीटें: {seats}",
     "layout_legend_mine": "आपकी सीट",
-    "layout_legend_other": "अन्य सीटें"
+    "layout_legend_other": "अन्य सीटें",
+    "tab_all": "सभी",
+    "tab_pending": "लंबित",
+    "tab_confirmed": "पुष्टि हुई",
+    "tab_cancelled": "रद्द",
+    "empty_filter_title": "कोई मेल नहीं",
+    "empty_filter_body": "इस फ़िल्टर में कुछ नहीं — सभी देखें।",
+    "chip_seats_assigned": "सीट दी गयी",
+    "chip_confirmed": "पुष्टि हुई",
+    "chip_cancelled": "रद्द",
+    "chip_pending": "लंबित"
   },
   "add_bus": {
     "title": "बस जोड़ें",
@@ -356,6 +429,13 @@
     "label_your_name": "आपका नाम",
     "hint_your_name": "हम आपको किस नाम से सूचीबद्ध करें?",
     "label_phone": "फ़ोन (हम WhatsApp पर संपर्क करेंगे)",
+    "label_trip_type": "आप किस तरफ यात्रा करेंगे?",
+    "trip_round_title": "दोनों तरफ (राउंड-ट्रिप)",
+    "trip_round_sub": "ग्रुप के साथ {from} से {to} और फिर वापस आइए।",
+    "trip_outbound_title": "केवल जाना — {from} → {to}",
+    "trip_outbound_sub": "जाते वक़्त ग्रुप के साथ चलूँगा, लेकिन वहाँ रुक जाऊँगा।",
+    "trip_return_title": "केवल आना — {from} → {to}",
+    "trip_return_sub": "मैं पहले से वहाँ हूँ — वापसी की बस से जुड़ूँगा।",
     "label_seat_count": "कितनी सीटें चाहिए?",
     "seat_double_sofa_label": "डबल सोफा",
     "seat_double_sofa_sub": "चौड़ी बर्थ · जोड़े या परिवार के लिए आदर्श",
@@ -382,7 +462,11 @@
     "route_price": "{from} → {to}  ·  ₹{price} / सीट",
     "totals_seat_one": "{} सीट",
     "totals_seat_other": "{} सीटें",
-    "totals_estimated": "अनुमानित कुल: ₹{amount}"
+    "totals_estimated": "अनुमानित कुल: ₹{amount}",
+    "title_edit": "अनुरोध संपादन",
+    "section_who_is_booking": "कौन बुक कर रहा है",
+    "button_update": "अनुरोध अपडेट करें",
+    "button_submit": "अनुरोध भेजें"
   },
   "customer_tour_detail": {
     "title": "टूर विवरण",
@@ -395,7 +479,24 @@
     "label_tour_status": "टूर स्थिति",
     "bus_confirmed": "बस की पुष्टि हो गई",
     "bus_ac": "AC",
-    "bus_non_ac": "Non-AC"
+    "bus_non_ac": "Non-AC",
+    "tab_about": "के बारे में",
+    "tab_schedule": "समय सारिणी",
+    "section_trip_summary": "यात्रा सारांश",
+    "section_about_tour": "इस यात्रा के बारे में",
+    "section_bus": "बस",
+    "section_timeline": "समय रेखा",
+    "label_route": "रूट",
+    "label_price": "मूल्य",
+    "label_tour_id": "यात्रा ID",
+    "price_per_seat_value": "₹{price} / सीट",
+    "chip_seats": "{count} सीट",
+    "schedule_departure_from": "{city} से प्रस्थान",
+    "schedule_arrive_in": "{city} पहुँचना",
+    "schedule_return_to": "{city} वापसी",
+    "cta_bookings_closed": "बुकिंग बंद",
+    "cta_join_waitlist": "वेटिंग लिस्ट में जुड़ें",
+    "cta_request_to_book": "बुकिंग के लिए अनुरोध"
   },
   "edit_tour": {
     "title": "टूर संपादित करें",

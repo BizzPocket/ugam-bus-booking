@@ -14,9 +14,9 @@ class ContactSyncService {
   factory ContactSyncService() => _instance;
   ContactSyncService._internal();
 
-  /// Returns true if contacts permission is currently granted.
+  /// Returns true if contacts permission is currently granted (no prompt).
   Future<bool> hasPermission() async {
-    return FlutterContacts.requestPermission(readonly: true);
+    return FlutterContacts.permissions.has(PermissionType.read);
   }
 
   /// Reads all device contacts and flattens them into one entry per
@@ -24,22 +24,22 @@ class ContactSyncService {
   /// entries; duplicates by normalised phone are collapsed (last name
   /// wins).
   ///
-  /// Returns an empty list when permission is denied.
+  /// Prompts for permission if not yet decided. Returns an empty list when
+  /// permission is denied.
   Future<List<DeviceContactEntry>> pullDeviceContacts() async {
-    final granted = await FlutterContacts.requestPermission(readonly: true);
-    if (!granted) return const [];
+    final status = await FlutterContacts.permissions.request(PermissionType.read);
+    if (status != PermissionStatus.granted &&
+        status != PermissionStatus.limited) {
+      return const [];
+    }
 
-    final raw = await FlutterContacts.getContacts(
-      withProperties: true,
-      withPhoto: false,
-      withAccounts: false,
-      withGroups: false,
-      withThumbnail: false,
+    final raw = await FlutterContacts.getAll(
+      properties: {ContactProperty.phone},
     );
 
     final byPhone = <String, DeviceContactEntry>{};
     for (final c in raw) {
-      final name = c.displayName.trim();
+      final name = (c.displayName ?? '').trim();
       if (name.isEmpty) continue;
 
       for (final p in c.phones) {

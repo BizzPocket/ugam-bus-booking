@@ -1000,6 +1000,8 @@ class _RequestCard extends StatelessWidget {
                     children: [
                       Text(
                         passenger.displayName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: UgamText.titleS
                             .copyWith(color: c.ink, fontSize: 14),
                       ),
@@ -1286,11 +1288,15 @@ class _CardActions extends StatelessWidget {
                   Icon(primaryIcon,
                       size: 16, color: isAssigned ? c.good : c.onAccent),
                   const SizedBox(width: 8),
-                  Text(
-                    primaryLabel,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: isAssigned ? c.good : c.onAccent,
-                      fontSize: 12.5,
+                  Flexible(
+                    child: Text(
+                      primaryLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: UgamText.bodyStrong.copyWith(
+                        color: isAssigned ? c.good : c.onAccent,
+                        fontSize: 12.5,
+                      ),
                     ),
                   ),
                 ],

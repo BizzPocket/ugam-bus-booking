@@ -213,7 +213,24 @@ class AuthController extends GetxController {
 
   Future<void> logout() async {
     await _adminAuth.signOut();
+    await _clearSessionLocally();
+    Get.offAllNamed('/splash');
+  }
 
+  /// Permanently deletes the current admin account and every record it owns
+  /// (tours, buses, passengers, booking requests, contacts), then clears the
+  /// local session and returns to splash. Throws if the server-side delete
+  /// fails so the caller can surface an error and keep the user signed in.
+  Future<void> deleteAccount() async {
+    await _adminAuth.deleteAccount();
+    await _clearSessionLocally();
+    Get.offAllNamed('/splash');
+  }
+
+  /// Clears the persisted prefs and in-memory session state. Shared by
+  /// [logout] and [deleteAccount]; does not touch the Supabase session
+  /// (callers handle sign-out / deletion first).
+  Future<void> _clearSessionLocally() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyPhone);
     await prefs.remove(_keyRole);
@@ -232,7 +249,6 @@ class AuthController extends GetxController {
     if (Get.isRegistered<UserController>()) {
       Get.find<UserController>().reset();
     }
-    Get.offAllNamed('/splash');
   }
 
   @override

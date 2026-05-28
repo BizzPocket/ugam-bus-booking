@@ -92,7 +92,6 @@ class Tour {
         'price_per_seat': pricePerSeat,
         if (description != null) 'description': description,
         'status': status.name,
-        if (busId != null) 'bus_id': busId,
         if (handlerId != null) 'handler_id': handlerId,
         if (createdBy != null) 'created_by': createdBy,
         'is_public': isPublic,

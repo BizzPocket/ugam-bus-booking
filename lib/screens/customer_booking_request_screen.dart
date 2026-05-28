@@ -325,7 +325,7 @@ class _CustomerBookingRequestScreenState
             _TopBar(
               c: c,
               title: widget.isEditing
-                  ? 'Edit request'
+                  ? tr('customer_booking.title_edit')
                   : tr('customer_booking.title'),
             ),
             Expanded(
@@ -339,7 +339,9 @@ class _CustomerBookingRequestScreenState
                 children: [
                   _TourPreviewCard(tour: widget.tour, c: c),
                   const SizedBox(height: UgamSpacing.xl),
-                  _SectionEyebrow(label: 'WHO IS BOOKING', c: c),
+                  _SectionEyebrow(
+                      label: tr('customer_booking.section_who_is_booking'),
+                      c: c),
                   const SizedBox(height: UgamSpacing.md),
                   UgamInput(
                     label: tr('customer_booking.label_your_name'),
@@ -437,8 +439,8 @@ class _CustomerBookingRequestScreenState
                 label: _saving
                     ? tr('customer_booking.button_saving')
                     : (widget.isEditing
-                        ? 'Update request'
-                        : 'Submit request'),
+                        ? tr('customer_booking.button_update')
+                        : tr('customer_booking.button_submit')),
                 leadingIcon: Icons.send_rounded,
                 trailingValue:
                     _estTotal > 0 ? '₹${_estTotal.toStringAsFixed(0)}' : null,
@@ -587,11 +589,13 @@ class _TourPreviewCard extends StatelessWidget {
   }
 
   static String _formatDate(DateTime d) {
-    const months = [
-      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+    const keys = [
+      'app.month.short.jan','app.month.short.feb','app.month.short.mar',
+      'app.month.short.apr','app.month.short.may','app.month.short.jun',
+      'app.month.short.jul','app.month.short.aug','app.month.short.sep',
+      'app.month.short.oct','app.month.short.nov','app.month.short.dec',
     ];
-    return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
+    return '${d.day.toString().padLeft(2, '0')} ${tr(keys[d.month - 1]).toUpperCase()}';
   }
 }
 

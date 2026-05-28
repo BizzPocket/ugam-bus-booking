@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
@@ -9,6 +10,15 @@ import 'config/supabase_config.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Inter is bundled in pubspec.yaml under `fonts:`. Disable
+  // google_fonts' runtime fetch from fonts.gstatic.com so any
+  // remaining inline `GoogleFonts.inter(...)` call sites resolve from
+  // the bundled file instead of triggering a network round-trip on
+  // first paint. Without this, low-end devices on slow networks
+  // spend hundreds of ms downloading the font before text settles
+  // into its final weight.
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,

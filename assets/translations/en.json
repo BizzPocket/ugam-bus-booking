@@ -34,6 +34,22 @@
       "phase_book": "Book",
       "phase_lock": "Lock",
       "phase_done": "Done"
+    },
+    "month": {
+      "short": {
+        "jan": "Jan",
+        "feb": "Feb",
+        "mar": "Mar",
+        "apr": "Apr",
+        "may": "May",
+        "jun": "Jun",
+        "jul": "Jul",
+        "aug": "Aug",
+        "sep": "Sep",
+        "oct": "Oct",
+        "nov": "Nov",
+        "dec": "Dec"
+      }
     }
   },
   "settings": {
@@ -58,6 +74,13 @@
     "logout": "Log Out",
     "logout_subtitle": "Sign out of your account",
     "logout_confirm_message": "Are you sure you want to sign out of your account?",
+    "delete_account": "Delete Account",
+    "delete_account_subtitle": "Permanently erase your account and all data",
+    "delete_account_confirm_title": "Delete account?",
+    "delete_account_confirm_message": "This permanently deletes your account along with every tour, bus, passenger, and booking request you own. This cannot be undone.",
+    "delete_account_confirm_cta": "Delete forever",
+    "delete_account_success": "Your account and all data have been deleted.",
+    "delete_account_error": "Could not delete your account. Please try again or contact support.",
     "footer_made_in": "Made with ♥ in Gujarat"
   },
   "language": {
@@ -75,7 +98,37 @@
     "empty_subtitle": "Check back soon — new tours are announced as soon as the route and date are confirmed.",
     "price_per_seat": "₹{price} / seat",
     "bus_to_be_confirmed": "Bus to be confirmed",
-    "tap_to_book": "Tap to book →"
+    "tap_to_book": "Tap to book →",
+    "header_explore": "Explore tours",
+    "search_hint": "Search by route or destination…",
+    "group_upcoming": "Upcoming",
+    "group_later": "Later",
+    "pull_to_refresh": "Pull down to refresh — new trips appear here.",
+    "no_matches_title": "No matches",
+    "no_matches_body": "No tours match \"{q}\".",
+    "chip_full": "FULL",
+    "chip_left": "{n} LEFT",
+    "chip_open": "OPEN",
+    "chip_from_price": "FROM ₹{price}"
+  },
+  "customer_more": {
+    "title": "More",
+    "section_preferences": "Preferences",
+    "language": "Language",
+    "section_about_legal": "About & Legal",
+    "about": "About Ugam Foj",
+    "about_subtitle": "What this app is and who makes it",
+    "privacy": "Privacy Policy",
+    "privacy_subtitle": "How we handle your data",
+    "terms": "Terms of Service",
+    "terms_subtitle": "The rules for using the app",
+    "section_support": "Support",
+    "contact": "Contact on WhatsApp",
+    "contact_subtitle": "Questions about a booking? Message us",
+    "contact_error_title": "Couldn't open chat",
+    "contact_error_body": "No app available to open the contact link.",
+    "version": "Version {version}",
+    "footer_made_by": "Made by Occubit Solution · devam.org"
   },
   "dashboard": {
     "greeting_morning": "Good Morning",
@@ -129,6 +182,10 @@
     "seat_chip": {
       "seats": "{count} Seats"
     },
+    "chip": {
+      "trip_outbound": "{from} → {to} only",
+      "trip_return": "{from} → {to} only"
+    },
     "action": {
       "assign_seats": "Assign Seats",
       "view_assignment": "View Assignment",
@@ -172,6 +229,10 @@
       "note_hint": "e.g. Travelling with elder parents",
       "single_sofa": "Single Sofa",
       "double_sofa": "Double Sofa",
+      "trip_type_label": "TRIP DIRECTION",
+      "trip_round": "Round-trip",
+      "trip_outbound": "One way · {from} → {to}",
+      "trip_return": "One way · {from} → {to}",
       "save": "Save Request",
       "saving": "Saving…"
     },
@@ -210,6 +271,8 @@
     "status_pending": "PENDING",
     "seats_double": "{count} Double",
     "seats_single": "{count} Single",
+    "trip_outbound": "One way · {from} → {to} only",
+    "trip_return": "One way · {from} → {to} only",
     "seats_total": "{total} total",
     "seats_fallback": "{count} seat(s)",
     "layout_view_hint": "Tap to see your seats on the bus layout",
@@ -226,7 +289,17 @@
     "layout_driver": "DRIVER",
     "layout_your_seats": "Your seats: {seats}",
     "layout_legend_mine": "Your seat",
-    "layout_legend_other": "Other seats"
+    "layout_legend_other": "Other seats",
+    "tab_all": "All",
+    "tab_pending": "Pending",
+    "tab_confirmed": "Confirmed",
+    "tab_cancelled": "Cancelled",
+    "empty_filter_title": "No matches",
+    "empty_filter_body": "Nothing in this filter — try All.",
+    "chip_seats_assigned": "Seats assigned",
+    "chip_confirmed": "Confirmed",
+    "chip_cancelled": "Cancelled",
+    "chip_pending": "Pending"
   },
   "add_bus": {
     "title": "Add Bus",
@@ -356,6 +429,13 @@
     "label_your_name": "YOUR NAME",
     "hint_your_name": "How should we list you?",
     "label_phone": "PHONE (we will WhatsApp you here)",
+    "label_trip_type": "WHICH WAY ARE YOU TRAVELLING?",
+    "trip_round_title": "Round-trip (both ways)",
+    "trip_round_sub": "Travel with the group from {from} to {to} and back.",
+    "trip_outbound_title": "One way only — {from} → {to}",
+    "trip_outbound_sub": "I'll travel with the group going, but stay back at the destination.",
+    "trip_return_title": "One way only — {from} → {to}",
+    "trip_return_sub": "I'm already at the destination — I'll join the return bus.",
     "label_seat_count": "HOW MANY SEATS?",
     "seat_double_sofa_label": "Double Sofa",
     "seat_double_sofa_sub": "Wider berth · ideal for couples or family",
@@ -382,7 +462,11 @@
     "route_price": "{from} → {to}  ·  ₹{price} / seat",
     "totals_seat_one": "{} seat",
     "totals_seat_other": "{} seats",
-    "totals_estimated": "Estimated total: ₹{amount}"
+    "totals_estimated": "Estimated total: ₹{amount}",
+    "title_edit": "Edit request",
+    "section_who_is_booking": "WHO IS BOOKING",
+    "button_update": "Update request",
+    "button_submit": "Submit request"
   },
   "customer_tour_detail": {
     "title": "Tour details",
@@ -395,7 +479,24 @@
     "label_tour_status": "Tour status",
     "bus_confirmed": "Bus confirmed",
     "bus_ac": "AC",
-    "bus_non_ac": "Non-AC"
+    "bus_non_ac": "Non-AC",
+    "tab_about": "About",
+    "tab_schedule": "Schedule",
+    "section_trip_summary": "TRIP SUMMARY",
+    "section_about_tour": "ABOUT THIS TOUR",
+    "section_bus": "BUS",
+    "section_timeline": "TIMELINE",
+    "label_route": "Route",
+    "label_price": "Price",
+    "label_tour_id": "Tour ID",
+    "price_per_seat_value": "₹{price} / seat",
+    "chip_seats": "{count} SEATS",
+    "schedule_departure_from": "Departure from {city}",
+    "schedule_arrive_in": "Arrive in {city}",
+    "schedule_return_to": "Return to {city}",
+    "cta_bookings_closed": "Bookings closed",
+    "cta_join_waitlist": "Join waitlist",
+    "cta_request_to_book": "Request to book"
   },
   "edit_tour": {
     "title": "Edit Tour",

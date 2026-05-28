@@ -12,6 +12,7 @@ export 'components/ugam_card.dart';
 export 'components/ugam_cta.dart';
 export 'components/ugam_date_pill.dart';
 export 'components/ugam_dock_nav.dart';
+export 'components/ugam_glass_container.dart';
 export 'components/ugam_empty.dart';
 export 'components/ugam_input.dart';
 export 'components/ugam_request_row.dart';

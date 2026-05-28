@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -291,12 +292,19 @@ class _HeroSection extends StatelessWidget {
   }
 
   static String _formatDate(DateTime d) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${d.day} ${months[d.month - 1]}';
+    return '${d.day} ${_monthShort(d.month)}';
   }
+}
+
+/// Shared localized 3-letter month abbreviation used across customer screens.
+String _monthShort(int month) {
+  const keys = [
+    'app.month.short.jan','app.month.short.feb','app.month.short.mar',
+    'app.month.short.apr','app.month.short.may','app.month.short.jun',
+    'app.month.short.jul','app.month.short.aug','app.month.short.sep',
+    'app.month.short.oct','app.month.short.nov','app.month.short.dec',
+  ];
+  return tr(keys[month - 1]);
 }
 
 class _ChromeCircle extends StatelessWidget {
@@ -339,9 +347,9 @@ class _TabBar extends StatelessWidget {
     return UgamTabPills(
       currentIndex: index,
       onChanged: onChanged,
-      items: const [
-        UgamTabItem(label: 'About'),
-        UgamTabItem(label: 'Schedule'),
+      items: [
+        UgamTabItem(label: tr('customer_tour_detail.tab_about')),
+        UgamTabItem(label: tr('customer_tour_detail.tab_schedule')),
       ],
     );
   }
@@ -358,22 +366,24 @@ class _AboutTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        _SectionEyebrow(label: 'TRIP SUMMARY', c: c),
+        _SectionEyebrow(label: tr('customer_tour_detail.section_trip_summary'), c: c),
         const SizedBox(height: UgamSpacing.md),
         _InfoCard(
           c: c,
           rows: [
-            ('Route', '${tour.fromCity} → ${tour.toCity}'),
-            ('Departure', _formatLongDate(tour.departureDate)),
+            (tr('customer_tour_detail.label_route'), '${tour.fromCity} → ${tour.toCity}'),
+            (tr('customer_tour_detail.label_departure'), _formatLongDate(tour.departureDate)),
             if (tour.returnDate != null)
-              ('Return', _formatLongDate(tour.returnDate!)),
-            ('Price', '₹${tour.pricePerSeat.toStringAsFixed(0)} / seat'),
-            ('Tour ID', WhatsAppService.tourCode(tour.id)),
+              (tr('customer_tour_detail.label_return'), _formatLongDate(tour.returnDate!)),
+            (tr('customer_tour_detail.label_price'),
+              tr('customer_tour_detail.price_per_seat_value',
+                namedArgs: {'price': tour.pricePerSeat.toStringAsFixed(0)})),
+            (tr('customer_tour_detail.label_tour_id'), WhatsAppService.tourCode(tour.id)),
           ],
         ),
         if (tour.description != null && tour.description!.isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.xl),
-          _SectionEyebrow(label: 'ABOUT THIS TOUR', c: c),
+          _SectionEyebrow(label: tr('customer_tour_detail.section_about_tour'), c: c),
           const SizedBox(height: UgamSpacing.md),
           Container(
             padding: const EdgeInsets.all(UgamSpacing.lg),
@@ -390,7 +400,7 @@ class _AboutTab extends StatelessWidget {
         ],
         if (tour.buses.isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.xl),
-          _SectionEyebrow(label: 'BUS', c: c),
+          _SectionEyebrow(label: tr('customer_tour_detail.section_bus'), c: c),
           const SizedBox(height: UgamSpacing.md),
           _BusCard(tour: tour, c: c),
         ],
@@ -399,11 +409,7 @@ class _AboutTab extends StatelessWidget {
   }
 
   static String _formatLongDate(DateTime d) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${d.day} ${months[d.month - 1]} ${d.year}';
+    return '${d.day} ${_monthShort(d.month)} ${d.year}';
   }
 }
 
@@ -452,11 +458,12 @@ class _BusCard extends StatelessWidget {
                 Row(
                   children: [
                     if (bus.isAC) ...[
-                      const UgamReqChip(label: 'AC'),
+                      UgamReqChip(label: tr('customer_tour_detail.bus_ac')),
                       const SizedBox(width: 5),
                     ],
                     UgamReqChip(
-                      label: '${bus.totalSeats} SEATS',
+                      label: tr('customer_tour_detail.chip_seats',
+                        namedArgs: {'count': bus.totalSeats.toString()}),
                       variant: UgamChipVariant.neutral,
                     ),
                   ],
@@ -482,7 +489,7 @@ class _ScheduleTab extends StatelessWidget {
     final events = _events();
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        _SectionEyebrow(label: 'TIMELINE', c: c),
+        _SectionEyebrow(label: tr('customer_tour_detail.section_timeline'), c: c),
         const SizedBox(height: UgamSpacing.md),
         for (var i = 0; i < events.length; i++)
           _TimelineRow(
@@ -499,19 +506,22 @@ class _ScheduleTab extends StatelessWidget {
     final out = <_ScheduleEvent>[
       _ScheduleEvent(
         icon: Icons.directions_bus_rounded,
-        title: 'Departure from ${tour.fromCity}',
+        title: tr('customer_tour_detail.schedule_departure_from',
+          namedArgs: {'city': tour.fromCity}),
         time: tour.departureDate,
       ),
       _ScheduleEvent(
         icon: Icons.location_on_rounded,
-        title: 'Arrive in ${tour.toCity}',
+        title: tr('customer_tour_detail.schedule_arrive_in',
+          namedArgs: {'city': tour.toCity}),
         time: tour.departureDate,
       ),
     ];
     if (tour.returnDate != null) {
       out.add(_ScheduleEvent(
         icon: Icons.flag_rounded,
-        title: 'Return to ${tour.fromCity}',
+        title: tr('customer_tour_detail.schedule_return_to',
+          namedArgs: {'city': tour.fromCity}),
         time: tour.returnDate!,
       ));
     }
@@ -619,11 +629,7 @@ class _TimelineRow extends StatelessWidget {
   }
 
   static String _formatDate(DateTime d) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    return '${d.day} ${months[d.month - 1]} ${d.year}';
+    return '${d.day} ${_monthShort(d.month)} ${d.year}';
   }
 }
 
@@ -703,18 +709,18 @@ class _StickyBookCta extends StatelessWidget {
     final VoidCallback? onTap;
 
     if (locked) {
-      label = 'Bookings closed';
+      label = tr('customer_tour_detail.cta_bookings_closed');
       icon = Icons.lock_outline_rounded;
       onTap = null;
     } else if (full) {
-      label = 'Join waitlist';
+      label = tr('customer_tour_detail.cta_join_waitlist');
       icon = Icons.hourglass_top_rounded;
       onTap = () => Get.to(
             () => CustomerBookingRequestScreen(tour: tour),
             transition: Transition.cupertino,
           );
     } else {
-      label = 'Request to book';
+      label = tr('customer_tour_detail.cta_request_to_book');
       icon = Icons.send_rounded;
       onTap = () => Get.to(
             () => CustomerBookingRequestScreen(tour: tour),

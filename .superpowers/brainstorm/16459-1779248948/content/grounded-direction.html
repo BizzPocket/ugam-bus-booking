@@ -1,0 +1,334 @@
+<h2>The grounded direction — customer & admin, same language</h2>
+<p class="subtitle">Khatabook DNA + redBus seat grids + Linear's recede-vs-focus density + 2026 thumb-zone patterns. No costume. Same component library carries both audiences.</p>
+
+<style>
+  :root {
+    --ink:        #111111;
+    --ink-2:      #4A4A48;
+    --ink-3:      #8A8A86;
+    --paper:      #FAFAF7;
+    --paper-2:    #F2F1EC;
+    --border:     #E5E2DA;
+    --border-2:   #D7D3C9;
+    --brand:      #1746A2;
+    --brand-deep: #0F2A6B;
+    --accent:     #C2410C;
+    --success:    #1F7A3A;
+    --warn:       #B45309;
+
+    --dark-paper:   #0E1014;
+    --dark-surface: #15181E;
+    --dark-surface-2:#1B1F26;
+    --dark-border:  #242935;
+    --dark-ink:     #EDEEF1;
+    --dark-ink-2:   #9BA1AE;
+    --dark-ink-3:   #6B7180;
+  }
+
+  .frames { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; margin-top: 18px; }
+  .lbl-strip { display: flex; align-items: center; justify-content: space-between; margin: 0 4px 8px; font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: #6B7180; font-weight: 600; }
+  .phone { width: 100%; aspect-ratio: 9/19; border-radius: 32px; padding: 16px 12px 18px; box-shadow: 0 20px 50px rgba(0,0,0,.18), 0 0 0 1.5px rgba(0,0,0,.08) inset; font-family: -apple-system, "Inter", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+  /* ── Customer (light/paper) ─────────────────────────── */
+  .cust { background: var(--paper); color: var(--ink); display:flex; flex-direction:column; }
+  .cust .topbar { display:flex; align-items:center; justify-content:space-between; padding: 4px 6px 14px; }
+  .cust .wm { display:flex; align-items:baseline; gap:8px; }
+  .cust .wm-en { font-size: 15.5px; font-weight: 700; letter-spacing: -.2px; }
+  .cust .wm-gu { font-size: 11px; color: var(--ink-3); font-family: "Noto Sans Gujarati","Mukta",sans-serif; }
+  .cust .icnbtn { width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 8px; display:grid; place-items:center; color: var(--ink-2); }
+
+  .cust .h1 { font-size: 22px; font-weight: 700; letter-spacing: -.4px; margin: 6px 6px 2px; line-height: 1.15; }
+  .cust .h1-sub { font-size: 12.5px; color: var(--ink-3); margin: 0 6px 14px; font-family: "Noto Sans Gujarati", sans-serif; }
+
+  .cust .filterbar { display:flex; gap: 6px; padding: 0 4px 14px; overflow-x: auto; }
+  .cust .chip { font-size: 11px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: #fff; white-space: nowrap; color: var(--ink-2); font-weight: 500; }
+  .cust .chip.on { background: var(--ink); color: var(--paper); border-color: var(--ink); font-weight: 600; }
+
+  .cust .tour { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 0; margin-bottom: 10px; display: flex; overflow: hidden; }
+  .cust .datecol { width: 58px; background: var(--paper-2); border-right: 1px dashed var(--border-2); display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 10px 0; }
+  .cust .day { font-size: 9.5px; color: var(--ink-3); letter-spacing: 1px; font-weight: 600; text-transform: uppercase; }
+  .cust .dnum { font-size: 22px; font-weight: 700; line-height: 1.05; letter-spacing: -.5px; margin: 1px 0; }
+  .cust .mon { font-size: 9.5px; color: var(--ink-3); letter-spacing: 1px; font-weight: 600; text-transform: uppercase; }
+  .cust .tbody { flex: 1; padding: 12px 12px 11px; min-width: 0; }
+  .cust .title { font-size: 14px; font-weight: 600; margin: 0 0 2px; letter-spacing: -.1px; }
+  .cust .route { font-size: 11.5px; color: var(--ink-2); margin: 0 0 8px; display:flex; align-items:center; gap:5px; }
+  .cust .route .arr { color: var(--ink-3); }
+  .cust .foot { display:flex; align-items:center; justify-content:space-between; }
+  .cust .price { font-size: 13px; font-weight: 700; }
+  .cust .price .per { font-size: 10px; color: var(--ink-3); font-weight: 500; }
+  .cust .seatsleft { display:flex; align-items:center; gap:5px; font-size: 10.5px; color: var(--success); font-weight: 600; }
+  .cust .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
+  .cust .dot.low { background: var(--warn); }
+  .cust .seatsleft.low { color: var(--warn); }
+
+  .cust .stickycta { margin-top: auto; position: sticky; bottom: 0; padding-top: 8px; background: linear-gradient(180deg, transparent, var(--paper) 40%); }
+  .cust .myreq { background: var(--ink); color: var(--paper); border-radius: 14px; padding: 13px 16px; display:flex; align-items:center; justify-content:space-between; font-size: 13px; font-weight: 600; }
+  .cust .myreq .gu { font-size: 10.5px; opacity: .72; font-family: "Noto Sans Gujarati", sans-serif; font-weight: 500; }
+
+  /* ── Admin (dark/workbench) ─────────────────────────── */
+  .adm { background: var(--dark-paper); color: var(--dark-ink); display:flex; flex-direction:column; }
+  .adm .topbar { display:flex; align-items:center; justify-content:space-between; padding: 2px 4px 12px; }
+  .adm .wm { display:flex; align-items:center; gap:7px; font-size: 13px; font-weight: 600; letter-spacing: -.1px; }
+  .adm .wm .pulse { width: 7px; height: 7px; border-radius: 50%; background: #43E08F; box-shadow: 0 0 0 3px rgba(67,224,143,.18); }
+  .adm .icnbtn { width: 30px; height: 30px; border: 1px solid var(--dark-border); border-radius: 8px; display:grid; place-items:center; color: var(--dark-ink-2); font-size: 12px; }
+
+  .adm .crumb { font-size: 10px; color: var(--dark-ink-3); margin: 0 4px 4px; letter-spacing: .4px; }
+  .adm .h1 { font-size: 18px; font-weight: 600; letter-spacing: -.3px; margin: 0 4px 2px; }
+  .adm .h1 .meta { color: var(--dark-ink-3); font-weight: 500; font-size: 13px; }
+  .adm .sub { font-size: 11px; color: var(--dark-ink-3); margin: 0 4px 12px; }
+
+  .adm .tabs { display:flex; gap: 2px; padding: 3px; background: var(--dark-surface); border-radius: 9px; border: 1px solid var(--dark-border); margin: 0 4px 12px; }
+  .adm .tab { flex:1; font-size: 11px; font-weight: 600; padding: 6px; text-align: center; color: var(--dark-ink-2); border-radius: 6px; display:flex; align-items:center; justify-content:center; gap:5px; }
+  .adm .tab .ct { font-size: 10px; color: var(--dark-ink-3); }
+  .adm .tab.on { background: var(--dark-surface-2); color: var(--dark-ink); box-shadow: inset 0 0 0 1px var(--dark-border); }
+  .adm .tab.on .ct { color: #6E8BFF; }
+
+  .adm .row { display:flex; align-items:center; gap: 10px; padding: 11px 10px; border-bottom: 1px solid var(--dark-border); }
+  .adm .row:first-of-type { border-top: 1px solid var(--dark-border); }
+  .adm .av { width: 32px; height: 32px; border-radius: 8px; background: var(--dark-surface); border: 1px solid var(--dark-border); display:grid; place-items:center; font-size: 11px; font-weight: 700; color: var(--dark-ink-2); }
+  .adm .who { flex: 1; min-width: 0; }
+  .adm .name { font-size: 12.5px; font-weight: 600; letter-spacing: -.05px; margin: 0 0 2px; display:flex; align-items:center; gap: 5px; }
+  .adm .ago  { font-size: 9.5px; color: var(--dark-ink-3); font-weight: 500; }
+  .adm .req  { font-size: 10.5px; color: var(--dark-ink-2); display:flex; align-items:center; gap:6px; }
+  .adm .seat-chip { font-size: 9.5px; padding: 1.5px 5px; border-radius: 4px; background: rgba(110,139,255,.13); color: #8FA6FF; font-weight: 600; letter-spacing: .3px; }
+  .adm .seat-chip.warm { background: rgba(194,65,12,.16); color: #F0884E; }
+  .adm .actions { display:flex; gap: 4px; }
+  .adm .act { width: 30px; height: 30px; border-radius: 8px; background: var(--dark-surface); border: 1px solid var(--dark-border); display:grid; place-items:center; color: var(--dark-ink-2); font-size: 13px; }
+  .adm .act.primary { background: #1B3A8A; border-color: #2A4DB0; color: #BFD1FF; }
+
+  .adm .stickycta { margin-top: auto; padding-top: 10px; position: sticky; bottom: 0; background: linear-gradient(180deg, transparent, var(--dark-paper) 40%); }
+  .adm .cta { background: var(--brand); color: white; border-radius: 12px; padding: 12px 14px; display:flex; align-items:center; justify-content:space-between; font-size: 13px; font-weight: 600; }
+  .adm .cta .right { display:flex; align-items:center; gap:8px; font-size: 12px; opacity: .9; }
+  .adm .cta .kbd { font-size: 9.5px; padding: 2px 5px; border-radius: 4px; background: rgba(255,255,255,.18); font-family: "JetBrains Mono", monospace; }
+
+  /* ── Reference card ─────────────────────────── */
+  .refs { margin-top: 26px; padding: 18px 20px; background: #F6F4EE; border: 1px solid #E5E2DA; border-radius: 14px; font-size: 13px; line-height: 1.55; color: #2A2A28; }
+  .refs h4 { margin: 0 0 10px; font-size: 13px; letter-spacing: .3px; text-transform: uppercase; color: #6B7180; font-weight: 700; }
+  .refs ul { margin: 0; padding-left: 18px; }
+  .refs li { margin-bottom: 6px; }
+  .refs code { background: rgba(0,0,0,.05); padding: 1px 5px; border-radius: 4px; font-size: 12px; font-family: "JetBrains Mono", monospace; }
+
+  /* ── Choice strip ─────────────────────────── */
+  .verdict { margin-top: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .verdict .option .letter { background: var(--ink); color: var(--paper); }
+</style>
+
+<div class="frames">
+
+  <div>
+    <div class="lbl-strip"><span>Customer surface</span><span>Light · Paper</span></div>
+    <div class="phone cust">
+      <div class="topbar">
+        <div class="wm">
+          <span class="wm-en">Ugam</span>
+          <span class="wm-gu">યાત્રા</span>
+        </div>
+        <div class="icnbtn">≡</div>
+      </div>
+
+      <div class="h1">Upcoming trips</div>
+      <div class="h1-sub">આવનારી મુસાફરી · 4 trips this month</div>
+
+      <div class="filterbar">
+        <div class="chip on">All</div>
+        <div class="chip">This week</div>
+        <div class="chip">Weekend</div>
+        <div class="chip">Day trip</div>
+      </div>
+
+      <div class="tour">
+        <div class="datecol">
+          <div class="day">Sat</div>
+          <div class="dnum tnum">25</div>
+          <div class="mon">May</div>
+        </div>
+        <div class="tbody">
+          <div class="title">Saputara Weekend</div>
+          <div class="route">Ahmedabad <span class="arr">→</span> Saputara · 2N</div>
+          <div class="foot">
+            <div class="price tnum">₹1,200 <span class="per">/ seat</span></div>
+            <div class="seatsleft low"><span class="dot low"></span><span class="tnum">8</span> left</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tour">
+        <div class="datecol">
+          <div class="day">Sun</div>
+          <div class="dnum tnum">01</div>
+          <div class="mon">Jun</div>
+        </div>
+        <div class="tbody">
+          <div class="title">Statue of Unity</div>
+          <div class="route">Vadodara <span class="arr">→</span> Kevadia · 1D</div>
+          <div class="foot">
+            <div class="price tnum">₹800 <span class="per">/ seat</span></div>
+            <div class="seatsleft"><span class="dot"></span><span class="tnum">22</span> left</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tour">
+        <div class="datecol">
+          <div class="day">Sat</div>
+          <div class="dnum tnum">08</div>
+          <div class="mon">Jun</div>
+        </div>
+        <div class="tbody">
+          <div class="title">Diu Beach Run</div>
+          <div class="route">Ahmedabad <span class="arr">→</span> Diu · 2N</div>
+          <div class="foot">
+            <div class="price tnum">₹1,500 <span class="per">/ seat</span></div>
+            <div class="seatsleft"><span class="dot"></span><span class="tnum">18</span> left</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stickycta">
+        <div class="myreq">
+          <span>My requests <span class="gu">· મારી વિનંતી</span></span>
+          <span>2 →</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="lbl-strip"><span>Admin workbench</span><span>Dark · Dense</span></div>
+    <div class="phone adm">
+      <div class="topbar">
+        <div class="wm"><span class="pulse"></span> Ugam · Requests</div>
+        <div class="icnbtn">⌘</div>
+      </div>
+
+      <div class="crumb">Saputara Weekend · 25 May</div>
+      <div class="h1">23 <span class="meta">requests · </span><span class="meta tnum">18/30 assigned</span></div>
+      <div class="sub">Last sync 2s ago · realtime</div>
+
+      <div class="tabs">
+        <div class="tab on">New <span class="ct tnum">5</span></div>
+        <div class="tab">Waitlist <span class="ct tnum">2</span></div>
+        <div class="tab">Assigned <span class="ct tnum">16</span></div>
+      </div>
+
+      <div class="row">
+        <div class="av">RP</div>
+        <div class="who">
+          <div class="name">Ramesh Patel <span class="ago">· 3m</span></div>
+          <div class="req">
+            <span class="seat-chip">2 × DS</span>
+            <span class="seat-chip warm">1 × SS</span>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="act">📞</div>
+          <div class="act primary">↪</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="av">JS</div>
+        <div class="who">
+          <div class="name">Jyoti Shah <span class="ago">· 18m</span></div>
+          <div class="req">
+            <span class="seat-chip">3 × DS</span>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="act">📞</div>
+          <div class="act primary">↪</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="av">KP</div>
+        <div class="who">
+          <div class="name">Kiran Parmar <span class="ago">· 41m</span></div>
+          <div class="req">
+            <span class="seat-chip">1 × DS</span>
+            <span class="seat-chip">2 × Seater</span>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="act">📞</div>
+          <div class="act primary">↪</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="av">MV</div>
+        <div class="who">
+          <div class="name">Meena Vyas <span class="ago">· 1h</span></div>
+          <div class="req">
+            <span class="seat-chip warm">2 × SS</span>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="act">📞</div>
+          <div class="act primary">↪</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="av">DM</div>
+        <div class="who">
+          <div class="name">Devang Mehta <span class="ago">· 2h</span></div>
+          <div class="req">
+            <span class="seat-chip">4 × DS</span>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="act">📞</div>
+          <div class="act primary">↪</div>
+        </div>
+      </div>
+
+      <div class="stickycta">
+        <div class="cta">
+          <span>Open seat map</span>
+          <span class="right"><span class="tnum">12 seats free</span><span class="kbd">⌥S</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="refs">
+  <h4>What each piece comes from</h4>
+  <ul>
+    <li><strong>Bilingual labels</strong> (<code>Ugam · યાત્રા</code>, <code>My requests · મારી વિનંતી</code>) — <em>Khatabook / OkCredit pattern</em>. Gujarati gets paired down a step, never as decoration.</li>
+    <li><strong>Date strip on the tour card</strong> (Sat · 25 · May) — readable in one glance, the way printed bus timetables work.</li>
+    <li><strong>Tabular numerics</strong> on every price, seat count, time stamp — Linear/Stripe pattern. Columns of <code>₹1,200</code> and <code>18/30</code> line up vertically across rows.</li>
+    <li><strong>Sticky bottom CTAs</strong> (My requests, Open seat map) — 2026 thumb-zone pattern from muz.li. Action always in reach of right thumb.</li>
+    <li><strong>Dense admin rows</strong> (56px, name + chips + 2 inline actions) — Khatabook ledger DNA. Call + Assign live in the row, not behind a tap-to-expand.</li>
+    <li><strong>Seat-type chips</strong> (<code>2 × DS</code>, <code>1 × SS</code>) — compact like SKU codes. Warm-accent variant signals "needs attention".</li>
+    <li><strong>Status as dot + label</strong> (<code>● 8 left</code> in amber) — recedes when fine, draws eye when warm. No "BADGE PILL" everywhere.</li>
+    <li><strong>Customer is light/paper, admin is dark/dense</strong> — same component library, two voices. Like Stripe vs Stripe Dashboard.</li>
+    <li><strong>No costume</strong> — no serif headlines, no decorative circles on splash, no rotated stamps, no "FIG. 001 · AUTHENTICATION" filler.</li>
+  </ul>
+</div>
+
+<div style="margin-top: 18px; padding: 14px 18px; background: #FFF7ED; border: 1px solid #FCD9B6; border-radius: 12px; font-size: 13px; line-height: 1.5; color: #6B3410;">
+  <strong>Two things to lock with you before I write the spec:</strong>
+  <ol style="margin: 8px 0 0; padding-left: 20px;">
+    <li>The <strong>customer = light</strong>, <strong>admin = dark</strong> split. Both still get a theme toggle, but the default mode flips by audience. OK?</li>
+    <li>Bilingual labels are <strong>English-primary</strong>. The Gujarati sub-label is opt-in per surface (you'd see it on customer cards, not on admin dense rows). OK to do it that way, or do you want full bilingual across the admin side too?</li>
+  </ol>
+</div>
+
+<div class="verdict">
+  <div class="option" data-choice="yes" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content"><h3>This direction works</h3><p>Write the design system spec around this language.</p></div>
+  </div>
+  <div class="option" data-choice="adjust" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content"><h3>Close, with changes</h3><p>I'll tell you what to adjust in the terminal.</p></div>
+  </div>
+  <div class="option" data-choice="restart" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content"><h3>Wrong direction</h3><p>Try a different reference set.</p></div>
+  </div>
+</div>

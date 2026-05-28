@@ -30,6 +30,13 @@ import 'tour_detail_screen.dart';
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
+  // TEMP: hides the "today's trip" hero/tile so the dashboard stays free of
+  // extra accent colour while the new colour system is settled. Flip to
+  // `true` to restore the section. (Kept non-final on purpose so the gate
+  // below doesn't const-fold into dead code.)
+  // ignore: prefer_final_fields
+  static bool _showTodayTrip = false;
+
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
@@ -78,17 +85,25 @@ class DashboardScreen extends StatelessWidget {
                       c: c,
                     )),
                 const SizedBox(height: UgamSpacing.xl),
-                Obx(() {
-                  final today = _todaysTour(tourCtrl.tours);
-                  if (today != null) {
-                    return _TodayHeroCard(tour: today, c: c);
-                  }
-                  return _NoTripsTodayTile(
-                    nextTour: _nextUpcomingTour(tourCtrl.tours),
-                    c: c,
-                  );
-                }),
-                const SizedBox(height: UgamSpacing.xl),
+                // TEMP: today's-trip section gated by [_showTodayTrip]. The
+                // collection-if keeps the Obx out of the tree entirely when
+                // hidden — an Obx whose builder reads no observable throws.
+                if (_showTodayTrip)
+                  Obx(() {
+                    final today = _todaysTour(tourCtrl.tours);
+                    final card = today != null
+                        ? _TodayHeroCard(tour: today, c: c)
+                        : _NoTripsTodayTile(
+                            nextTour: _nextUpcomingTour(tourCtrl.tours),
+                            c: c,
+                          );
+                    // Bottom spacer lives inside the section so hiding it
+                    // leaves one clean gap before the quick actions.
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: UgamSpacing.xl),
+                      child: card,
+                    );
+                  }),
                 _QuickActions(c: c, shell: shell),
                 const SizedBox(height: UgamSpacing.xl),
                 Obx(() {
@@ -797,6 +812,8 @@ class _QA extends StatelessWidget {
                 color: primary ? c.onAccent : c.ink,
                 fontSize: 12,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),

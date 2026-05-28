@@ -1,6 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import '../config/theme.dart';
+import '../design/tokens.dart';
 
 class SeatMap extends StatelessWidget {
   final int totalSeats;
@@ -17,6 +17,7 @@ class SeatMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final c = UgamColors.of(context);
     // 2 seats | aisle | 2 seats
     const cols = 4;
     final rows = (totalSeats / cols).ceil();
@@ -24,10 +25,10 @@ class SeatMap extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.surface(context),
+        color: c.card,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: AppColors.border(context),
+          color: c.border,
         ),
       ),
       child: Column(
@@ -37,16 +38,16 @@ class SeatMap extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: AppColors.surfaceAlt(context),
+              color: c.cardElev,
               shape: BoxShape.circle,
               border: Border.all(
-                color: AppColors.border(context),
+                color: c.border,
                 width: 2,
               ),
             ),
             child: Icon(
               Icons.drive_eta_rounded,
-              color: AppColors.textMuted(context),
+              color: c.ink2,
               size: 22,
             ),
           ),
@@ -98,8 +99,8 @@ class SeatMap extends StatelessWidget {
               ),
               const SizedBox(width: 20),
               _LegendDot(
-                color: AppColors.surfaceAlt(context),
-                borderColor: AppColors.textMuted(context),
+                color: c.cardElev,
+                borderColor: c.ink2,
                 label: tr('app.label.booked'),
                 theme: theme,
               ),
@@ -127,15 +128,16 @@ class SeatWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final c = UgamColors.of(context);
 
     final bgColor = isBooked
-        ? AppColors.surfaceAlt(context)
+        ? c.cardElev
         : theme.colorScheme.primary.withAlpha(isDark ? 40 : 20);
     final borderColor = isBooked
-        ? AppColors.textMuted(context)
+        ? c.ink2
         : theme.colorScheme.primary;
     final textColor = isBooked
-        ? AppColors.textMuted(context)
+        ? c.ink2
         : theme.colorScheme.primary;
 
     return GestureDetector(

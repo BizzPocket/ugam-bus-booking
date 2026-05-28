@@ -8,6 +8,7 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../utils/app_dialogs.dart';
+import '../utils/app_snackbar.dart';
 import '../widgets/language_picker_sheet.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -164,6 +165,30 @@ class SettingsScreen extends StatelessWidget {
                         );
                         if (ok) authCtrl.logout();
                       },
+                      // Account deletion only applies to admins — passengers
+                      // have no server-side account (local phone only).
+                      onDeleteAccount: authCtrl.isAdmin
+                          ? () async {
+                              final ok = await AppDialogs.confirm(
+                                title: tr(
+                                    'settings.delete_account_confirm_title'),
+                                message: tr(
+                                    'settings.delete_account_confirm_message'),
+                                confirmText:
+                                    tr('settings.delete_account_confirm_cta'),
+                                isDestructive: true,
+                              );
+                              if (!ok) return;
+                              try {
+                                await authCtrl.deleteAccount();
+                                AppSnackBar.success(
+                                    tr('settings.delete_account_success'));
+                              } catch (_) {
+                                AppSnackBar.error(
+                                    tr('settings.delete_account_error'));
+                              }
+                            }
+                          : null,
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     Center(
@@ -563,12 +588,49 @@ class _Divider extends StatelessWidget {
 class _DangerRow extends StatelessWidget {
   final UgamColorSet c;
   final VoidCallback onLogout;
-  const _DangerRow({required this.c, required this.onLogout});
+
+  /// Admin-only. When null (passenger session) the delete-account row is
+  /// hidden — passengers have no server-side account to delete.
+  final VoidCallback? onDeleteAccount;
+
+  const _DangerRow({
+    required this.c,
+    required this.onLogout,
+    this.onDeleteAccount,
+  });
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _dangerTile(
+          icon: Icons.logout_rounded,
+          title: tr('settings.logout'),
+          subtitle: tr('settings.logout_subtitle'),
+          onTap: onLogout,
+        ),
+        if (onDeleteAccount != null) ...[
+          const SizedBox(height: UgamSpacing.md),
+          _dangerTile(
+            icon: Icons.delete_forever_rounded,
+            title: tr('settings.delete_account'),
+            subtitle: tr('settings.delete_account_subtitle'),
+            onTap: onDeleteAccount!,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _dangerTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
     return InkWell(
-      onTap: onLogout,
+      onTap: onTap,
       borderRadius: BorderRadius.circular(20),
       child: Container(
         padding: const EdgeInsets.symmetric(
@@ -589,7 +651,7 @@ class _DangerRow extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               alignment: Alignment.center,
-              child: Icon(Icons.logout_rounded, size: 18, color: c.danger),
+              child: Icon(icon, size: 18, color: c.danger),
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -597,11 +659,11 @@ class _DangerRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(tr('settings.logout'),
+                  Text(title,
                       style: UgamText.titleS
                           .copyWith(color: c.danger, fontSize: 15)),
                   const SizedBox(height: 1),
-                  Text(tr('settings.logout_subtitle'),
+                  Text(subtitle,
                       style: UgamText.caption
                           .copyWith(color: c.ink3, fontSize: 12)),
                 ],

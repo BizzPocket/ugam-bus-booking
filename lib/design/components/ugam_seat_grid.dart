@@ -37,34 +37,57 @@ class UgamSeatGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (int r = 0; r < rows.length; r++) ...[
-          Row(
-            children: [
-              for (int col = 0; col < rows[r].length; col++) ...[
-                Expanded(
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: _SeatCell(
-                      cell: rows[r][col],
-                      onTap: onTapSeat == null
-                          ? null
-                          : () {
-                              HapticFeedback.selectionClick();
-                              onTapSeat!(r, col);
-                            },
+    if (rows.isEmpty) return const SizedBox.shrink();
+    final int cols = rows[0].length;
+
+    return LayoutBuilder(
+      builder: (ctx, constraints) {
+        const double minCellWidth = 48.0;
+        const double cellGap = 7.0;
+        final double totalGapsWidth = (cols - 1) * cellGap;
+        final double calculatedCellWidth = (constraints.maxWidth - totalGapsWidth) / cols;
+        final bool useScroll = calculatedCellWidth < minCellWidth;
+        final double cellWidth = useScroll ? minCellWidth : calculatedCellWidth;
+
+        final gridContent = Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int r = 0; r < rows.length; r++) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (int col = 0; col < rows[r].length; col++) ...[
+                    SizedBox(
+                      width: cellWidth,
+                      height: cellWidth,
+                      child: _SeatCell(
+                        cell: rows[r][col],
+                        onTap: onTapSeat == null
+                            ? null
+                            : () {
+                                HapticFeedback.selectionClick();
+                                onTapSeat!(r, col);
+                              },
+                      ),
                     ),
-                  ),
-                ),
-                if (col != rows[r].length - 1) const SizedBox(width: 7),
-              ],
+                    if (col != rows[r].length - 1) const SizedBox(width: cellGap),
+                  ],
+                ],
+              ),
+              if (r != rows.length - 1) const SizedBox(height: cellGap),
             ],
-          ),
-          if (r != rows.length - 1) const SizedBox(height: 7),
-        ],
-      ],
+          ],
+        );
+
+        if (useScroll) {
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: gridContent,
+          );
+        }
+        return gridContent;
+      },
     );
   }
 }

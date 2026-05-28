@@ -1,8 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
+import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
@@ -16,10 +15,9 @@ Future<void> showCustomerSeatLayoutSheet(
   BuildContext context, {
   required CustomerRequestEntry entry,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
+  return UgamSheet.show<void>(
+    context,
+    title: tr('customer_my_requests.layout_sheet_title'),
     builder: (_) => _CustomerSeatLayoutSheet(entry: entry),
   );
 }
@@ -65,116 +63,67 @@ class _CustomerSeatLayoutSheetState extends State<_CustomerSeatLayoutSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final maxHeight = mediaQuery.size.height * 0.85;
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      minChildSize: 0.4,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (_, scrollController) {
-        return Container(
-          constraints: BoxConstraints(maxHeight: maxHeight),
-          decoration: BoxDecoration(
-            color: AppColors.surface(context),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _grabHandle(),
-              _header(),
-              Divider(height: 1, color: AppColors.border(context)),
-              Expanded(child: _body(scrollController)),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _grabHandle() {
-    return Container(
-      width: 36,
-      height: 4,
-      margin: const EdgeInsets.only(top: 12, bottom: 8),
-      decoration: BoxDecoration(
-        color: AppColors.border(context),
-        borderRadius: BorderRadius.circular(2),
-      ),
-    );
-  }
-
-  Widget _header() {
+    final c = UgamColors.of(context);
     final assignedCount = widget.entry.assignedSeats.length;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
-      child: Row(
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  tr('customer_my_requests.layout_sheet_title'),
-                  style: GoogleFonts.inter(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.text(context),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  tr(
-                    'customer_my_requests.layout_sheet_subtitle',
-                    namedArgs: {'count': assignedCount.toString()},
-                  ),
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppColors.textMuted(context),
-                  ),
-                ),
-              ],
+          Text(
+            tr(
+              'customer_my_requests.layout_sheet_subtitle',
+              namedArgs: {'count': assignedCount.toString()},
             ),
+            style: UgamText.caption.copyWith(color: c.ink2),
           ),
-          IconButton(
-            icon: const Icon(Icons.close_rounded, size: 22),
-            onPressed: () => Navigator.of(context).maybePop(),
-            color: AppColors.textMuted(context),
-            visualDensity: VisualDensity.compact,
-          ),
+          const SizedBox(height: UgamSpacing.lg),
+          _body(),
         ],
       ),
     );
   }
 
-  Widget _body(ScrollController controller) {
+  Widget _body() {
+    final c = UgamColors.of(context);
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const SizedBox(
+        height: 200,
+        child: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
     }
     if (_error != null) {
-      return _state(
-        icon: Icons.cloud_off_rounded,
-        title: tr('customer_my_requests.layout_load_error_title'),
-        body: _error!,
+      return SizedBox(
+        height: 250,
+        child: UgamEmpty(
+          icon: Icons.cloud_off_rounded,
+          title: tr('customer_my_requests.layout_load_error_title'),
+          body: _error!,
+        ),
       );
     }
     if (_buses.isEmpty) {
-      return _state(
-        icon: Icons.event_seat_outlined,
-        title: tr('customer_my_requests.layout_empty_title'),
-        body: tr('customer_my_requests.layout_empty_body'),
+      return SizedBox(
+        height: 250,
+        child: UgamEmpty(
+          icon: Icons.event_seat_outlined,
+          title: tr('customer_my_requests.layout_empty_title'),
+          body: tr('customer_my_requests.layout_empty_body'),
+        ),
       );
     }
 
     final mySeats = widget.entry.assignedSeats;
     return ListView.separated(
-      controller: controller,
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: UgamSpacing.xl),
       itemCount: _buses.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 20),
+      separatorBuilder: (_, _) => const SizedBox(height: UgamSpacing.lg),
       itemBuilder: (_, i) {
         final bus = _buses[i];
         final mineOnThisBus = mySeats
@@ -183,44 +132,6 @@ class _CustomerSeatLayoutSheetState extends State<_CustomerSeatLayoutSheet> {
             .toSet();
         return _BusLayoutCard(bus: bus, mySeatIds: mineOnThisBus);
       },
-    );
-  }
-
-  Widget _state({
-    required IconData icon,
-    required String title,
-    required String body,
-  }) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: AppColors.textMuted(context)),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: AppColors.text(context),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppColors.textMuted(context),
-                height: 1.4,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -240,48 +151,45 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     final layout = widget.bus.layout;
     final hasLower = layout != null && layout.lowerDeck.any((c) => c.hasSeat);
     final hasUpper = layout != null && layout.upperDeck.any((c) => c.hasSeat);
-    // If only upper has seats, default to that.
     if (!hasLower && hasUpper && !_showUpper) {
       _showUpper = true;
     }
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.bg(context),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border(context)),
+        color: c.card,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+        border: Border.all(color: c.border),
       ),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _busHeader(),
           if (layout == null)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
               child: Text(
                 tr('customer_my_requests.layout_unavailable'),
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: AppColors.textMuted(context),
-                ),
+                style: UgamText.body.copyWith(color: c.ink2),
               ),
             )
           else ...[
             if (hasLower && hasUpper) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: UgamSpacing.md),
               _deckToggle(),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: UgamSpacing.lg),
             _SeatGrid(
               layout: layout,
               isUpper: _showUpper,
               mySeatIds: widget.mySeatIds,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: UgamSpacing.md),
             _legend(),
           ],
         ],
@@ -290,15 +198,16 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
   }
 
   Widget _busHeader() {
+    final c = UgamColors.of(context);
     final mine = widget.mySeatIds.toList()..sort();
     return Row(
       children: [
-        const Icon(
+        Icon(
           Icons.directions_bus_rounded,
-          size: 18,
-          color: AppTheme.brand,
+          size: 20,
+          color: c.accent,
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: UgamSpacing.sm),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -307,11 +216,7 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
                 widget.bus.busNumber.isNotEmpty
                     ? '${widget.bus.name} · ${widget.bus.busNumber}'
                     : widget.bus.name,
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.text(context),
-                ),
+                style: UgamText.titleS.copyWith(color: c.ink),
               ),
               if (mine.isNotEmpty)
                 Padding(
@@ -321,10 +226,9 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
                       'customer_my_requests.layout_your_seats',
                       namedArgs: {'seats': mine.join(', ')},
                     ),
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.brand,
+                    style: UgamText.caption.copyWith(
+                      color: c.accent,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -336,72 +240,39 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
   }
 
   Widget _deckToggle() {
-    return Container(
-      height: 34,
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border(context)),
-      ),
-      child: Row(
-        children: [
-          _deckChip(
-            label: tr('customer_my_requests.layout_deck_lower'),
-            active: !_showUpper,
-            onTap: () => setState(() => _showUpper = false),
-          ),
-          _deckChip(
-            label: tr('customer_my_requests.layout_deck_upper'),
-            active: _showUpper,
-            onTap: () => setState(() => _showUpper = true),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _deckChip({
-    required String label,
-    required bool active,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          decoration: BoxDecoration(
-            color: active ? AppTheme.brand : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-              color: active ? Colors.white : AppColors.textMuted(context),
-            ),
-          ),
+    return UgamTabPills(
+      currentIndex: _showUpper ? 1 : 0,
+      onChanged: (i) {
+        setState(() {
+          _showUpper = i == 1;
+        });
+      },
+      items: [
+        UgamTabItem(
+          label: tr('customer_my_requests.layout_deck_lower'),
+          icon: Icons.layers_clear_rounded,
         ),
-      ),
+        UgamTabItem(
+          label: tr('customer_my_requests.layout_deck_upper'),
+          icon: Icons.layers_rounded,
+        ),
+      ],
     );
   }
 
   Widget _legend() {
+    final c = UgamColors.of(context);
     return Wrap(
-      spacing: 12,
-      runSpacing: 6,
+      spacing: UgamSpacing.md,
+      runSpacing: UgamSpacing.xs,
       children: [
         _legendItem(
-          color: AppTheme.brand,
-          textColor: Colors.white,
+          color: c.accent,
           label: tr('customer_my_requests.layout_legend_mine'),
         ),
         _legendItem(
-          color: const Color(0xFFE2E8F0),
-          textColor: AppColors.textMuted(context),
+          color: c.cardElev,
+          border: c.border,
           label: tr('customer_my_requests.layout_legend_other'),
         ),
       ],
@@ -410,9 +281,10 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
 
   Widget _legendItem({
     required Color color,
-    required Color textColor,
+    Color? border,
     required String label,
   }) {
+    final c = UgamColors.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -421,16 +293,14 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
           height: 14,
           decoration: BoxDecoration(
             color: color,
-            borderRadius: BorderRadius.circular(3),
+            borderRadius: BorderRadius.circular(4),
+            border: border != null ? Border.all(color: border) : null,
           ),
         ),
         const SizedBox(width: 6),
         Text(
           label,
-          style: GoogleFonts.inter(
-            fontSize: 11,
-            color: AppColors.textMuted(context),
-          ),
+          style: UgamText.caption.copyWith(color: c.ink2),
         ),
       ],
     );
@@ -450,32 +320,31 @@ class _SeatGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     final deck = isUpper ? layout.upperDeck : layout.lowerDeck;
     final cols = layout.cols;
     var maxRow = -1;
-    for (final c in deck) {
-      if (c.hasSeat && c.row > maxRow) maxRow = c.row;
+    for (final cell in deck) {
+      if (cell.hasSeat && cell.row > maxRow) maxRow = cell.row;
     }
     if (maxRow < 0) {
       return Padding(
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          tr('customer_my_requests.layout_deck_empty'),
-          textAlign: TextAlign.center,
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            color: AppColors.textMuted(context),
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
+        child: Center(
+          child: Text(
+            tr('customer_my_requests.layout_deck_empty'),
+            style: UgamText.caption.copyWith(color: c.ink3),
           ),
         ),
       );
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+      padding: const EdgeInsets.all(UgamSpacing.md),
       decoration: BoxDecoration(
-        color: AppColors.surface(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border(context)),
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: c.border),
       ),
       child: Column(
         children: [
@@ -484,28 +353,33 @@ class _SeatGrid extends StatelessWidget {
             children: [
               Icon(
                 Icons.account_circle_rounded,
-                size: 18,
-                color: AppColors.textMuted(context),
+                size: 16,
+                color: c.ink3,
               ),
               const SizedBox(width: 6),
               Text(
-                tr('customer_my_requests.layout_driver'),
-                style: GoogleFonts.inter(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
+                tr('customer_my_requests.layout_driver').toUpperCase(),
+                style: UgamText.micro.copyWith(
                   letterSpacing: 1,
-                  color: AppColors.textMuted(context),
+                  color: c.ink3,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Divider(height: 1, color: AppColors.border(context)),
-          const SizedBox(height: 10),
-          for (int r = 0; r <= maxRow; r++) ...[
-            _row(context, deck, r, cols),
-            if (r < maxRow) const SizedBox(height: 6),
-          ],
+          const SizedBox(height: UgamSpacing.sm),
+          Divider(height: 1, color: c.border),
+          const SizedBox(height: UgamSpacing.md),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              children: [
+                for (int r = 0; r <= maxRow; r++) ...[
+                  _row(context, deck, r, cols),
+                  if (r < maxRow) const SizedBox(height: 6),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -514,16 +388,16 @@ class _SeatGrid extends StatelessWidget {
   Widget _row(BuildContext context, List<SeatCell> deck, int row, int cols) {
     final children = <Widget>[];
     final aisleAt = cols ~/ 2;
-    for (int c = 0; c < cols; c++) {
-      if (c == aisleAt) {
+    for (int col = 0; col < cols; col++) {
+      if (col == aisleAt) {
         children.add(const SizedBox(width: 18));
       }
       final cell = deck.firstWhere(
-        (s) => s.row == row && s.col == c,
-        orElse: () => SeatCell(row: row, col: c),
+        (s) => s.row == row && s.col == col,
+        orElse: () => SeatCell(row: row, col: col),
       );
       children.add(_cellWidget(context, cell));
-      if (c < cols - 1 && c != aisleAt - 1) {
+      if (col < cols - 1 && col != aisleAt - 1) {
         children.add(const SizedBox(width: 6));
       }
     }
@@ -534,22 +408,23 @@ class _SeatGrid extends StatelessWidget {
   }
 
   Widget _cellWidget(BuildContext context, SeatCell cell) {
+    final c = UgamColors.of(context);
     const double w = 46;
     const double h = 40;
     if (cell.isEmpty) {
       return const SizedBox(width: w, height: h);
     }
     final isMine = cell.seatId != null && mySeatIds.contains(cell.seatId);
-    final bg = isMine ? AppTheme.brand : const Color(0xFFF1F5F9);
-    final border = isMine ? AppTheme.brand : AppColors.border(context);
-    final fg = isMine ? Colors.white : AppColors.textMuted(context);
+    final bg = isMine ? c.accent : c.card;
+    final border = isMine ? c.accent : c.border;
+    final fg = isMine ? c.onAccent : c.ink2;
     return Container(
       width: w,
       height: h,
       decoration: BoxDecoration(
         color: bg,
         border: Border.all(color: border, width: isMine ? 1.5 : 1),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
       ),
       alignment: Alignment.center,
       child: Column(
@@ -557,19 +432,20 @@ class _SeatGrid extends StatelessWidget {
         children: [
           Text(
             cell.seatId ?? '',
-            style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: fg,
+            style: UgamText.tabular(
+              UgamText.bodyStrong.copyWith(
+                fontSize: 11,
+                color: fg,
+              ),
             ),
           ),
           if (cell.seatType != null)
             Text(
               _shortType(cell.seatType!),
-              style: GoogleFonts.inter(
-                fontSize: 8,
-                fontWeight: FontWeight.w600,
-                color: fg.withValues(alpha: 0.85),
+              style: UgamText.micro.copyWith(
+                fontSize: 7,
+                fontWeight: FontWeight.w700,
+                color: fg.withValues(alpha: 0.8),
                 letterSpacing: 0.4,
               ),
             ),

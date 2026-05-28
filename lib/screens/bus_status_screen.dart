@@ -462,49 +462,56 @@ class _SeatChartCard extends StatelessWidget {
           final innerWidth = constraints.maxWidth;
           final leftGapCount = math.max(0, leftCols - 1);
           final rightGapCount = math.max(0, (cols - leftCols) - 1);
-          // No DragTarget outline here (read-only) so no per-tile
-          // outline budget to subtract — just gaps and aisle.
           final usableWidth = innerWidth -
               aisleGap -
               (leftGapCount + rightGapCount) * cellGap;
-          final cellWidth = (usableWidth / cols).clamp(0.0, 120.0);
-          // Match seat_assignment_screen's 1.05× sleeper height so a
-          // booked tile can stack seatId + name + phone comfortably.
+          const double minCellWidth = 56.0;
+          final double calculatedCellWidth = usableWidth / cols;
+          final bool useScroll = calculatedCellWidth < minCellWidth;
+          final cellWidth = (useScroll ? minCellWidth : calculatedCellWidth).clamp(0.0, 120.0);
           final tileHeight = math.min(84.0, cellWidth * 1.05);
+
+          final gridContent = Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _frontLabel(c),
+              const SizedBox(height: UgamSpacing.sm),
+              for (int r = 0; r <= maxRow; r++) ...[
+                _SeatRow(
+                  row: r,
+                  cols: cols,
+                  leftCols: leftCols,
+                  deck: deck,
+                  cellWidth: cellWidth,
+                  cellHeight: tileHeight,
+                  aisleGap: aisleGap,
+                  cellGap: cellGap,
+                  assignments: assignments,
+                  onSeatTap: onSeatTap,
+                ),
+                if (r < maxRow) const SizedBox(height: 6),
+              ],
+              const SizedBox(height: UgamSpacing.sm),
+              Container(height: 1, color: c.border),
+              const SizedBox(height: UgamSpacing.xs),
+              Text(
+                'REAR',
+                style: UgamText.micro.copyWith(color: c.ink3),
+              ),
+            ],
+          );
 
           return SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(
               parent: BouncingScrollPhysics(),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _frontLabel(c),
-                const SizedBox(height: UgamSpacing.sm),
-                for (int r = 0; r <= maxRow; r++) ...[
-                  _SeatRow(
-                    row: r,
-                    cols: cols,
-                    leftCols: leftCols,
-                    deck: deck,
-                    cellWidth: cellWidth,
-                    cellHeight: tileHeight,
-                    aisleGap: aisleGap,
-                    cellGap: cellGap,
-                    assignments: assignments,
-                    onSeatTap: onSeatTap,
-                  ),
-                  if (r < maxRow) const SizedBox(height: 6),
-                ],
-                const SizedBox(height: UgamSpacing.sm),
-                Container(height: 1, color: c.border),
-                const SizedBox(height: UgamSpacing.xs),
-                Text(
-                  'REAR',
-                  style: UgamText.micro.copyWith(color: c.ink3),
-                ),
-              ],
-            ),
+            child: useScroll
+                ? SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: gridContent,
+                  )
+                : gridContent,
           );
         },
       ),

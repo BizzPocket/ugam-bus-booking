@@ -21,6 +21,8 @@ class UgamInput extends StatelessWidget {
   final String? errorText;
   final Widget? prefix;
   final Widget? suffix;
+  final bool readOnly;
+  final bool enabled;
 
   const UgamInput({
     super.key,
@@ -37,6 +39,8 @@ class UgamInput extends StatelessWidget {
     this.errorText,
     this.prefix,
     this.suffix,
+    this.readOnly = false,
+    this.enabled = true,
   });
 
   @override
@@ -60,7 +64,12 @@ class UgamInput extends StatelessWidget {
           maxLength: maxLength,
           onChanged: onChanged,
           onSubmitted: onSubmitted,
-          style: UgamText.body.copyWith(color: c.ink, fontSize: 15),
+          readOnly: readOnly,
+          enabled: enabled,
+          style: UgamText.body.copyWith(
+            color: enabled ? c.ink : c.ink3,
+            fontSize: 15,
+          ),
           decoration: InputDecoration(
             hintText: hint,
             errorText: errorText,

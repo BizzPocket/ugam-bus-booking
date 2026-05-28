@@ -301,12 +301,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
                       style: UgamText.micro.copyWith(color: c.ink2),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
-                    Row(
-                      children: [
-                        Expanded(child: UgamInput(controller: _fromCtrl)),
-                        Container(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: UgamSpacing.sm + 2),
+                    if (MediaQuery.of(context).size.width < 400) ...[
+                      UgamInput(controller: _fromCtrl),
+                      const SizedBox(height: UgamSpacing.xs),
+                      Center(
+                        child: Container(
                           width: 30,
                           height: 30,
                           decoration: BoxDecoration(
@@ -314,39 +313,76 @@ class _EditTourScreenState extends State<EditTourScreen> {
                             shape: BoxShape.circle,
                           ),
                           alignment: Alignment.center,
-                          child: Icon(Icons.arrow_forward_rounded,
+                          child: Icon(Icons.arrow_downward_rounded,
                               size: 14, color: c.accent),
                         ),
-                        Expanded(child: UgamInput(controller: _toCtrl)),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: UgamSpacing.xs),
+                      UgamInput(controller: _toCtrl),
+                    ] else ...[
+                      Row(
+                        children: [
+                          Expanded(child: UgamInput(controller: _fromCtrl)),
+                          Container(
+                            margin: const EdgeInsets.symmetric(
+                                horizontal: UgamSpacing.sm + 2),
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: c.accentFill,
+                              shape: BoxShape.circle,
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(Icons.arrow_forward_rounded,
+                                size: 14, color: c.accent),
+                          ),
+                          Expanded(child: UgamInput(controller: _toCtrl)),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: UgamSpacing.lg),
                     Text(
                       tr('create_tour.label.date_range').toUpperCase(),
                       style: UgamText.micro.copyWith(color: c.ink2),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _DateField(
-                            c: c,
-                            hint: tr('create_tour.hint.start_date'),
-                            date: _departureDate,
-                            onTap: () => _pickDate(false),
+                    if (MediaQuery.of(context).size.width < 400) ...[
+                      _DateField(
+                        c: c,
+                        hint: tr('create_tour.hint.start_date'),
+                        date: _departureDate,
+                        onTap: () => _pickDate(false),
+                      ),
+                      const SizedBox(height: UgamSpacing.sm),
+                      _DateField(
+                        c: c,
+                        hint: tr('create_tour.hint.end_date'),
+                        date: _returnDate,
+                        onTap: () => _pickDate(true),
+                      ),
+                    ] else ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _DateField(
+                              c: c,
+                              hint: tr('create_tour.hint.start_date'),
+                              date: _departureDate,
+                              onTap: () => _pickDate(false),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: UgamSpacing.md),
-                        Expanded(
-                          child: _DateField(
-                            c: c,
-                            hint: tr('create_tour.hint.end_date'),
-                            date: _returnDate,
-                            onTap: () => _pickDate(true),
+                          const SizedBox(width: UgamSpacing.md),
+                          Expanded(
+                            child: _DateField(
+                              c: c,
+                              hint: tr('create_tour.hint.end_date'),
+                              date: _returnDate,
+                              onTap: () => _pickDate(true),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: UgamSpacing.lg),
                     UgamInput(
                       label: tr('create_tour.label.price_per_seat'),
@@ -522,7 +558,9 @@ class _TourPreviewCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 8),
-                Row(
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
                   children: [
                     _PreviewPill(
                       c: c,
@@ -530,14 +568,11 @@ class _TourPreviewCard extends StatelessWidget {
                       label: dateText,
                       muted: departureDate == null,
                     ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: _PreviewPill(
-                        c: c,
-                        icon: Icons.currency_rupee_rounded,
-                        label: priceText,
-                        muted: priceText == 'Set price',
-                      ),
+                    _PreviewPill(
+                      c: c,
+                      icon: Icons.currency_rupee_rounded,
+                      label: priceText,
+                      muted: priceText == 'Set price',
                     ),
                   ],
                 ),
@@ -576,18 +611,16 @@ class _PreviewPill extends StatelessWidget {
         children: [
           Icon(icon, size: 12, color: muted ? c.ink3 : c.accent),
           const SizedBox(width: 4),
-          Flexible(
-            child: Text(
-              label,
-              style: UgamText.tabular(
-                UgamText.caption.copyWith(
-                  color: muted ? c.ink3 : c.accent,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
+          Text(
+            label,
+            style: UgamText.tabular(
+              UgamText.caption.copyWith(
+                color: muted ? c.ink3 : c.accent,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
-              overflow: TextOverflow.ellipsis,
             ),
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

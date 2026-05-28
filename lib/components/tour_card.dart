@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../models/tour.dart';
-import '../config/theme.dart';
+import '../design/tokens.dart';
 import 'tour_status_badge.dart';
 
 class TourCard extends StatelessWidget {
@@ -15,16 +15,17 @@ class TourCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final c = UgamColors.of(context);
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.surface(context),
+          color: c.card,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: AppColors.border(context),
+            color: c.border,
           ),
           boxShadow: isDark
               ? []
@@ -65,8 +66,8 @@ class TourCard extends StatelessWidget {
                 Container(
                   width: 6,
                   height: 6,
-                  decoration: const BoxDecoration(
-                    color: AppTheme.brand,
+                  decoration: BoxDecoration(
+                    color: c.accent,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -88,8 +89,8 @@ class TourCard extends StatelessWidget {
                 Container(
                   width: 6,
                   height: 6,
-                  decoration: const BoxDecoration(
-                    color: AppTheme.success,
+                  decoration: BoxDecoration(
+                    color: c.good,
                     shape: BoxShape.circle,
                   ),
                 ),

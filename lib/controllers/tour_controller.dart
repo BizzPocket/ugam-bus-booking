@@ -1,11 +1,16 @@
 import 'dart:async';
+import 'dart:developer' as dev;
 import 'package:get/get.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgresChangeEvent;
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/passenger.dart';
 import '../models/bus_details.dart';
 import '../models/payment_status.dart';
+import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
+import '../models/seat_layout.dart';
+import '../services/realtime_service.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
 import 'auth_controller.dart';
@@ -18,6 +23,31 @@ class TourController extends GetxController {
 
   SyncService get _sync => Get.find<SyncService>();
   AuthController get _auth => Get.find<AuthController>();
+  RealtimeService get _realtime => Get.find<RealtimeService>();
+
+  StreamSubscription<DataChangedEvent>? _realtimeSub;
+  Timer? _refreshDebounce;
+
+  /// Microtask flag for coalescing burst notifications. Without this, a
+  /// single seat tap (which can fan out to 1-3 server-side row changes,
+  /// each arriving as its own realtime event) would fire Obx 1-3 times
+  /// — every observer of `tours` would rebuild for each event. With it,
+  /// the burst collapses to one rebuild per microtask.
+  bool _notifyScheduled = false;
+
+  /// Mark the `tours` list as dirty and schedule a single notification.
+  /// Multiple calls within the same microtask collapse to one Obx fire.
+  /// Mutate `tours.value` (the underlying List) before calling this —
+  /// `tours[idx] = x` style mutations are NOT used because the RxList
+  /// notifies on every assignment, defeating the coalescing.
+  void _scheduleNotify() {
+    if (_notifyScheduled) return;
+    _notifyScheduled = true;
+    scheduleMicrotask(() {
+      _notifyScheduled = false;
+      tours.refresh();
+    });
+  }
 
   @override
   void onInit() {
@@ -26,10 +56,177 @@ class TourController extends GetxController {
     _subscribeToChanges();
   }
 
+  @override
+  void onClose() {
+    _realtimeSub?.cancel();
+    _refreshDebounce?.cancel();
+    super.onClose();
+  }
+
   void _subscribeToChanges() {
+    // Refresh whenever we come back online — covers offline → online edges
+    // where realtime might have missed events while the socket was down.
     ever(_sync.isOnline, (online) {
-      if (online) _loadTours();
+      if (online) _scheduleRefresh();
     });
+
+    // Live updates: apply each Postgres change directly to local state.
+    // The previous implementation triggered a full debounced refetch
+    // (3 round-trips: tours + passengers + buses) on every event, which
+    // thrashes hard when two devices are writing at the same time. Now
+    // we mutate the matching row in place; we only fall back to a full
+    // refetch when the payload lacks information we need (e.g. a
+    // passenger event arrived before its parent tour) or anything in
+    // the incremental path throws.
+    _realtimeSub = _realtime.events.listen(_applyRealtimeEvent);
+  }
+
+  /// Coalesce bursts of realtime events into a single fetch — used by
+  /// connectivity-recovery edges and as the safety net when an
+  /// incremental apply can't resolve a parent row locally.
+  void _scheduleRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 300), _loadTours);
+  }
+
+  void _applyRealtimeEvent(DataChangedEvent event) {
+    try {
+      switch (event.table) {
+        case LiveTable.tours:
+          _applyTourEvent(event);
+        case LiveTable.passengers:
+          _applyPassengerEvent(event);
+        case LiveTable.buses:
+          _applyBusEvent(event);
+        case LiveTable.bookingRequests:
+          // Customer-side audit row. The companion passenger row's own
+          // realtime event is what carries the data we render, so we
+          // can ignore this stream entirely from the tour controller.
+          return;
+      }
+    } catch (e, st) {
+      // Defensive: if a payload has an unexpected shape, drop back to
+      // the old behaviour rather than leaving the local cache out of
+      // sync with the server.
+      dev.log('realtime apply failed: $e\n$st', name: 'TourController');
+      _scheduleRefresh();
+    }
+  }
+
+  void _applyTourEvent(DataChangedEvent event) {
+    // ignore: invalid_use_of_protected_member
+    final raw = tours.value;
+    if (event.eventType == PostgresChangeEvent.delete) {
+      final id = event.oldRow?['id']?.toString();
+      if (id == null) return;
+      final before = raw.length;
+      raw.removeWhere((t) => t.id == id);
+      if (raw.length != before) _scheduleNotify();
+      return;
+    }
+    final row = event.newRow;
+    if (row == null) return;
+    final id = row['id']?.toString();
+    if (id == null) return;
+
+    final idx = raw.indexWhere((t) => t.id == id);
+    if (idx < 0) {
+      // Brand-new tour. Nested passengers/buses arrive via their own
+      // realtime events; in the meantime we render the tour with empty
+      // lists, which is what the server actually has at this instant.
+      raw.add(Tour.fromMap(row));
+      _scheduleNotify();
+      return;
+    }
+    // Update — preserve the nested passengers/buses we already hold so
+    // we don't drop them just because they're not in the top-level
+    // tours payload.
+    final existing = raw[idx];
+    raw[idx] = Tour.fromMap(row).copyWith(
+      buses: existing.buses,
+      passengers: existing.passengers,
+    );
+    _scheduleNotify();
+  }
+
+  void _applyPassengerEvent(DataChangedEvent event) {
+    // ignore: invalid_use_of_protected_member
+    final raw = tours.value;
+    if (event.eventType == PostgresChangeEvent.delete) {
+      final tourId = event.oldRow?['tour_id']?.toString();
+      final passengerId = event.oldRow?['id']?.toString();
+      if (tourId == null || passengerId == null) return;
+      final idx = raw.indexWhere((t) => t.id == tourId);
+      if (idx < 0) return;
+      final t = raw[idx];
+      final next = t.passengers.where((p) => p.id != passengerId).toList();
+      if (next.length == t.passengers.length) return;
+      raw[idx] = t.copyWith(passengers: next);
+      _scheduleNotify();
+      return;
+    }
+    final row = event.newRow;
+    if (row == null) return;
+    final tourId = row['tour_id']?.toString();
+    final pid = row['id']?.toString();
+    if (tourId == null || pid == null) return;
+    final idx = raw.indexWhere((t) => t.id == tourId);
+    if (idx < 0) {
+      // Parent tour not loaded yet — likely racing its own INSERT. Fall
+      // back to a debounced refetch so we don't drop the passenger.
+      _scheduleRefresh();
+      return;
+    }
+    final t = raw[idx];
+    final newPassenger = Passenger.fromMap(row);
+    final next = List<Passenger>.from(t.passengers);
+    final pIdx = next.indexWhere((p) => p.id == pid);
+    if (pIdx < 0) {
+      next.add(newPassenger);
+    } else {
+      next[pIdx] = newPassenger;
+    }
+    raw[idx] = t.copyWith(passengers: next);
+    _scheduleNotify();
+  }
+
+  void _applyBusEvent(DataChangedEvent event) {
+    // ignore: invalid_use_of_protected_member
+    final raw = tours.value;
+    if (event.eventType == PostgresChangeEvent.delete) {
+      final tourId = event.oldRow?['tour_id']?.toString();
+      final busId = event.oldRow?['id']?.toString();
+      if (tourId == null || busId == null) return;
+      final idx = raw.indexWhere((t) => t.id == tourId);
+      if (idx < 0) return;
+      final t = raw[idx];
+      final next = t.buses.where((b) => b.id != busId).toList();
+      if (next.length == t.buses.length) return;
+      raw[idx] = t.copyWith(buses: next);
+      _scheduleNotify();
+      return;
+    }
+    final row = event.newRow;
+    if (row == null) return;
+    final tourId = row['tour_id']?.toString();
+    final bid = row['id']?.toString();
+    if (tourId == null || bid == null) return;
+    final idx = raw.indexWhere((t) => t.id == tourId);
+    if (idx < 0) {
+      _scheduleRefresh();
+      return;
+    }
+    final t = raw[idx];
+    final newBus = Bus.fromMap(row);
+    final next = List<Bus>.from(t.buses);
+    final bIdx = next.indexWhere((b) => b.id == bid);
+    if (bIdx < 0) {
+      next.add(newBus);
+    } else {
+      next[bIdx] = newBus;
+    }
+    raw[idx] = t.copyWith(buses: next);
+    _scheduleNotify();
   }
 
   Future<void> _loadTours() async {
@@ -39,11 +236,24 @@ class TourController extends GetxController {
       final data = await _sync.smartFetch(
         table: 'tours',
         cacheKey: 'all_tours',
-        orderBy: r'$createdAt',
+        orderBy: 'created_at',
         maxAge: 120000,
       );
       final loaded = data.map((item) => Tour.fromMap(item)).toList();
-      tours.assignAll(loaded);
+
+      // Preserve local tours that have a pending insert op — they exist
+      // locally but the server fetch may have raced ahead of the write
+      // and returned without them. Otherwise the freshly-created tour
+      // would vanish under the user.
+      final pendingIds = await _sync.pendingEntityIdsForTable('tours');
+      final serverIds = loaded.map((t) => t.id).toSet();
+      final preserved = tours
+          .where(
+            (t) => !serverIds.contains(t.id) && pendingIds.contains(t.id),
+          )
+          .toList();
+
+      tours.assignAll([...loaded, ...preserved]);
     } catch (_) {
       if (tours.isEmpty) {
         hasError.value = true;
@@ -57,7 +267,13 @@ class TourController extends GetxController {
     isLoading.value = false;
   }
 
-  Future<void> refreshTours() => _loadTours();
+  /// Force a fresh fetch from Supabase. Used by pull-to-refresh and
+  /// by callers that just wrote data and want it reflected in the UI.
+  /// Bypasses the 2-minute smartFetch cache by invalidating it first.
+  Future<void> refreshTours() async {
+    await _sync.invalidateCache('all_tours');
+    await _loadTours();
+  }
 
   // Tour CRUD
   Future<Tour> createTour({
@@ -69,6 +285,18 @@ class TourController extends GetxController {
     required double pricePerSeat,
     String? description,
   }) async {
+    // RLS on `tours` requires owner_id = auth.uid(). Refuse to queue an
+    // insert without an admin session — otherwise we'd write a row with a
+    // null owner_id that RLS rejects on every retry until the 5-retry cap.
+    final adminId = _auth.currentAdmin.value?.id;
+    if (adminId == null) {
+      AppSnackBar.error(
+        'Please sign in with your admin password before creating a tour.',
+        title: 'Sign in required',
+      );
+      throw StateError('createTour requires an authenticated admin session');
+    }
+
     final tour = Tour(
       title: title,
       fromCity: fromCity,
@@ -79,17 +307,32 @@ class TourController extends GetxController {
       description: description,
       createdBy: _auth.userPhone.value,
     );
+
+    // Optimistic add so the UI feels instant. If the server write fails,
+    // we revert below so the user doesn't end up with a phantom tour they
+    // think was saved.
     tours.add(tour);
     tours.refresh();
+
     final tourData = {
       ...tour.toMap(),
-      'owner_id': _auth.currentAdmin.value?.id,
+      'owner_id': adminId,
     };
-    await _sync.smartInsert(
-      table: 'tours',
-      entityId: tour.id,
-      data: tourData,
-    );
+    try {
+      await _sync.smartInsert(
+        table: 'tours',
+        entityId: tour.id,
+        data: tourData,
+      );
+    } catch (e) {
+      tours.removeWhere((t) => t.id == tour.id);
+      tours.refresh();
+      AppSnackBar.error(
+        'Could not create tour. $e',
+        title: 'Save failed',
+      );
+      rethrow;
+    }
     await _sync.invalidateCache('all_tours');
     return tour;
   }
@@ -131,10 +374,16 @@ class TourController extends GetxController {
 
   Future<void> deleteTour(String id) async {
     tours.removeWhere((t) => t.id == id);
-    await _sync.smartDelete(
-      table: 'tours',
-      entityId: id,
-    );
+    try {
+      await _sync.smartDelete(
+        table: 'tours',
+        entityId: id,
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not delete tour. $e', title: 'Delete failed');
+      rethrow;
+    }
     await _sync.invalidateCache('all_tours');
   }
 
@@ -164,11 +413,17 @@ class TourController extends GetxController {
       final list = List<Passenger>.from(t.passengers)..add(passenger);
       return t.copyWith(passengers: list);
     });
-    await _sync.smartInsert(
-      table: 'passengers',
-      entityId: passenger.id,
-      data: passenger.toMap(),
-    );
+    try {
+      await _sync.smartInsert(
+        table: 'passengers',
+        entityId: passenger.id,
+        data: passenger.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not save passenger. $e', title: 'Save failed');
+      rethrow;
+    }
     await _sync.invalidateCache('all_tours');
     final tour = getTour(tourId);
     if (tour != null && tour.status == TourStatus.planning) {
@@ -181,20 +436,35 @@ class TourController extends GetxController {
       final list = t.passengers.where((p) => p.id != passengerId).toList();
       return t.copyWith(passengers: list);
     });
-    await _sync.smartDelete(
-      table: 'passengers',
-      entityId: passengerId,
-    );
+    try {
+      await _sync.smartDelete(
+        table: 'passengers',
+        entityId: passengerId,
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not remove passenger. $e', title: 'Delete failed');
+      rethrow;
+    }
     await _sync.invalidateCache('all_tours');
   }
 
   Future<void> updatePassenger(String tourId, Passenger passenger) async {
     _updatePassengerLocal(tourId, passenger.id, (p) => passenger);
-    await _sync.smartUpdate(
-      table: 'passengers',
-      entityId: passenger.id,
-      data: passenger.toMap(),
-    );
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passenger.id,
+        data: passenger.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not update passenger. $e',
+        title: 'Save failed',
+      );
+      rethrow;
+    }
     await _sync.invalidateCache('all_tours');
   }
 
@@ -205,16 +475,33 @@ class TourController extends GetxController {
       updated = p.copyWith(paymentStatus: status);
       return updated!;
     });
-    if (updated != null) {
+    if (updated == null) return;
+    try {
       await _sync.smartUpdate(
         table: 'passengers',
         entityId: passengerId,
         data: updated!.toMap(),
       );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not update payment status. $e',
+        title: 'Save failed',
+      );
+      rethrow;
     }
   }
 
   // Seat Assignment
+  //
+  // Both methods follow the same shape as the other CRUD operations: stage
+  // an optimistic mutation locally, await the server write, and on failure
+  // pull fresh state from the server + surface the error. Without the
+  // try/refresh path, a silent server reject (RLS, JSON cast, etc.) leaves
+  // the user staring at the OLD seats: optimistic mutation flashes the new
+  // seats, then the next realtime refetch overwrites local with the
+  // unchanged server row — making the change look reverted with no
+  // explanation.
   Future<void> assignSeats(
       String tourId, String passengerId, List<SeatAssignment> assignments) async {
     Passenger? updated;
@@ -222,12 +509,20 @@ class TourController extends GetxController {
       updated = p.copyWith(assignedSeats: assignments);
       return updated!;
     });
-    if (updated != null) {
+    if (updated == null) return;
+    try {
       await _sync.smartUpdate(
         table: 'passengers',
         entityId: passengerId,
         data: updated!.toMap(),
       );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not save seat assignment. $e',
+        title: 'Save failed',
+      );
+      rethrow;
     }
   }
 
@@ -237,12 +532,312 @@ class TourController extends GetxController {
       updated = p.copyWith(assignedSeats: []);
       return updated!;
     });
+    if (updated == null) return;
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerId,
+        data: updated!.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not clear seat assignment. $e',
+        title: 'Save failed',
+      );
+      rethrow;
+    }
+  }
+
+  /// Customer-cancels a single seat — common phone-in flow: "I booked 3
+  /// seats but I only need 2 now". The agent picks the seat to drop and
+  /// this method does BOTH the unassignment AND the request-line
+  /// decrement so the passenger doesn't keep showing up in the Requests
+  /// tab as "1 seat outstanding".
+  ///
+  /// Looks up the seat's type+position from the bus layout to find the
+  /// right RequestLine to decrement (prefers exact type+position match,
+  /// falls back to seatType-only). If qty drops to 0 the line is removed
+  /// from the list entirely. If no matching line exists, only the seat
+  /// is freed and the request is left untouched.
+  Future<void> cancelOneSeat({
+    required String tourId,
+    required String passengerId,
+    required String busId,
+    required String seatId,
+  }) async {
+    final tour = getTour(tourId);
+    final bus = tour?.buses.where((b) => b.id == busId).firstOrNull;
+    final layout = bus?.layout;
+    SeatCell? cell;
+    if (layout != null) {
+      for (final c in [...layout.lowerDeck, ...layout.upperDeck]) {
+        if (c.seatId == seatId) {
+          cell = c;
+          break;
+        }
+      }
+    }
+    final type = cell?.seatType;
+    final pos = cell?.position;
+
+    Passenger? updated;
+    _updatePassengerLocal(tourId, passengerId, (p) {
+      final newAssigned = p.assignedSeats
+          .where((a) => !(a.busId == busId && a.seatId == seatId))
+          .toList();
+
+      List<RequestLine> newRequest = List.of(p.requestLines);
+      if (type != null) {
+        // First pass: exact (type + position) match.
+        var idx = newRequest.indexWhere(
+            (l) => l.seatType == type && l.position == pos && l.qty > 0);
+        // Second pass: seat-type-only match (handles requests that came
+        // in without an explicit upper/lower preference).
+        if (idx < 0) {
+          idx = newRequest.indexWhere(
+              (l) => l.seatType == type && l.qty > 0);
+        }
+        if (idx >= 0) {
+          final line = newRequest[idx];
+          if (line.qty > 1) {
+            newRequest[idx] = line.copyWith(qty: line.qty - 1);
+          } else {
+            newRequest.removeAt(idx);
+          }
+        }
+      }
+
+      updated = p.copyWith(
+        assignedSeats: newAssigned,
+        requestLines: newRequest,
+      );
+      return updated!;
+    });
+    if (updated == null) return;
+
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerId,
+        data: updated!.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not cancel the seat. $e',
+        title: 'Cancel failed',
+      );
+      rethrow;
+    }
+  }
+
+  /// Consolidate a set of source seats (typically two single sofas
+  /// previously cross-filled to satisfy a `doubleSofa` request) into
+  /// a single whole Double Sofa for the same passenger. The drag-drop
+  /// overview tab calls this when the admin drags one of those singles
+  /// onto a free Double Sofa — the partner single is released in the
+  /// same atomic write and the passenger ends up owning both berths
+  /// on the target double.
+  ///
+  /// All [sourceSeatIds] on [busId] are removed from the passenger's
+  /// `assignedSeats`; exactly 2 entries are added at [targetSeatId].
+  /// Assignments on other buses or other seats are untouched.
+  Future<void> consolidateOntoDouble({
+    required String tourId,
+    required String passengerId,
+    required String busId,
+    required String targetSeatId,
+    required List<String> sourceSeatIds,
+  }) async {
+    Passenger? updated;
+    _updatePassengerLocal(tourId, passengerId, (p) {
+      final next = p.assignedSeats
+          .where((a) =>
+              !(a.busId == busId && sourceSeatIds.contains(a.seatId)))
+          .toList()
+        ..add(SeatAssignment(busId: busId, seatId: targetSeatId))
+        ..add(SeatAssignment(busId: busId, seatId: targetSeatId));
+      updated = p.copyWith(assignedSeats: next);
+      return updated!;
+    });
+    if (updated == null) return;
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerId,
+        data: updated!.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not consolidate onto Double Sofa. $e',
+        title: 'Move failed',
+      );
+      rethrow;
+    }
+  }
+
+  /// Move a single seat from one slot to another within the same bus for
+  /// the same passenger. The drag-and-drop overview tab uses this when
+  /// the agent drops an occupied seat onto a free slot.
+  ///
+  /// Both ends of the swap have to land on the server for the chart to
+  /// stay consistent — failure here triggers a server refresh so the UI
+  /// snaps back to truth instead of holding a phantom move.
+  Future<void> moveSeat({
+    required String tourId,
+    required String passengerId,
+    required String busId,
+    required String fromSeatId,
+    required String toSeatId,
+  }) async {
+    Passenger? updated;
+    _updatePassengerLocal(tourId, passengerId, (p) {
+      // Count how many berths this passenger holds on the source cell.
+      // 2 happens when they own a whole-double; 1 in every other case.
+      // We replicate that count onto the target so a whole-double move
+      // doesn't silently downgrade to a half-double.
+      final berths = p.assignedSeats
+          .where((a) => a.busId == busId && a.seatId == fromSeatId)
+          .length;
+      if (berths == 0) {
+        updated = p;
+        return p;
+      }
+      final next = p.assignedSeats
+          .where((a) => !(a.busId == busId && a.seatId == fromSeatId))
+          .toList();
+      for (var i = 0; i < berths; i++) {
+        next.add(SeatAssignment(busId: busId, seatId: toSeatId));
+      }
+      updated = p.copyWith(assignedSeats: next);
+      return updated!;
+    });
+    if (updated == null) return;
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerId,
+        data: updated!.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not move the seat. $e',
+        title: 'Move failed',
+      );
+      rethrow;
+    }
+  }
+
+  /// Exchange seats between two passengers on the same bus. Used by the
+  /// drag-and-drop overview when one occupied seat is dropped onto
+  /// another occupied seat.
+  ///
+  /// Local state is mutated in one synchronous pass so the UI never
+  /// shows a halfway state where both passengers appear to hold the
+  /// same seat. The two server updates run sequentially; if the second
+  /// fails we pull fresh state so neither side ends up out of sync.
+  Future<void> swapSeats({
+    required String tourId,
+    required String busId,
+    required String passengerAId,
+    required String seatAId,
+    required String passengerBId,
+    required String seatBId,
+  }) async {
+    if (passengerAId == passengerBId) return;
+    if (seatAId == seatBId) return;
+
+    Passenger? updatedA;
+    Passenger? updatedB;
+    _updateTourLocal(tourId, (t) {
+      // Berth counts on each side. The swap preserves each passenger's
+      // berth count: A's berths on seatA → A's berths on seatB, and
+      // vice versa. Whole-double swaps still carry both berths.
+      final pA = t.passengers.firstWhere((p) => p.id == passengerAId,
+          orElse: () => t.passengers.first);
+      final pB = t.passengers.firstWhere((p) => p.id == passengerBId,
+          orElse: () => t.passengers.first);
+      final berthsA = pA.assignedSeats
+          .where((a) => a.busId == busId && a.seatId == seatAId)
+          .length;
+      final berthsB = pB.assignedSeats
+          .where((a) => a.busId == busId && a.seatId == seatBId)
+          .length;
+
+      final newPassengers = t.passengers.map((p) {
+        if (p.id == passengerAId) {
+          final next = p.assignedSeats
+              .where((a) => !(a.busId == busId && a.seatId == seatAId))
+              .toList();
+          for (var i = 0; i < berthsA; i++) {
+            next.add(SeatAssignment(busId: busId, seatId: seatBId));
+          }
+          updatedA = p.copyWith(assignedSeats: next);
+          return updatedA!;
+        }
+        if (p.id == passengerBId) {
+          final next = p.assignedSeats
+              .where((a) => !(a.busId == busId && a.seatId == seatBId))
+              .toList();
+          for (var i = 0; i < berthsB; i++) {
+            next.add(SeatAssignment(busId: busId, seatId: seatAId));
+          }
+          updatedB = p.copyWith(assignedSeats: next);
+          return updatedB!;
+        }
+        return p;
+      }).toList();
+      return t.copyWith(passengers: newPassengers);
+    });
+
+    final a = updatedA;
+    final b = updatedB;
+    if (a == null || b == null) return;
+
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerAId,
+        data: a.toMap(),
+      );
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerBId,
+        data: b.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not swap the seats. $e',
+        title: 'Swap failed',
+      );
+      rethrow;
+    }
+  }
+
+  /// Toggles a passenger's waitlist flag. Moving onto the waitlist
+  /// also clears any seat assignments — they should not hold seats
+  /// while waitlisted.
+  Future<void> setWaitlisted(
+      String tourId, String passengerId, bool waitlisted) async {
+    Passenger? updated;
+    _updatePassengerLocal(tourId, passengerId, (p) {
+      updated = p.copyWith(
+        isWaitlisted: waitlisted,
+        assignedSeats: waitlisted ? const <SeatAssignment>[] : p.assignedSeats,
+      );
+      return updated!;
+    });
     if (updated != null) {
       await _sync.smartUpdate(
         table: 'passengers',
         entityId: passengerId,
         data: updated!.toMap(),
       );
+      await _sync.invalidateCache('all_tours');
     }
   }
 
@@ -292,30 +887,29 @@ class TourController extends GetxController {
 
   // Bus Management
   Future<void> addBus(String tourId, Bus bus) async {
+    final boundBus = bus.copyWith(tourId: tourId);
     _updateTourLocal(tourId, (t) {
-      final list = List<Bus>.from(t.buses)..add(bus);
-      return t.copyWith(buses: list, busId: bus.id);
+      final list = List<Bus>.from(t.buses)..add(boundBus);
+      return t.copyWith(buses: list);
     });
     final busData = {
-      ...bus.toMap(),
+      ...boundBus.toMap(),
       'owner_id': _auth.currentAdmin.value?.id,
     };
-    await _sync.smartInsert(
-      table: 'buses',
-      entityId: bus.id,
-      data: busData,
-    );
-    // Persist tour.busId so the FK is stored in Supabase
-    final tour = getTour(tourId);
-    if (tour != null) {
-      await _sync.smartUpdate(
-        table: 'tours',
-        entityId: tourId,
-        data: tour.toMap(),
+    try {
+      await _sync.smartInsert(
+        table: 'buses',
+        entityId: boundBus.id,
+        data: busData,
       );
-      if (tour.status == TourStatus.collecting) {
-        await updateStatus(tourId, TourStatus.busBooked);
-      }
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not add bus. $e', title: 'Save failed');
+      rethrow;
+    }
+    final tour = getTour(tourId);
+    if (tour != null && tour.status == TourStatus.collecting) {
+      await updateStatus(tourId, TourStatus.busBooked);
     }
     await _sync.invalidateCache('all_tours');
   }
@@ -325,25 +919,35 @@ class TourController extends GetxController {
       final list = t.buses.map((b) => b.id == bus.id ? bus : b).toList();
       return t.copyWith(buses: list);
     });
-    await _sync.smartUpdate(
-      table: 'buses',
-      entityId: bus.id,
-      data: bus.toMap(),
-    );
+    try {
+      await _sync.smartUpdate(
+        table: 'buses',
+        entityId: bus.id,
+        data: bus.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not update bus. $e', title: 'Save failed');
+      rethrow;
+    }
     await _sync.invalidateCache('all_tours');
   }
 
   Future<void> removeBus(String tourId, String busId) async {
     _updateTourLocal(tourId, (t) {
       final list = t.buses.where((b) => b.id != busId).toList();
-      // Clear busId on tour if it pointed to the removed bus
       return t.copyWith(buses: list, busId: t.busId == busId ? null : t.busId);
     });
-    await _sync.smartDelete(
-      table: 'buses',
-      entityId: busId,
-    );
-    // Persist updated tour.busId
+    try {
+      await _sync.smartDelete(
+        table: 'buses',
+        entityId: busId,
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not remove bus. $e', title: 'Delete failed');
+      rethrow;
+    }
     final tour = getTour(tourId);
     if (tour != null) {
       await _sync.smartUpdate(

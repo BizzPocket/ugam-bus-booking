@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../tokens.dart';
-
 /// Visual fallback for bus / destination photography.
 ///
 /// Renders a deterministic gradient (palette chosen by [seed]) with a
@@ -13,31 +11,28 @@ class UgamBusBackdrop extends StatelessWidget {
 
   const UgamBusBackdrop({super.key, required this.seed});
 
-  static const _palettes = <List<Color>>[
-    [Color(0xFF1E3A8A), Color(0xFF0F172A)],   // deep blue
-    [Color(0xFF7C2D12), Color(0xFF1F0A06)],   // burnt amber
-    [Color(0xFF134E4A), Color(0xFF052E2B)],   // teal
-    [Color(0xFF581C87), Color(0xFF1E0936)],   // royal purple
-    [Color(0xFF064E3B), Color(0xFF021F18)],   // forest
-    [Color(0xFFB91C1C), Color(0xFF450707)],   // crimson
+  // Cohesive coffee/espresso family — one flat solid per tour, varying in
+  // lightness so tours stay distinct while the app reads as one warm-brown
+  // system. All shades keep overlaid white chips/scrim legible.
+  static const _solids = <Color>[
+    Color(0xFF3B2A20),       // dark coffee (brand primary)
+    Color(0xFF4A3326),       // lifted brown
+    Color(0xFF5C4130),       // mid mocha
+    Color(0xFF6F4E39),       // light mocha
+    Color(0xFF2E211A),       // deep espresso
+    Color(0xFF7A5640),       // caramel-brown (lightest)
   ];
 
-  List<Color> get _palette {
+  Color get _solid {
     final h = seed.codeUnits.fold<int>(0, (a, b) => a + b);
-    return _palettes[h % _palettes.length];
+    return _solids[h % _solids.length];
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
+    final fill = _solid;
     return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: _palette,
-        ),
-      ),
+      color: fill,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -49,20 +44,28 @@ class UgamBusBackdrop extends StatelessWidget {
               child: Icon(
                 Icons.directions_bus_filled_rounded,
                 size: 230,
-                color: c.ink.withValues(alpha: 0.18),
+                // Crisp, single-tone motif — slightly darkened shade of the
+                // fill rather than a hazy translucent white, so it reads as
+                // a clean graphic instead of fog.
+                color: Color.alphaBlend(
+                  Colors.black.withValues(alpha: 0.14),
+                  fill,
+                ),
               ),
             ),
           ),
-          DecoratedBox(
+          // Subtle, crisp bottom scrim only — just enough to keep overlaid
+          // titles/chips legible on the hero, without muddying the tile.
+          const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
                   Colors.transparent,
-                  Colors.black.withValues(alpha: 0.45),
+                  Color(0x4D000000), // 30% black, sharp toward the base
                 ],
-                stops: const [0.45, 1],
+                stops: [0.55, 1],
               ),
             ),
           ),

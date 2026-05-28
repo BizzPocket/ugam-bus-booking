@@ -1,5 +1,5 @@
 name: occubusbooking
-description: "TourPro - Smart Tour Management for booking agents. Manage tours, passengers, seats, and payments."
+description: "Ugam Booking - Smart Tour Management for booking agents. Manage tours, passengers, seats, and payments."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -50,9 +50,6 @@ dependencies:
   # Secure storage for Supabase session refresh tokens
   flutter_secure_storage: ^9.2.2
 
-  # HTTP client
-  http: ^1.3.0
-
   # URL launcher for WhatsApp direct share
   url_launcher: ^6.3.1
 
@@ -70,16 +67,10 @@ dependencies:
   crypto: ^3.0.6
 
   # Device address-book read for contacts sync (admin-side enrichment)
-  flutter_contacts: ^1.1.9+2
 
   # i18n — Gujarati (default), English, Hindi
   easy_localization: ^3.0.7
-
-  # In-app auto-update (checks GitHub Releases, downloads APK, triggers install)
-  package_info_plus: ^8.0.2
-  path_provider: ^2.1.4
-  open_filex: ^4.5.0
-  permission_handler: ^11.3.1
+  flutter_contacts: ^2.1.0
 
 dev_dependencies:
   flutter_test:
@@ -101,8 +92,8 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/icon/ugam_logo.png"
   remove_alpha_ios: true
-  background_color_ios: "#FFF7ED"
-  adaptive_icon_background: "#FFF7ED"
+  background_color_ios: "#FBF3EC"
+  adaptive_icon_background: "#FBF3EC"
   adaptive_icon_foreground: "assets/icon/ugam_logo.png"
   min_sdk_android: 21
 
@@ -120,6 +111,19 @@ flutter:
   assets:
     - assets/icon/ugam_logo.png
     - assets/translations/
+
+  fonts:
+    # Inter is the primary brand font, called from ~330 sites across
+    # the app. Bundling it as a variable-axis TTF means weights
+    # 100-900 resolve instantly from local storage instead of
+    # google_fonts triggering a fonts.gstatic.com download on first
+    # paint (which made text flash from Roboto → Inter on slow
+    # networks, and added ~50-200ms of first-frame latency on
+    # low-end devices). All five weights map to the same .ttf;
+    # Flutter's variable-font support synthesises the others.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Variable.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

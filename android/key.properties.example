@@ -1,0 +1,14 @@
+# Android upload-key configuration — COPY to `android/key.properties` and fill in.
+#
+# `android/key.properties` is git-ignored; never commit it or the .jks file.
+# Generate the keystore with (one time):
+#
+#   keytool -genkey -v -keystore ~/ugam-upload-keystore.jks \
+#       -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# Then point storeFile at the absolute path of that .jks file below.
+
+storePassword=YOUR_KEYSTORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=upload
+storeFile=/absolute/path/to/ugam-upload-keystore.jks

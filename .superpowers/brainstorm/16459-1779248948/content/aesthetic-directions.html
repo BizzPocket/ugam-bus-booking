@@ -1,0 +1,210 @@
+<h2>Pick the aesthetic direction</h2>
+<p class="subtitle">Three takes on the customer tour list. Same content, three personalities. The admin side will use a denser, more functional dialect of whichever language you pick.</p>
+
+<style>
+  .phones { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 18px; }
+  .phone-card { cursor: pointer; transition: transform .12s ease; }
+  .phone-card:hover { transform: translateY(-3px); }
+  .phone { width: 100%; aspect-ratio: 9/19.5; border-radius: 28px; overflow: hidden; padding: 14px 12px 18px; display: flex; flex-direction: column; box-shadow: 0 20px 50px rgba(0,0,0,.18), 0 0 0 2px rgba(0,0,0,.06) inset; font-family: -apple-system, "Inter", system-ui, sans-serif; }
+  .phone-label { margin-top: 10px; text-align: center; }
+  .phone-label h3 { margin: 0 0 4px; font-size: 14px; }
+  .phone-label p  { margin: 0; font-size: 11.5px; color: #64748B; line-height: 1.4; }
+
+  /* ── A — Premium Travel (Hopper/Airbnb cousin) */
+  .pa { background: #FAF8F4; color: #1B1815; }
+  .pa .h { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 14px; }
+  .pa .brand { font-family: "Fraunces", "Times New Roman", serif; font-weight: 600; font-size: 20px; letter-spacing: -.5px; }
+  .pa .icon { width: 30px; height: 30px; border-radius: 50%; background: #1B1815; color: #FAF8F4; display: grid; place-items: center; font-size: 13px; }
+  .pa .hero { font-family: "Fraunces", serif; font-size: 22px; line-height: 1.05; letter-spacing: -.8px; margin: 4px 4px 14px; font-weight: 500; }
+  .pa .hero em { font-style: italic; color: #C7541E; font-weight: 400; }
+  .pa .card { background: #fff; border-radius: 18px; padding: 10px; margin-bottom: 10px; box-shadow: 0 4px 14px rgba(0,0,0,.06); }
+  .pa .img { height: 78px; border-radius: 12px; background: linear-gradient(135deg,#9CC3D5,#5B8FA0); margin-bottom: 8px; position: relative; overflow: hidden; }
+  .pa .img::after { content:""; position:absolute; inset:0; background: radial-gradient(circle at 20% 80%, rgba(255,255,255,.4), transparent 50%); }
+  .pa .date-tab { position:absolute; top:8px; left:8px; background: rgba(255,255,255,.95); border-radius: 8px; padding: 3px 8px; font-size: 9px; font-weight: 700; letter-spacing: .3px; color: #1B1815; }
+  .pa .title { font-family: "Fraunces", serif; font-size: 13.5px; font-weight: 600; margin: 0 4px 2px; line-height: 1.2; }
+  .pa .meta { font-size: 10px; color: #6B6660; margin: 0 4px 6px; }
+  .pa .row { display:flex; align-items:center; justify-content:space-between; padding: 0 4px; }
+  .pa .price { font-family: "Fraunces", serif; font-size: 14px; font-weight: 600; }
+  .pa .price small { font-size: 9px; color: #6B6660; font-weight: 400; font-family: -apple-system, sans-serif; }
+  .pa .pill { background: #1B1815; color: #FAF8F4; font-size: 9px; padding: 4px 10px; border-radius: 999px; font-weight: 600; }
+
+  /* ── B — Operator Pro (Linear/Stripe cousin) */
+  .pb { background: #0E1014; color: #E7E9EE; }
+  .pb .h { display:flex; align-items:center; justify-content:space-between; padding: 4px 2px 12px; border-bottom: 1px solid #1C2026; margin-bottom: 12px; }
+  .pb .brand { font-size: 13px; font-weight: 600; letter-spacing: -.2px; display:flex; align-items:center; gap:6px; }
+  .pb .dot { width: 6px; height: 6px; border-radius: 50%; background: #6E8BFF; }
+  .pb .kbd { font-size: 9px; color: #8A92A6; padding: 2px 5px; border: 1px solid #2A2F3A; border-radius: 4px; font-family: "JetBrains Mono", monospace; }
+  .pb .hero { font-size: 17px; font-weight: 600; letter-spacing: -.3px; margin: 0 0 2px; }
+  .pb .sub  { font-size: 10.5px; color: #8A92A6; margin: 0 0 14px; }
+  .pb .card { background: #15181E; border: 1px solid #1F232C; border-radius: 10px; padding: 10px 11px; margin-bottom: 8px; }
+  .pb .top  { display:flex; align-items:center; justify-content:space-between; margin-bottom: 6px; }
+  .pb .id   { font-family: "JetBrains Mono", monospace; font-size: 9px; color: #6E8BFF; letter-spacing: .5px; }
+  .pb .badge{ font-size: 8.5px; padding: 2px 6px; border-radius: 4px; background: rgba(110,139,255,.12); color: #6E8BFF; font-weight: 600; letter-spacing: .4px; }
+  .pb .ttl  { font-size: 13px; font-weight: 600; margin: 0 0 3px; letter-spacing: -.1px; }
+  .pb .route{ font-size: 10.5px; color: #B6BBC8; margin: 0 0 8px; display:flex; align-items:center; gap: 5px; }
+  .pb .arr  { color: #4A5160; }
+  .pb .grid { display:grid; grid-template-columns: repeat(3,1fr); gap: 6px; }
+  .pb .stat { background: #0E1014; border-radius: 6px; padding: 6px 7px; }
+  .pb .lbl  { font-size: 8px; color: #6B7280; letter-spacing: .5px; text-transform: uppercase; margin: 0 0 2px; }
+  .pb .val  { font-family: "JetBrains Mono", monospace; font-size: 12px; font-weight: 600; color: #E7E9EE; }
+
+  /* ── C — Regional Warm (Indian travel — saffron + cream) */
+  .pc { background: linear-gradient(180deg,#FFF5E6 0%, #FFE9CF 100%); color: #2A1E0C; }
+  .pc .h { display:flex; align-items:flex-end; justify-content:space-between; padding: 6px 4px 4px; }
+  .pc .brand { line-height: 1; }
+  .pc .brand-en { font-size: 16px; font-weight: 800; letter-spacing: -.3px; color: #6B2C00; }
+  .pc .brand-gu { font-family: "Noto Sans Gujarati","Mukta",sans-serif; font-size: 10px; color: #9A6A2E; margin-top: 2px; }
+  .pc .stamp { width: 32px; height: 32px; border-radius: 6px; background: #C8501C; color: #FFF5E6; display:grid; place-items:center; font-size: 12px; font-weight: 700; transform: rotate(-4deg); }
+  .pc .banner { background: #C8501C; color: #FFF5E6; padding: 8px 12px; border-radius: 10px; font-size: 11px; margin: 12px 0; display:flex; align-items:center; gap:8px; }
+  .pc .banner .em { font-weight: 700; }
+  .pc .card { background: #FFFCF6; border: 1px solid #F2D9B2; border-radius: 14px; overflow: hidden; margin-bottom: 10px; box-shadow: 0 2px 0 #E9C58E; }
+  .pc .strip { background: #FFF1DB; padding: 6px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom: 1px dashed #D9B889; }
+  .pc .date { font-size: 10px; font-weight: 700; color: #6B2C00; letter-spacing: .5px; }
+  .pc .seats{ font-size: 9.5px; color: #9A6A2E; font-weight: 600; }
+  .pc .body { padding: 10px 12px 12px; }
+  .pc .title{ font-size: 14px; font-weight: 700; margin: 0 0 3px; color: #2A1E0C; }
+  .pc .route{ font-size: 11px; color: #6B5B40; margin: 0 0 10px; }
+  .pc .arrow{ color: #C8501C; }
+  .pc .foot { display:flex; align-items:center; justify-content:space-between; }
+  .pc .price{ font-size: 16px; font-weight: 800; color: #2A1E0C; }
+  .pc .price small { font-size: 9px; color: #6B5B40; font-weight: 500; }
+  .pc .btn  { background: #1F7A3A; color: white; padding: 6px 12px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+</style>
+
+<div class="phones">
+
+  <!-- A — Premium Travel -->
+  <div class="phone-card option" data-choice="premium" onclick="toggleSelect(this)">
+    <div class="phone pa">
+      <div class="h">
+        <div class="brand">ugam</div>
+        <div class="icon">📨</div>
+      </div>
+      <div class="hero">Find your <em>next</em> trip.</div>
+
+      <div class="card">
+        <div class="img"><div class="date-tab">SAT · 25 MAY</div></div>
+        <div class="title">Saputara Weekend</div>
+        <div class="meta">Ahmedabad → Saputara · 2 nights</div>
+        <div class="row">
+          <div class="price">₹1,200 <small>/ seat</small></div>
+          <div class="pill">Reserve</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="img" style="background:linear-gradient(135deg,#E8B687,#C7541E)"><div class="date-tab">SUN · 01 JUN</div></div>
+        <div class="title">Statue of Unity</div>
+        <div class="meta">Vadodara → Kevadia · day trip</div>
+        <div class="row">
+          <div class="price">₹800 <small>/ seat</small></div>
+          <div class="pill">Reserve</div>
+        </div>
+      </div>
+    </div>
+    <div class="phone-label">
+      <h3>A — Premium Travel</h3>
+      <p>Editorial serif headlines, warm off-white, photographic tiles. Hopper / Airbnb cousin.</p>
+    </div>
+  </div>
+
+  <!-- B — Operator Pro -->
+  <div class="phone-card option" data-choice="operator" onclick="toggleSelect(this)">
+    <div class="phone pb">
+      <div class="h">
+        <div class="brand"><span class="dot"></span> ugam · tours</div>
+        <div class="kbd">⌘K</div>
+      </div>
+      <div class="hero">Open tours</div>
+      <div class="sub">3 active · 2 collecting · 1 locked</div>
+
+      <div class="card">
+        <div class="top">
+          <span class="id">TR-0142</span>
+          <span class="badge">COLLECTING</span>
+        </div>
+        <div class="ttl">Saputara Weekend</div>
+        <div class="route">Ahmedabad <span class="arr">→</span> Saputara <span class="arr">·</span> 25 May</div>
+        <div class="grid">
+          <div class="stat"><div class="lbl">Req</div><div class="val">23</div></div>
+          <div class="stat"><div class="lbl">Asgn</div><div class="val">18 / 30</div></div>
+          <div class="stat"><div class="lbl">Rev</div><div class="val">₹27.6K</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="top">
+          <span class="id">TR-0141</span>
+          <span class="badge" style="background:rgba(82,196,127,.12); color:#52C47F">LOCKED</span>
+        </div>
+        <div class="ttl">Statue of Unity</div>
+        <div class="route">Vadodara <span class="arr">→</span> Kevadia <span class="arr">·</span> 01 Jun</div>
+        <div class="grid">
+          <div class="stat"><div class="lbl">Req</div><div class="val">30</div></div>
+          <div class="stat"><div class="lbl">Asgn</div><div class="val">30 / 30</div></div>
+          <div class="stat"><div class="lbl">Rev</div><div class="val">₹24K</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="phone-label">
+      <h3>B — Operator Pro</h3>
+      <p>Dense, dark-by-default, monospace numerics, IDs and chips. Linear / Stripe cousin.</p>
+    </div>
+  </div>
+
+  <!-- C — Regional Warm -->
+  <div class="phone-card option" data-choice="regional" onclick="toggleSelect(this)">
+    <div class="phone pc">
+      <div class="h">
+        <div class="brand">
+          <div class="brand-en">Ugam Booking</div>
+          <div class="brand-gu">તમારી જાત્રા, અમારી જવાબદારી</div>
+        </div>
+        <div class="stamp">જા</div>
+      </div>
+
+      <div class="banner">
+        <span>🎉</span><span><span class="em">2 trips this week</span> · book early</span>
+      </div>
+
+      <div class="card">
+        <div class="strip">
+          <span class="date">શનિવાર · 25 મે</span>
+          <span class="seats">8 બેઠકો બાકી</span>
+        </div>
+        <div class="body">
+          <div class="title">Saputara Weekend</div>
+          <div class="route">Ahmedabad <span class="arrow">→</span> Saputara · 2 nights</div>
+          <div class="foot">
+            <div class="price">₹1,200 <small>/ બેઠક</small></div>
+            <div class="btn">Book →</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="strip">
+          <span class="date">રવિવાર · 01 જૂન</span>
+          <span class="seats">22 બેઠકો બાકી</span>
+        </div>
+        <div class="body">
+          <div class="title">Statue of Unity</div>
+          <div class="route">Vadodara <span class="arrow">→</span> Kevadia · day trip</div>
+          <div class="foot">
+            <div class="price">₹800 <small>/ બેઠક</small></div>
+            <div class="btn">Book →</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="phone-label">
+      <h3>C — Regional Warm</h3>
+      <p>Cream + saffron, dual-script brand, ticket-stub cards. Feels Indian / local-bus-travel.</p>
+    </div>
+  </div>
+
+</div>
+
+<div style="margin-top: 22px; padding: 14px 16px; background: #F1F5F9; border-radius: 10px; font-size: 13px; line-height: 1.55;">
+  <strong>Each direction can carry both audiences</strong> — the admin side becomes a denser, more functional dialect of whichever language you pick. E.g. <em>Premium Travel</em>'s admin would keep the serif headlines but trade tile photos for sparkline data; <em>Operator Pro</em> stays the same; <em>Regional Warm</em>'s admin tones down the saffron to amber accents on cream.
+</div>
