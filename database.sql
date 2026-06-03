@@ -610,8 +610,10 @@ create policy "collections_owner_all" on public.collections
 
 -- READ: full tour manifest (all buses + all passengers + collections) for a
 -- handler, money-aware. Same gating/ordering/coalesce as the original; the
--- buses payload also carries price_per_seat + the three per-seat-type prices,
--- each passenger carries trip_type + request_lines, and a top-level
+-- buses payload also carries price_per_seat + the three per-seat-type prices +
+-- the rear-zone fields (rear_rows / rear_price) so the handler app resolves the
+-- same per-row fares as the admin, each passenger carries trip_type +
+-- request_lines, and a top-level
 -- "collections" array carries the whole tour's money rows — the figures the
 -- handler app needs to compute what each passenger owes. NULL for non-handler
 -- (or unknown) requests; empty arrays come back as []. Defined here (after the
@@ -642,7 +644,9 @@ as $$
                      'price_per_seat',    b.price_per_seat,
                      'single_sofa_price', b.single_sofa_price,
                      'double_sofa_price', b.double_sofa_price,
-                     'seater_price',      b.seater_price
+                     'seater_price',      b.seater_price,
+                     'rear_rows',         b.rear_rows,
+                     'rear_price',        b.rear_price
                    )
                    order by b.name
                  )

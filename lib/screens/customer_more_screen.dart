@@ -2,13 +2,10 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../config/app_contact.dart';
 import '../config/i18n_config.dart';
 import '../content/legal_content.dart';
 import '../design/ugam.dart';
-import '../utils/app_snackbar.dart';
 import '../widgets/language_picker_sheet.dart';
 import 'legal_document_screen.dart';
 
@@ -98,21 +95,6 @@ class CustomerMoreScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: UgamSpacing.lg),
-
-                  // ── Support ──
-                  _SectionLabel(c: c, label: tr('customer_more.section_support')),
-                  UgamCard.plain(
-                    padding: EdgeInsets.zero,
-                    child: _MoreRow(
-                      c: c,
-                      icon: Icons.chat_bubble_outline_rounded,
-                      tone: UgamStatVariant.good,
-                      title: tr('customer_more.contact'),
-                      subtitle: tr('customer_more.contact_subtitle'),
-                      onTap: _openContact,
-                    ),
-                  ),
                   const SizedBox(height: UgamSpacing.xl),
 
                   _Footer(c: c, version: _appVersion),
@@ -133,38 +115,6 @@ class CustomerMoreScreen extends StatelessWidget {
     );
   }
 
-  /// Opens WhatsApp to the support number when configured, otherwise falls
-  /// back to a support email — so the row always reaches a real channel.
-  Future<void> _openContact() async {
-    HapticFeedback.selectionClick();
-    final wa = AppContact.supportWhatsApp.trim();
-    final Uri uri;
-    if (wa.isNotEmpty) {
-      uri = Uri.parse(
-        'https://wa.me/$wa?text=${Uri.encodeComponent(AppContact.whatsAppGreeting)}',
-      );
-    } else {
-      uri = Uri(
-        scheme: 'mailto',
-        path: AppContact.supportEmail,
-        query: 'subject=${Uri.encodeComponent('Ugam Foj — support')}',
-      );
-    }
-    try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!ok) {
-        AppSnackBar.error(
-          tr('customer_more.contact_error_body'),
-          title: tr('customer_more.contact_error_title'),
-        );
-      }
-    } catch (_) {
-      AppSnackBar.error(
-        tr('customer_more.contact_error_body'),
-        title: tr('customer_more.contact_error_title'),
-      );
-    }
-  }
 }
 
 // ─── pieces ─────────────────────────────────────────────────────────────

@@ -229,13 +229,42 @@ class TourController extends GetxController {
     _scheduleNotify();
   }
 
+  /// Tour visibility scope for the current viewer:
+  /// - An authenticated admin sees ONLY their own tours (an explicit `owner_id`
+  ///   filter on top of RLS), under a per-admin cache key so an earlier
+  ///   anonymous "all public tours" fetch (done at app start, before login)
+  ///   can't bleed into the admin's list.
+  /// - A customer / anonymous viewer sees ALL public tours
+  ///   (RLS `tours_public_read`).
+  String get _tourCacheKey {
+    final adminId = _auth.currentAdmin.value?.id;
+    return _auth.isAdmin && adminId != null
+        ? 'tours_admin_$adminId'
+        : 'tours_public';
+  }
+
+  Map<String, String>? get _tourFilters {
+    final adminId = _auth.currentAdmin.value?.id;
+    return _auth.isAdmin && adminId != null ? {'owner_id': adminId} : null;
+  }
+
   Future<void> _loadTours() async {
     isLoading.value = true;
     hasError.value = false;
     try {
+      // Paint cached tours immediately on cold start so weak networks
+      // don't leave the whole app blank while the live fetch crawls.
+      if (tours.isEmpty) {
+        final cached = await _sync.getCachedList(_tourCacheKey);
+        if (cached != null && cached.isNotEmpty) {
+          tours.assignAll(cached.map((item) => Tour.fromMap(item)).toList());
+        }
+      }
+
       final data = await _sync.smartFetch(
         table: 'tours',
-        cacheKey: 'all_tours',
+        cacheKey: _tourCacheKey,
+        filters: _tourFilters,
         orderBy: 'created_at',
         maxAge: 120000,
       );
@@ -271,7 +300,7 @@ class TourController extends GetxController {
   /// by callers that just wrote data and want it reflected in the UI.
   /// Bypasses the 2-minute smartFetch cache by invalidating it first.
   Future<void> refreshTours() async {
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
     await _loadTours();
   }
 
@@ -333,7 +362,7 @@ class TourController extends GetxController {
       );
       rethrow;
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
     return tour;
   }
 
@@ -384,7 +413,7 @@ class TourController extends GetxController {
       AppSnackBar.error('Could not delete tour. $e', title: 'Delete failed');
       rethrow;
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
   }
 
   // Status Transitions
@@ -424,7 +453,7 @@ class TourController extends GetxController {
       AppSnackBar.error('Could not save passenger. $e', title: 'Save failed');
       rethrow;
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
     final tour = getTour(tourId);
     if (tour != null && tour.status == TourStatus.planning) {
       await updateStatus(tourId, TourStatus.collecting);
@@ -446,7 +475,7 @@ class TourController extends GetxController {
       AppSnackBar.error('Could not remove passenger. $e', title: 'Delete failed');
       rethrow;
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
   }
 
   Future<void> updatePassenger(String tourId, Passenger passenger) async {
@@ -465,7 +494,7 @@ class TourController extends GetxController {
       );
       rethrow;
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
   }
 
   Future<void> updatePassengerPayment(
@@ -549,6 +578,47 @@ class TourController extends GetxController {
     }
   }
 
+  /// Free every seat on [busId] across all passengers of [tourId] in one go.
+  /// Each passenger keeps any seats they hold on OTHER buses, and their
+  /// request lines are left intact — so they reappear as needing assignment
+  /// and can be re-seated immediately. Persists only the passengers that
+  /// actually changed.
+  Future<void> unassignBus(String tourId, String busId) async {
+    final tour = getTour(tourId);
+    if (tour == null) return;
+
+    final changed = <Passenger>[];
+    for (final p in tour.passengers) {
+      if (!p.assignedSeats.any((a) => a.busId == busId)) continue;
+      final remaining =
+          p.assignedSeats.where((a) => a.busId != busId).toList();
+      Passenger? updated;
+      _updatePassengerLocal(tourId, p.id, (cur) {
+        updated = cur.copyWith(assignedSeats: remaining);
+        return updated!;
+      });
+      if (updated != null) changed.add(updated!);
+    }
+    if (changed.isEmpty) return;
+
+    try {
+      for (final p in changed) {
+        await _sync.smartUpdate(
+          table: 'passengers',
+          entityId: p.id,
+          data: p.toMap(),
+        );
+      }
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not clear the bus. $e',
+        title: 'Save failed',
+      );
+      rethrow;
+    }
+  }
+
   /// Customer-cancels a single seat — common phone-in flow: "I booked 3
   /// seats but I only need 2 now". The agent picks the seat to drop and
   /// this method does BOTH the unassignment AND the request-line
@@ -571,7 +641,7 @@ class TourController extends GetxController {
     final layout = bus?.layout;
     SeatCell? cell;
     if (layout != null) {
-      for (final c in [...layout.lowerDeck, ...layout.upperDeck]) {
+      for (final c in layout.grid) {
         if (c.seatId == seatId) {
           cell = c;
           break;
@@ -837,7 +907,7 @@ class TourController extends GetxController {
         entityId: passengerId,
         data: updated!.toMap(),
       );
-      await _sync.invalidateCache('all_tours');
+      await _sync.invalidateCache(_tourCacheKey);
     }
   }
 
@@ -911,7 +981,7 @@ class TourController extends GetxController {
     if (tour != null && tour.status == TourStatus.collecting) {
       await updateStatus(tourId, TourStatus.busBooked);
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
   }
 
   Future<void> updateBus(String tourId, Bus bus) async {
@@ -930,7 +1000,7 @@ class TourController extends GetxController {
       AppSnackBar.error('Could not update bus. $e', title: 'Save failed');
       rethrow;
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
   }
 
   Future<void> removeBus(String tourId, String busId) async {
@@ -956,7 +1026,7 @@ class TourController extends GetxController {
         data: tour.toMap(),
       );
     }
-    await _sync.invalidateCache('all_tours');
+    await _sync.invalidateCache(_tourCacheKey);
   }
 
   // Queries
@@ -981,7 +1051,7 @@ class TourController extends GetxController {
         entityId: tourId,
         data: updated.toMap(),
       );
-      await _sync.invalidateCache('all_tours');
+      await _sync.invalidateCache(_tourCacheKey);
     }
   }
 

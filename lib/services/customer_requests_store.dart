@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/bus_details.dart';
+import '../models/collection.dart';
+import '../models/handler_manifest.dart';
 import '../models/seat_assignment.dart';
 import '../models/trip_type.dart';
 
@@ -284,5 +286,53 @@ class CustomerRequestsStore {
         .whereType<Map>()
         .map((m) => Bus.fromMap(Map<String, dynamic>.from(m)))
         .toList();
+  }
+
+  /// Whether this request belongs to the tour's designated handler. Only the
+  /// handler may pull the full bus chart, so the UI gates on this first. Goes
+  /// through a SECURITY DEFINER RPC since customers are anonymous. Any error
+  /// or null result is treated as "not a handler".
+  Future<bool> isRequestHandler(String requestId) async {
+    final client = Supabase.instance.client;
+    try {
+      final result = await client.rpc(
+        'is_request_handler',
+        params: {'p_request_id': requestId},
+      );
+      return result as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Fetches the full tour manifest (every bus + every passenger) for the
+  /// handler tied to [requestId]. Returns null when the RPC yields null (e.g.
+  /// the request isn't a handler). Customers are anonymous, so this goes
+  /// through a SECURITY DEFINER RPC.
+  Future<HandlerManifest?> handlerTourManifest(String requestId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_tour_manifest',
+      params: {'p_request_id': requestId},
+    );
+    if (result == null) return null;
+    return HandlerManifest.fromJson(Map<String, dynamic>.from(result as Map));
+  }
+
+  /// Inserts or updates a passenger [Collection] for the handler's tour via a
+  /// SECURITY DEFINER RPC (customers are anonymous). The collection is sent as a
+  /// jsonb payload; the server resolves the tour from the request and verifies
+  /// the bus + passenger belong to it. Returns the upserted row, or null when
+  /// the caller isn't the tour's handler. Lets exceptions propagate so the UI
+  /// can surface a real failure.
+  Future<Collection?> handlerUpsertCollection(
+      String requestId, Collection c) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc('handler_upsert_collection', params: {
+      'p_request_id': requestId,
+      'p_collection': c.toMap(),
+    });
+    if (result is! Map) return null;
+    return Collection.fromMap(Map<String, dynamic>.from(result));
   }
 }

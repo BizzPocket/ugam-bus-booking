@@ -1,10 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../components/combined_seat_grid.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
-import '../models/seat_layout.dart';
-import '../models/seat_type.dart';
 import '../services/customer_requests_store.dart';
 
 /// Read-only seat layout viewer for the customer "My Requests" screen.
@@ -87,7 +86,6 @@ class _CustomerSeatLayoutSheetState extends State<_CustomerSeatLayoutSheet> {
   }
 
   Widget _body() {
-    final c = UgamColors.of(context);
     if (_loading) {
       return const SizedBox(
         height: 200,
@@ -147,17 +145,10 @@ class _BusLayoutCard extends StatefulWidget {
 }
 
 class _BusLayoutCardState extends State<_BusLayoutCard> {
-  bool _showUpper = false;
-
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final layout = widget.bus.layout;
-    final hasLower = layout != null && layout.lowerDeck.any((c) => c.hasSeat);
-    final hasUpper = layout != null && layout.upperDeck.any((c) => c.hasSeat);
-    if (!hasLower && hasUpper && !_showUpper) {
-      _showUpper = true;
-    }
 
     return Container(
       decoration: BoxDecoration(
@@ -170,7 +161,7 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _busHeader(),
-          if (layout == null)
+          if (layout == null || layout.totalCells == 0)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
               child: Text(
@@ -179,15 +170,34 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
               ),
             )
           else ...[
-            if (hasLower && hasUpper) ...[
-              const SizedBox(height: UgamSpacing.md),
-              _deckToggle(),
-            ],
             const SizedBox(height: UgamSpacing.lg),
-            _SeatGrid(
-              layout: layout,
-              isUpper: _showUpper,
-              mySeatIds: widget.mySeatIds,
+            Container(
+              padding: const EdgeInsets.all(UgamSpacing.md),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: c.border),
+              ),
+              child: CombinedSeatGrid(
+                layout: layout,
+                driverLabel: tr('customer_my_requests.layout_driver'),
+                tileBuilder: (ctx, cell) {
+                  final cc = UgamColors.of(ctx);
+                  final isMine = cell.seatId != null &&
+                      widget.mySeatIds.contains(cell.seatId);
+                  return CombinedSeatGrid.seatTile(
+                    ctx,
+                    label: cell.seatId ?? '',
+                    subLabel: cell.seatType != null
+                        ? CombinedSeatGrid.shortType(cell.seatType!)
+                        : null,
+                    background: isMine ? cc.accent : cc.card,
+                    border: isMine ? cc.accent : cc.border,
+                    foreground: isMine ? cc.onAccent : cc.ink2,
+                    borderWidth: isMine ? 1.5 : 1,
+                  );
+                },
+              ),
             ),
             const SizedBox(height: UgamSpacing.md),
             _legend(),
@@ -239,27 +249,6 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
     );
   }
 
-  Widget _deckToggle() {
-    return UgamTabPills(
-      currentIndex: _showUpper ? 1 : 0,
-      onChanged: (i) {
-        setState(() {
-          _showUpper = i == 1;
-        });
-      },
-      items: [
-        UgamTabItem(
-          label: tr('customer_my_requests.layout_deck_lower'),
-          icon: Icons.layers_clear_rounded,
-        ),
-        UgamTabItem(
-          label: tr('customer_my_requests.layout_deck_upper'),
-          icon: Icons.layers_rounded,
-        ),
-      ],
-    );
-  }
-
   Widget _legend() {
     final c = UgamColors.of(context);
     return Wrap(
@@ -304,164 +293,5 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
         ),
       ],
     );
-  }
-}
-
-class _SeatGrid extends StatelessWidget {
-  final BusLayout layout;
-  final bool isUpper;
-  final Set<String> mySeatIds;
-
-  const _SeatGrid({
-    required this.layout,
-    required this.isUpper,
-    required this.mySeatIds,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    final deck = isUpper ? layout.upperDeck : layout.lowerDeck;
-    final cols = layout.cols;
-    var maxRow = -1;
-    for (final cell in deck) {
-      if (cell.hasSeat && cell.row > maxRow) maxRow = cell.row;
-    }
-    if (maxRow < 0) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
-        child: Center(
-          child: Text(
-            tr('customer_my_requests.layout_deck_empty'),
-            style: UgamText.caption.copyWith(color: c.ink3),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Icon(
-                Icons.account_circle_rounded,
-                size: 16,
-                color: c.ink3,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                tr('customer_my_requests.layout_driver').toUpperCase(),
-                style: UgamText.micro.copyWith(
-                  letterSpacing: 1,
-                  color: c.ink3,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.sm),
-          Divider(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.md),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Column(
-              children: [
-                for (int r = 0; r <= maxRow; r++) ...[
-                  _row(context, deck, r, cols),
-                  if (r < maxRow) const SizedBox(height: 6),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _row(BuildContext context, List<SeatCell> deck, int row, int cols) {
-    final children = <Widget>[];
-    final aisleAt = cols ~/ 2;
-    for (int col = 0; col < cols; col++) {
-      if (col == aisleAt) {
-        children.add(const SizedBox(width: 18));
-      }
-      final cell = deck.firstWhere(
-        (s) => s.row == row && s.col == col,
-        orElse: () => SeatCell(row: row, col: col),
-      );
-      children.add(_cellWidget(context, cell));
-      if (col < cols - 1 && col != aisleAt - 1) {
-        children.add(const SizedBox(width: 6));
-      }
-    }
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: children,
-    );
-  }
-
-  Widget _cellWidget(BuildContext context, SeatCell cell) {
-    final c = UgamColors.of(context);
-    const double w = 46;
-    const double h = 40;
-    if (cell.isEmpty) {
-      return const SizedBox(width: w, height: h);
-    }
-    final isMine = cell.seatId != null && mySeatIds.contains(cell.seatId);
-    final bg = isMine ? c.accent : c.card;
-    final border = isMine ? c.accent : c.border;
-    final fg = isMine ? c.onAccent : c.ink2;
-    return Container(
-      width: w,
-      height: h,
-      decoration: BoxDecoration(
-        color: bg,
-        border: Border.all(color: border, width: isMine ? 1.5 : 1),
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-      ),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            cell.seatId ?? '',
-            style: UgamText.tabular(
-              UgamText.bodyStrong.copyWith(
-                fontSize: 11,
-                color: fg,
-              ),
-            ),
-          ),
-          if (cell.seatType != null)
-            Text(
-              _shortType(cell.seatType!),
-              style: UgamText.micro.copyWith(
-                fontSize: 7,
-                fontWeight: FontWeight.w700,
-                color: fg.withValues(alpha: 0.8),
-                letterSpacing: 0.4,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  String _shortType(SeatType t) {
-    switch (t) {
-      case SeatType.singleSofa:
-        return 'SINGLE';
-      case SeatType.doubleSofa:
-        return 'DOUBLE';
-      case SeatType.seater:
-        return 'SEATER';
-    }
   }
 }

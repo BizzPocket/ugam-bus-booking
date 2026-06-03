@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -65,7 +66,6 @@ class _CustomerBookingRequestScreenState
   bool _showNote = false;
 
   int get _totalSeats => _doubleSofa + _singleSofa;
-  double get _estTotal => widget.tour.pricePerSeat * _totalSeats;
 
   @override
   void initState() {
@@ -106,17 +106,31 @@ class _CustomerBookingRequestScreenState
       AppSnackBar.error(tr('customer_booking.err_phone_invalid'));
       return;
     }
+    if (!isPlausibleIndianMobile(phone)) {
+      AppSnackBar.error(tr('customer_booking.err_phone_fake'));
+      return;
+    }
     if (_totalSeats == 0) {
       AppSnackBar.error(tr('customer_booking.err_no_seats'));
       return;
     }
     final adminPhone = widget.tour.createdBy;
     final hasOrganiser = adminPhone != null && adminPhone.isNotEmpty;
+    final normalisedPhone = '+91${normalisePhone(phone)}';
+
+    // Anti-abuse (no external verification): block a repeat pending request for
+    // this trip from the same number, and rate-limit rapid-fire submissions.
+    if (!widget.isEditing) {
+      final blocked = await _preflightCreate(normalisedPhone);
+      if (blocked != null) {
+        AppSnackBar.error(blocked);
+        return;
+      }
+    }
 
     setState(() => _saving = true);
     try {
       final note = _note.text.trim();
-      final normalisedPhone = '+91${normalisePhone(phone)}';
       if (widget.isEditing) {
         await _submitEdit(
           name: name,
@@ -134,12 +148,41 @@ class _CustomerBookingRequestScreenState
           adminPhone: adminPhone,
           hasOrganiser: hasOrganiser,
         );
+        await _markSubmitted();
       }
     } catch (_) {
       AppSnackBar.error(tr('customer_booking.err_save_failed'));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  static const _kLastRequestMsKey = 'last_request_ms';
+  static const _cooldownMs = 15000;
+
+  /// Returns an error message to block submission, or null to allow it.
+  /// Guards (device-local, no server/verification): one pending request per
+  /// trip per number, and a short cooldown between submissions.
+  Future<String?> _preflightCreate(String normalisedPhone) async {
+    final mine = normalisePhone(normalisedPhone);
+    final existing = await CustomerRequestsStore().list();
+    final duplicate = existing.any((e) =>
+        e.tourId == widget.tour.id &&
+        normalisePhone(e.customerPhone) == mine &&
+        e.status.toLowerCase() == 'pending');
+    if (duplicate) return tr('customer_booking.err_duplicate');
+
+    final prefs = await SharedPreferences.getInstance();
+    final last = prefs.getInt(_kLastRequestMsKey) ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - last < _cooldownMs) return tr('customer_booking.err_too_fast');
+    return null;
+  }
+
+  Future<void> _markSubmitted() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+        _kLastRequestMsKey, DateTime.now().millisecondsSinceEpoch);
   }
 
   Future<void> _submitCreate({
@@ -429,8 +472,7 @@ class _CustomerBookingRequestScreenState
                       autofocus: true,
                     ),
                   const SizedBox(height: UgamSpacing.md),
-                  _Totals(
-                      seatCount: _totalSeats, estTotal: _estTotal, c: c),
+                  _Totals(seatCount: _totalSeats, c: c),
                 ],
               ),
             ),
@@ -442,8 +484,6 @@ class _CustomerBookingRequestScreenState
                         ? tr('customer_booking.button_update')
                         : tr('customer_booking.button_submit')),
                 leadingIcon: Icons.send_rounded,
-                trailingValue:
-                    _estTotal > 0 ? '₹${_estTotal.toStringAsFixed(0)}' : null,
                 loading: _saving,
                 onPressed: _submit,
               ),
@@ -571,14 +611,6 @@ class _TourPreviewCard extends StatelessWidget {
                   style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: UgamSpacing.sm),
-                Text(
-                  '₹${tour.pricePerSeat.toStringAsFixed(0)} / seat',
-                  style: UgamText.tabular(
-                    UgamText.bodyStrong
-                        .copyWith(color: c.accent, fontSize: 13),
-                  ),
                 ),
               ],
             ),
@@ -888,12 +920,10 @@ class _TripTypeOption extends StatelessWidget {
 
 class _Totals extends StatelessWidget {
   final int seatCount;
-  final double estTotal;
   final UgamColorSet c;
 
   const _Totals({
     required this.seatCount,
-    required this.estTotal,
     required this.c,
   });
 
@@ -912,15 +942,6 @@ class _Totals extends StatelessWidget {
               UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 13),
             ),
           ),
-          const Spacer(),
-          if (estTotal > 0)
-            Text(
-              tr('customer_booking.totals_estimated',
-                  namedArgs: {'amount': estTotal.toStringAsFixed(0)}),
-              style: UgamText.tabular(
-                UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
-              ),
-            ),
         ],
       ),
     );

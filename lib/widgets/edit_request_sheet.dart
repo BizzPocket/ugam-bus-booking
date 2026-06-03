@@ -350,23 +350,19 @@ class _EditTripChip extends StatelessWidget {
 class _EditSeatCounter extends StatelessWidget {
   final String label;
   final int value;
-  final int minVal;
-  final int maxVal;
   final ValueChanged<int> onChanged;
 
   const _EditSeatCounter({
     required this.label,
     required this.value,
-    this.minVal = 0,
-    this.maxVal = 10,
     required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final canMinus = value > minVal;
-    final canPlus = value < maxVal;
+    final canMinus = value > 0;
+    final canPlus = value < 10;
 
     return Container(
       height: 56,

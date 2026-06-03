@@ -299,7 +299,8 @@
     "chip_seats_assigned": "સીટ ફાળવાઈ",
     "chip_confirmed": "પુષ્ટિ થયેલ",
     "chip_cancelled": "રદ થયેલ",
-    "chip_pending": "બાકી"
+    "chip_pending": "બાકી",
+    "view_full_chart": "આખો બસ ચાર્ટ જુઓ"
   },
   "add_bus": {
     "title": "બસ ઉમેરો",
@@ -314,13 +315,29 @@
       "bus_type": "બસ ટાઈપ",
       "seater_count": "સીટર સંખ્યા (બાકી સ્લીપર)",
       "single_sofa_count": "સિંગલ સોફા સંખ્યા (બાકી ડબલ સોફા)",
+      "rear_rows": "છેલ્લી કેટલી રો અલગ ભાવે?",
+      "rear_price": "પાછલી રોનો ભાવ (સીટ દીઠ)",
       "optional": "(વૈકલ્પિક)"
     },
     "hint": {
       "bus_number": "દા.ત. GJ-05-AB-1234 (વૈકલ્પિક)",
       "driver_name": "માલિક confirm કરે ત્યારે ઉમેરો (વૈકલ્પિક)",
       "price_default": "ટૂરનો ભાવ વાપરશે (₹{price})",
-      "price_plain": "દા.ત. 500"
+      "price_plain": "દા.ત. 500",
+      "rear_rows": "0 = પાછલો ઝોન નહીં",
+      "rear_rows_max": "0 = નહીં · વધુમાં {max} રો",
+      "rear_price": "વ્યક્તિ દીઠ, પાછલી રો માટે"
+    },
+    "section": {
+      "rear_zone_eyebrow": "પાછલો ઝોન (વૈકલ્પિક)",
+      "rear_zone_title": "પાછલી રો અલગ ભાવે રાખો",
+      "rear_zone_body": "છેલ્લી થોડી રો માટે વ્યક્તિ દીઠ અલગ ભાવ રાખો. 0 રાખશો તો દરેક રો માટે બેઝ ભાવ વપરાશે.",
+      "overrides_title": "સીટ-ટાઈપ પ્રમાણે ઓવરરાઈડ (વૈકલ્પિક)",
+      "overrides_body": "આગળની રો માટે સિંગલ / ડબલ / સીટરના ભાવ સેટ કરો."
+    },
+    "rear_zone": {
+      "legend": "કુલ {total} માંથી છેલ્લી {rows} રો પાછલી-રોના ભાવે (હાઈલાઈટ કરેલ).",
+      "legend_plain": "છેલ્લી {rows} રો પાછલી-રોના ભાવે રહેશે."
     },
     "info": {
       "optional_fields": "બસ નંબર અને ડ્રાઈવરની વિગત વૈકલ્પિક છે — અત્યારે સેવ કરો, બસ માલિક confirm કરે ત્યારે ભરો.",
@@ -466,7 +483,10 @@
     "title_edit": "વિનંતી સંપાદન",
     "section_who_is_booking": "કોણ બુક કરી રહ્યું છે",
     "button_update": "વિનંતી અપડેટ કરો",
-    "button_submit": "વિનંતી મોકલો"
+    "button_submit": "વિનંતી મોકલો",
+    "err_phone_fake": "કૃપા કરી સાચો 10-અંકનો મોબાઇલ નંબર દાખલ કરો.",
+    "err_duplicate": "આ ટ્રિપ માટે તમારી વિનંતી પહેલેથી બાકી છે.",
+    "err_too_fast": "ફરી મોકલતા પહેલા થોડી ક્ષણ રાહ જુઓ."
   },
   "customer_tour_detail": {
     "title": "ટૂર વિગત",
@@ -485,6 +505,12 @@
     "section_trip_summary": "યાત્રા સારાંશ",
     "section_about_tour": "આ યાત્રા વિશે",
     "section_bus": "બસ",
+    "section_contact": "સંપર્ક",
+    "contact_organiser": "આયોજક સાથે WhatsApp પર સંપર્ક કરો",
+    "contact_organiser_subtitle": "આ પ્રવાસ વિશે પ્રશ્નો છે? આયોજકને સંદેશ મોકલો.",
+    "contact_greeting": "🙏 જય ગુરુદેવ — મારે {tour} ({code}) પ્રવાસ વિશે પ્રશ્ન છે.",
+    "contact_error_title": "WhatsApp ખોલી શકાયું નહીં",
+    "contact_error_body": "કૃપા કરીને ખાતરી કરો કે WhatsApp ઇન્સ્ટોલ કરેલું છે.",
     "section_timeline": "સમય રેખા",
     "label_route": "રૂટ",
     "label_price": "કિંમત",
@@ -648,6 +674,12 @@
       "no_tours_body": "સીટ સોંપવા ટૂર બનાવો અને બસ ઉમેરો.",
       "no_buses_title": "કોઈ બસ ઉમેરી નથી",
       "no_buses_body": "સીટ સોંપતા પહેલાં આ ટૂર માટે બસ ઉમેરો."
+    },
+    "clear_bus": {
+      "title": "બધી સીટ રદ કરવી?",
+      "body": "{bus} પરની બધી {count} સોંપાયેલી સીટ ખાલી થશે. પેસેન્જરની વિનંતી જળવાઈ રહેશે અને ફરી સીટ સોંપી શકાશે.",
+      "confirm": "બધી રદ કરો",
+      "done": "{bus} પરની બધી સીટ ખાલી કરી."
     }
   },
   "splash": {

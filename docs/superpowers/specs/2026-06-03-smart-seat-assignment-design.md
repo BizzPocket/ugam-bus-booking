@@ -45,6 +45,16 @@ The agent runs community yatra tours with **20–25 buses per tour**, ~1 tour/mo
 
 Additional confirmed hard rules: **reserved/blocked seats** (per-seat flag), **handler gets a front/door seat** (handler picked late).
 
+### 3a. Refinement — admin-driven forward zone (2026-06-03, supersedes the customer-request priority path)
+The agent's preferred flow is simpler and unifies three ideas into one:
+- **Priority is an admin pick, not a customer request.** The agent taps the elderly/sick passengers directly in the list (sets `priority_status = approved`). There is NO customer priority request and NO approval queue — the customer form stays name / mobile / seat-type / trip / remark only. (The `priority_status` enum stays; in practice only `none` and `approved` are used.)
+- **"Forward zone" = premium zone = priority zone — ONE admin-marked set of seats.** The agent marks which physical front seats are the forward/premium seats. The engine seats approved-priority passengers into that marked zone first (instead of a hardcoded front-N-rows), and the pricing premium band applies to exactly those seats. Whoever is allotted a forward seat pays the premium (priority people included, per §10; an "elderly exempt" toggle is a future option).
+- **One "Fill bus" action** runs the engine (= Generate / auto-fill): priority → forward zone first (respecting groups), then everyone else auto-adjusted into the rest.
+
+Resulting admin flow: **(1) create groups → (2) mark the forward/premium seats → (3) tap the priority passengers in the list → (4) Fill bus.**
+
+Build impact: the engine gains a "front = seats in the admin-marked forward zone (fallback: lowest rows)" input — a small change to the committed `frontRowCount` heuristic; priority capture becomes an admin toggle in the passenger list; no new migration (reuse `priority_status` + a new per-seat forward/premium flag that doubles as the pricing band). The swap-assistant / cascade / applier logic is unaffected.
+
 ## 4. Data model changes
 
 All additive; offline-first (whole-row writes) preserved.
@@ -143,7 +153,14 @@ Three focused screens; **one job each**; existing `CombinedSeatGrid` reused. Rep
 4. **Per-bus seat detail** — one tap-first screen + swap-assistant + group cascade; **retire** the two old screens.
 5. **Batch persistence + re-run/lock + edge cases** (cancellation/late/waitlist/handler).
 
-## 10. Open / deferred
-- Ladies rule & gender capture (out of scope).
-- Premium/per-row pricing as an anti-gaming lever — pending `2026-06-03-bus-pricing-brief.md`.
-- Money/handler-chart integration of group/priority rings — pending those briefs.
+## 10. Pricing & capture decisions (resolved 2026-06-03)
+These came out of the other-screen briefs and are now locked:
+- **Whole Double Sofa booked solo → full sofa price.** Fix the current half-charge bug: when one passenger holds both berths of a doubleSofa cell, charge the full `doubleSofaPrice` (not half).
+- **Front-row premium = a money rule on placement, separate from priority-approval.** The premium applies to whoever the agent/plan *allots* to a front/premium seat; it is never a customer choice and does not change who gets seated there (priority-approval + the engine decide seating).
+- **Pricing is set once at the tour level** (base + per-type + bands) and inherited by all buses; per-bus override is rare/advanced.
+- **Pricing supports flexible row bands** (named row-range bands, jsonb) — not just a single front/rear scalar.
+- **Customer booking form stays minimal**: name, mobile, seat-type request, trip type, optional remark — *nothing else*. Elderly/front need goes in the remark; the agent approves it into `priority_status`. → the customer-form screen needs essentially no change.
+
+## 11. Still deferred
+- Ladies rule & gender capture (out of scope for now).
+- Money/handler-chart integration of group/priority rings — pending those briefs' build.

@@ -140,3 +140,158 @@ Draft (review with the org before publishing):
 - R8 minification + resource shrinking on Android release (`proguard-rules.pro`).
 - iOS export-compliance key + `PrivacyInfo.xcprivacy`.
 - Debug boot instrumentation removed; release builds verified to compile.
+
+---
+
+## 7. App Store Connect — Version Information (ready to paste)
+
+> Paste each block into the matching field on the App Store Connect "Version
+> Information" page. Promotional Text + Description can be edited any time
+> without resubmitting a binary.
+
+### Promotional Text (170 chars max)
+```
+Run group bus yatras end-to-end — manage tours, seats, requests, and passengers from one screen. Built for community tour-booking agents who work over WhatsApp.
+```
+
+### Description (4,000 chars max)
+```
+Ugam Booking is a focused tour-management app for community booking agents who plan and run group bus yatras. It replaces the spreadsheet + WhatsApp + paper-list workflow with a single screen that holds every tour from first inquiry to the day the bus rolls out.
+
+WHAT YOU CAN DO
+• Create and publish tours with route, date, bus type, price, and seat layout.
+• Take customer booking requests directly in-app, or capture them from WhatsApp.
+• Assign passengers to specific seats on visual bus layouts — single, double, sleeper, and sofa rows — with ladies-seat and shared-pair handling built in.
+• Track payment status per passenger and per tour at a glance.
+• Send tour updates, departure notes, and confirmations to riders through WhatsApp deep links — no message-blasting required.
+• Match incoming booking requests to your saved contacts so you instantly recognise who is on the line.
+• Works offline: requests, edits, and seat assignments queue locally and sync automatically when you are back online.
+
+FOR COMMUNITY AGENTS
+Built for the Ugam Foj / DEVAM satsangi community's tour coordinators, but useful for any small-to-mid operator running scheduled group buses.
+
+LANGUAGES
+English, ગુજરાતી (Gujarati), and हिन्दी (Hindi) — pick your language in Settings.
+
+PRIVACY & CONTROL
+Your data lives in your account, encrypted in transit. Contacts are read on-device only when you grant permission, used only to match phone numbers to names — never uploaded, never shared. Delete your account and all associated data any time from Settings.
+```
+
+### Keywords (100 chars max, comma-separated, no spaces around commas)
+```
+bus,tour,yatra,booking,travel,seat,passenger,trip,agent,whatsapp,gujarati,fleet,group travel
+```
+*(92 chars; swap any term as needed.)*
+
+### Support URL  *(🔑 must exist as a public page before review)*
+```
+https://devam.org
+```
+*Verified 2026-05-28: only the **root** `https://devam.org` returns 200 — every
+subpath (`/support`, `/contact`, `/privacy`, `/about`, etc.) currently returns
+404. So use the root for now. Before the next update, host a real `/support`
+page on devam.org listing an email + WhatsApp number, and switch the URL here.
+Apple rejects `mailto:` URLs and 404 pages.*
+
+### Marketing URL  *(optional)*
+```
+https://devam.org
+```
+
+### Version
+```
+1.0
+```
+Matches `MARKETING_VERSION = 1.0` in the Xcode project and `1.0.0` in
+`pubspec.yaml`. Bump both together for the next submission.
+
+### Copyright (200 chars max)
+```
+© 2026 Occubit Solution
+```
+*(Default to Occubit Solution because the bundle ID prefix `com.occubitsolution.*`
+implies that's the developer-account holder. Replace with the exact legal name
+on the Apple Developer enrolment if different — Apple cross-checks this.)*
+
+### Routing App Coverage File
+**Leave blank.** Only for transportation apps that provide Apple Maps directions
+via `MKDirections`. Not applicable.
+
+---
+
+## 8. App Store Connect — App Review Information
+
+> ⚠️ **CRITICAL**: the admin login is reached by a hidden long-press on the
+> "Explore tours" title. The Notes field below tells the reviewer exactly how
+> to find it — without this, Apple rejects under Guideline 2.1 (App
+> Completeness) because the reviewer can't reach the admin features.
+
+### Before submitting — create a demo admin in Supabase
+Do NOT share the real production agent's credentials. Create a dedicated
+review account:
+- A real phone+password admin in Supabase (e.g. phone `9000000001`).
+- Seed it with 2–3 sample tours + a few sample booking requests so the
+  reviewer has something to interact with.
+- Keep the password simple but unique (don't reuse anything you actually use).
+
+### Sign-In Information
+- ✅ **Sign-in required** (the admin shell is gated)
+- User name: `<demo admin 10-digit phone, no +91>` e.g. `9000000001`
+- Password: `<the password you set in Supabase for the demo account>`
+
+### Contact Information
+Your own real first/last name, phone, and email. Apple may email this address
+if they have questions during review — use a mailbox you actually check.
+
+### Notes (paste verbatim)
+```
+HOW THE APP IS STRUCTURED
+
+Ugam Booking has two modes in the same binary:
+
+1. CUSTOMER MODE (default — no login)
+   On launch, the splash routes anonymous users straight to "Explore tours."
+   Customers browse upcoming tours, view details, and submit booking requests
+   without creating an account. This is the path most users take.
+
+2. ADMIN MODE (login required — for the single tour-booking agent)
+   Admin login is intentionally hidden from customers to keep the public flow
+   clean. Exactly one agent per organisation uses this side.
+
+>>> HOW TO REACH THE ADMIN LOGIN <<<
+On the "Explore tours" screen (the first screen after splash), LONG-PRESS
+the "Explore tours" title in the top bar. This opens the login screen.
+Sign in with the phone + password provided above.
+
+WHAT TO TEST AS ADMIN
+After login you land in the admin shell with five tabs (dashboard, tours,
+requests, seat assignment, notify). The demo account has sample tours and
+requests pre-loaded so you can verify create / edit / seat-assign / mark-paid
+flows end-to-end.
+
+PERMISSIONS
+• Contacts (NSContactsUsageDescription): requested only when you open the
+  Requests tab. Used on-device to match incoming phone numbers to saved
+  contact names. App works fully if you deny.
+
+WHATSAPP DEEP LINKS
+The app declares LSApplicationQueriesSchemes "whatsapp" to deep-link share
+tour details to WhatsApp. WhatsApp does not need to be installed; if absent,
+the share opens the system sheet instead.
+
+LANGUAGES
+Default Gujarati. Switch via Settings → Language (English / ગુજરાતી / हिन्दी).
+
+ACCOUNT DELETION
+Settings → Delete account removes the account and all associated data
+(complies with App Store Guideline 5.1.1(v)).
+```
+
+### Attachment
+Optional — skip unless you want to include a short screen-recording
+demonstrating the long-press gesture. Not required if the Notes are clear.
+
+### App Store Version Release
+For this **first release**, pick **"Manually release this version"** — once
+Apple approves, you click "Release" yourself when you're ready to announce.
+For future updates, "Automatically release" is fine.

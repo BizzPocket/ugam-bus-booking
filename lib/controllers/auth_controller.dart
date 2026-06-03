@@ -9,6 +9,7 @@ import '../models/admin.dart';
 import '../models/profile.dart';
 import '../services/admin_auth_service.dart';
 import '../utils/app_snackbar.dart';
+import 'tour_controller.dart';
 import 'user_controller.dart';
 
 /// Phone+password admin auth backed by Supabase Auth (synthetic-email mapping).
@@ -53,6 +54,16 @@ class AuthController extends GetxController {
     if (phone == null || phone.isEmpty) return;
 
     final roleName = prefs.getString(_keyRole) ?? 'passenger';
+
+    // Admin-only access: only an admin session is ever restored. Any stale
+    // non-admin (passenger) session is cleared so the user lands on login.
+    if (roleName != UserRole.admin.name) {
+      await prefs.remove(_keyPhone);
+      await prefs.remove(_keyRole);
+      await prefs.remove(_keyName);
+      return;
+    }
+
     final name = prefs.getString(_keyName) ?? '';
 
     userPhone.value = phone;
@@ -77,6 +88,17 @@ class AuthController extends GetxController {
       } catch (_) {
         // Offline or transient — admin will hydrate on next online action.
       }
+    }
+  }
+
+  /// Re-scope the tour list after a role change. Admins see only their own
+  /// tours; customers/anon see all public tours. The tour controller is a
+  /// fenix singleton whose `onInit` won't re-run on navigation, so an explicit
+  /// refresh is required when the role flips (login / logout).
+  void _reloadTours() {
+    if (Get.isRegistered<TourController>()) {
+      // ignore: unawaited_futures
+      Get.find<TourController>().refreshTours();
     }
   }
 
@@ -121,7 +143,12 @@ class AuthController extends GetxController {
         awaitingAdminPassword.value = true;
         passwordController.clear();
       } else {
-        await _loginAsPassenger(phone);
+        // Admin-only access: a number that isn't in the `admins` table cannot
+        // log in. No password-less passenger session is created.
+        AppSnackBar.error(
+          'This number is not registered. Contact the owner for access.',
+          title: 'Access denied',
+        );
       }
     } catch (e) {
       AppSnackBar.error(
@@ -193,16 +220,7 @@ class AuthController extends GetxController {
       // ignore: unawaited_futures
       Get.find<UserController>().ensureLoadedForCurrentAdmin();
     }
-    Get.offAllNamed('/');
-  }
-
-  Future<void> _loginAsPassenger(String phone) async {
-    isLoggedIn.value = true;
-    userPhone.value = phone;
-    phoneNumber.value = phone;
-    userRole.value = UserRole.passenger;
-    userName.value = '';
-    await _persistSession();
+    _reloadTours();
     Get.offAllNamed('/');
   }
 
@@ -249,6 +267,8 @@ class AuthController extends GetxController {
     if (Get.isRegistered<UserController>()) {
       Get.find<UserController>().reset();
     }
+    // Back to an anonymous viewer — re-scope the tour list to all public tours.
+    _reloadTours();
   }
 
   @override

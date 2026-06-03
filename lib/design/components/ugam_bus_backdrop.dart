@@ -31,45 +31,47 @@ class UgamBusBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fill = _solid;
-    return Container(
-      color: fill,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned(
-            right: -16,
-            top: 18,
-            child: Transform.rotate(
-              angle: -0.06,
-              child: Icon(
-                Icons.directions_bus_filled_rounded,
-                size: 230,
-                // Crisp, single-tone motif — slightly darkened shade of the
-                // fill rather than a hazy translucent white, so it reads as
-                // a clean graphic instead of fog.
-                color: Color.alphaBlend(
-                  Colors.black.withValues(alpha: 0.14),
-                  fill,
+    return RepaintBoundary(
+      child: Container(
+        color: fill,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned(
+              right: -16,
+              top: 18,
+              child: Transform.rotate(
+                angle: -0.06,
+                child: Icon(
+                  Icons.directions_bus_filled_rounded,
+                  size: 230,
+                  // Crisp, single-tone motif — slightly darkened shade of the
+                  // fill rather than a hazy translucent white, so it reads as
+                  // a clean graphic instead of fog.
+                  color: Color.alphaBlend(
+                    Colors.black.withValues(alpha: 0.14),
+                    fill,
+                  ),
                 ),
               ),
             ),
-          ),
-          // Subtle, crisp bottom scrim only — just enough to keep overlaid
-          // titles/chips legible on the hero, without muddying the tile.
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Color(0x4D000000), // 30% black, sharp toward the base
-                ],
-                stops: [0.55, 1],
+            // Subtle, crisp bottom scrim only — just enough to keep overlaid
+            // titles/chips legible on the hero, without muddying the tile.
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Color(0x4D000000), // 30% black, sharp toward the base
+                  ],
+                  stops: [0.55, 1],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

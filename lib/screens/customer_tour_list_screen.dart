@@ -624,14 +624,6 @@ class _TourRow extends StatelessWidget {
                               label: tr('customer_tour_list.chip_open'),
                               variant: UgamChipVariant.neutral,
                             ),
-                          const SizedBox(width: 5),
-                          UgamReqChip(
-                            label: tr('customer_tour_list.chip_from_price',
-                                namedArgs: {
-                                  'price': tour.pricePerSeat.toStringAsFixed(0)
-                                }),
-                            variant: UgamChipVariant.accent,
-                          ),
                           const Spacer(),
                           Container(
                             width: 30,

@@ -16,6 +16,9 @@ import 'supabase_service.dart';
 /// - WRITE: Write to cache immediately → queue for Supabase → sync when online
 /// - SYNC: On connectivity change, flush pending operations
 class SyncService extends GetxService {
+  static const _readTimeout = Duration(seconds: 8);
+  static const _writeTimeout = Duration(seconds: 12);
+
   final OfflineDatabase _cache = OfflineDatabase();
   final isOnline = true.obs;
   final isSyncing = false.obs;
@@ -70,6 +73,14 @@ class SyncService extends GetxService {
         .toSet();
   }
 
+  /// Exposes cached list payloads so controllers can paint something
+  /// immediately on cold start before the live fetch finishes.
+  Future<List<Map<String, dynamic>>?> getCachedList(String cacheKey) async {
+    final cached = await _cache.getCachedData(cacheKey);
+    if (cached == null) return null;
+    return _asListOfMap(cached);
+  }
+
   // ── Smart Fetch (cache-first) ─────────────────────────────
 
   Future<List<Map<String, dynamic>>> smartFetch({
@@ -87,7 +98,11 @@ class SyncService extends GetxService {
     // pure offline fallback.
     if (isOnline.value) {
       try {
-        final data = await _fetchFromSupabase(table, filters, orderBy);
+        final data = await _withTimeout(
+          _fetchFromSupabase(table, filters, orderBy),
+          _readTimeout,
+          '$table fetch',
+        );
         // Cache write is fire-and-forget: it only matters for the next
         // cold start / offline session, and the encode + SQLite
         // transaction adds 10-50ms on busy payloads. Awaiting it would
@@ -225,13 +240,25 @@ class SyncService extends GetxService {
     String? cacheKey,
   }) async {
     if (isOnline.value) {
-      await _writeToServer(
-        operation: 'insert',
-        table: table,
-        entityId: entityId,
-        data: data,
-      );
-      return;
+      try {
+        await _withTimeout(
+          _writeToServer(
+            operation: 'insert',
+            table: table,
+            entityId: entityId,
+            data: data,
+          ),
+          _writeTimeout,
+          'insert $table',
+        );
+        return;
+      } catch (e, st) {
+        if (!_isTransientNetworkError(e)) rethrow;
+        dev.log(
+          'smartInsert degraded to offline queue for $table/$entityId — $e\n$st',
+          name: 'SyncService',
+        );
+      }
     }
     await _cache.addPendingOp(
       tableName: table,
@@ -248,13 +275,25 @@ class SyncService extends GetxService {
     required Map<String, dynamic> data,
   }) async {
     if (isOnline.value) {
-      await _writeToServer(
-        operation: 'update',
-        table: table,
-        entityId: entityId,
-        data: data,
-      );
-      return;
+      try {
+        await _withTimeout(
+          _writeToServer(
+            operation: 'update',
+            table: table,
+            entityId: entityId,
+            data: data,
+          ),
+          _writeTimeout,
+          'update $table',
+        );
+        return;
+      } catch (e, st) {
+        if (!_isTransientNetworkError(e)) rethrow;
+        dev.log(
+          'smartUpdate degraded to offline queue for $table/$entityId — $e\n$st',
+          name: 'SyncService',
+        );
+      }
     }
     await _cache.addPendingOp(
       tableName: table,
@@ -270,13 +309,25 @@ class SyncService extends GetxService {
     required String entityId,
   }) async {
     if (isOnline.value) {
-      await _writeToServer(
-        operation: 'delete',
-        table: table,
-        entityId: entityId,
-        data: {'id': entityId},
-      );
-      return;
+      try {
+        await _withTimeout(
+          _writeToServer(
+            operation: 'delete',
+            table: table,
+            entityId: entityId,
+            data: {'id': entityId},
+          ),
+          _writeTimeout,
+          'delete $table',
+        );
+        return;
+      } catch (e, st) {
+        if (!_isTransientNetworkError(e)) rethrow;
+        dev.log(
+          'smartDelete degraded to offline queue for $table/$entityId — $e\n$st',
+          name: 'SyncService',
+        );
+      }
     }
     await _cache.addPendingOp(
       tableName: table,
@@ -459,5 +510,28 @@ class SyncService extends GetxService {
     if (!isOnline.value) return;
     await _cache.clearCache();
     await syncPendingOps();
+  }
+
+  Future<T> _withTimeout<T>(
+    Future<T> future,
+    Duration duration,
+    String label,
+  ) {
+    return future.timeout(
+      duration,
+      onTimeout: () => throw TimeoutException('$label timed out', duration),
+    );
+  }
+
+  bool _isTransientNetworkError(Object error) {
+    if (error is TimeoutException) return true;
+    final message = error.toString().toLowerCase();
+    return message.contains('socketexception') ||
+        message.contains('clientexception') ||
+        message.contains('failed host lookup') ||
+        message.contains('network is unreachable') ||
+        message.contains('connection closed') ||
+        message.contains('connection error') ||
+        message.contains('timed out');
   }
 }

@@ -1,10 +1,9 @@
-import 'dart:math' as math;
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../components/combined_seat_grid.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
@@ -15,6 +14,7 @@ import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import 'add_bus_screen.dart';
+import 'bus_money_screen.dart';
 import 'tour_seat_assignment_screen.dart';
 
 /// Read-only seat layout for a single bus on a tour. Renders each seat
@@ -43,10 +43,6 @@ class BusStatusScreen extends StatefulWidget {
 }
 
 class _BusStatusScreenState extends State<BusStatusScreen> {
-  // Deck toggle state (only meaningful when the bus actually has an
-  // upper deck). Mirrors seat_assignment_screen's `_showUpper` flag.
-  bool _showUpper = false;
-
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
@@ -95,8 +91,6 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
           final assignedCount = assignments.values
               .fold<int>(0, (sum, list) => sum + list.length);
 
-          final hasUpper = layout.upperDeck.any((cell) => cell.hasSeat);
-
           return Column(
             children: [
               _Header(bus: bus, tourTitle: tour.title),
@@ -121,29 +115,6 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                   total: totalSeats,
                 ),
               ),
-              if (hasUpper)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    UgamSpacing.gutter,
-                    0,
-                    UgamSpacing.gutter,
-                    UgamSpacing.sm,
-                  ),
-                  child: UgamTabPills(
-                    currentIndex: _showUpper ? 1 : 0,
-                    onChanged: (i) => setState(() => _showUpper = i == 1),
-                    items: [
-                      UgamTabItem(
-                        label: tr('bus_status.deck_lower'),
-                        icon: Icons.event_seat_rounded,
-                      ),
-                      UgamTabItem(
-                        label: tr('bus_status.deck_upper'),
-                        icon: Icons.single_bed_rounded,
-                      ),
-                    ],
-                  ),
-                ),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
@@ -151,7 +122,6 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                   ),
                   child: _SeatChartCard(
                     layout: layout,
-                    showUpper: hasUpper && _showUpper,
                     assignments: assignments,
                     onSeatTap: (passenger) =>
                         _showPassengerSheet(context, passenger, bus, tour.id),
@@ -418,13 +388,11 @@ class _Tally extends StatelessWidget {
 /// tiles via `_SeatTile`.
 class _SeatChartCard extends StatelessWidget {
   final BusLayout layout;
-  final bool showUpper;
   final Map<String, List<Passenger>> assignments;
   final ValueChanged<Passenger> onSeatTap;
 
   const _SeatChartCard({
     required this.layout,
-    required this.showUpper,
     required this.assignments,
     required this.onSeatTap,
   });
@@ -432,9 +400,7 @@ class _SeatChartCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final deck = showUpper ? layout.upperDeck : layout.lowerDeck;
-    final seatCells = deck.where((cell) => cell.hasSeat).toList();
-    if (seatCells.isEmpty) {
+    if (layout.totalCells == 0) {
       return UgamCard.plain(
         child: Center(
           child: Text(
@@ -445,153 +411,42 @@ class _SeatChartCard extends StatelessWidget {
       );
     }
 
-    final maxRow =
-        seatCells.map((cell) => cell.row).reduce((a, b) => a > b ? a : b);
-    final cols = layout.cols;
-    final leftCols = cols ~/ 2;
+    const double tileW = 62;
+    const double tileH = 78;
 
     return UgamCard.plain(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
         vertical: UgamSpacing.lg,
       ),
-      child: LayoutBuilder(
-        builder: (ctx, constraints) {
-          const cellGap = 4.0;
-          const aisleGap = 12.0;
-          final innerWidth = constraints.maxWidth;
-          final leftGapCount = math.max(0, leftCols - 1);
-          final rightGapCount = math.max(0, (cols - leftCols) - 1);
-          final usableWidth = innerWidth -
-              aisleGap -
-              (leftGapCount + rightGapCount) * cellGap;
-          const double minCellWidth = 56.0;
-          final double calculatedCellWidth = usableWidth / cols;
-          final bool useScroll = calculatedCellWidth < minCellWidth;
-          final cellWidth = (useScroll ? minCellWidth : calculatedCellWidth).clamp(0.0, 120.0);
-          final tileHeight = math.min(84.0, cellWidth * 1.05);
-
-          final gridContent = Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _frontLabel(c),
-              const SizedBox(height: UgamSpacing.sm),
-              for (int r = 0; r <= maxRow; r++) ...[
-                _SeatRow(
-                  row: r,
-                  cols: cols,
-                  leftCols: leftCols,
-                  deck: deck,
-                  cellWidth: cellWidth,
-                  cellHeight: tileHeight,
-                  aisleGap: aisleGap,
-                  cellGap: cellGap,
-                  assignments: assignments,
-                  onSeatTap: onSeatTap,
-                ),
-                if (r < maxRow) const SizedBox(height: 6),
-              ],
-              const SizedBox(height: UgamSpacing.sm),
-              Container(height: 1, color: c.border),
-              const SizedBox(height: UgamSpacing.xs),
-              Text(
-                'REAR',
-                style: UgamText.micro.copyWith(color: c.ink3),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics(),
+        ),
+        child: CombinedSeatGrid(
+          layout: layout,
+          cellWidth: tileW,
+          cellHeight: tileH,
+          colGap: 4,
+          rowGap: 6,
+          driverLabel: tr('bus_status.driver_label'),
+          tileBuilder: (ctx, cell) {
+            final occupants = cell.seatId != null
+                ? (assignments[cell.seatId] ?? const <Passenger>[])
+                : const <Passenger>[];
+            return RepaintBoundary(
+              child: _SeatTile(
+                width: tileW,
+                height: tileH,
+                cell: cell,
+                passengers: occupants,
+                onTap: onSeatTap,
               ),
-            ],
-          );
-
-          return SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            child: useScroll
-                ? SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: gridContent,
-                  )
-                : gridContent,
-          );
-        },
+            );
+          },
+        ),
       ),
     );
-  }
-
-  Widget _frontLabel(UgamColorSet c) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Icon(Icons.directions_bus_filled_rounded, size: 14, color: c.ink3),
-        const SizedBox(width: 4),
-        Text(
-          tr('bus_status.driver_label'),
-          style: UgamText.micro.copyWith(color: c.ink3),
-        ),
-      ],
-    );
-  }
-}
-
-class _SeatRow extends StatelessWidget {
-  final int row;
-  final int cols;
-  final int leftCols;
-  final List<SeatCell> deck;
-  final double cellWidth;
-  final double cellHeight;
-  final double aisleGap;
-  final double cellGap;
-  final Map<String, List<Passenger>> assignments;
-  final ValueChanged<Passenger> onSeatTap;
-
-  const _SeatRow({
-    required this.row,
-    required this.cols,
-    required this.leftCols,
-    required this.deck,
-    required this.cellWidth,
-    required this.cellHeight,
-    required this.aisleGap,
-    required this.cellGap,
-    required this.assignments,
-    required this.onSeatTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final children = <Widget>[];
-    for (int col = 0; col < cols; col++) {
-      // Insert the aisle right before the first right-of-aisle column.
-      if (col == leftCols && col > 0) {
-        children.add(SizedBox(width: aisleGap));
-      } else if (col > 0) {
-        children.add(SizedBox(width: cellGap));
-      }
-      final cell = deck.firstWhere(
-        (s) => s.row == row && s.col == col,
-        orElse: () => SeatCell(row: row, col: col),
-      );
-      if (cell.isEmpty || cell.seatId == null) {
-        children.add(SizedBox(width: cellWidth, height: cellHeight));
-      } else {
-        final occupants = assignments[cell.seatId] ?? const <Passenger>[];
-        // RepaintBoundary isolates each tile's paint surface — tapping
-        // a tile to open the sheet won't invalidate the whole chart.
-        children.add(
-          RepaintBoundary(
-            child: _SeatTile(
-              width: cellWidth,
-              height: cellHeight,
-              cell: cell,
-              passengers: occupants,
-              onTap: onSeatTap,
-            ),
-          ),
-        );
-      }
-    }
-    return Row(mainAxisAlignment: MainAxisAlignment.center, children: children);
   }
 }
 
@@ -1061,30 +916,51 @@ class _BottomActions extends StatelessWidget {
     final c = UgamColors.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: _OutlinedPill(
-              c: c,
-              icon: Icons.edit_rounded,
-              label: 'Edit bus details',
-              onTap: () => Get.to(
-                () => AddBusScreen(tourId: tourId, existing: bus),
-                transition: Transition.cupertino,
+          Row(
+            children: [
+              Expanded(
+                child: _OutlinedPill(
+                  c: c,
+                  icon: Icons.edit_rounded,
+                  label: 'Edit bus details',
+                  onTap: () => Get.to(
+                    () => AddBusScreen(tourId: tourId, existing: bus),
+                    transition: Transition.cupertino,
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _OutlinedPill(
+                  c: c,
+                  icon: Icons.grid_view_rounded,
+                  label: 'Open seat assignment',
+                  onTap: () => Get.to(
+                    () => TourSeatAssignmentScreen(tourId: tourId),
+                    transition: Transition.cupertino,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _OutlinedPill(
-              c: c,
-              icon: Icons.grid_view_rounded,
-              label: 'Open seat assignment',
-              onTap: () => Get.to(
-                () => TourSeatAssignmentScreen(tourId: tourId),
+          const SizedBox(height: 10),
+          _OutlinedPill(
+            c: c,
+            icon: Icons.payments_rounded,
+            label: 'Collection & money',
+            onTap: () {
+              final tour = Get.find<TourController>().getTour(tourId);
+              if (tour == null) {
+                AppSnackBar.error('Tour not found. Pull to refresh.');
+                return;
+              }
+              Get.to(
+                () => BusMoneyScreen(tour: tour, bus: bus),
                 transition: Transition.cupertino,
-              ),
-            ),
+              );
+            },
           ),
         ],
       ),

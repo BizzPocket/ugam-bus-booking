@@ -96,11 +96,16 @@ class _TabSegment extends StatelessWidget {
               Icon(item.icon, size: 14, color: active ? c.ink : c.ink2),
               const SizedBox(width: 5),
             ],
-            Text(
-              item.label,
-              style: UgamText.bodyStrong.copyWith(
-                color: active ? c.ink : c.ink2,
-                fontSize: 12,
+            Flexible(
+              child: Text(
+                item.label,
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                style: UgamText.bodyStrong.copyWith(
+                  color: active ? c.ink : c.ink2,
+                  fontSize: 12,
+                ),
               ),
             ),
             if (item.count != null) ...[

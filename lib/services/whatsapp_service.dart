@@ -195,9 +195,6 @@ class WhatsAppService {
     bool isUpdate = false,
     TripType tripType = TripType.roundTrip,
   }) {
-    final totalSeats = singleSofaCount + doubleSofaCount;
-    final total = tour.pricePerSeat * totalSeats;
-
     final seatParts = <String>[];
     if (doubleSofaCount > 0) {
       seatParts.add('$doubleSofaCount Double Sofa');
@@ -236,10 +233,6 @@ class WhatsAppService {
       tripLine,
     ];
 
-    if (total > 0) {
-      lines.add('💰 *Estimated total:* ₹${total.toStringAsFixed(0)}');
-    }
-
     if (note != null && note.trim().isNotEmpty) {
       lines.addAll(['', '📝 ${note.trim()}']);
     }
@@ -277,6 +270,13 @@ class WhatsAppService {
     return _openWhatsApp(adminPhone, msg);
   }
 
+  /// Opens a WhatsApp chat to [phone] (any local/international format — the
+  /// number is normalised internally) pre-filled with [message]. Used by the
+  /// customer "Contact organiser" action on a tour. Returns true if WhatsApp
+  /// opened successfully.
+  Future<bool> openChat({required String phone, required String message}) =>
+      _openWhatsApp(phone, message);
+
   // ── Message Builders ──────────────────────────────────────
 
   String buildTicketMessage({
@@ -291,7 +291,6 @@ class WhatsAppService {
     final seats = passenger.assignedSeats.isNotEmpty
         ? passenger.assignedSeats.map((a) => a.seatId).join(', ')
         : 'To be assigned';
-    final total = tour.pricePerSeat * passenger.totalSeatsRequested;
 
     final lines = <String>[
       '🎫 *Ticket Confirmed!*',
@@ -310,7 +309,6 @@ class WhatsAppService {
       lines.add('🧑‍✈️ *Driver:* $driverName${driverPhone != null ? ' ($driverPhone)' : ''}');
     }
     if (handlerPhone != null) lines.add('📞 *Handler:* $handlerPhone');
-    if (total > 0) lines.add('💰 *Amount:* ₹${total.toStringAsFixed(0)}');
 
     lines.addAll(['', '🙏 Have a blessed journey!']);
 
@@ -336,11 +334,6 @@ class WhatsAppService {
     if (busNumber != null) lines.add('🚌 *Bus:* $busNumber');
     if (driverName != null) lines.add('🧑‍✈️ *Driver:* $driverName${driverPhone != null ? ' ($driverPhone)' : ''}');
     if (handlerPhone != null) lines.add('📞 *Handler Contact:* $handlerPhone');
-    if (tour.pricePerSeat > 0) {
-      lines.add('💰 *Price:* ₹${tour.pricePerSeat.toStringAsFixed(0)}/seat');
-    } else {
-      lines.add('🆓 *Free Tour*');
-    }
 
     lines.addAll([
       '',
@@ -363,12 +356,6 @@ class WhatsAppService {
       '📍 ${tour.fromCity} → ${tour.toCity}',
       '📅 ${_formatDate(tour.departureDate)}${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
     ];
-
-    if (tour.pricePerSeat > 0) {
-      lines.add('💰 ₹${tour.pricePerSeat.toStringAsFixed(0)} per seat');
-    } else {
-      lines.add('🆓 *Free Tour*');
-    }
 
     if (tour.description != null && tour.description!.isNotEmpty) {
       lines.addAll(['', '📝 ${tour.description}']);

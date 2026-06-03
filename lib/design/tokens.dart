@@ -183,12 +183,13 @@ class UgamSpacing {
 class UgamMotion {
   const UgamMotion._();
 
-  static const Duration tapIn = Duration(milliseconds: 120);
-  static const Duration tapOut = Duration(milliseconds: 180);
-  static const Duration tab = Duration(milliseconds: 200);
-  static const Duration sheet = Duration(milliseconds: 280);
-  static const Duration dock = Duration(milliseconds: 140);
-  static const Duration shimmer = Duration(milliseconds: 1200);
+  static const Duration tapIn = Duration(milliseconds: 70);
+  static const Duration tapOut = Duration(milliseconds: 100);
+  static const Duration tab = Duration(milliseconds: 110);
+  static const Duration sheet = Duration(milliseconds: 180);
+  static const Duration dock = Duration(milliseconds: 90);
+  static const Duration route = Duration(milliseconds: 140);
+  static const Duration shimmer = Duration(milliseconds: 900);
   static const Duration snackbar = Duration(milliseconds: 3200);
 
   static const Curve easeOut = Curves.easeOutCubic;

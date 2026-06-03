@@ -299,7 +299,8 @@
     "chip_seats_assigned": "Seats assigned",
     "chip_confirmed": "Confirmed",
     "chip_cancelled": "Cancelled",
-    "chip_pending": "Pending"
+    "chip_pending": "Pending",
+    "view_full_chart": "View full bus chart"
   },
   "add_bus": {
     "title": "Add Bus",
@@ -314,13 +315,29 @@
       "bus_type": "Bus Type",
       "seater_count": "Seater Count (rest are Sleeper)",
       "single_sofa_count": "Single Sofa Count (rest are Double Sofa)",
+      "rear_rows": "Last how many rows priced differently?",
+      "rear_price": "Rear-row price (per seat)",
       "optional": "(optional)"
     },
     "hint": {
       "bus_number": "e.g. GJ-05-AB-1234 (optional)",
       "driver_name": "Add later when owner confirms (optional)",
       "price_default": "Defaults to tour price (₹{price})",
-      "price_plain": "e.g. 500"
+      "price_plain": "e.g. 500",
+      "rear_rows": "0 = no rear zone",
+      "rear_rows_max": "0 = none · up to {max} rows",
+      "rear_price": "Per person, for the rear rows"
+    },
+    "section": {
+      "rear_zone_eyebrow": "REAR ZONE (OPTIONAL)",
+      "rear_zone_title": "Price the back rows differently",
+      "rear_zone_body": "Charge the last few rows a different per-person price. Leave at 0 to use the base price for every row.",
+      "overrides_title": "Per-type overrides (optional)",
+      "overrides_body": "Tune single / double / seater prices for the front rows."
+    },
+    "rear_zone": {
+      "legend": "Last {rows} of {total} rows use the rear-row price (highlighted).",
+      "legend_plain": "The last {rows} rows will use the rear-row price."
     },
     "info": {
       "optional_fields": "Bus Number and driver details are optional — save now and fill them in once the bus owner confirms.",
@@ -466,7 +483,10 @@
     "title_edit": "Edit request",
     "section_who_is_booking": "WHO IS BOOKING",
     "button_update": "Update request",
-    "button_submit": "Submit request"
+    "button_submit": "Submit request",
+    "err_phone_fake": "Please enter a real 10-digit mobile number.",
+    "err_duplicate": "You already have a pending request for this trip.",
+    "err_too_fast": "Please wait a few seconds before submitting again."
   },
   "customer_tour_detail": {
     "title": "Tour details",
@@ -485,6 +505,12 @@
     "section_trip_summary": "TRIP SUMMARY",
     "section_about_tour": "ABOUT THIS TOUR",
     "section_bus": "BUS",
+    "section_contact": "CONTACT",
+    "contact_organiser": "Contact organiser on WhatsApp",
+    "contact_organiser_subtitle": "Questions about this tour? Message the organiser.",
+    "contact_greeting": "🙏 Jai Gurudev — I have a question about the tour {tour} ({code}).",
+    "contact_error_title": "Couldn't open WhatsApp",
+    "contact_error_body": "Please make sure WhatsApp is installed.",
     "section_timeline": "TIMELINE",
     "label_route": "Route",
     "label_price": "Price",
@@ -648,6 +674,12 @@
       "no_tours_body": "Create a tour and add buses to start assigning seats.",
       "no_buses_title": "No buses added",
       "no_buses_body": "Add a bus to this tour before assigning seats."
+    },
+    "clear_bus": {
+      "title": "Unassign all seats?",
+      "body": "This frees all {count} assigned seat(s) on {bus}. Passengers keep their requests and can be re-seated.",
+      "confirm": "Unassign all",
+      "done": "Cleared all seats on {bus}."
     }
   },
   "splash": {

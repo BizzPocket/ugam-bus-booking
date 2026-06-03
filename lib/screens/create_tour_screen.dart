@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -24,6 +26,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   DateTime? _returnDate;
   final _formKey = GlobalKey<FormState>();
   bool _saving = false;
+  Timer? _previewDebounce;
 
   @override
   void initState() {
@@ -36,7 +39,10 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   }
 
   void _previewListener() {
-    if (mounted) setState(() {});
+    _previewDebounce?.cancel();
+    _previewDebounce = Timer(const Duration(milliseconds: 90), () {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -45,6 +51,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
     _fromCtrl.removeListener(_previewListener);
     _toCtrl.removeListener(_previewListener);
     _priceCtrl.removeListener(_previewListener);
+    _previewDebounce?.cancel();
     _titleCtrl.dispose();
     _fromCtrl.dispose();
     _toCtrl.dispose();

@@ -1,11 +1,11 @@
-import 'dart:math' as math;
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../components/combined_seat_grid.dart';
 import '../design/ugam.dart';
 import '../controllers/tour_controller.dart';
+import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
@@ -119,12 +119,17 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
             for (final e in occupantsBySeat.entries) e.key: e.value.length,
           };
 
+          final assignedSeatCount = occupantsBySeat.length;
+
           return Column(
             children: [
               _TopBar(
                 title: tr('seat_assignment.title'),
                 c: c,
                 tourId: tour.id,
+                onClearSeats: assignedSeatCount == 0
+                    ? null
+                    : () => _confirmClearBus(tour, bus, assignedSeatCount),
               ),
               // Tour pills — only shown when more than one active tour.
               if (tours.length > 1) ...[
@@ -191,6 +196,45 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
         }),
       ),
     );
+  }
+
+  /// Confirm + unassign every seat on the currently-selected bus. Passengers
+  /// keep their requests, so they drop straight back into the "to assign" pool.
+  Future<void> _confirmClearBus(Tour tour, Bus bus, int seatCount) async {
+    final c = UgamColors.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.card,
+        title: Text(tr('seat_assignment.clear_bus.title')),
+        content: Text(
+          tr('seat_assignment.clear_bus.body', namedArgs: {
+            'count': '$seatCount',
+            'bus': bus.name,
+          }),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(tr('app.action.cancel')),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: c.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(tr('seat_assignment.clear_bus.confirm')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _tourCtrl.unassignBus(tour.id, bus.id);
+      AppSnackBar.success(
+        tr('seat_assignment.clear_bus.done', namedArgs: {'bus': bus.name}),
+      );
+    } catch (_) {
+      // unassignBus already surfaced the error.
+    }
   }
 
   /// Handle a long-press drag drop. Validation:
@@ -291,7 +335,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
       final layout = bus?.layout;
       String? otherSingleSeatId;
       if (passenger != null && layout != null) {
-        final allCells = [...layout.lowerDeck, ...layout.upperDeck];
+        final allCells = layout.grid;
         for (final a in passenger.assignedSeats) {
           if (a.busId != busId) continue;
           if (a.seatId == data.seatId) continue;
@@ -443,7 +487,16 @@ class _TopBar extends StatelessWidget {
   final UgamColorSet c;
   final String? tourId;
 
-  const _TopBar({required this.title, required this.c, this.tourId});
+  /// When non-null, shows a "clear seats" action that unassigns every seat on
+  /// the currently-selected bus. Null hides the action (e.g. nothing assigned).
+  final VoidCallback? onClearSeats;
+
+  const _TopBar({
+    required this.title,
+    required this.c,
+    this.tourId,
+    this.onClearSeats,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -464,6 +517,27 @@ class _TopBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (onClearSeats != null) ...[
+            GestureDetector(
+              onTap: onClearSeats,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: c.danger.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.layers_clear_rounded,
+                  size: 19,
+                  color: c.danger,
+                ),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+          ],
           GestureDetector(
             onTap: tourId == null
                 ? null
@@ -662,103 +736,6 @@ class _SeatChartCard extends StatelessWidget {
     required this.onSeatDrop,
   });
 
-  Widget _deckHeader(String title, IconData icon, UgamColorSet c) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: c.accentFill,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-        border: Border.all(color: c.accent.withValues(alpha: 0.15)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: c.accent),
-          const SizedBox(width: 6),
-          Text(
-            title,
-            style: UgamText.bodyStrong.copyWith(
-              color: c.accent,
-              fontSize: 11,
-              letterSpacing: 0.6,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDeckGrid(
-    BuildContext context,
-    List<SeatCell> deck,
-    String title,
-    IconData icon,
-    UgamColorSet c,
-    bool hasUpper,
-    double cellWidth,
-    double tileHeight,
-    bool useScroll,
-  ) {
-    final seatCells = deck.where((c) => c.hasSeat).toList();
-    if (seatCells.isEmpty) return const SizedBox.shrink();
-
-    final maxRow = seatCells.map((c) => c.row).reduce((a, b) => a > b ? a : b);
-    final cols = layout!.cols;
-    final leftCols = cols ~/ 2;
-
-    const cellGap = 4.0;
-    const aisleGap = 12.0;
-
-    final gridContent = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (hasUpper) ...[
-          _deckHeader(title, icon, c),
-          const SizedBox(height: UgamSpacing.md),
-        ],
-        _frontLabel(c),
-        const SizedBox(height: UgamSpacing.sm),
-        for (int r = 0; r <= maxRow; r++) ...[
-          _SeatRow(
-            row: r,
-            cols: cols,
-            leftCols: leftCols,
-            deck: deck,
-            cellWidth: cellWidth,
-            cellHeight: tileHeight,
-            aisleGap: aisleGap,
-            cellGap: cellGap,
-            busId: busId,
-            tour: tour,
-            idBySeat: idBySeat,
-            berthsBySeat: berthsBySeat,
-            occupantsBySeat: occupantsBySeat,
-            onSeatDrop: onSeatDrop,
-            nameBySeat: nameBySeat,
-            phoneBySeat: phoneBySeat,
-            onSeatTap: onSeatTap,
-          ),
-          if (r < maxRow) const SizedBox(height: 6),
-        ],
-        const SizedBox(height: UgamSpacing.sm),
-        Container(height: 1, color: c.border),
-        const SizedBox(height: UgamSpacing.xs),
-        Text(
-          'REAR',
-          style: UgamText.micro.copyWith(color: c.ink3),
-        ),
-      ],
-    );
-
-    return useScroll
-        ? SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: gridContent,
-          )
-        : gridContent;
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -773,173 +750,48 @@ class _SeatChartCard extends StatelessWidget {
       );
     }
 
-    final hasUpper = layout!.upperDeck.any((c) => c.hasSeat);
+    const double tileW = 62;
+    const double tileH = 78;
 
     return UgamCard.plain(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
         vertical: UgamSpacing.lg,
       ),
-      child: LayoutBuilder(
-        builder: (ctx, constraints) {
-          final cols = layout!.cols;
-          final leftCols = cols ~/ 2;
-
-          const cellGap = 4.0;
-          const aisleGap = 12.0;
-          const dragOutlinePerTile = 4.0;
-          final innerWidth = constraints.maxWidth;
-          final leftGapCount = math.max(0, leftCols - 1);
-          final rightGapCount = math.max(0, (cols - leftCols) - 1);
-          final usableWidth = innerWidth -
-              aisleGap -
-              (leftGapCount + rightGapCount) * cellGap -
-              cols * dragOutlinePerTile;
-          const double minCellWidth = 56.0;
-          final double calculatedCellWidth = usableWidth / cols;
-          final bool useScroll = calculatedCellWidth < minCellWidth;
-          final cellWidth = (useScroll ? minCellWidth : calculatedCellWidth).clamp(0.0, 120.0);
-          final tileHeight = math.min(84.0, cellWidth * 1.05);
-
-          return SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            child: Column(
-              children: [
-                _buildDeckGrid(
-                  context,
-                  layout!.lowerDeck,
-                  tr('seat_assignment.lower_deck').toUpperCase(),
-                  Icons.event_seat_rounded,
-                  c,
-                  hasUpper,
-                  cellWidth,
-                  tileHeight,
-                  useScroll,
-                ),
-                if (hasUpper) ...[
-                  const SizedBox(height: UgamSpacing.huge),
-                  Container(
-                    height: 1.5,
-                    color: c.border,
-                    margin: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-                  ),
-                  const SizedBox(height: UgamSpacing.huge),
-                  _buildDeckGrid(
-                    context,
-                    layout!.upperDeck,
-                    tr('seat_assignment.upper_deck').toUpperCase(),
-                    Icons.single_bed_rounded,
-                    c,
-                    hasUpper,
-                    cellWidth,
-                    tileHeight,
-                    useScroll,
-                  ),
-                ],
-              ],
-            ),
-          );
-        },
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: CombinedSeatGrid(
+          layout: layout!,
+          cellWidth: tileW,
+          cellHeight: tileH,
+          colGap: 4,
+          rowGap: 6,
+          driverLabel: tr('seat_assignment.driver_label'),
+          tileBuilder: (ctx, cell) {
+            final seatId = cell.seatId;
+            final occupants = seatId != null
+                ? (occupantsBySeat[seatId] ?? const <String>[])
+                : const <String>[];
+            return RepaintBoundary(
+              child: _SeatTile(
+                width: tileW,
+                height: tileH,
+                cell: cell,
+                tour: tour,
+                occupantIds: occupants,
+                busId: busId,
+                onTap: () {
+                  if (seatId != null) onSeatTap(seatId);
+                },
+                onDropped: (data) => onSeatDrop(data, cell),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _frontLabel(UgamColorSet c) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Icon(
-          Icons.directions_bus_filled_rounded,
-          size: 14,
-          color: c.ink3,
-        ),
-        const SizedBox(width: 4),
-        Text(
-          tr('seat_assignment.driver_label'),
-          style: UgamText.micro.copyWith(color: c.ink3),
-        ),
-      ],
-    );
-  }
-}
-
-// ─── Seat row ──────────────────────────────────────────────────────────
-
-class _SeatRow extends StatelessWidget {
-  final int row;
-  final int cols;
-  final int leftCols;
-  final List<SeatCell> deck;
-  final double cellWidth;
-  final double cellHeight;
-  final double aisleGap;
-  final double cellGap;
-  final Map<String, String> nameBySeat;
-  final Map<String, String> phoneBySeat;
-  final Map<String, String> idBySeat;
-  final Map<String, int> berthsBySeat;
-  final Map<String, List<String>> occupantsBySeat;
-  final Tour tour;
-  final String busId;
-  final ValueChanged<String> onSeatTap;
-  final void Function(_SeatDragData data, SeatCell targetCell) onSeatDrop;
-
-  const _SeatRow({
-    required this.row,
-    required this.cols,
-    required this.leftCols,
-    required this.deck,
-    required this.cellWidth,
-    required this.cellHeight,
-    required this.aisleGap,
-    required this.cellGap,
-    required this.nameBySeat,
-    required this.phoneBySeat,
-    required this.idBySeat,
-    required this.berthsBySeat,
-    required this.occupantsBySeat,
-    required this.tour,
-    required this.busId,
-    required this.onSeatTap,
-    required this.onSeatDrop,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final children = <Widget>[];
-    for (int c = 0; c < cols; c++) {
-      if (c == leftCols && c > 0) {
-        children.add(SizedBox(width: aisleGap));
-      } else if (c > 0) {
-        children.add(SizedBox(width: cellGap));
-      }
-      final cell = deck.firstWhere(
-        (s) => s.row == row && s.col == c,
-        orElse: () => SeatCell(row: row, col: c),
-      );
-      if (cell.isEmpty || cell.seatId == null) {
-        children.add(SizedBox(width: cellWidth, height: cellHeight));
-      } else {
-        final seatId = cell.seatId!;
-        final occupants = occupantsBySeat[seatId] ?? const <String>[];
-        children.add(
-          RepaintBoundary(
-            child: _SeatTile(
-              width: cellWidth,
-              height: cellHeight,
-              cell: cell,
-              tour: tour,
-              occupantIds: occupants,
-              busId: busId,
-              onTap: () => onSeatTap(seatId),
-              onDropped: (data) => onSeatDrop(data, cell),
-            ),
-          ),
-        );
-      }
-    }
-    return Row(mainAxisAlignment: MainAxisAlignment.center, children: children);
-  }
 }
 
 // ─── Seat tile ─────────────────────────────────────────────────────────

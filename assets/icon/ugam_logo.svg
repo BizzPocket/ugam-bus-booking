@@ -1,48 +1,52 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E9CC78"/>
+      <stop offset="0.55" stop-color="#CBA24C"/>
+      <stop offset="1" stop-color="#B8862F"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Cream ground (the canonical medallion ground; also the launcher bg) -->
   <rect width="1024" height="1024" fill="#FBF3EC"/>
-  <!-- Rising-sun rays: even angular spacing, outer + centre rays long. -->
-  <g fill="#D2794B">
-    <polygon points="275.9,454.8 272.2,482.6 105.5,446.5"/>
-    <polygon points="283.8,424.4 276.6,451.4 116.0,393.9"/>
-    <polygon points="294.1,398.9 286.4,417.4 188.6,366.1"/>
-    <polygon points="311.2,367.9 297.2,392.1 156.9,295.0"/>
-    <polygon points="327.7,346.0 315.5,361.8 234.3,286.9"/>
-    <polygon points="352.2,320.4 332.4,340.2 222.1,210.1"/>
-    <polygon points="373.8,303.5 358.0,315.7 298.9,222.3"/>
-    <polygon points="404.1,285.2 379.9,299.2 307.0,144.9"/>
-    <polygon points="429.4,274.4 410.9,282.1 378.1,176.6"/>
-    <polygon points="463.4,264.6 436.4,271.8 405.9,104.0"/>
-    <polygon points="490.6,260.7 470.8,263.4 466.3,153.0"/>
-    <polygon points="526.0,260.0 498.0,260.0 512.0,90.0"/>
-    <polygon points="553.2,263.4 533.4,260.7 557.7,153.0"/>
-    <polygon points="587.6,271.8 560.6,264.6 618.1,104.0"/>
-    <polygon points="613.1,282.1 594.6,274.4 645.9,176.6"/>
-    <polygon points="644.1,299.2 619.9,285.2 717.0,144.9"/>
-    <polygon points="666.0,315.7 650.2,303.5 725.1,222.3"/>
-    <polygon points="691.6,340.2 671.8,320.4 801.9,210.1"/>
-    <polygon points="708.5,361.8 696.3,346.0 789.7,286.9"/>
-    <polygon points="726.8,392.1 712.8,367.9 867.1,295.0"/>
-    <polygon points="737.6,417.4 729.9,398.9 835.4,366.1"/>
-    <polygon points="747.4,451.4 740.2,424.4 908.0,393.9"/>
-    <polygon points="751.8,482.6 748.1,454.8 918.5,446.5"/>
+
+  <!-- Calm, even rays of light — uniform length + spacing -->
+  <g fill="#DDB85F">
+    <polygon points="751.7,578.7 748.6,561.3 856.7,551.2"/>
+    <polygon points="740.4,531.9 733.9,515.4 837.8,484.1"/>
+    <polygon points="720.0,488.2 710.3,473.3 806.0,422.1"/>
+    <polygon points="691.3,449.5 678.9,436.8 762.6,367.6"/>
+    <polygon points="655.6,417.2 640.9,407.2 709.2,322.8"/>
+    <polygon points="614.1,392.6 597.8,385.7 648.0,289.5"/>
+    <polygon points="568.6,376.7 551.2,373.2 581.4,268.9"/>
+    <polygon points="520.9,370.2 503.1,370.2 512.0,262.0"/>
+    <polygon points="472.8,373.2 455.4,376.7 442.6,268.9"/>
+    <polygon points="426.2,385.7 409.9,392.6 376.0,289.5"/>
+    <polygon points="383.1,407.2 368.4,417.2 314.8,322.8"/>
+    <polygon points="345.1,436.8 332.7,449.5 261.4,367.6"/>
+    <polygon points="313.7,473.3 304.0,488.2 218.0,422.1"/>
+    <polygon points="290.1,515.4 283.6,531.9 186.2,484.1"/>
+    <polygon points="275.4,561.3 272.3,578.7 167.3,551.2"/>
   </g>
-  <!-- Rising sun (terracotta) with cream word-mark -->
-  <path d="M 262 500 A 250 250 0 0 1 762 500 Z" fill="#C56A3F"/>
-  <text x="512" y="455" text-anchor="middle"
+
+  <!-- Rising sun dome (gold gradient) with the cream word-mark -->
+  <path d="M 280 612 A 232 232 0 0 1 744 612 Z" fill="url(#sun)"/>
+  <text x="512" y="525" text-anchor="middle"
         font-family="Kohinoor Gujarati, Gujarati Sangam MN, GujaratiMT, Noto Sans Gujarati, sans-serif"
-        font-weight="800" font-size="138" fill="#FBF3EC">ઉગમ</text>
-  <!-- Side-view yatra bus in deep brown -->
+        font-weight="800" font-size="132" fill="#FBF3EC">ઉગમ</text>
+
+  <!-- Yatra bus on the horizon — the sun rises BEHIND it (one integrated mark) -->
   <g>
-    <rect x="236" y="522" width="552" height="148" rx="34" fill="#4A2F25"/>
+    <rect x="248" y="560" width="528" height="140" rx="32" fill="#3A2415"/>
     <g fill="#FBF3EC">
-      <rect x="270" y="550" width="86" height="56" rx="10"/>
-      <rect x="368" y="550" width="86" height="56" rx="10"/>
-      <rect x="466" y="550" width="86" height="56" rx="10"/>
-      <rect x="564" y="550" width="86" height="56" rx="10"/>
-      <rect x="662" y="550" width="92" height="56" rx="10"/>
+      <rect x="282" y="586" width="82" height="54" rx="9"/>
+      <rect x="376" y="586" width="82" height="54" rx="9"/>
+      <rect x="470" y="586" width="82" height="54" rx="9"/>
+      <rect x="564" y="586" width="82" height="54" rx="9"/>
+      <rect x="658" y="586" width="84" height="54" rx="9"/>
     </g>
-    <circle cx="772" cy="642" r="13" fill="#D2794B"/>
-    <g fill="#4A2F25"><circle cx="346" cy="690" r="48"/><circle cx="678" cy="690" r="48"/></g>
-    <g fill="#FBF3EC"><circle cx="346" cy="690" r="17"/><circle cx="678" cy="690" r="17"/></g>
+    <circle cx="760" cy="672" r="12" fill="#E9CC78"/>
+    <g fill="#3A2415"><circle cx="352" cy="718" r="46"/><circle cx="672" cy="718" r="46"/></g>
+    <g fill="#FBF3EC"><circle cx="352" cy="718" r="16"/><circle cx="672" cy="718" r="16"/></g>
   </g>
 </svg>

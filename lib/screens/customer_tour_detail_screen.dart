@@ -7,6 +7,7 @@ import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../services/whatsapp_service.dart';
+import '../utils/app_snackbar.dart';
 import 'customer_booking_request_screen.dart';
 
 /// Public-facing tour detail — image-5 fidelity.
@@ -199,35 +200,6 @@ class _HeroSection extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(width: UgamSpacing.sm),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: UgamSpacing.md,
-                          vertical: UgamSpacing.sm,
-                        ),
-                        decoration: BoxDecoration(
-                          color: c.accentFill,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '₹${tour.pricePerSeat.toStringAsFixed(0)}',
-                              style: UgamText.tabular(
-                                UgamText.titleM.copyWith(
-                                    color: c.accent, fontSize: 18),
-                              ),
-                            ),
-                            Text(
-                              '/ seat',
-                              style: UgamText.caption
-                                  .copyWith(color: c.accent, fontSize: 10),
-                            ),
-                          ],
-                        ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -375,9 +347,6 @@ class _AboutTab extends StatelessWidget {
             (tr('customer_tour_detail.label_departure'), _formatLongDate(tour.departureDate)),
             if (tour.returnDate != null)
               (tr('customer_tour_detail.label_return'), _formatLongDate(tour.returnDate!)),
-            (tr('customer_tour_detail.label_price'),
-              tr('customer_tour_detail.price_per_seat_value',
-                namedArgs: {'price': tour.pricePerSeat.toStringAsFixed(0)})),
             (tr('customer_tour_detail.label_tour_id'), WhatsAppService.tourCode(tour.id)),
           ],
         ),
@@ -404,12 +373,102 @@ class _AboutTab extends StatelessWidget {
           const SizedBox(height: UgamSpacing.md),
           _BusCard(tour: tour, c: c),
         ],
+        if (tour.createdBy != null && tour.createdBy!.trim().isNotEmpty) ...[
+          const SizedBox(height: UgamSpacing.xl),
+          _SectionEyebrow(
+              label: tr('customer_tour_detail.section_contact'), c: c),
+          const SizedBox(height: UgamSpacing.md),
+          _ContactOrganiserButton(tour: tour, c: c),
+        ],
       ]),
     );
   }
 
   static String _formatLongDate(DateTime d) {
     return '${d.day} ${_monthShort(d.month)} ${d.year}';
+  }
+}
+
+/// Tappable "Contact organiser on WhatsApp" row shown on a tour's About tab
+/// when the tour carries an organiser number ([Tour.createdBy]) — the same
+/// number the booking flow sends requests to. Opens a WhatsApp chat with a
+/// tour-aware greeting. Hidden entirely when the tour has no organiser number.
+class _ContactOrganiserButton extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _ContactOrganiserButton({required this.tour, required this.c});
+
+  Future<void> _open() async {
+    HapticFeedback.selectionClick();
+    final phone = tour.createdBy?.trim() ?? '';
+    if (phone.isEmpty) return;
+    final ok = await WhatsAppService().openChat(
+      phone: phone,
+      message: tr('customer_tour_detail.contact_greeting', namedArgs: {
+        'tour': tour.title,
+        'code': WhatsAppService.tourCode(tour.id),
+      }),
+    );
+    if (!ok) {
+      AppSnackBar.error(
+        tr('customer_tour_detail.contact_error_body'),
+        title: tr('customer_tour_detail.contact_error_title'),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _open,
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.all(UgamSpacing.lg),
+          decoration: BoxDecoration(
+            color: c.cardElev,
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.accentFill,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.chat_bubble_outline_rounded,
+                    size: 20, color: c.accent),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      tr('customer_tour_detail.contact_organiser'),
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.ink, fontSize: 14),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      tr('customer_tour_detail.contact_organiser_subtitle'),
+                      style:
+                          UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward_rounded, size: 18, color: c.ink3),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -732,7 +791,6 @@ class _StickyBookCta extends StatelessWidget {
       child: UgamCTA(
         label: label,
         leadingIcon: icon,
-        trailingValue: '₹${tour.pricePerSeat.toStringAsFixed(0)}',
         onPressed: onTap,
       ),
     );

@@ -2,6 +2,9 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 import 'bus_type.dart';
 import 'seat_layout.dart';
+import 'seat_type.dart';
+import 'passenger.dart';
+import 'trip_type.dart';
 
 /// A bus in the admin's fleet (per-admin, not per-tour).
 ///
@@ -29,6 +32,21 @@ class Bus {
   /// Defaults to 0; agents may set it when adding the bus.
   final double pricePerSeat;
 
+  /// Optional per-seat-type overrides for the FRONT (non-rear) rows. Each falls
+  /// back to [pricePerSeat] when null. [doubleSofaPrice] is the WHOLE double-sofa
+  /// price (covers both berths), so one berth is half of it.
+  final double? singleSofaPrice;
+  final double? doubleSofaPrice;
+  final double? seaterPrice;
+
+  /// Rear-zone pricing. The last [rearRows] rows of the layout form a "rear zone"
+  /// priced at [rearPrice] PER PERSON (a whole double sofa there = 2 × rearPrice).
+  /// [rearRows] == 0 (or a null [rearPrice]) means no rear zone — every row uses
+  /// the base/override pricing. The rear zone takes precedence over per-type
+  /// overrides for the rows it covers.
+  final int rearRows;
+  final double? rearPrice;
+
   final String? notes;
   final BusLayout? layout;
   final DateTime createdAt;
@@ -48,13 +66,18 @@ class Bus {
     this.busType = 'Semi-Sleeper',
     this.totalSeatsLegacy = 0,
     this.pricePerSeat = 0,
+    this.singleSofaPrice,
+    this.doubleSofaPrice,
+    this.seaterPrice,
+    this.rearRows = 0,
+    this.rearPrice,
     this.notes,
     this.layout,
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : id = id ?? const Uuid().v4(),
-        createdAt = createdAt ?? DateTime.now(),
-        updatedAt = updatedAt ?? DateTime.now();
+  }) : id = id ?? const Uuid().v4(),
+       createdAt = createdAt ?? DateTime.now(),
+       updatedAt = updatedAt ?? DateTime.now();
 
   /// Parsed bus type enum. The underlying `busType` string is kept on the
   /// Appwrite document for forward compatibility with arbitrary type names
@@ -96,6 +119,11 @@ class Bus {
       'bus_type': busType,
       'total_seats': totalSeatsLegacy,
       'price_per_seat': pricePerSeat,
+      'single_sofa_price': singleSofaPrice,
+      'double_sofa_price': doubleSofaPrice,
+      'seater_price': seaterPrice,
+      'rear_rows': rearRows,
+      'rear_price': rearPrice,
       'notes': notes,
       'layout': layout?.toMap(),
       'created_at': createdAt.toIso8601String(),
@@ -120,6 +148,11 @@ class Bus {
       busType: map['bus_type'] as String? ?? 'Semi-Sleeper',
       totalSeatsLegacy: map['total_seats'] as int? ?? 0,
       pricePerSeat: (map['price_per_seat'] as num?)?.toDouble() ?? 0,
+      singleSofaPrice: (map['single_sofa_price'] as num?)?.toDouble(),
+      doubleSofaPrice: (map['double_sofa_price'] as num?)?.toDouble(),
+      seaterPrice: (map['seater_price'] as num?)?.toDouble(),
+      rearRows: (map['rear_rows'] as num?)?.toInt() ?? 0,
+      rearPrice: (map['rear_price'] as num?)?.toDouble(),
       notes: map['notes'] as String?,
       layout: _parseLayout(map['layout']),
       createdAt: _parseDate(map['created_at']),
@@ -164,6 +197,11 @@ class Bus {
     String? busType,
     int? totalSeatsLegacy,
     double? pricePerSeat,
+    double? singleSofaPrice,
+    double? doubleSofaPrice,
+    double? seaterPrice,
+    int? rearRows,
+    double? rearPrice,
     String? notes,
     BusLayout? layout,
   }) {
@@ -181,11 +219,85 @@ class Bus {
       busType: busType ?? this.busType,
       totalSeatsLegacy: totalSeatsLegacy ?? this.totalSeatsLegacy,
       pricePerSeat: pricePerSeat ?? this.pricePerSeat,
+      singleSofaPrice: singleSofaPrice ?? this.singleSofaPrice,
+      doubleSofaPrice: doubleSofaPrice ?? this.doubleSofaPrice,
+      seaterPrice: seaterPrice ?? this.seaterPrice,
+      rearRows: rearRows ?? this.rearRows,
+      rearPrice: rearPrice ?? this.rearPrice,
       notes: notes ?? this.notes,
       layout: layout ?? this.layout,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
     );
+  }
+
+  // ── Fare calculation ──────────────────────────────────────
+
+  /// Per-person (per-berth) price for a seat of [type] sitting in [row], BEFORE
+  /// the trip-type factor. Pricing is per person and driven by row position:
+  ///
+  ///   1. Rear zone — when [row] is among the last [rearRows] rows and
+  ///      [rearPrice] is set, every berth there costs [rearPrice] regardless of
+  ///      seat type (so a WHOLE double sofa in the rear zone = 2 × rearPrice,
+  ///      because it is two assignment entries). Rear pricing wins over per-type
+  ///      overrides for the rows it covers.
+  ///   2. Front rows — a per-type override when set, otherwise [pricePerSeat].
+  ///      [doubleSofaPrice] is the WHOLE-sofa override, so one berth is half of
+  ///      it; with no override a double berth is the full per-person base price
+  ///      (a whole double sofa therefore costs 2 × [pricePerSeat]).
+  double berthPriceFor(SeatType type, int row) {
+    final l = layout;
+    if (l != null && rearRows > 0 && rearPrice != null && row >= l.rows - rearRows) {
+      return rearPrice!;
+    }
+    switch (type) {
+      case SeatType.singleSofa:
+        return singleSofaPrice ?? pricePerSeat;
+      case SeatType.doubleSofa:
+        return doubleSofaPrice != null ? doubleSofaPrice! / 2 : pricePerSeat;
+      case SeatType.seater:
+        return seaterPrice ?? pricePerSeat;
+    }
+  }
+
+  /// Round trip pays full; a single leg (outbound-only / return-only) pays half.
+  static double tripFactor(TripType t) => t == TripType.roundTrip ? 1.0 : 0.5;
+
+  /// Total a passenger owes for the berths they hold ON THIS bus, after the
+  /// trip-type factor. Handles whole-double (two SeatAssignment entries on the
+  /// same seatId => 2 berths) and shared-double (one entry => 1 berth)
+  /// automatically because we sum per assignment entry.
+  double amountDueFor(Passenger passenger) {
+    final l = layout;
+    if (l == null) return 0;
+    final cellById = <String, SeatCell>{};
+    for (final c in l.grid) {
+      final sid = c.seatId;
+      if (sid != null && c.seatType != null) cellById[sid] = c;
+    }
+    double sum = 0;
+    for (final a in passenger.assignedSeats) {
+      if (a.busId != id) continue;
+      final c = cellById[a.seatId];
+      if (c == null) continue;
+      sum += berthPriceFor(c.seatType!, c.row);
+    }
+    return sum * tripFactor(passenger.tripType);
+  }
+
+  /// Amount due for one assigned seat/berth on this bus, after the trip factor.
+  /// Collection rows are tracked per assignment entry, so a whole double sofa
+  /// (two entries on the same seatId) is charged twice — once per berth.
+  double amountDueForSeat(Passenger passenger, String seatId) {
+    final l = layout;
+    if (l == null) return 0;
+    final baseSeatId = seatId.split('#').first;
+    for (final c in l.grid) {
+      if (c.seatId == baseSeatId && c.seatType != null) {
+        return berthPriceFor(c.seatType!, c.row) * tripFactor(passenger.tripType);
+      }
+    }
+    return 0;
   }
 
   @override

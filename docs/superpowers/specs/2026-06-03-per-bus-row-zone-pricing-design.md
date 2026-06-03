@@ -133,6 +133,14 @@ No changes required in `collection_screen.dart` or `handler_bus_chart_screen.dar
 the new resolution automatically. Each `Collection.amountDue` is still computed and
 stored at collection time, so settlement math stays correct.
 
+**One server-side exception (handler manifest).** The handler app builds its `Bus`
+objects from the `handler_tour_manifest()` RPC's per-bus JSON, which did **not**
+include the new columns — so handlers would have priced every rear-zone seat at the
+base price. Migration `006_handler_manifest_rear_zone.sql` re-creates the function
+with `rear_rows` / `rear_price` added to the buses payload (mirrored in
+`database.sql`). `Bus.fromMap` already parses the fields, so no Dart change is
+needed on the handler side.
+
 > **Implementation check — whole double sofas.** A whole double sofa is two
 > assignment entries on the same `seatId`. `amountDueForSeat()` returns the
 > *per-berth* price, so the two entries must each contribute (2 × per-person total)

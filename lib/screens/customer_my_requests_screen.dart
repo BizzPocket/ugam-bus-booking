@@ -10,6 +10,7 @@ import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
+import 'handler_bus_chart_screen.dart';
 
 /// Customer-facing list of every booking request submitted from this
 /// device — image-5 fidelity.
@@ -40,10 +41,33 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   List<CustomerRequestEntry> _entries = const [];
   _StatusFilter _filter = _StatusFilter.all;
 
+  /// Cached handler status per request id. Populated once per entry set so the
+  /// `isRequestHandler` RPC is not re-fired on every rebuild.
+  final Map<String, bool> _handlerStatus = {};
+
   @override
   void initState() {
     super.initState();
     _bootstrap();
+  }
+
+  /// Resolves handler status for any entries we haven't checked yet and caches
+  /// the result. Safe to call repeatedly — already-resolved ids are skipped.
+  Future<void> _resolveHandlers(List<CustomerRequestEntry> entries) async {
+    final pending =
+        entries.where((e) => !_handlerStatus.containsKey(e.id)).toList();
+    if (pending.isEmpty) return;
+    for (final e in pending) {
+      try {
+        final isHandler = await _store.isRequestHandler(e.id);
+        if (!mounted) return;
+        _handlerStatus[e.id] = isHandler;
+      } catch (_) {
+        if (!mounted) return;
+        _handlerStatus[e.id] = false;
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   // ─── DATA LAYER — PRESERVED ────────────────────────────────────────
@@ -55,6 +79,7 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       _entries = cached;
       _loading = false;
     });
+    _resolveHandlers(cached);
     _refresh();
   }
 
@@ -65,6 +90,7 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       final fresh = await _store.refreshAll();
       if (!mounted) return;
       setState(() => _entries = fresh);
+      _resolveHandlers(fresh);
     } catch (_) {
       // Cached list is still usable.
     } finally {
@@ -203,8 +229,12 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                                     height: UgamSpacing.sm + 2),
                                 itemBuilder: (_, i) => _RequestRow(
                                   entry: _visible[i],
+                                  isHandler:
+                                      _handlerStatus[_visible[i].id] ?? false,
                                   onTap: () => _onRowTap(_visible[i]),
                                   onEdit: () => _openEdit(_visible[i]),
+                                  onViewChart: () =>
+                                      _openFullChart(_visible[i]),
                                 ),
                               ),
                             ),
@@ -223,6 +253,16 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       _openEdit(entry);
     }
     // Otherwise: read-only, tap is a no-op (status chip + lock copy explain).
+  }
+
+  void _openFullChart(CustomerRequestEntry entry) {
+    HapticFeedback.selectionClick();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => HandlerBusChartScreen(requestId: entry.id),
+      ),
+    );
   }
 }
 
@@ -308,13 +348,17 @@ class _TopBar extends StatelessWidget {
 
 class _RequestRow extends StatelessWidget {
   final CustomerRequestEntry entry;
+  final bool isHandler;
   final VoidCallback onTap;
   final VoidCallback onEdit;
+  final VoidCallback onViewChart;
 
   const _RequestRow({
     required this.entry,
+    required this.isHandler,
     required this.onTap,
     required this.onEdit,
+    required this.onViewChart,
   });
 
   @override
@@ -441,6 +485,10 @@ class _RequestRow extends StatelessWidget {
                 c: c,
                 onEdit: onEdit,
               ),
+            ],
+            if (isHandler) ...[
+              const SizedBox(height: UgamSpacing.sm + 2),
+              _HandlerChartButton(c: c, onTap: onViewChart),
             ],
           ],
         ),
@@ -579,6 +627,49 @@ class _RowFooter extends StatelessWidget {
             Icon(Icons.sticky_note_2_outlined, size: 14, color: c.ink3),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Handler-only affordance: opens the full bus chart for this request.
+/// Rendered only when `isRequestHandler` resolved true for the entry.
+class _HandlerChartButton extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _HandlerChartButton({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.sm + 2,
+        ),
+        decoration: BoxDecoration(
+          color: c.accent,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.grid_view_rounded, size: 16, color: c.onAccent),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: Text(
+                tr('customer_my_requests.view_full_chart'),
+                style: UgamText.bodyStrong
+                    .copyWith(color: c.onAccent, fontSize: 12.5),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: c.onAccent),
+          ],
+        ),
       ),
     );
   }

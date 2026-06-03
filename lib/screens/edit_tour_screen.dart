@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -24,6 +26,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
   DateTime? _returnDate;
   final _formKey = GlobalKey<FormState>();
   bool _saving = false;
+  Timer? _fieldDebounce;
 
   // Originals captured at initState — used to detect dirty state and
   // to power the "Cancel changes" action.
@@ -63,7 +66,10 @@ class _EditTourScreenState extends State<EditTourScreen> {
   }
 
   void _onFieldChanged() {
-    if (mounted) setState(() {});
+    _fieldDebounce?.cancel();
+    _fieldDebounce = Timer(const Duration(milliseconds: 90), () {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -73,6 +79,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
     _toCtrl.removeListener(_onFieldChanged);
     _priceCtrl.removeListener(_onFieldChanged);
     _descCtrl.removeListener(_onFieldChanged);
+    _fieldDebounce?.cancel();
     _titleCtrl.dispose();
     _fromCtrl.dispose();
     _toCtrl.dispose();
