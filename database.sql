@@ -18,6 +18,9 @@
 
 drop trigger if exists on_auth_user_created on auth.users;
 
+drop table if exists public.bus_handovers     cascade;
+drop table if exists public.expenses          cascade;
+drop table if exists public.collections       cascade;
 drop table if exists public.booking_requests  cascade;
 drop table if exists public.admin_contacts    cascade;
 drop table if exists public.passengers        cascade;
@@ -103,7 +106,8 @@ set search_path = public
 as $$
   select a.id, a.phone, a.name
     from public.admins a
-   where a.phone = p_phone
+   where right(regexp_replace(a.phone, '\D', '', 'g'), 10)
+       = right(regexp_replace(p_phone, '\D', '', 'g'), 10)
    limit 1;
 $$;
 
@@ -171,6 +175,15 @@ create table public.buses (
   bus_type        text not null default 'Semi-Sleeper',
   total_seats     int  not null default 0,
   price_per_seat  numeric(10, 2) not null default 0,
+  -- Optional rear-zone pricing: the last `rear_rows` rows are charged at
+  -- `rear_price` per person instead of price_per_seat. rear_rows = 0 means
+  -- no rear zone; rear_price null means rear rows fall back to the base price.
+  rear_rows         integer not null default 0,
+  rear_price        numeric(10, 2),
+  -- Optional per-seat-type overrides; null means fall back to price_per_seat.
+  single_sofa_price numeric(10, 2),
+  double_sofa_price numeric(10, 2),
+  seater_price      numeric(10, 2),
   notes           text,
   layout          jsonb,
   created_at      timestamptz not null default now(),
@@ -193,6 +206,31 @@ create policy "buses_owner_all" on public.buses for all to authenticated
 
 
 -- ============================================================
+-- 4b. passenger_groups
+--    Cross-booking groups that must ride the same bus.
+--    Mirrors PassengerGroup.toMap() in lib/models/passenger_group.dart
+-- ============================================================
+
+create table public.passenger_groups (
+  id          uuid primary key default gen_random_uuid(),
+  tour_id     uuid not null references public.tours(id) on delete cascade,
+  label       text not null,
+  color_index int  not null default 0,
+  created_at  timestamptz not null default now()
+);
+
+create index passenger_groups_tour_idx on public.passenger_groups(tour_id);
+
+alter table public.passenger_groups enable row level security;
+create policy "passenger_groups_owner_all" on public.passenger_groups
+  for all to authenticated
+  using (exists (select 1 from public.tours t
+                  where t.id = passenger_groups.tour_id and t.owner_id = auth.uid()))
+  with check (exists (select 1 from public.tours t
+                       where t.id = passenger_groups.tour_id and t.owner_id = auth.uid()));
+
+
+-- ============================================================
 -- 5. passengers
 --    Columns mirror Passenger.toMap() in lib/models/passenger.dart
 -- ============================================================
@@ -204,18 +242,23 @@ create table public.passengers (
   name            text not null,
   phone           text not null,
   age_group       text not null default 'adult',
+  trip_type       text not null default 'roundTrip',
   request_lines   jsonb not null default '[]'::jsonb,
   assigned_seats  jsonb not null default '[]'::jsonb,
   payment_status  text not null default 'notPaid',
   is_handler      boolean not null default false,
   is_waitlisted   boolean not null default false,
   note            text,
+  group_id        uuid references public.passenger_groups(id) on delete set null,
+  priority_status text not null default 'none',
+  priority_reason text,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
 
 create index passengers_tour_idx on public.passengers(tour_id);
 create index passengers_user_idx on public.passengers(user_id);
+create index passengers_group_idx on public.passengers(tour_id, group_id);
 
 -- Idempotency: re-submitting from the customer app updates the same row.
 create unique index passengers_tour_phone_unique
@@ -427,6 +470,35 @@ revoke all on function public.bus_layouts_for_request(uuid) from public;
 grant execute on function public.bus_layouts_for_request(uuid)
   to anon, authenticated;
 
+-- READ: is the caller's booking request owned by a tour handler?
+-- A handler is a passenger (matched by tour_id + customer_phone) flagged
+-- is_handler = true. Returns false (never errors) for unknown request ids.
+create or replace function public.is_request_handler(p_request_id uuid)
+returns boolean
+language sql security definer set search_path = public
+as $$
+  select coalesce(
+    exists (
+      select 1
+        from public.booking_requests br
+        join public.passengers p
+          on p.tour_id = br.tour_id
+         and p.phone   = br.customer_phone
+       where br.id = p_request_id
+         and p.is_handler = true
+    ),
+    false
+  );
+$$;
+
+revoke all on function public.is_request_handler(uuid) from public;
+grant execute on function public.is_request_handler(uuid)
+  to anon, authenticated;
+
+-- NOTE: handler_tour_manifest + handler_upsert_collection are defined further
+-- down, immediately after the public.collections table, because the manifest's
+-- SQL body references public.collections and must be created after it exists.
+
 -- UPDATE: customer edits their own pending request.
 -- Server enforces both gates:
 --   1) booking_requests.status must still be 'pending'
@@ -499,6 +571,287 @@ grant execute on function public.booking_request_customer_update(uuid, int, text
 
 
 -- ============================================================
+-- 7.1 collections  (one row per passenger+bus+seat money record)
+--     amount due / received / refunded for a passenger on a bus.
+--     Tour-scoped child table: RLS via the tours-owner join.
+-- ============================================================
+
+create table public.collections (
+  id              uuid primary key default gen_random_uuid(),
+  tour_id         uuid not null references public.tours(id) on delete cascade,
+  bus_id          uuid not null references public.buses(id) on delete cascade,
+  passenger_id    uuid not null references public.passengers(id) on delete cascade,
+  seat_id         text not null default '',
+  amount_due      numeric(10, 2) not null default 0,
+  amount_received numeric(10, 2) not null default 0,
+  amount_refunded numeric(10, 2) not null default 0,
+  note            text,
+  collected_by    text,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create unique index collections_passenger_bus_seat_unique
+  on public.collections(passenger_id, bus_id, seat_id);
+create index collections_tour_idx on public.collections(tour_id);
+create index collections_bus_idx  on public.collections(bus_id);
+
+create trigger collections_set_updated_at before update on public.collections
+  for each row execute function public.set_updated_at();
+
+alter table public.collections enable row level security;
+create policy "collections_owner_all" on public.collections
+  for all to authenticated
+  using (exists (select 1 from public.tours t
+                 where t.id = collections.tour_id and t.owner_id = auth.uid()))
+  with check (exists (select 1 from public.tours t
+                      where t.id = collections.tour_id and t.owner_id = auth.uid()));
+
+
+-- READ: full tour manifest (all buses + all passengers + collections) for a
+-- handler, money-aware. Same gating/ordering/coalesce as the original; the
+-- buses payload also carries price_per_seat + the three per-seat-type prices,
+-- each passenger carries trip_type + request_lines, and a top-level
+-- "collections" array carries the whole tour's money rows — the figures the
+-- handler app needs to compute what each passenger owes. NULL for non-handler
+-- (or unknown) requests; empty arrays come back as []. Defined here (after the
+-- collections table) because the SQL body references public.collections.
+create or replace function public.handler_tour_manifest(p_request_id uuid)
+returns jsonb
+language sql security definer set search_path = public
+as $$
+  with req as (
+    select br.tour_id, br.customer_phone
+      from public.booking_requests br
+     where br.id = p_request_id
+  )
+  select case
+    when not public.is_request_handler(p_request_id) then null
+    else jsonb_build_object(
+      'buses', coalesce(
+        (
+          select jsonb_agg(
+                   jsonb_build_object(
+                     'id',                b.id,
+                     'tour_id',           b.tour_id,
+                     'name',              b.name,
+                     'registration_no',   b.registration_no,
+                     'bus_type',          b.bus_type,
+                     'total_seats',       b.total_seats,
+                     'layout',            b.layout,
+                     'price_per_seat',    b.price_per_seat,
+                     'single_sofa_price', b.single_sofa_price,
+                     'double_sofa_price', b.double_sofa_price,
+                     'seater_price',      b.seater_price
+                   )
+                   order by b.name
+                 )
+            from public.buses b
+            join req on req.tour_id = b.tour_id
+        ),
+        '[]'::jsonb
+      ),
+      'passengers', coalesce(
+        (
+          select jsonb_agg(
+                   jsonb_build_object(
+                     'id',             p.id,
+                     'tour_id',        p.tour_id,
+                     'name',           p.name,
+                     'phone',          p.phone,
+                     'age_group',      p.age_group,
+                     'assigned_seats', p.assigned_seats,
+                     'is_handler',     p.is_handler,
+                     'trip_type',      p.trip_type,
+                     'request_lines',  p.request_lines
+                   )
+                   order by p.name
+                 )
+            from public.passengers p
+            join req on req.tour_id = p.tour_id
+        ),
+        '[]'::jsonb
+      ),
+      'collections', coalesce(
+        (
+          select jsonb_agg(
+                   jsonb_build_object(
+                     'id',              col.id,
+                     'tour_id',         col.tour_id,
+                     'bus_id',          col.bus_id,
+                     'passenger_id',    col.passenger_id,
+                     'seat_id',         col.seat_id,
+                     'amount_due',      col.amount_due,
+                     'amount_received', col.amount_received,
+                     'amount_refunded', col.amount_refunded,
+                     'note',            col.note,
+                     'collected_by',    col.collected_by,
+                     'created_at',      col.created_at,
+                     'updated_at',      col.updated_at
+                   )
+                   order by col.created_at
+                 )
+            from public.collections col
+            join req on req.tour_id = col.tour_id
+        ),
+        '[]'::jsonb
+      )
+    )
+  end;
+$$;
+
+revoke all on function public.handler_tour_manifest(uuid) from public;
+grant execute on function public.handler_tour_manifest(uuid)
+  to anon, authenticated;
+
+-- WRITE: a handler records cash for one (passenger, bus) pair. Takes the
+-- collection as a jsonb payload; the server always uses its own resolved
+-- tour_id (p_collection->>'tour_id' is ignored) and defensively verifies the
+-- target passenger + bus belong to the handler's own tour. Conflict target is
+-- the collections_passenger_bus_seat_unique index. Returns the upserted row as
+-- jsonb, or NULL when the caller is not a handler / the target is out of tour.
+create or replace function public.handler_upsert_collection(
+  p_request_id uuid,
+  p_collection jsonb
+)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_tour_id      uuid;
+  v_bus_id       uuid;
+  v_passenger_id uuid;
+  v_seat_id      text;
+  v_id           uuid;
+  v_row          public.collections;
+begin
+  if not public.is_request_handler(p_request_id) then
+    return null;
+  end if;
+
+  select br.tour_id into v_tour_id
+    from public.booking_requests br
+   where br.id = p_request_id;
+
+  v_bus_id       := (p_collection->>'bus_id')::uuid;
+  v_passenger_id := (p_collection->>'passenger_id')::uuid;
+  v_seat_id      := coalesce(nullif(p_collection->>'seat_id', ''), '');
+  v_id           := coalesce(nullif(p_collection->>'id', '')::uuid, gen_random_uuid());
+
+  if not exists (
+    select 1 from public.passengers p
+     where p.id = v_passenger_id and p.tour_id = v_tour_id
+  ) then
+    return null;
+  end if;
+
+  if not exists (
+    select 1 from public.buses b
+     where b.id = v_bus_id and b.tour_id = v_tour_id
+  ) then
+    return null;
+  end if;
+
+  insert into public.collections (
+    id, tour_id, bus_id, passenger_id, seat_id,
+    amount_due, amount_received, amount_refunded, note, collected_by
+  )
+  values (
+    v_id, v_tour_id, v_bus_id, v_passenger_id, v_seat_id,
+    coalesce((p_collection->>'amount_due')::numeric, 0),
+    coalesce((p_collection->>'amount_received')::numeric, 0),
+    coalesce((p_collection->>'amount_refunded')::numeric, 0),
+    nullif(p_collection->>'note', ''),
+    nullif(p_collection->>'collected_by', '')
+  )
+  on conflict (passenger_id, bus_id, seat_id) do update set
+    amount_due      = excluded.amount_due,
+    amount_received = excluded.amount_received,
+    amount_refunded = excluded.amount_refunded,
+    note            = excluded.note,
+    collected_by    = excluded.collected_by,
+    updated_at      = now()
+  returning * into v_row;
+
+  return to_jsonb(v_row);
+end;
+$$;
+
+revoke all on function public.handler_upsert_collection(uuid, jsonb) from public;
+grant execute on function public.handler_upsert_collection(uuid, jsonb)
+  to anon, authenticated;
+
+
+-- ============================================================
+-- 7.2 expenses  (per-bus line items: fuel, tolls, food, …)
+-- ============================================================
+
+create table public.expenses (
+  id          uuid primary key default gen_random_uuid(),
+  tour_id     uuid not null references public.tours(id) on delete cascade,
+  bus_id      uuid not null references public.buses(id) on delete cascade,
+  category    text not null default 'other',
+  label       text not null,
+  amount      numeric(10, 2) not null default 0,
+  paid_by     text,
+  note        text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index expenses_tour_idx on public.expenses(tour_id);
+create index expenses_bus_idx  on public.expenses(bus_id);
+
+create trigger expenses_set_updated_at before update on public.expenses
+  for each row execute function public.set_updated_at();
+
+alter table public.expenses enable row level security;
+create policy "expenses_owner_all" on public.expenses
+  for all to authenticated
+  using (exists (select 1 from public.tours t
+                 where t.id = expenses.tour_id and t.owner_id = auth.uid()))
+  with check (exists (select 1 from public.tours t
+                      where t.id = expenses.tour_id and t.owner_id = auth.uid()));
+
+
+-- ============================================================
+-- 7.3 bus_handovers  (handler→admin cash settlement events)
+--     Multiple rows per bus allowed (partial hand-overs).
+--     No updated_at column, so no set_updated_at trigger.
+-- ============================================================
+
+create table public.bus_handovers (
+  id                 uuid primary key default gen_random_uuid(),
+  tour_id            uuid not null references public.tours(id) on delete cascade,
+  bus_id             uuid not null references public.buses(id) on delete cascade,
+  expected_amount    numeric(10, 2) not null default 0,
+  handed_over_amount numeric(10, 2) not null default 0,
+  note               text,
+  settled_at         timestamptz not null default now(),
+  created_at         timestamptz not null default now()
+);
+
+create index bus_handovers_tour_idx on public.bus_handovers(tour_id);
+create index bus_handovers_bus_idx  on public.bus_handovers(bus_id);
+
+alter table public.bus_handovers enable row level security;
+create policy "bus_handovers_owner_all" on public.bus_handovers
+  for all to authenticated
+  using (exists (select 1 from public.tours t
+                 where t.id = bus_handovers.tour_id and t.owner_id = auth.uid()))
+  with check (exists (select 1 from public.tours t
+                      where t.id = bus_handovers.tour_id and t.owner_id = auth.uid()));
+
+
+-- Handler-side money for now is collections-only (see handler_upsert_collection
+-- above + the tour manifest's embedded "collections" array). Per-bus expenses
+-- and handover settlement are recorded admin-side (RLS-scoped to the tour
+-- owner). If the handler flow later needs to record expenses / handovers
+-- directly, add them here as jsonb-payload RPCs gated on is_request_handler,
+-- matching handler_upsert_collection.
+
+
+-- ============================================================
 -- 8. Auto-seed an admins row when an auth user signs up
 -- ============================================================
 
@@ -532,6 +885,11 @@ alter publication supabase_realtime add table public.buses;
 -- booking_requests is added so the admin app receives a live push when a
 -- customer submits or edits a request, instead of needing a manual refresh.
 alter publication supabase_realtime add table public.booking_requests;
+-- Money-collection tables push live so collections/expenses/hand-over edits
+-- made on one device (e.g. the handler) reflect on the admin's screen.
+alter publication supabase_realtime add table public.collections;
+alter publication supabase_realtime add table public.expenses;
+alter publication supabase_realtime add table public.bus_handovers;
 
 
 -- ============================================================
@@ -613,8 +971,8 @@ end $$;
 --     where table_schema='public'
 --     order by table_name;
 --
--- Expected tables: admin_contacts, admins, booking_requests, buses,
---                  passengers, tours
+-- Expected tables: admin_contacts, admins, booking_requests, bus_handovers,
+--                  buses, collections, expenses, passengers, tours
 --
 -- Verify the test admin exists:
 --   select a.id, a.phone, a.name, u.email
