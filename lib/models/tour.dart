@@ -2,6 +2,7 @@ import 'package:uuid/uuid.dart';
 import 'tour_status.dart';
 import 'bus_details.dart';
 import 'passenger.dart';
+import 'passenger_group.dart';
 
 /// A tour planned and managed by the agent.
 ///
@@ -28,6 +29,7 @@ class Tour {
   // Embedded by sync layer (not stored in Tour document)
   final List<Bus> buses;
   final List<Passenger> passengers;
+  final List<PassengerGroup> groups;
 
   Tour({
     String? id,
@@ -46,6 +48,7 @@ class Tour {
     this.isPublic = true,
     this.buses = const [],
     this.passengers = const [],
+    this.groups = const [],
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : id = id ?? const Uuid().v4(),
@@ -114,6 +117,14 @@ class Tour {
           .toList();
     }
 
+    List<PassengerGroup> groups = const [];
+    if (map['groups'] is List) {
+      groups = (map['groups'] as List)
+          .whereType<Map>()
+          .map((g) => PassengerGroup.fromMap(Map<String, dynamic>.from(g)))
+          .toList();
+    }
+
     return Tour(
       id: (map['id'] ?? '').toString(),
       ownerId: map['owner_id']?.toString(),
@@ -138,6 +149,7 @@ class Tour {
       isPublic: map['is_public'] is bool ? map['is_public'] as bool : true,
       buses: buses,
       passengers: passengers,
+      groups: groups,
       createdAt: _parseDate(map['created_at']),
       updatedAt: _parseDate(map['updated_at']),
     );
@@ -165,6 +177,7 @@ class Tour {
     bool? isPublic,
     List<Bus>? buses,
     List<Passenger>? passengers,
+    List<PassengerGroup>? groups,
     DateTime? updatedAt,
   }) {
     return Tour(
@@ -184,6 +197,7 @@ class Tour {
       isPublic: isPublic ?? this.isPublic,
       buses: buses ?? this.buses,
       passengers: passengers ?? this.passengers,
+      groups: groups ?? this.groups,
       createdAt: createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
     );

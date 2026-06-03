@@ -89,7 +89,15 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
         bottom: false,
         child: Column(
           children: [
-            _Header(title: _ctrl.getTour(widget.tourId)?.title ?? '', c: c),
+            _Header(
+              title: _ctrl.getTour(widget.tourId)?.title ?? '',
+              // TODO(seat-ui): groups entry.
+              onGroups: () => Get.toNamed(
+                AppRoutes.tourGroups,
+                arguments: {'tourId': widget.tourId},
+              ),
+              c: c,
+            ),
             Expanded(
               child: Obx(() {
                 final tour = _ctrl.getTour(widget.tourId);
@@ -175,9 +183,14 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
 
 class _Header extends StatelessWidget {
   final String title;
+  final VoidCallback onGroups;
   final UgamColorSet c;
 
-  const _Header({required this.title, required this.c});
+  const _Header({
+    required this.title,
+    required this.onGroups,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -211,6 +224,22 @@ class _Header extends StatelessWidget {
               style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          // Groups & priority management.
+          GestureDetector(
+            onTap: onGroups,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.groups_rounded, size: 20, color: c.ink),
             ),
           ),
         ],

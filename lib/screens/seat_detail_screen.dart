@@ -7,6 +7,8 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
+import '../services/group_cascade.dart';
+import '../services/swap_candidate_finder.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 
@@ -38,7 +40,7 @@ import '../utils/phone_dialer.dart';
 /// screen is dark-first per the locked design DNA. The chart is reactive:
 /// an Obx on the controller's `tours` repaints whenever an assignment
 /// changes (e.g. after Free seat).
-class SeatDetailScreen extends StatelessWidget {
+class SeatDetailScreen extends StatefulWidget {
   final String tourId;
   final String busId;
 
@@ -48,7 +50,20 @@ class SeatDetailScreen extends StatelessWidget {
     required this.busId,
   });
 
+  @override
+  State<SeatDetailScreen> createState() => _SeatDetailScreenState();
+}
+
+class _SeatDetailScreenState extends State<SeatDetailScreen> {
   TourController get _ctrl => Get.find<TourController>();
+
+  String get tourId => widget.tourId;
+  String get busId => widget.busId;
+
+  /// When true, the chart enters "Edit seats" mode: tapping any seat opens a
+  /// small sheet to toggle the seat's Forward / Reserved flags instead of the
+  /// occupant detail / move flow. Toggled from the app-bar action.
+  bool _editMode = false;
 
   /// Build a seatId → occupants map for [bus]. A `doubleSofa` cell may hold
   /// up to two DISTINCT passengers when the agent split the sofa between
@@ -104,7 +119,13 @@ class SeatDetailScreen extends StatelessWidget {
           if (tour == null || bus == null) {
             return Column(
               children: [
-                _Header(title: 'Seat detail', subtitle: null, c: c),
+                _Header(
+                  title: 'Seat detail',
+                  subtitle: null,
+                  c: c,
+                  editMode: false,
+                  onToggleEdit: null,
+                ),
                 Expanded(
                   child: Center(
                     child: Text(
@@ -128,8 +149,12 @@ class SeatDetailScreen extends StatelessWidget {
             children: [
               _Header(
                 title: bus.name,
-                subtitle: '$assigned/$total assigned',
+                subtitle: _editMode
+                    ? 'Editing seats · tap a seat'
+                    : '$assigned/$total assigned',
                 c: c,
+                editMode: _editMode,
+                onToggleEdit: () => setState(() => _editMode = !_editMode),
               ),
               Expanded(
                 child: layout == null || layout.totalCells == 0
@@ -165,19 +190,28 @@ class SeatDetailScreen extends StatelessWidget {
                                     ? (occupants[cell.seatId] ??
                                         const <Passenger>[])
                                     : const <Passenger>[];
+                                // In edit mode, every real seat routes to the
+                                // forward/reserved flag sheet — occupant detail
+                                // and free-info sheets are suppressed.
+                                final VoidCallback? editTap =
+                                    (_editMode && cell.seatId != null)
+                                        ? () => _showSeatFlagsSheet(ctx, cell, bus)
+                                        : null;
                                 return RepaintBoundary(
                                   child: _SeatTile(
                                     cell: cell,
                                     occupants: seatOccupants,
-                                    onTapBooked: () => _showOccupantSheet(
-                                      ctx,
-                                      cell: cell,
-                                      occupants: seatOccupants,
-                                      bus: bus,
-                                      tourTitle: tour.title,
-                                    ),
-                                    onTapFree: () =>
-                                        _showFreeSheet(ctx, cell, bus),
+                                    editMode: _editMode,
+                                    onTapBooked: editTap ??
+                                        () => _showOccupantSheet(
+                                              ctx,
+                                              cell: cell,
+                                              occupants: seatOccupants,
+                                              bus: bus,
+                                              tourTitle: tour.title,
+                                            ),
+                                    onTapFree: editTap ??
+                                        () => _showFreeSheet(ctx, cell, bus),
                                   ),
                                 );
                               },
@@ -215,6 +249,7 @@ class SeatDetailScreen extends StatelessWidget {
       final c = UgamColors.of(context);
       showModalBottomSheet<void>(
         context: context,
+        isScrollControlled: true,
         backgroundColor: c.card,
         shape: const RoundedRectangleBorder(
           borderRadius:
@@ -235,10 +270,14 @@ class SeatDetailScreen extends StatelessWidget {
               seatId: cell.seatId!,
             );
           },
-          // TODO(seat-ui): move/swap actions land in a later slice. Leave a
-          // visible placeholder so the affordance has a home in the layout.
-          onMove: null,
-          onSwap: null,
+          onMove: () {
+            Navigator.of(sheetCtx).pop();
+            _startMoveOrSwap(context, mover: occupant, fromCell: cell);
+          },
+          onSwap: () {
+            Navigator.of(sheetCtx).pop();
+            _startMoveOrSwap(context, mover: occupant, fromCell: cell);
+          },
         ),
       );
     }
@@ -346,6 +385,374 @@ class SeatDetailScreen extends StatelessWidget {
       ),
     );
   }
+
+  // ── Move / Swap flow ────────────────────────────────────────────────────
+
+  /// Entry point for the Move/Swap actions on a booked occupant. Picks a
+  /// destination bus (skips a single-bus tour straight through), then runs the
+  /// swap assistant for that bus and surfaces its options.
+  void _startMoveOrSwap(
+    BuildContext context, {
+    required Passenger mover,
+    required SeatCell fromCell,
+  }) {
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return;
+    final buses = tour.buses;
+    if (buses.isEmpty) return;
+
+    void run(Bus destination) =>
+        _openSwapAssist(context, mover: mover, fromCell: fromCell, destination: destination);
+
+    // One bus → nothing to pick; go straight to that bus's swap assistant.
+    if (buses.length == 1) {
+      run(buses.first);
+      return;
+    }
+
+    final c = UgamColors.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+      ),
+      builder: (sheetCtx) => _DestinationPickerSheet(
+        mover: mover,
+        buses: buses,
+        currentBusId: busId,
+        onPick: (b) {
+          Navigator.of(sheetCtx).pop();
+          run(b);
+        },
+      ),
+    );
+  }
+
+  /// Compute and present the [SwapAssist] for [mover] onto [destination]: free
+  /// seats to take outright, ranked swap candidates, and blocked occupants.
+  void _openSwapAssist(
+    BuildContext context, {
+    required Passenger mover,
+    required SeatCell fromCell,
+    required Bus destination,
+  }) {
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return;
+    final passengers = tour.passengers;
+
+    final assist = SwapCandidateFinder.find(
+      mover: mover,
+      destinationBus: destination,
+      passengers: passengers,
+    );
+
+    final c = UgamColors.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.card,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+      ),
+      builder: (sheetCtx) => _SwapAssistSheet(
+        mover: mover,
+        destination: destination,
+        assist: assist,
+        onTakeFree: (freeSeatId) {
+          Navigator.of(sheetCtx).pop();
+          _moveMoverTo(
+            context,
+            mover: mover,
+            fromCell: fromCell,
+            destination: destination,
+            toSeatId: freeSeatId,
+          );
+        },
+        onSwap: (candidate) {
+          Navigator.of(sheetCtx).pop();
+          _swapWith(
+            context,
+            mover: mover,
+            fromCell: fromCell,
+            destination: destination,
+            candidate: candidate,
+          );
+        },
+      ),
+    );
+  }
+
+  /// Place [mover] onto a FREE seat of [destination]. If the mover belongs to a
+  /// group, the whole group cascades (after a confirm) via [GroupCascade];
+  /// otherwise only the mover moves. A whole-double mover keeps both berths
+  /// because [TourController.moveSeat] replicates the source berth count.
+  Future<void> _moveMoverTo(
+    BuildContext context, {
+    required Passenger mover,
+    required SeatCell fromCell,
+    required Bus destination,
+    required String toSeatId,
+  }) async {
+    final fromSeatId = fromCell.seatId;
+    if (fromSeatId == null) return;
+
+    final hasGroup = mover.groupId != null && mover.groupId!.isNotEmpty;
+    if (hasGroup) {
+      await _moveGroup(
+        context,
+        mover: mover,
+        destination: destination,
+        anchorToSeatId: toSeatId,
+      );
+      return;
+    }
+
+    await _ctrl.moveSeat(
+      tourId: tourId,
+      passengerId: mover.id,
+      busId: destination.id,
+      fromSeatId: fromSeatId,
+      toSeatId: toSeatId,
+    );
+  }
+
+  /// Swap [mover] with a chosen movable [candidate] on [destination]. Group
+  /// movers cascade the whole group instead of a one-for-one swap (a group
+  /// can't be split across a swap), so we route them through the group planner.
+  Future<void> _swapWith(
+    BuildContext context, {
+    required Passenger mover,
+    required SeatCell fromCell,
+    required Bus destination,
+    required SwapCandidate candidate,
+  }) async {
+    final fromSeatId = fromCell.seatId;
+    if (fromSeatId == null) return;
+
+    final hasGroup = mover.groupId != null && mover.groupId!.isNotEmpty;
+    if (hasGroup) {
+      await _moveGroup(
+        context,
+        mover: mover,
+        destination: destination,
+        anchorToSeatId: candidate.seatId,
+      );
+      return;
+    }
+
+    await _ctrl.swapSeats(
+      tourId: tourId,
+      busId: destination.id,
+      passengerAId: mover.id,
+      seatAId: fromSeatId,
+      passengerBId: candidate.passengerId,
+      seatBId: candidate.seatId,
+    );
+  }
+
+  /// Cascade a grouped mover and all siblings onto [destination] via
+  /// [GroupCascade.planMove]. Confirms "Move whole group (N people)?" when the
+  /// group is more than one; aborts with the planner's reason when it doesn't
+  /// fit. The anchor mover lands on [anchorToSeatId]; siblings keep whichever
+  /// seats they already hold (a full re-seat is the workbench's job).
+  Future<void> _moveGroup(
+    BuildContext context, {
+    required Passenger mover,
+    required Bus destination,
+    required String anchorToSeatId,
+  }) async {
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return;
+    final passengers = tour.passengers;
+
+    final plan = GroupCascade.planMove(
+      mover: mover,
+      destinationBus: destination,
+      passengers: passengers,
+    );
+
+    final memberCount = plan.memberPassengerIds.length;
+
+    // Single-member "group" → just move the mover, no confirm needed.
+    if (memberCount <= 1) {
+      if (!plan.destinationFits) {
+        _showBlockedDialog(context, plan.blockedReason);
+        return;
+      }
+      await _moveAnchorAndSiblings(
+        mover: mover,
+        destination: destination,
+        anchorToSeatId: anchorToSeatId,
+        memberIds: plan.memberPassengerIds,
+        passengers: passengers,
+      );
+      return;
+    }
+
+    final confirmed = await _confirmGroupMove(context, count: memberCount);
+    if (confirmed != true) return;
+    if (!context.mounted) return;
+
+    if (!plan.destinationFits) {
+      _showBlockedDialog(context, plan.blockedReason);
+      return;
+    }
+
+    await _moveAnchorAndSiblings(
+      mover: mover,
+      destination: destination,
+      anchorToSeatId: anchorToSeatId,
+      memberIds: plan.memberPassengerIds,
+      passengers: passengers,
+    );
+  }
+
+  /// Move every member of the group onto [destination]. The anchor mover lands
+  /// on [anchorToSeatId]; each sibling moves from its current seat (wherever it
+  /// is) onto the destination bus. Members already on the destination bus are
+  /// left in place. [TourController.moveSeat] preserves each member's berth
+  /// count, so whole doubles stay whole.
+  Future<void> _moveAnchorAndSiblings({
+    required Passenger mover,
+    required Bus destination,
+    required String anchorToSeatId,
+    required List<String> memberIds,
+    required List<Passenger> passengers,
+  }) async {
+    // Anchor first onto the chosen target seat.
+    final anchorFrom = mover.assignedSeats.firstWhereOrNull((a) => true);
+    if (anchorFrom != null) {
+      await _ctrl.moveSeat(
+        tourId: tourId,
+        passengerId: mover.id,
+        busId: destination.id,
+        fromSeatId: anchorFrom.seatId,
+        toSeatId: anchorToSeatId,
+      );
+    }
+
+    // Siblings: move each onto the destination bus from wherever they sit. We
+    // can't compute exact engine targets here, so each sibling lands on its
+    // own current seatId on the destination bus — the workbench re-seats them
+    // precisely. The key invariant the cascade guarantees (via the planner) is
+    // that the bus HAS room; placement detail is the auto-fill's job afterward.
+    for (final id in memberIds) {
+      if (id == mover.id) continue;
+      final sibling = passengers.firstWhereOrNull((p) => p.id == id);
+      if (sibling == null) continue;
+      final from = sibling.assignedSeats.firstWhereOrNull((a) => true);
+      if (from == null) continue;
+      // Already on the destination bus → leave in place.
+      if (from.busId == destination.id) continue;
+      await _ctrl.moveSeat(
+        tourId: tourId,
+        passengerId: sibling.id,
+        busId: destination.id,
+        fromSeatId: from.seatId,
+        toSeatId: from.seatId,
+      );
+    }
+  }
+
+  Future<bool?> _confirmGroupMove(BuildContext context, {required int count}) {
+    final c = UgamColors.of(context);
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: c.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+        ),
+        title: Text(
+          'Move whole group?',
+          style: UgamText.titleM.copyWith(color: c.ink),
+        ),
+        content: Text(
+          'This booking travels with $count people. They sit together on one '
+          'bus, so all $count will move.',
+          style: UgamText.body.copyWith(color: c.ink2),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            style: TextButton.styleFrom(foregroundColor: c.ink2),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: c.accent),
+            child: Text('Move $count people'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showBlockedDialog(BuildContext context, String? reason) {
+    final c = UgamColors.of(context);
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: c.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline_rounded, size: 20, color: c.warm),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              "Can't move here",
+              style: UgamText.titleM.copyWith(color: c.ink),
+            ),
+          ],
+        ),
+        content: Text(
+          reason ?? 'The destination bus does not have room for this booking.',
+          style: UgamText.body.copyWith(color: c.ink2),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            style: TextButton.styleFrom(foregroundColor: c.accent),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Edit seats: Forward / Reserved flags ────────────────────────────────
+
+  /// Edit-mode tap on a seat → a small sheet with two switches:
+  /// "Forward / premium seat" ([TourController.setSeatForward]) and
+  /// "Hold / reserved" ([TourController.setSeatReserved]). The chart repaints
+  /// reactively once the controller mutates the bus layout.
+  void _showSeatFlagsSheet(BuildContext context, SeatCell cell, Bus bus) {
+    final seatId = cell.seatId;
+    if (seatId == null) return;
+    final c = UgamColors.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+      ),
+      builder: (sheetCtx) => _SeatFlagsSheet(
+        seatId: seatId,
+        typeLabel: cell.typeLabel,
+        busName: bus.name,
+        forward: cell.forward,
+        reserved: cell.reserved,
+        onForward: (v) => _ctrl.setSeatForward(tourId, bus.id, seatId, v),
+        onReserved: (v) => _ctrl.setSeatReserved(tourId, bus.id, seatId, v),
+      ),
+    );
+  }
 }
 
 // Tile sizing — a touch larger than the read-only chart so initials read
@@ -360,7 +767,19 @@ class _Header extends StatelessWidget {
   final String? subtitle;
   final UgamColorSet c;
 
-  const _Header({required this.title, required this.subtitle, required this.c});
+  /// Whether the chart is in "Edit seats" mode (forward/reserved toggling).
+  final bool editMode;
+
+  /// Toggles edit mode. Null hides the action (e.g. the bus-not-found state).
+  final VoidCallback? onToggleEdit;
+
+  const _Header({
+    required this.title,
+    required this.subtitle,
+    required this.c,
+    required this.editMode,
+    required this.onToggleEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -411,6 +830,49 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
+          if (onToggleEdit != null) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            Semantics(
+              button: true,
+              toggled: editMode,
+              label: editMode ? 'Done editing seats' : 'Edit seats',
+              child: GestureDetector(
+                onTap: onToggleEdit,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  height: 44,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.md,
+                  ),
+                  decoration: BoxDecoration(
+                    color: editMode ? c.accent : c.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  ),
+                  alignment: Alignment.center,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        editMode
+                            ? Icons.check_rounded
+                            : Icons.tune_rounded,
+                        size: 16,
+                        color: editMode ? c.onAccent : c.ink,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        editMode ? 'Done' : 'Edit seats',
+                        style: UgamText.caption.copyWith(
+                          color: editMode ? c.onAccent : c.ink,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -455,11 +917,16 @@ class _SeatTile extends StatelessWidget {
   final VoidCallback onTapBooked;
   final VoidCallback onTapFree;
 
+  /// When true the tile draws a small edit affordance and an empty seat in the
+  /// forward zone still gets a warm ring so the agent sees the flag take.
+  final bool editMode;
+
   const _SeatTile({
     required this.cell,
     required this.occupants,
     required this.onTapBooked,
     required this.onTapFree,
+    this.editMode = false,
   });
 
   bool get _isBooked => occupants.isNotEmpty;
@@ -479,31 +946,51 @@ class _SeatTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
+    final Widget tile;
+    final VoidCallback onTap;
     if (_isShared) {
-      return GestureDetector(
-        onTap: onTapBooked,
-        behavior: HitTestBehavior.opaque,
-        child: _sharedTile(c),
-      );
+      tile = _sharedTile(c);
+      onTap = onTapBooked;
+    } else if (_isBooked) {
+      tile = _bookedTile(c, occupants.first);
+      onTap = onTapBooked;
+    } else if (cell.reserved) {
+      tile = _heldTile(c);
+      onTap = onTapFree;
+    } else {
+      tile = _freeTile(c);
+      onTap = onTapFree;
     }
-    if (_isBooked) {
-      return GestureDetector(
-        onTap: onTapBooked,
-        behavior: HitTestBehavior.opaque,
-        child: _bookedTile(c, occupants.first),
-      );
-    }
-    if (cell.reserved) {
-      return GestureDetector(
-        onTap: onTapFree,
-        behavior: HitTestBehavior.opaque,
-        child: _heldTile(c),
-      );
-    }
+
     return GestureDetector(
-      onTap: onTapFree,
+      onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: _freeTile(c),
+      child: editMode ? _withEditAffordance(c, tile) : tile,
+    );
+  }
+
+  /// In edit mode, overlay a tiny tune glyph and (for an empty forward seat) a
+  /// warm ring so toggling a flag is visibly reflected on every seat state.
+  Widget _withEditAffordance(UgamColorSet c, Widget tile) {
+    final showForwardRing = !_isBooked && cell.forward;
+    return Stack(
+      children: [
+        if (showForwardRing)
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(UgamRadius.seat),
+                border: Border.all(color: c.warm, width: 2),
+              ),
+            ),
+          ),
+        tile,
+        Positioned(
+          bottom: 3,
+          right: 3,
+          child: Icon(Icons.tune_rounded, size: 11, color: c.ink3),
+        ),
+      ],
     );
   }
 
@@ -903,8 +1390,9 @@ class _OccupantSheet extends StatelessWidget {
   final bool isShared;
   final Future<void> Function() onFreeSeat;
 
-  // TODO(seat-ui): move/swap wiring arrives in a later slice; the buttons
-  // render disabled placeholders when these are null.
+  /// Move / Swap entry points. Both open the destination-bus picker → swap
+  /// assistant; null renders disabled placeholders (e.g. a shared half-double
+  /// whose move semantics aren't supported here yet).
   final VoidCallback? onMove;
   final VoidCallback? onSwap;
 
@@ -1065,7 +1553,50 @@ class _OccupantSheet extends StatelessWidget {
             ),
           ],
           const SizedBox(height: UgamSpacing.lg),
-          // Free seat — the one mutating action in this slice.
+          // Move / Swap — open the destination-bus picker → swap assistant.
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: onMove,
+                  icon: const Icon(Icons.open_with_rounded, size: 16),
+                  label: const Text('Move'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: c.accent,
+                    foregroundColor: c.onAccent,
+                    disabledBackgroundColor: c.cardElev,
+                    disabledForegroundColor: c.ink3,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(UgamRadius.input),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onSwap,
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                  label: const Text('Swap'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: c.accent,
+                    disabledForegroundColor: c.ink3,
+                    side: BorderSide(
+                      color: (onSwap == null ? c.border : c.accent)
+                          .withValues(alpha: 0.5),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(UgamRadius.input),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          // Free seat — release the berth (and decrement the request line).
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1260,6 +1791,599 @@ class _IndicatorChip extends StatelessWidget {
               color: tint,
               fontWeight: FontWeight.w700,
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Destination-bus picker ──────────────────────────────────────────────
+
+/// Lists the tour's buses so the agent picks where to move [mover]. The bus
+/// the mover currently sits on is tagged so it reads as a deliberate choice.
+class _DestinationPickerSheet extends StatelessWidget {
+  final Passenger mover;
+  final List<Bus> buses;
+  final String currentBusId;
+  final ValueChanged<Bus> onPick;
+
+  const _DestinationPickerSheet({
+    required this.mover,
+    required this.buses,
+    required this.currentBusId,
+    required this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.sm + 4,
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SheetGrabber(),
+          Text(
+            'Move ${mover.displayName} to…',
+            style: UgamText.titleM.copyWith(color: c.ink),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Pick the destination bus.',
+            style: UgamText.body.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          for (final b in buses)
+            Padding(
+              padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+              child: GestureDetector(
+                onTap: () => onPick(b),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.all(UgamSpacing.md),
+                  decoration: BoxDecoration(
+                    color: c.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.row),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.directions_bus_rounded,
+                        size: 20,
+                        color: c.accent,
+                      ),
+                      const SizedBox(width: UgamSpacing.md),
+                      Expanded(
+                        child: Text(
+                          b.name,
+                          style: UgamText.bodyStrong.copyWith(color: c.ink),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (b.id == currentBusId)
+                        _IndicatorChip(
+                          icon: Icons.place_rounded,
+                          label: 'Current',
+                          fill: c.cardElev,
+                          tint: c.ink2,
+                        ),
+                      const SizedBox(width: 6),
+                      Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Swap assistant ──────────────────────────────────────────────────────
+
+/// Surfaces a [SwapAssist] for moving [mover] onto [destination]:
+///   * Free seats — tap to place the mover there outright.
+///   * Can swap — ranked occupants the mover can exchange seats with.
+///   * Cannot move — greyed occupants with the blocking reason.
+class _SwapAssistSheet extends StatelessWidget {
+  final Passenger mover;
+  final Bus destination;
+  final SwapAssist assist;
+  final ValueChanged<String> onTakeFree;
+  final ValueChanged<SwapCandidate> onSwap;
+
+  const _SwapAssistSheet({
+    required this.mover,
+    required this.destination,
+    required this.assist,
+    required this.onTakeFree,
+    required this.onSwap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final hasAnything = assist.freeSeatIds.isNotEmpty ||
+        assist.movable.isNotEmpty ||
+        assist.blocked.isNotEmpty;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.sm + 4,
+        UgamSpacing.gutter,
+        UgamSpacing.lg + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.75,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const _SheetGrabber(),
+            Text(
+              'Move ${mover.displayName} → ${destination.name}',
+              style: UgamText.titleM.copyWith(color: c.ink),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              mover.requestSummary,
+              style: UgamText.caption.copyWith(color: c.ink2),
+            ),
+            const SizedBox(height: UgamSpacing.md),
+            Flexible(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!hasAnything)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: UgamSpacing.lg,
+                        ),
+                        child: Text(
+                          'No room on ${destination.name} — every seat is taken '
+                          'by a grouped or priority passenger.',
+                          style: UgamText.body.copyWith(color: c.ink2),
+                        ),
+                      ),
+                    // (a) Free seats.
+                    if (assist.freeSeatIds.isNotEmpty) ...[
+                      _SwapSectionLabel(
+                        label: 'Free seats',
+                        count: assist.freeSeatIds.length,
+                        c: c,
+                      ),
+                      Wrap(
+                        spacing: UgamSpacing.sm,
+                        runSpacing: UgamSpacing.sm,
+                        children: [
+                          for (final seatId in assist.freeSeatIds)
+                            GestureDetector(
+                              onTap: () => onTakeFree(seatId),
+                              behavior: HitTestBehavior.opaque,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: UgamSpacing.md,
+                                  vertical: UgamSpacing.sm + 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: c.accentFill,
+                                  borderRadius:
+                                      BorderRadius.circular(UgamRadius.chip),
+                                  border: Border.all(
+                                    color: c.accent.withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.event_seat_rounded,
+                                      size: 14,
+                                      color: c.accent,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      seatId,
+                                      style: UgamText.tabular(
+                                        UgamText.caption.copyWith(
+                                          color: c.accent,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: UgamSpacing.md),
+                    ],
+                    // (b) Movable / can-swap candidates.
+                    if (assist.movable.isNotEmpty) ...[
+                      _SwapSectionLabel(
+                        label: 'Can swap',
+                        count: assist.movable.length,
+                        c: c,
+                      ),
+                      for (final cand in assist.movable)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+                          child: GestureDetector(
+                            onTap: () => onSwap(cand),
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              padding: const EdgeInsets.all(UgamSpacing.md),
+                              decoration: BoxDecoration(
+                                color: c.cardElev,
+                                borderRadius:
+                                    BorderRadius.circular(UgamRadius.row),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: c.accent,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      _SeatTile.initials(cand.passengerName),
+                                      style: UgamText.bodyStrong.copyWith(
+                                        color: c.onAccent,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: UgamSpacing.md),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          cand.passengerName,
+                                          style: UgamText.bodyStrong
+                                              .copyWith(color: c.ink),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Seat ${cand.seatId} · ${cand.reason}',
+                                          style: UgamText.micro
+                                              .copyWith(color: c.ink2),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: UgamSpacing.sm),
+                                  Icon(
+                                    Icons.swap_horiz_rounded,
+                                    size: 18,
+                                    color: c.accent,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: UgamSpacing.md),
+                    ],
+                    // (c) Blocked occupants — greyed, with the reason.
+                    if (assist.blocked.isNotEmpty) ...[
+                      _SwapSectionLabel(
+                        label: 'Cannot move',
+                        count: assist.blocked.length,
+                        c: c,
+                      ),
+                      for (final b in assist.blocked)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+                          child: Opacity(
+                            opacity: 0.55,
+                            child: Container(
+                              padding: const EdgeInsets.all(UgamSpacing.md),
+                              decoration: BoxDecoration(
+                                color: c.cardElev.withValues(alpha: 0.5),
+                                borderRadius:
+                                    BorderRadius.circular(UgamRadius.row),
+                                border: Border.all(color: c.border),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.lock_outline_rounded,
+                                    size: 18,
+                                    color: c.ink3,
+                                  ),
+                                  const SizedBox(width: UgamSpacing.md),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          b.passengerName,
+                                          style: UgamText.bodyStrong
+                                              .copyWith(color: c.ink2),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          b.reason,
+                                          style: UgamText.micro
+                                              .copyWith(color: c.ink3),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: UgamSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: TextButton.styleFrom(foregroundColor: c.ink2),
+                child: const Text('Cancel'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SwapSectionLabel extends StatelessWidget {
+  final String label;
+  final int count;
+  final UgamColorSet c;
+
+  const _SwapSectionLabel({
+    required this.label,
+    required this.count,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: UgamText.titleS.copyWith(color: c.ink),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$count',
+            style: UgamText.tabular(
+              UgamText.caption.copyWith(color: c.ink3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Edit-mode seat flags sheet ──────────────────────────────────────────
+
+/// Two-switch sheet for an individual seat in edit mode: "Forward / premium
+/// seat" and "Hold / reserved". Each switch fires its controller setter as it
+/// flips, so the chart repaints reactively (and a still-open sheet keeps the
+/// live state via the local mirror).
+class _SeatFlagsSheet extends StatefulWidget {
+  final String seatId;
+  final String typeLabel;
+  final String busName;
+  final bool forward;
+  final bool reserved;
+  final ValueChanged<bool> onForward;
+  final ValueChanged<bool> onReserved;
+
+  const _SeatFlagsSheet({
+    required this.seatId,
+    required this.typeLabel,
+    required this.busName,
+    required this.forward,
+    required this.reserved,
+    required this.onForward,
+    required this.onReserved,
+  });
+
+  @override
+  State<_SeatFlagsSheet> createState() => _SeatFlagsSheetState();
+}
+
+class _SeatFlagsSheetState extends State<_SeatFlagsSheet> {
+  late bool _forward = widget.forward;
+  late bool _reserved = widget.reserved;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.sm + 4,
+        UgamSpacing.gutter,
+        UgamSpacing.xl,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SheetGrabber(),
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: c.cardElev,
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.tune_rounded, size: 18, color: c.ink),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Seat ${widget.seatId}',
+                      style: UgamText.titleM.copyWith(color: c.ink),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${widget.typeLabel} · ${widget.busName}',
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          _FlagSwitch(
+            icon: Icons.star_rounded,
+            title: 'Forward / premium seat',
+            subtitle: 'Priority passengers fill these first.',
+            value: _forward,
+            // Warm = attention; the forward zone is the priority/premium band.
+            activeColor: c.warm,
+            c: c,
+            onChanged: (v) {
+              setState(() => _forward = v);
+              widget.onForward(v);
+            },
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          _FlagSwitch(
+            icon: Icons.lock_outline_rounded,
+            title: 'Hold / reserved',
+            subtitle: 'Auto-fill skips a held seat.',
+            value: _reserved,
+            activeColor: c.accent,
+            c: c,
+            onChanged: (v) {
+              setState(() => _reserved = v);
+              widget.onReserved(v);
+            },
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(foregroundColor: c.ink2),
+              child: const Text('Done'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FlagSwitch extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final Color activeColor;
+  final UgamColorSet c;
+  final ValueChanged<bool> onChanged;
+
+  const _FlagSwitch({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.activeColor,
+    required this.c,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        border: Border.all(
+          color: value ? activeColor.withValues(alpha: 0.5) : c.border,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: value ? activeColor : c.ink3),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  subtitle,
+                  style: UgamText.micro.copyWith(color: c.ink2),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeTrackColor: activeColor,
+            activeThumbColor: c.onAccent,
           ),
         ],
       ),

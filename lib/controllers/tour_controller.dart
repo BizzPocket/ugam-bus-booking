@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart' show PostgresChangeEvent
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/passenger.dart';
+import '../models/passenger_group.dart';
+import '../models/priority_status.dart';
 import '../models/bus_details.dart';
 import '../models/payment_status.dart';
 import '../models/request_line.dart';
@@ -1100,13 +1102,235 @@ class TourController extends GetxController {
   List<Tour> toursByStatus(TourStatus status) =>
       tours.where((t) => t.status == status).toList();
 
+  /// Cross-booking groups for [tourId] (empty when the tour is unknown or
+  /// has no groups yet). Loaded by the sync layer alongside passengers/buses.
+  List<PassengerGroup> groupsForTour(String tourId) =>
+      getTour(tourId)?.groups ?? const <PassengerGroup>[];
+
   List<Tour> get activeTours =>
       tours.where((t) => t.status != TourStatus.completed).toList();
 
   List<Tour> get completedTours =>
       tours.where((t) => t.status == TourStatus.completed).toList();
 
+  // Groups (cross-booking)
+  //
+  // Groups live in their own `passenger_groups` table (one row per group,
+  // keyed by tour_id) and are embedded into Tour.groups by the sync layer.
+  // These mirror the existing offline-first CRUD shape: stage an optimistic
+  // local mutation, await the server write, and on failure pull fresh state
+  // + surface the error.
+
+  /// Create a new cross-booking group on [tourId]. Returns the new group id.
+  Future<String> createGroup(String tourId, String label,
+      {int colorIndex = 0}) async {
+    final group = PassengerGroup(
+      tourId: tourId,
+      label: label,
+      colorIndex: colorIndex,
+    );
+    _updateTourLocal(tourId, (t) {
+      final list = List<PassengerGroup>.from(t.groups)..add(group);
+      return t.copyWith(groups: list);
+    });
+    try {
+      await _sync.smartInsert(
+        table: 'passenger_groups',
+        entityId: group.id,
+        data: group.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not create group. $e', title: 'Save failed');
+      rethrow;
+    }
+    await _sync.invalidateCache(_tourCacheKey);
+    return group.id;
+  }
+
+  /// Set or clear a passenger's group membership. Pass `null` to ungroup.
+  Future<void> setPassengerGroup(
+      String tourId, String passengerId, String? groupId) async {
+    Passenger? updated;
+    _updatePassengerLocal(tourId, passengerId, (p) {
+      // copyWith uses `??`, so it can't clear group_id back to null. Build the
+      // updated passenger explicitly to allow an explicit null (ungroup).
+      updated = _passengerWithGroup(p, groupId);
+      return updated!;
+    });
+    if (updated == null) return;
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerId,
+        data: updated!.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not update group. $e',
+        title: 'Save failed',
+      );
+      rethrow;
+    }
+    await _sync.invalidateCache(_tourCacheKey);
+  }
+
+  /// Delete a group: first clears `group_id` on every member (locally and on
+  /// the server) so no passenger row dangles a reference to a deleted group,
+  /// then deletes the group row itself.
+  Future<void> deleteGroup(String tourId, String groupId) async {
+    final tour = getTour(tourId);
+    if (tour == null) return;
+
+    final members =
+        tour.passengers.where((p) => p.groupId == groupId).toList();
+
+    // Optimistic local update: clear members, drop the group row.
+    _updateTourLocal(tourId, (t) {
+      final nextPassengers = t.passengers
+          .map((p) => p.groupId == groupId ? _passengerWithGroup(p, null) : p)
+          .toList();
+      final nextGroups = t.groups.where((g) => g.id != groupId).toList();
+      return t.copyWith(passengers: nextPassengers, groups: nextGroups);
+    });
+
+    try {
+      for (final p in members) {
+        await _sync.smartUpdate(
+          table: 'passengers',
+          entityId: p.id,
+          data: _passengerWithGroup(p, null).toMap(),
+        );
+      }
+      await _sync.smartDelete(
+        table: 'passenger_groups',
+        entityId: groupId,
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not delete group. $e', title: 'Delete failed');
+      rethrow;
+    }
+    await _sync.invalidateCache(_tourCacheKey);
+  }
+
+  // Priority
+
+  /// Approve or clear a passenger's priority (front/sofa) status. `approved`
+  /// maps to [PriorityStatus.approved]; otherwise [PriorityStatus.none].
+  Future<void> setPassengerPriority(
+      String tourId, String passengerId, bool approved) async {
+    Passenger? updated;
+    _updatePassengerLocal(tourId, passengerId, (p) {
+      updated = p.copyWith(
+        priorityStatus:
+            approved ? PriorityStatus.approved : PriorityStatus.none,
+      );
+      return updated!;
+    });
+    if (updated == null) return;
+    try {
+      await _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerId,
+        data: updated!.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error(
+        'Could not update priority. $e',
+        title: 'Save failed',
+      );
+      rethrow;
+    }
+    await _sync.invalidateCache(_tourCacheKey);
+  }
+
+  // Seat flags (forward / reserved)
+  //
+  // Both flags live on individual SeatCells inside the bus layout grid, so
+  // toggling one means rebuilding that bus's layout and persisting the whole
+  // bus row — the same shape updateBus uses.
+
+  /// Toggle the "forward / premium" flag on a single seat of [busId].
+  Future<void> setSeatForward(
+          String tourId, String busId, String seatId, bool forward) =>
+      _updateSeatFlag(tourId, busId, seatId,
+          (cell) => cell.copyWith(forward: forward));
+
+  /// Toggle the "reserved / held back" flag on a single seat of [busId].
+  Future<void> setSeatReserved(
+          String tourId, String busId, String seatId, bool reserved) =>
+      _updateSeatFlag(tourId, busId, seatId,
+          (cell) => cell.copyWith(reserved: reserved));
+
   // Internals
+  /// Rebuild [Passenger] with an explicit (possibly null) group id. Needed
+  /// because [Passenger.copyWith] can't clear a field back to null.
+  Passenger _passengerWithGroup(Passenger p, String? groupId) {
+    return Passenger(
+      id: p.id,
+      tourId: p.tourId,
+      userId: p.userId,
+      name: p.name,
+      phone: p.phone,
+      ageGroup: p.ageGroup,
+      requestLines: p.requestLines,
+      assignedSeats: p.assignedSeats,
+      paymentStatus: p.paymentStatus,
+      isHandler: p.isHandler,
+      isWaitlisted: p.isWaitlisted,
+      note: p.note,
+      tripType: p.tripType,
+      groupId: groupId,
+      priorityStatus: p.priorityStatus,
+      priorityReason: p.priorityReason,
+      createdAt: p.createdAt,
+    );
+  }
+
+  /// Shared seat-flag toggler used by [setSeatForward] / [setSeatReserved].
+  /// Finds the seat cell on [busId] by [seatId], applies [transform], rebuilds
+  /// the layout (preserving every other cell), optimistically updates local
+  /// state, and persists the whole bus row.
+  Future<void> _updateSeatFlag(
+    String tourId,
+    String busId,
+    String seatId,
+    SeatCell Function(SeatCell) transform,
+  ) async {
+    final tour = getTour(tourId);
+    final bus = tour?.buses.where((b) => b.id == busId).firstOrNull;
+    final layout = bus?.layout;
+    if (bus == null || layout == null) return;
+
+    final target = layout.grid.where((c) => c.seatId == seatId).firstOrNull;
+    if (target == null) return;
+
+    final updatedBus = bus.copyWith(
+      layout: layout.updateCell(transform(target)),
+    );
+
+    _updateTourLocal(tourId, (t) {
+      final list = t.buses.map((b) => b.id == busId ? updatedBus : b).toList();
+      return t.copyWith(buses: list);
+    });
+
+    try {
+      await _sync.smartUpdate(
+        table: 'buses',
+        entityId: busId,
+        data: updatedBus.toMap(),
+      );
+    } catch (e) {
+      await refreshTours();
+      AppSnackBar.error('Could not update the seat. $e', title: 'Save failed');
+      rethrow;
+    }
+    await _sync.invalidateCache(_tourCacheKey);
+  }
+
   Future<void> _updateTour(String tourId, Tour Function(Tour) updater) async {
     final idx = tours.indexWhere((t) => t.id == tourId);
     if (idx >= 0) {

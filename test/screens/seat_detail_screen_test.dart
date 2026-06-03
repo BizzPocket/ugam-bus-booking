@@ -21,6 +21,12 @@ class _FakeTourController extends TourController {
   /// Records every (passengerId, busId, seatId) the screen asked to free.
   final List<String> freedSeats = [];
 
+  /// Records every (busId, seatId, value) the screen asked to flag forward.
+  final List<String> forwardCalls = [];
+
+  /// Records every (busId, seatId, value) the screen asked to flag reserved.
+  final List<String> reservedCalls = [];
+
   @override
   // ignore: must_call_super
   void onInit() {
@@ -35,6 +41,18 @@ class _FakeTourController extends TourController {
     required String seatId,
   }) async {
     freedSeats.add('$passengerId:$busId:$seatId');
+  }
+
+  @override
+  Future<void> setSeatForward(
+      String tourId, String busId, String seatId, bool forward) async {
+    forwardCalls.add('$busId:$seatId:$forward');
+  }
+
+  @override
+  Future<void> setSeatReserved(
+      String tourId, String busId, String seatId, bool reserved) async {
+    reservedCalls.add('$busId:$seatId:$reserved');
   }
 }
 
@@ -282,5 +300,38 @@ void main() {
     expect(find.textContaining('is shared'), findsOneWidget);
     expect(find.text('Arjun Rao'), findsOneWidget);
     expect(find.text('Bela Nair'), findsOneWidget);
+  });
+
+  testWidgets(
+      'Edit seats toggle opens the forward/reserved flag sheet and fires the '
+      'controller setters', (tester) async {
+    final ctrl = _FakeTourController();
+    Get.put<TourController>(ctrl);
+    ctrl.tours.assignAll([_fakeTour()]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    // Normal mode: the app-bar action reads "Edit seats".
+    expect(find.text('Edit seats'), findsOneWidget);
+
+    // Enter edit mode.
+    await tester.tap(find.text('Edit seats'));
+    await tester.pumpAndSettle();
+    expect(find.text('Done'), findsOneWidget);
+    expect(find.textContaining('Editing seats'), findsOneWidget);
+
+    // Tapping the free seat SU2 now opens the flag sheet (NOT the free info
+    // sheet) — it surfaces both switch labels.
+    await tester.tap(find.text('SU2'));
+    await tester.pumpAndSettle();
+    expect(find.text('Forward / premium seat'), findsOneWidget);
+    expect(find.text('Hold / reserved'), findsOneWidget);
+
+    // Flipping a switch fires the matching controller setter.
+    expect(ctrl.forwardCalls, isEmpty);
+    await tester.tap(find.byType(Switch).first);
+    await tester.pumpAndSettle();
+    expect(ctrl.forwardCalls, contains('b1:SU2:true'));
   });
 }

@@ -189,10 +189,18 @@ class SyncService extends GetxService {
         .select()
         .inFilter('tour_id', tourIds)
         .limit(500);
+    // Passenger groups (cross-booking groups) are also keyed by tour_id.
+    final groupsFuture = _client
+        .from('passenger_groups')
+        .select()
+        .inFilter('tour_id', tourIds)
+        .limit(500);
 
-    final results = await Future.wait([passengersFuture, busesFuture]);
+    final results =
+        await Future.wait([passengersFuture, busesFuture, groupsFuture]);
     final passengersRaw = results[0];
     final busesRaw = results[1];
+    final groupsRaw = results[2];
 
     final passengersByTour = <String, List<Map<String, dynamic>>>{};
     for (final p in passengersRaw as List) {
@@ -208,12 +216,20 @@ class SyncService extends GetxService {
       if (tId != null) busesByTour.putIfAbsent(tId, () => []).add(m);
     }
 
+    final groupsByTour = <String, List<Map<String, dynamic>>>{};
+    for (final g in groupsRaw as List) {
+      final m = Map<String, dynamic>.from(g as Map);
+      final tId = m['tour_id'] as String?;
+      if (tId != null) groupsByTour.putIfAbsent(tId, () => []).add(m);
+    }
+
     return tours.map((t) {
       final tId = t['id'] as String;
       return {
         ...t,
         'passengers': passengersByTour[tId] ?? const [],
         'buses': busesByTour[tId] ?? const [],
+        'groups': groupsByTour[tId] ?? const [],
       };
     }).toList();
   }
