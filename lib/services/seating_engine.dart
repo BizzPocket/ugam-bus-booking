@@ -492,21 +492,29 @@ class SeatingEngine {
   }) {
     if (_remaining(pending) == 0) return;
 
-    // Bus order: for priority, prefer buses with free FRONT sofa budget first
-    // (spread priority across buses — goal 1), else balance by emptiest /
-    // tightest. We use "most front budget remaining" so priority spreads out
-    // rather than stacking on one bus.
+    // Bus order: PACK, don't balance. Fill the fullest bus that still has room
+    // before opening the next one — the agent's flow: "pick one bus, seat the
+    // unassigned people, and only move to the next bus once this one is full."
+    // Buses with no room sort last. A priority passenger still takes a FRONT
+    // seat *within* the chosen bus via the requireFront pass below (and, all
+    // else equal, we prefer a bus that still has free front budget so priority
+    // people aren't pushed to the rear while a front seat sits open elsewhere).
     final ordered = [...state.buses]
       ..sort((a, b) {
+        final ea = state.freeBerths(a.id);
+        final eb = state.freeBerths(b.id);
+        final aRoom = ea > 0;
+        final bRoom = eb > 0;
+        if (aRoom != bRoom) return aRoom ? -1 : 1; // buses with room first
         if (priority) {
+          // Priority still seeks a FRONT seat — prefer the bus with the most
+          // free front budget (spreads priority only as far as needed to seat
+          // elders up front). The non-priority bulk skips this and packs below.
           final fa = state.freeFrontSofa(a.id);
           final fb = state.freeFrontSofa(b.id);
           if (fa != fb) return fb.compareTo(fa); // most front budget first
         }
-        // Balance fill: prefer the emptiest bus (most free berths).
-        final ea = state.freeBerths(a.id);
-        final eb = state.freeBerths(b.id);
-        if (ea != eb) return eb.compareTo(ea);
+        if (ea != eb) return ea.compareTo(eb); // fewest free first = PACK
         return a.id.compareTo(b.id);
       });
 
