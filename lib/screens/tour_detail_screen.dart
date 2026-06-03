@@ -10,6 +10,7 @@ import '../models/passenger.dart';
 import '../models/payment_status.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../routes/app_routes.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import 'add_bus_screen.dart';
@@ -86,6 +87,12 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
                     () => EditTourScreen(tourId: widget.tourId),
                     transition: Transition.cupertino,
                   ),
+                  // TODO(seat-ui): entry point into SLICE 1 — the Tour
+                  // Overview / "Fill bus" auto-assignment cockpit.
+                  onOverview: () => Get.toNamed(
+                    AppRoutes.tourOverview,
+                    arguments: {'tourId': widget.tourId},
+                  ),
                 ),
               ),
               SliverToBoxAdapter(
@@ -157,10 +164,14 @@ class _HeroSection extends StatelessWidget {
   final VoidCallback onBack;
   final VoidCallback onEdit;
 
+  /// Opens the SLICE 1 Tour Overview / "Fill bus" cockpit.
+  final VoidCallback onOverview;
+
   const _HeroSection({
     required this.tour,
     required this.onBack,
     required this.onEdit,
+    required this.onOverview,
   });
 
   @override
@@ -216,6 +227,13 @@ class _HeroSection extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
+                // TODO(seat-ui): entry point to the Tour Overview screen
+                // (auto seat-fill cockpit). Kept next to Edit in the chrome.
+                _ChromeCircle(
+                  icon: Icons.auto_awesome_rounded,
+                  onTap: onOverview,
+                ),
+                const SizedBox(width: UgamSpacing.sm),
                 _ChromeCircle(
                   icon: Icons.edit_rounded,
                   onTap: onEdit,

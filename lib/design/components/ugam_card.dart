@@ -48,18 +48,30 @@ class UgamCard extends StatefulWidget {
 
 class _UgamCardState extends State<UgamCard>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: UgamMotion.tapOut,
-    reverseDuration: UgamMotion.tapIn,
-    lowerBound: 0,
-    upperBound: 1,
-    value: 1,
-  );
+  // Built eagerly in initState (not via a `late final` field initializer) so
+  // the AnimationController is always created while this element is active.
+  // A non-tappable card never touches _ctrl during build; deferring creation
+  // to a lazy initializer would otherwise run it inside dispose() — when the
+  // element is deactivated — and the controller's TickerMode ancestor lookup
+  // then throws "Looking up a deactivated widget's ancestor is unsafe".
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
 
-  late final Animation<double> _scale = Tween<double>(begin: 0.97, end: 1)
-      .chain(CurveTween(curve: UgamMotion.easeOut))
-      .animate(_ctrl);
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: UgamMotion.tapOut,
+      reverseDuration: UgamMotion.tapIn,
+      lowerBound: 0,
+      upperBound: 1,
+      value: 1,
+    );
+    _scale = Tween<double>(begin: 0.97, end: 1)
+        .chain(CurveTween(curve: UgamMotion.easeOut))
+        .animate(_ctrl);
+  }
 
   @override
   void dispose() {

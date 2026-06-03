@@ -11,6 +11,8 @@ import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
 import '../services/realtime_service.dart';
+import '../services/seating_engine.dart';
+import '../services/seating_plan_applier.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
 import 'auth_controller.dart';
@@ -20,6 +22,18 @@ class TourController extends GetxController {
   final isLoading = false.obs;
   final hasError = false.obs;
   final errorMessage = ''.obs;
+
+  /// Last seating plan produced by [fillTour], keyed by tourId. The seat
+  /// Overview screen reads this to render the "N need your decision" chip
+  /// without re-running the engine on every rebuild. Reactive so a fresh
+  /// fillTour repaints any observer. Cleared entry is fine — absence just
+  /// means "no plan generated yet this session".
+  final lastPlanByTour = <String, SeatingPlan>{}.obs;
+
+  /// Exceptions from the most recent [fillTour] for [tourId] (empty when no
+  /// plan has been generated this session).
+  List<SeatingException> exceptionsForTour(String tourId) =>
+      lastPlanByTour[tourId]?.exceptions ?? const <SeatingException>[];
 
   SyncService get _sync => Get.find<SyncService>();
   AuthController get _auth => Get.find<AuthController>();
@@ -553,6 +567,59 @@ class TourController extends GetxController {
       );
       rethrow;
     }
+  }
+
+  /// Auto-fill an entire tour with the deterministic [SeatingEngine].
+  ///
+  /// Finds the tour, asks the engine to [SeatingEngine.propose] a plan from
+  /// its buses + passengers, diffs that against current state via
+  /// [SeatingPlanApplier.diff], and persists ONLY the passengers that
+  /// actually changed — each through the existing offline-first
+  /// [assignSeats] path (no double-writes, no bypassing SyncService). A
+  /// passenger whose seats are unchanged is skipped entirely, so a re-run
+  /// with nothing to change is a no-op on the wire.
+  ///
+  /// The returned [SeatingPlan] (also cached in [lastPlanByTour]) carries
+  /// the exceptions the UI surfaces as "needs your decision".
+  Future<SeatingPlan> fillTour(String tourId) async {
+    final tour = getTour(tourId);
+    if (tour == null) {
+      // Nothing to fill — hand back an empty plan so callers don't null-check.
+      const empty = SeatingPlan(
+        assignmentsByPassenger: {},
+        exceptions: [],
+        reasons: [],
+      );
+      lastPlanByTour[tourId] = empty;
+      lastPlanByTour.refresh();
+      return empty;
+    }
+
+    final plan = SeatingEngine.propose(
+      buses: tour.buses,
+      passengers: tour.passengers,
+    );
+
+    // Cache the plan so the Overview screen can render exceptions even if
+    // the caller didn't hold the return value.
+    lastPlanByTour[tourId] = plan;
+    lastPlanByTour.refresh();
+
+    final changes = SeatingPlanApplier.diff(
+      plan: plan,
+      passengers: tour.passengers,
+    );
+
+    // Persist each changed passenger through the SAME optimistic, offline-
+    // first path the manual seat editor uses. assignSeats already stages a
+    // local mutation, awaits the server write, and on failure pulls fresh
+    // state + surfaces the error — so a mid-run failure won't leave a
+    // half-applied phantom plan.
+    for (final change in changes) {
+      await assignSeats(tourId, change.passengerId, change.newAssignedSeats);
+    }
+
+    return plan;
   }
 
   Future<void> unassignSeats(String tourId, String passengerId) async {
