@@ -74,7 +74,10 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
   }
 
   void _onBusTap(Bus bus) {
-    // TODO(seat-ui): wire to the per-bus seat-detail route in a later slice.
+    Get.toNamed(
+      AppRoutes.seatDetail,
+      arguments: {'tourId': widget.tourId, 'busId': bus.id},
+    );
   }
 
   @override

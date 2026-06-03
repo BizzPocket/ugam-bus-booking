@@ -9,6 +9,7 @@ import '../screens/create_tour_screen.dart';
 import '../screens/tour_seat_assignment_screen.dart';
 import '../screens/tour_overview_screen.dart';
 import '../screens/seating_exceptions_screen.dart';
+import '../screens/seat_detail_screen.dart';
 
 class AppRoutes {
   static const String splash = '/splash';
@@ -21,6 +22,7 @@ class AppRoutes {
   static const String seatAssignment = '/seat-assignment';
   static const String tourOverview = '/tour-overview';
   static const String seatingExceptions = '/seating-exceptions';
+  static const String seatDetail = '/seat-detail';
 
   static final routes = [
     GetPage(name: splash, page: () => const SplashScreen()),
@@ -58,6 +60,16 @@ class AppRoutes {
         final args = Get.arguments as Map<String, dynamic>?;
         return SeatingExceptionsScreen(
           tourId: (args?['tourId'] as String?) ?? '',
+        );
+      },
+    ),
+    GetPage(
+      name: seatDetail,
+      page: () {
+        final args = Get.arguments as Map<String, dynamic>?;
+        return SeatDetailScreen(
+          tourId: (args?['tourId'] as String?) ?? '',
+          busId: (args?['busId'] as String?) ?? '',
         );
       },
     ),

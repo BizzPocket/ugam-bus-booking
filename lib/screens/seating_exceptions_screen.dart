@@ -3,7 +3,9 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
+import '../routes/app_routes.dart';
 import '../services/seating_engine.dart';
+import '../utils/app_snackbar.dart';
 
 /// SLICE 2 of the smart-seat UI: the short "needs your decision" list.
 ///
@@ -37,8 +39,44 @@ class SeatingExceptionsScreen extends StatelessWidget {
 
   TourController get _ctrl => Get.find<TourController>();
 
+  /// Navigate to the seat detail of the bus the affected passenger sits on,
+  /// when resolvable. An exception is passenger-scoped (priority / seat-type)
+  /// or group-scoped (group won't fit / broken pair); we resolve the first
+  /// affected passenger that actually holds a seat and jump to that bus. When
+  /// nothing is placed yet (the common case for an unfit group), there is no
+  /// bus to show — surface a gentle hint instead of a dead tap.
   void _onExceptionTap(SeatingException ex) {
-    // TODO(seat-ui): wire to the per-bus seat-detail route in a later slice.
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return;
+
+    // Collect candidate passengers: the named one first, then any group
+    // member when the exception is group-scoped.
+    final candidates = <String?>[
+      ex.passengerId,
+      if (ex.groupId != null)
+        ...tour.passengers
+            .where((p) => p.groupId == ex.groupId)
+            .map((p) => p.id),
+    ];
+
+    for (final pid in candidates) {
+      if (pid == null) continue;
+      final p = tour.passengers.where((x) => x.id == pid).firstOrNull;
+      final seat = p?.assignedSeats.firstOrNull;
+      if (seat != null) {
+        Get.toNamed(
+          AppRoutes.seatDetail,
+          arguments: {'tourId': tourId, 'busId': seat.busId},
+        );
+        return;
+      }
+    }
+
+    AppSnackBar.info(
+      'These passengers are not seated yet — fill or assign them to a bus '
+      'first, then open the chart.',
+      title: 'Nothing placed yet',
+    );
   }
 
   /// Resolve a passenger id to a display name via the tour roster. Falls
