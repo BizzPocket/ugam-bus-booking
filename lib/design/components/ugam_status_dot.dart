@@ -37,12 +37,20 @@ class UgamStatusDot extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 5),
-        Text(
-          label,
-          style: UgamText.caption.copyWith(
-            color: color,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
+        // Long labels (e.g. a full status description) must ellipsize within
+        // the available width rather than overflow the row. All call sites pass
+        // bounded width, so Flexible is safe here.
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            style: UgamText.caption.copyWith(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],
