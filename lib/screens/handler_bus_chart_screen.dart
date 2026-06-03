@@ -3,18 +3,85 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../components/combined_seat_grid.dart';
+import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/handler_manifest.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
+import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 
 String _money(num v) => '₹${v.toStringAsFixed(0)}';
+
+/// The passengers holding one seat, resolved by leg.
+///
+/// A single seat can now be LEG-SHARED: an `outboundOnly` passenger (the GO
+/// leg) and a separate `returnOnly` passenger (the RETURN leg) can both hold
+/// the same seatId on disjoint legs. A `roundTrip` passenger holds BOTH legs
+/// exclusively (so [go] and [ret] are the same person). [primary] is the
+/// passenger to show first / use for the single-occupant tile look.
+class _SeatOccupants {
+  /// The GO-leg occupant (outboundOnly or roundTrip), if any.
+  final Passenger? go;
+
+  /// The RETURN-leg occupant (returnOnly or roundTrip), if any.
+  final Passenger? ret;
+
+  const _SeatOccupants({this.go, this.ret});
+
+  bool get isEmpty => go == null && ret == null;
+
+  /// True when GO and RETURN are two DIFFERENT people sharing the seat across
+  /// legs (an outbound-only + a return-only) — the leg-shared case.
+  bool get isLegShared => go != null && ret != null && go!.id != ret!.id;
+
+  /// The single passenger when the seat is held by one person (a round-trip,
+  /// or a lone one-way leg); null when leg-shared or empty.
+  Passenger? get sole {
+    if (isEmpty) return null;
+    if (isLegShared) return null;
+    return go ?? ret;
+  }
+
+  /// Every DISTINCT passenger on this seat, GO first.
+  List<Passenger> get all {
+    final out = <Passenger>[];
+    if (go != null) out.add(go!);
+    if (ret != null && (go == null || ret!.id != go!.id)) out.add(ret!);
+    return out;
+  }
+}
+
+/// Builds a leg-resolved occupant view for [seatId] on [busId] from the
+/// manifest's passengers. A whole-double (one passenger, two assignment
+/// entries on the SAME seatId) still resolves to a single occupant; a
+/// genuine leg-shared seat resolves to two distinct people on disjoint legs.
+_SeatOccupants _occupantsForSeat(
+  HandlerManifest manifest,
+  String busId,
+  String seatId,
+) {
+  Passenger? go;
+  Passenger? ret;
+  for (final p in manifest.passengers) {
+    final holdsSeat = p.assignedSeats.any(
+      (a) => a.busId == busId && a.seatId == seatId,
+    );
+    if (!holdsSeat) continue;
+    if (p.tripType.usesOutbound && go == null) go = p;
+    if (p.tripType.usesReturn && ret == null) ret = p;
+  }
+  return _SeatOccupants(go: go, ret: ret);
+}
+
+/// The two ways the handler reads the chart: the visual seat [grid] or the
+/// call-first [list] (a roster of full name + mobile per seat).
+enum _ViewMode { grid, list }
 
 /// Read-only full bus chart for a tour "handler" (group coordinator).
 ///
@@ -44,6 +111,10 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   String? _error;
   HandlerManifest? _manifest;
   String? _selectedBusId;
+
+  /// Chart vs roster. The handler most often needs full names + mobiles to
+  /// call people, so a List (roster) sits alongside the visual Grid.
+  _ViewMode _viewMode = _ViewMode.grid;
 
   /// Local, mutable collection cache keyed by '"$passengerId|$busId"'.
   /// Seeded from the manifest once loaded; updated in-place after each save so
@@ -142,7 +213,41 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   }
 
   void _onSeatTapped(Bus bus, String seatId, Passenger occupant) {
+    final manifest = _manifest;
+    // A leg-shared seat (a GO occupant + a different RETURN occupant) needs a
+    // chooser: the handler picks which person to call / collect from. A single
+    // occupant goes straight to the collect sheet.
+    final occ = manifest == null
+        ? const _SeatOccupants()
+        : _occupantsForSeat(manifest, bus.id, seatId);
+    if (occ.isLegShared) {
+      _showLegSharedChooser(bus, seatId, occ);
+      return;
+    }
     _showOccupantSheet(bus, seatId, occupant);
+  }
+
+  /// Leg-shared seat → a small chooser listing the GO occupant and the RETURN
+  /// occupant (each with phone + Call), so the handler picks whom to act on
+  /// before the collect sheet opens.
+  Future<void> _showLegSharedChooser(
+    Bus bus,
+    String seatId,
+    _SeatOccupants occ,
+  ) {
+    return UgamSheet.show<void>(
+      context,
+      title: 'Seat $seatId · shared',
+      builder: (sheetCtx) => _LegSharedChooserSheet(
+        seatId: seatId,
+        go: occ.go,
+        ret: occ.ret,
+        onPick: (p) {
+          Navigator.of(sheetCtx).pop();
+          _showOccupantSheet(bus, seatId, p);
+        },
+      ),
+    );
   }
 
   Future<void> _showOccupantSheet(Bus bus, String seatId, Passenger passenger) {
@@ -255,6 +360,8 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     final multiBus = manifest.buses.length > 1;
     final summary = _summaryForBus(manifest, bus);
 
+    final grid = _viewMode == _ViewMode.grid;
+
     return Column(
       children: [
         if (multiBus)
@@ -265,11 +372,24 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             c: c,
           ),
         if (multiBus) const SizedBox(height: UgamSpacing.md),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            UgamSpacing.gutter,
+            multiBus ? 0 : UgamSpacing.md,
+            UgamSpacing.gutter,
+            UgamSpacing.sm,
+          ),
+          child: _ViewToggle(
+            mode: _viewMode,
+            onChanged: (m) => setState(() => _viewMode = m),
+            c: c,
+          ),
+        ),
         Expanded(
           child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(
+            padding: const EdgeInsets.fromLTRB(
               UgamSpacing.gutter,
-              multiBus ? 0 : UgamSpacing.md,
+              0,
               UgamSpacing.gutter,
               UgamSpacing.xl,
             ),
@@ -282,15 +402,24 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                   toCollect: summary.toCollect,
                 ),
                 const SizedBox(height: UgamSpacing.lg),
-                _SeatGrid(
-                  bus: bus,
-                  manifest: manifest,
-                  collectionFor: (pId, seatId) =>
-                      _collectionFor(pId, bus.id, seatId),
-                  onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
-                ),
-                const SizedBox(height: UgamSpacing.lg),
-                _Legend(c: c),
+                if (grid) ...[
+                  _SeatGrid(
+                    bus: bus,
+                    manifest: manifest,
+                    collectionFor: (pId, seatId) =>
+                        _collectionFor(pId, bus.id, seatId),
+                    onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
+                  ),
+                  const SizedBox(height: UgamSpacing.lg),
+                  _Legend(c: c),
+                ] else
+                  _SeatRoster(
+                    bus: bus,
+                    manifest: manifest,
+                    collectionFor: (pId, seatId) =>
+                        _collectionFor(pId, bus.id, seatId),
+                    onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
+                  ),
               ],
             ),
           ),
@@ -419,33 +548,13 @@ class _BusPills extends StatelessWidget {
   }
 }
 
-// ─── Group colour palette ──────────────────────────────────────────────
+// ─── Group colour ──────────────────────────────────────────────────────
 
-/// Six pleasant hues that read well as a thin ring on the near-black dark
-/// ground. A passenger's [Passenger.groupId] is hashed into this list so the
-/// same group always draws the same colour within a session.
-///
-/// Mirrors the agent seat-detail screen's group palette EXACTLY (the
-/// seat-detail class is private to that file, so the hue list and hashing are
-/// copied here verbatim) so the handler reads the same group colour the agent
-/// sees for a given group.
-class _GroupPalette {
-  const _GroupPalette._();
-
-  static const List<Color> hues = [
-    Color(0xFF6AA9FF), // sky blue
-    Color(0xFF8E7BFF), // periwinkle
-    Color(0xFF4FD1C5), // teal
-    Color(0xFFF6A5C0), // rose
-    Color(0xFFB892FF), // violet
-    Color(0xFF9AE6B4), // mint
-  ];
-
-  static Color colorFor(String groupId) {
-    final idx = groupId.hashCode.abs() % hues.length;
-    return hues[idx];
-  }
-}
+// Group ring colours come from the shared `groupColorForId` util
+// (lib/design/group_color.dart) — an infinite, golden-angle hue generator that
+// never collides with the warm priority ring or the one-way tint. The old
+// copied 6-hue `_GroupPalette` was deleted so the handler reads exactly the
+// same colour the agent seat-detail screen shows for a given group.
 
 /// The per-seat collection state, derived from the manifest's collection row
 /// (if any) against what the seat owes. Drives a small corner indicator on the
@@ -531,23 +640,29 @@ class _SeatGrid extends StatelessWidget {
         rowGap: 8,
         driverLabel: 'Driver',
         tileBuilder: (ctx, cell) {
-          final occupant = cell.seatId == null
-              ? null
-              : manifest.seatOccupant(bus.id, cell.seatId!);
-          final money = occupant == null
+          // Leg-aware: a seat may hold a GO occupant and a DIFFERENT RETURN
+          // occupant (an outbound-only + a return-only sharing the seat on
+          // disjoint legs). Resolve both so the tile can split + badge them.
+          final occ = cell.seatId == null
+              ? const _SeatOccupants()
+              : _occupantsForSeat(manifest, bus.id, cell.seatId!);
+          // The money dot follows the GO occupant first (then RETURN) — the
+          // primary person whose due/collection drives the at-a-glance state.
+          final primary = occ.go ?? occ.ret;
+          final money = primary == null
               ? _MoneyState.uncollected
-              : _moneyState(occupant, cell.seatId!);
+              : _moneyState(primary, cell.seatId!);
           return SizedBox(
             width: tileW,
             height: tileH,
             child: RepaintBoundary(
               child: _SeatTile(
                 cell: cell,
-                occupant: occupant,
+                occupants: occ,
                 money: money,
-                onTap: occupant == null
+                onTap: primary == null
                     ? null
-                    : () => onTapOccupant(cell.seatId!, occupant),
+                    : () => onTapOccupant(cell.seatId!, primary),
               ),
             ),
           );
@@ -566,18 +681,18 @@ class _SeatGrid extends StatelessWidget {
 /// and held tiles are inert (the handler never edits seats).
 class _SeatTile extends StatelessWidget {
   final SeatCell cell;
-  final Passenger? occupant;
+  final _SeatOccupants occupants;
   final _MoneyState money;
   final VoidCallback? onTap;
 
   const _SeatTile({
     required this.cell,
-    required this.occupant,
+    required this.occupants,
     required this.money,
     required this.onTap,
   });
 
-  bool get _occupied => occupant != null;
+  bool get _occupied => !occupants.isEmpty;
 
   static String initials(String displayName) {
     final n = displayName.trim();
@@ -594,8 +709,10 @@ class _SeatTile extends StatelessWidget {
     final c = UgamColors.of(context);
 
     final Widget tile;
-    if (_occupied) {
-      tile = _bookedTile(c, occupant!);
+    if (occupants.isLegShared) {
+      tile = _legSharedTile(c, occupants.go!, occupants.ret!);
+    } else if (_occupied) {
+      tile = _bookedTile(c, occupants.sole!);
     } else if (cell.reserved) {
       tile = _heldTile(c);
     } else {
@@ -662,18 +779,25 @@ class _SeatTile extends StatelessWidget {
   }
 
   // BOOKED — initials on card fill; group ring + warm priority ring/badge,
-  // plus a handler-only money dot in the bottom-left corner.
+  // a one-way GO/RET corner badge + cyan tint for a single-leg occupant, plus a
+  // handler-only money dot in the bottom-left corner.
   Widget _bookedTile(UgamColorSet c, Passenger p) {
     final priority = p.isPriorityApproved || cell.forward;
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    final groupColor = hasGroup ? _GroupPalette.colorFor(p.groupId!) : null;
+    // INFINITE COLORS: shared golden-angle generator (never collides with the
+    // warm priority ring or the one-way cyan tint).
+    final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
+    final oneWay = p.tripType.isOneWay;
 
-    // The outer ring colour signals belonging. Priority (warm) is attention,
-    // so it always wins the ring; a group then shows as a small dot badge.
+    // The outer ring colour signals belonging. Priority (warm) is attention so
+    // it always wins; then a one-way leg shows the cyan tint; then a group ring.
     final Color ringColor;
     final double ringWidth;
     if (priority) {
       ringColor = c.warm;
+      ringWidth = 2;
+    } else if (oneWay) {
+      ringColor = kOneWayTint;
       ringWidth = 2;
     } else if (groupColor != null) {
       ringColor = groupColor;
@@ -715,16 +839,23 @@ class _SeatTile extends StatelessWidget {
               ),
             ),
           ),
-          // Priority warm badge, top-right.
+          // Priority warm badge, top-right (priority outranks the leg badge).
           if (priority)
             Positioned(
               top: 3,
               right: 3,
               child: Icon(Icons.star_rounded, size: 12, color: c.warm),
+            )
+          // One-way GO/RET corner badge, top-right, when not priority.
+          else if (oneWay)
+            Positioned(
+              top: 2,
+              right: 2,
+              child: _LegBadge(tripType: p.tripType),
             ),
-          // Group dot badge (only when the group colour isn't already the
-          // ring, i.e. a priority booking that ALSO belongs to a group).
-          if (priority && groupColor != null)
+          // Group dot badge (only when the group colour isn't already the ring,
+          // i.e. a priority or one-way booking that ALSO belongs to a group).
+          if ((priority || oneWay) && groupColor != null)
             Positioned(
               bottom: 4,
               right: 4,
@@ -738,6 +869,130 @@ class _SeatTile extends StatelessWidget {
             child: _Dot(color: money.color(c), size: 8),
           ),
         ],
+      ),
+    );
+  }
+
+  // LEG-SHARED — a GO occupant and a DIFFERENT RETURN occupant on disjoint
+  // legs. Split left (GO) / right (RET), each half showing initials, a GO/RET
+  // badge and a group dot; the cyan one-way tint frames the whole tile.
+  Widget _legSharedTile(UgamColorSet c, Passenger go, Passenger ret) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
+        border: Border.all(color: kOneWayTint, width: 2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Row(
+            children: [
+              Expanded(child: _legHalf(c, go, TripType.outboundOnly)),
+              Container(width: 1, color: c.border),
+              Expanded(child: _legHalf(c, ret, TripType.returnOnly)),
+            ],
+          ),
+          // Seat id, centred top.
+          Positioned(
+            top: 3,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                cell.seatId ?? '',
+                style: UgamText.tabular(
+                  UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
+                ),
+              ),
+            ),
+          ),
+          // Handler-only money dot (follows the GO occupant), bottom-left.
+          Positioned(
+            bottom: 3,
+            left: 4,
+            child: _Dot(color: money.color(c), size: 7),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legHalf(UgamColorSet c, Passenger p, TripType leg) {
+    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
+    final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
+    return Container(
+      color: c.cardElev,
+      alignment: Alignment.center,
+      child: Stack(
+        children: [
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    initials(p.displayName),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (groupColor != null) ...[
+                  const SizedBox(height: 2),
+                  _Dot(color: groupColor, size: 6),
+                ],
+              ],
+            ),
+          ),
+          Positioned(
+            bottom: 1,
+            right: 1,
+            child: _LegBadge(tripType: leg, compact: true),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A tiny GO / RET corner pill marking a one-way leg on a seat tile, tinted
+/// with [kOneWayTint]. [compact] shrinks it for the split leg-shared halves.
+class _LegBadge extends StatelessWidget {
+  final TripType tripType;
+  final bool compact;
+
+  const _LegBadge({required this.tripType, this.compact = false});
+
+  String get _label => tripType.usesReturn && !tripType.usesOutbound
+      ? 'RET'
+      : 'GO';
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 3 : 4,
+        vertical: compact ? 1 : 2,
+      ),
+      decoration: BoxDecoration(
+        color: kOneWayTint,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      // Dark ground reads as crisp ink on the bright cyan tint (no hardcoded
+      // hex — kOneWayTint is the only fixed colour, supplied by the util).
+      child: Text(
+        _label,
+        style: UgamText.micro.copyWith(
+          color: c.bg,
+          fontSize: compact ? 7 : 8,
+          height: 1,
+          letterSpacing: 0.3,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
@@ -820,6 +1075,7 @@ class _Legend extends StatelessWidget {
           c: c,
         ),
         _LegendItem(swatch: _LegendSwatch.held, label: 'Held', c: c),
+        _LegendItem(swatch: _LegendSwatch.oneWay, label: 'One-way (GO/RET)', c: c),
         _LegendItem(swatch: _LegendSwatch.paidDot, label: 'Paid', c: c),
         _LegendItem(swatch: _LegendSwatch.owingDot, label: 'Owing', c: c),
       ],
@@ -827,7 +1083,7 @@ class _Legend extends StatelessWidget {
   }
 }
 
-enum _LegendSwatch { dashed, filled, warmRing, held, paidDot, owingDot }
+enum _LegendSwatch { dashed, filled, warmRing, held, oneWay, paidDot, owingDot }
 
 class _LegendItem extends StatelessWidget {
   final _LegendSwatch swatch;
@@ -884,6 +1140,16 @@ class _LegendItem extends StatelessWidget {
           alignment: Alignment.center,
           child: Icon(Icons.lock_outline_rounded, size: 8, color: c.ink3),
         );
+      case _LegendSwatch.oneWay:
+        dot = Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: c.cardElev,
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: kOneWayTint, width: 2),
+          ),
+        );
       case _LegendSwatch.paidDot:
         dot = _Dot(color: c.good, size: 12);
       case _LegendSwatch.owingDot:
@@ -896,6 +1162,498 @@ class _LegendItem extends StatelessWidget {
         const SizedBox(width: 6),
         Text(label, style: UgamText.micro.copyWith(color: c.ink2)),
       ],
+    );
+  }
+}
+
+// ─── Grid / List toggle ────────────────────────────────────────────────
+
+/// A two-segment pill switching the chart between the visual seat [grid] and
+/// the call-first [list] (roster). DNA: accent fill on the selected segment,
+/// cardElev track.
+class _ViewToggle extends StatelessWidget {
+  final _ViewMode mode;
+  final ValueChanged<_ViewMode> onChanged;
+  final UgamColorSet c;
+
+  const _ViewToggle({
+    required this.mode,
+    required this.onChanged,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Row(
+        children: [
+          _segment(
+            icon: Icons.grid_view_rounded,
+            label: 'Grid',
+            selected: mode == _ViewMode.grid,
+            onTap: () => onChanged(_ViewMode.grid),
+          ),
+          _segment(
+            icon: Icons.format_list_bulleted_rounded,
+            label: 'List',
+            selected: mode == _ViewMode.list,
+            onTap: () => onChanged(_ViewMode.list),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _segment({
+    required IconData icon,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? c.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 15,
+                  color: selected ? c.onAccent : c.ink2,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: UgamText.caption.copyWith(
+                    color: selected ? c.onAccent : c.ink2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Seat roster (List view) ────────────────────────────────────────────
+
+/// The call-first roster: one row per booked berth in seat order, showing the
+/// seat id, the occupant's FULL name + mobile (tap to call), a trip badge
+/// (round-trip / GO / RET), a group dot, and the per-seat collection status.
+/// A leg-shared seat emits TWO rows (the GO occupant and the RETURN occupant).
+/// Read-only + collect: tapping the row (or the money chip) opens the same
+/// collect sheet the grid uses.
+class _SeatRoster extends StatelessWidget {
+  final Bus bus;
+  final HandlerManifest manifest;
+  final Collection? Function(String passengerId, String seatId) collectionFor;
+  final void Function(String seatId, Passenger passenger) onTapOccupant;
+
+  const _SeatRoster({
+    required this.bus,
+    required this.manifest,
+    required this.collectionFor,
+    required this.onTapOccupant,
+  });
+
+  _MoneyState _moneyState(Passenger passenger, String seatId) {
+    final due = bus.amountDueForSeat(passenger, seatId);
+    final col = collectionFor(passenger.id, seatId);
+    if (col == null) {
+      return due > 0 ? _MoneyState.owing : _MoneyState.uncollected;
+    }
+    if (col.isReturnDue) return _MoneyState.returnDue;
+    if (col.balance < 0) return _MoneyState.owing;
+    if (col.isSquare && col.amountReceived > 0) return _MoneyState.paid;
+    return _MoneyState.uncollected;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final layout = bus.layout;
+    if (layout == null || layout.totalCells == 0) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+        alignment: Alignment.center,
+        child: Text(
+          'This bus has no seat layout yet.',
+          textAlign: TextAlign.center,
+          style: UgamText.caption.copyWith(color: c.ink2),
+        ),
+      );
+    }
+
+    // Walk every seat cell in placement order; emit a row per distinct
+    // occupant. `grid` is the flat seat list (only [hasSeat] cells stored).
+    final rows = <Widget>[];
+    for (final cell in layout.grid) {
+      final seatId = cell.seatId;
+      if (seatId == null) continue;
+      final occ = _occupantsForSeat(manifest, bus.id, seatId);
+      if (occ.isEmpty) continue;
+      for (final p in occ.all) {
+        rows.add(
+          _RosterRow(
+            seatId: seatId,
+            passenger: p,
+            money: _moneyState(p, seatId),
+            onTap: () => onTapOccupant(seatId, p),
+            c: c,
+          ),
+        );
+      }
+    }
+
+    if (rows.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+        alignment: Alignment.center,
+        child: Text(
+          'No passengers seated on ${bus.name} yet.',
+          textAlign: TextAlign.center,
+          style: UgamText.caption.copyWith(color: c.ink2),
+        ),
+      );
+    }
+
+    return UgamCard.plain(
+      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+      child: Column(children: rows),
+    );
+  }
+}
+
+/// One roster line: seat id chip, full name + mobile + group dot + trip badge,
+/// and a tap-to-call action plus the collection-status chip.
+class _RosterRow extends StatelessWidget {
+  final String seatId;
+  final Passenger passenger;
+  final _MoneyState money;
+  final VoidCallback onTap;
+  final UgamColorSet c;
+
+  const _RosterRow({
+    required this.seatId,
+    required this.passenger,
+    required this.money,
+    required this.onTap,
+    required this.c,
+  });
+
+  String get _moneyLabel {
+    switch (money) {
+      case _MoneyState.paid:
+        return 'Paid';
+      case _MoneyState.owing:
+        return 'Owing';
+      case _MoneyState.returnDue:
+        return 'Return due';
+      case _MoneyState.uncollected:
+        return 'Not collected';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = passenger;
+    final hasPhone = p.phone.trim().isNotEmpty;
+    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
+    final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.sm + 2,
+        ),
+        child: Row(
+          children: [
+            // Seat id chip.
+            Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
+                border: Border.all(color: c.border),
+              ),
+              child: Text(
+                seatId,
+                style: UgamText.tabular(
+                  UgamText.caption.copyWith(
+                    color: c.ink,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            // Name + mobile + badges.
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          p.displayName,
+                          style: UgamText.bodyStrong.copyWith(color: c.ink),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (groupColor != null) ...[
+                        const SizedBox(width: 6),
+                        _Dot(color: groupColor, size: 8),
+                      ],
+                      const SizedBox(width: 6),
+                      _TripBadge(tripType: p.tripType, c: c),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasPhone ? p.phone : 'No mobile',
+                    style: UgamText.tabular(
+                      UgamText.micro.copyWith(
+                        color: hasPhone ? c.ink2 : c.ink3,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      _Dot(color: money.color(c), size: 7),
+                      const SizedBox(width: 5),
+                      Text(
+                        _moneyLabel,
+                        style: UgamText.micro.copyWith(color: c.ink2),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            // Tap-to-call.
+            if (hasPhone) ...[
+              const SizedBox(width: UgamSpacing.sm),
+              Semantics(
+                button: true,
+                label: 'Call ${p.phone}',
+                child: GestureDetector(
+                  onTap: () => PhoneDialer.call(p.phone),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.call_rounded, size: 17, color: c.accent),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A small trip-type pill. Round-trip is muted (the common case); a one-way
+/// leg uses the reserved [kOneWayTint] with a GO / RET label so it matches the
+/// grid's leg badge.
+class _TripBadge extends StatelessWidget {
+  final TripType tripType;
+  final UgamColorSet c;
+
+  const _TripBadge({required this.tripType, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final oneWay = tripType.isOneWay;
+    final label = !oneWay
+        ? 'RT'
+        : (tripType.usesReturn && !tripType.usesOutbound ? 'RET' : 'GO');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: oneWay ? kOneWayTint : c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        border: oneWay ? null : Border.all(color: c.border),
+      ),
+      child: Text(
+        label,
+        style: UgamText.micro.copyWith(
+          // Dark ground on the bright cyan; muted ink on the neutral pill.
+          color: oneWay ? c.bg : c.ink2,
+          fontSize: 8,
+          letterSpacing: 0.3,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Leg-shared chooser sheet ───────────────────────────────────────────
+
+/// A chooser for a leg-shared seat: lists the GO occupant and the RETURN
+/// occupant, each with phone + a Call button, so the handler picks whom to
+/// collect from / call before the collect sheet opens.
+class _LegSharedChooserSheet extends StatelessWidget {
+  final String seatId;
+  final Passenger? go;
+  final Passenger? ret;
+  final ValueChanged<Passenger> onPick;
+
+  const _LegSharedChooserSheet({
+    required this.seatId,
+    required this.go,
+    required this.ret,
+    required this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Two passengers share this seat across legs. Pick one to view or '
+          'collect.',
+          style: UgamText.body.copyWith(color: c.ink2),
+        ),
+        const SizedBox(height: UgamSpacing.md),
+        if (go != null)
+          _LegSharedTile(
+            passenger: go!,
+            leg: TripType.outboundOnly,
+            onPick: () => onPick(go!),
+            c: c,
+          ),
+        if (go != null && ret != null) const SizedBox(height: UgamSpacing.sm),
+        if (ret != null)
+          _LegSharedTile(
+            passenger: ret!,
+            leg: TripType.returnOnly,
+            onPick: () => onPick(ret!),
+            c: c,
+          ),
+      ],
+    );
+  }
+}
+
+class _LegSharedTile extends StatelessWidget {
+  final Passenger passenger;
+  final TripType leg;
+  final VoidCallback onPick;
+  final UgamColorSet c;
+
+  const _LegSharedTile({
+    required this.passenger,
+    required this.leg,
+    required this.onPick,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = passenger;
+    final hasPhone = p.phone.trim().isNotEmpty;
+    return GestureDetector(
+      onTap: onPick,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+        ),
+        child: Row(
+          children: [
+            _TripBadge(tripType: leg, c: c),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    p.displayName,
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasPhone ? p.phone : 'No mobile',
+                    style: UgamText.tabular(
+                      UgamText.micro.copyWith(
+                        color: hasPhone ? c.ink2 : c.ink3,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (hasPhone) ...[
+              const SizedBox(width: UgamSpacing.sm),
+              Semantics(
+                button: true,
+                label: 'Call ${p.phone}',
+                child: GestureDetector(
+                  onTap: () => PhoneDialer.call(p.phone),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.call_rounded, size: 17, color: c.accent),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+          ],
+        ),
+      ),
     );
   }
 }

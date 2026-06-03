@@ -10,6 +10,7 @@ import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/screens/seat_detail_screen.dart';
 
 /// Test double for [TourController] that needs no live Supabase / GetX
@@ -45,13 +46,21 @@ class _FakeTourController extends TourController {
 
   @override
   Future<void> setSeatForward(
-      String tourId, String busId, String seatId, bool forward) async {
+    String tourId,
+    String busId,
+    String seatId,
+    bool forward,
+  ) async {
     forwardCalls.add('$busId:$seatId:$forward');
   }
 
   @override
   Future<void> setSeatReserved(
-      String tourId, String busId, String seatId, bool reserved) async {
+    String tourId,
+    String busId,
+    String seatId,
+    bool reserved,
+  ) async {
     reservedCalls.add('$busId:$seatId:$reserved');
   }
 }
@@ -115,7 +124,8 @@ BusLayout _layout() {
   );
 }
 
-Bus _bus() => Bus(id: 'b1', name: 'Bus 1', busType: 'Sleeper', layout: _layout());
+Bus _bus() =>
+    Bus(id: 'b1', name: 'Bus 1', busType: 'Sleeper', layout: _layout());
 
 Passenger _booked(
   String id,
@@ -123,63 +133,61 @@ Passenger _booked(
   String seatId, {
   String? groupId,
   PriorityStatus priority = PriorityStatus.none,
-}) =>
-    Passenger(
-      id: id,
-      tourId: 't1',
-      name: name,
-      phone: '+919876500000',
-      groupId: groupId,
-      priorityStatus: priority,
-      requestLines: const [
-        RequestLine(seatType: SeatType.singleSofa, qty: 1),
-      ],
-      assignedSeats: [SeatAssignment(busId: 'b1', seatId: seatId)],
-    );
+  TripType tripType = TripType.roundTrip,
+}) => Passenger(
+  id: id,
+  tourId: 't1',
+  name: name,
+  phone: '+919876500000',
+  groupId: groupId,
+  priorityStatus: priority,
+  tripType: tripType,
+  requestLines: const [RequestLine(seatType: SeatType.singleSofa, qty: 1)],
+  assignedSeats: [SeatAssignment(busId: 'b1', seatId: seatId)],
+);
 
 /// A passenger holding a WHOLE Double Sofa: ONE passenger with TWO
 /// [SeatAssignment] entries on the SAME seatId (as written by
 /// [TourController.consolidateOntoDouble]).
 Passenger _wholeDouble(String id, String name, String seatId) => Passenger(
-      id: id,
-      tourId: 't1',
-      name: name,
-      phone: '+919876500000',
-      priorityStatus: PriorityStatus.none,
-      requestLines: const [
-        RequestLine(seatType: SeatType.doubleSofa, qty: 1),
-      ],
-      assignedSeats: [
-        SeatAssignment(busId: 'b1', seatId: seatId),
-        SeatAssignment(busId: 'b1', seatId: seatId),
-      ],
-    );
+  id: id,
+  tourId: 't1',
+  name: name,
+  phone: '+919876500000',
+  priorityStatus: PriorityStatus.none,
+  requestLines: const [RequestLine(seatType: SeatType.doubleSofa, qty: 1)],
+  assignedSeats: [
+    SeatAssignment(busId: 'b1', seatId: seatId),
+    SeatAssignment(busId: 'b1', seatId: seatId),
+  ],
+);
 
 Tour _fakeTour() => Tour(
-      id: 't1',
-      title: 'Dwarka Yatra',
-      fromCity: 'Surat',
-      toCity: 'Dwarka',
-      departureDate: DateTime(2026, 7, 1),
-      pricePerSeat: 1200,
-      buses: [_bus()],
-      passengers: [
-        _booked('p1', 'Ramesh Patel', 'SU1'),
-        _booked('p2', 'Sita Joshi', 'DU1', groupId: 'patel'),
-        _booked('p3', 'Mohan Shah', 'DL1', priority: PriorityStatus.approved),
-      ],
-    );
+  id: 't1',
+  title: 'Dwarka Yatra',
+  fromCity: 'Surat',
+  toCity: 'Dwarka',
+  departureDate: DateTime(2026, 7, 1),
+  pricePerSeat: 1200,
+  buses: [_bus()],
+  passengers: [
+    _booked('p1', 'Ramesh Patel', 'SU1'),
+    _booked('p2', 'Sita Joshi', 'DU1', groupId: 'patel'),
+    _booked('p3', 'Mohan Shah', 'DL1', priority: PriorityStatus.approved),
+  ],
+);
 
 Widget _harness() => GetMaterialApp(
-      theme: ThemeData(brightness: Brightness.dark),
-      home: const SeatDetailScreen(tourId: 't1', busId: 'b1'),
-    );
+  theme: ThemeData(brightness: Brightness.dark),
+  home: const SeatDetailScreen(tourId: 't1', busId: 'b1'),
+);
 
 void main() {
   tearDown(Get.reset);
 
-  testWidgets('renders the bus name header + assigned/total subtitle',
-      (tester) async {
+  testWidgets('renders the bus name header + assigned/total subtitle', (
+    tester,
+  ) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([_fakeTour()]);
@@ -193,8 +201,9 @@ void main() {
     expect(find.text('3/7 assigned'), findsOneWidget);
   });
 
-  testWidgets('renders booked initials, the held tile, and free tiles',
-      (tester) async {
+  testWidgets('renders booked initials, the held tile, and free tiles', (
+    tester,
+  ) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([_fakeTour()]);
@@ -215,8 +224,9 @@ void main() {
     expect(find.text('SU2'), findsOneWidget);
   });
 
-  testWidgets('tapping a booked seat opens a sheet with name + Free action',
-      (tester) async {
+  testWidgets('tapping a booked seat opens a sheet with name + Free action', (
+    tester,
+  ) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([_fakeTour()]);
@@ -241,46 +251,113 @@ void main() {
   });
 
   testWidgets(
-      'WHOLE double (one passenger, two entries on same seatId) renders ONE '
-      'tile and taps straight to the occupant sheet (no chooser)',
-      (tester) async {
-    final ctrl = _FakeTourController();
-    Get.put<TourController>(ctrl);
-    ctrl.tours.assignAll([
-      _fakeTour().copyWith(
-        passengers: [_wholeDouble('p9', 'Kiran Mehta', 'DU2')],
-      ),
-    ]);
+    'WHOLE double (one passenger, two entries on same seatId) renders ONE '
+    'tile and taps straight to the occupant sheet (no chooser)',
+    (tester) async {
+      final ctrl = _FakeTourController();
+      Get.put<TourController>(ctrl);
+      ctrl.tours.assignAll([
+        _fakeTour().copyWith(
+          passengers: [_wholeDouble('p9', 'Kiran Mehta', 'DU2')],
+        ),
+      ]);
 
-    await tester.pumpWidget(_harness());
-    await tester.pump();
+      await tester.pumpWidget(_harness());
+      await tester.pump();
 
-    // One occupant tile, not a split shared tile: initials appear exactly once.
-    expect(find.text('KM'), findsOneWidget);
-    // Two raw berths on the only passenger → 2/7 assigned (not 1/7). The layout
-    // has 5 single berths + the DU2 double (counts as 2 berths) = 7 total.
-    expect(find.text('2/7 assigned'), findsOneWidget);
+      // One occupant tile, not a split shared tile: initials appear exactly once.
+      expect(find.text('KM'), findsOneWidget);
+      // Two raw berths on the only passenger → 2/7 assigned (not 1/7). The layout
+      // has 5 single berths + the DU2 double (counts as 2 berths) = 7 total.
+      expect(find.text('2/7 assigned'), findsOneWidget);
 
-    // Tapping goes straight to the occupant sheet — NO shared chooser.
-    await tester.tap(find.text('KM'));
-    await tester.pumpAndSettle();
-    expect(find.text('is shared'), findsNothing);
-    expect(find.textContaining('is shared'), findsNothing);
-    expect(find.text('Kiran Mehta'), findsOneWidget);
-    expect(find.text('Free seat'), findsOneWidget);
-  });
+      // Tapping goes straight to the occupant sheet — NO shared chooser.
+      await tester.tap(find.text('KM'));
+      await tester.pumpAndSettle();
+      expect(find.text('is shared'), findsNothing);
+      expect(find.textContaining('is shared'), findsNothing);
+      expect(find.text('Kiran Mehta'), findsOneWidget);
+      expect(find.text('Free seat'), findsOneWidget);
+    },
+  );
 
   testWidgets(
-      'SHARED double (two DISTINCT passengers on one seatId) renders a split '
-      'tile and the chooser lists both distinct names',
-      (tester) async {
+    'SHARED double (two DISTINCT passengers on one seatId) renders a split '
+    'tile and the chooser lists both distinct names',
+    (tester) async {
+      final ctrl = _FakeTourController();
+      Get.put<TourController>(ctrl);
+      ctrl.tours.assignAll([
+        _fakeTour().copyWith(
+          passengers: [
+            _booked('p10', 'Arjun Rao', 'DU2'),
+            _booked('p11', 'Bela Nair', 'DU2'),
+          ],
+        ),
+      ]);
+
+      await tester.pumpWidget(_harness());
+      await tester.pump();
+
+      // Split tile shows BOTH distinct initials.
+      expect(find.text('AR'), findsOneWidget);
+      expect(find.text('BN'), findsOneWidget);
+      // Two raw berths (one per distinct passenger) → 2/7 assigned.
+      expect(find.text('2/7 assigned'), findsOneWidget);
+
+      // Tapping the split tile opens the shared chooser listing both names.
+      await tester.tap(find.text('AR'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('is shared'), findsOneWidget);
+      expect(find.text('Arjun Rao'), findsOneWidget);
+      expect(find.text('Bela Nair'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Edit seats toggle opens the forward/reserved flag sheet and fires the '
+    'controller setters',
+    (tester) async {
+      final ctrl = _FakeTourController();
+      Get.put<TourController>(ctrl);
+      ctrl.tours.assignAll([_fakeTour()]);
+
+      await tester.pumpWidget(_harness());
+      await tester.pump();
+
+      // Normal mode: the app-bar action reads "Edit seats".
+      expect(find.text('Edit seats'), findsOneWidget);
+
+      // Enter edit mode.
+      await tester.tap(find.text('Edit seats'));
+      await tester.pumpAndSettle();
+      expect(find.text('Done'), findsOneWidget);
+      expect(find.textContaining('Editing seats'), findsOneWidget);
+
+      // Tapping the free seat SU2 now opens the flag sheet (NOT the free info
+      // sheet) — it surfaces both switch labels.
+      await tester.tap(find.text('SU2'));
+      await tester.pumpAndSettle();
+      expect(find.text('Forward / premium seat'), findsOneWidget);
+      expect(find.text('Hold / reserved'), findsOneWidget);
+
+      // Flipping a switch fires the matching controller setter.
+      expect(ctrl.forwardCalls, isEmpty);
+      await tester.tap(find.byType(Switch).first);
+      await tester.pumpAndSettle();
+      expect(ctrl.forwardCalls, contains('b1:SU2:true'));
+    },
+  );
+
+  testWidgets('a one-way occupant shows its GO leg badge on the seat tile', (
+    tester,
+  ) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([
       _fakeTour().copyWith(
         passengers: [
-          _booked('p10', 'Arjun Rao', 'DU2'),
-          _booked('p11', 'Bela Nair', 'DU2'),
+          _booked('p1', 'Ramesh Patel', 'SU1', tripType: TripType.outboundOnly),
         ],
       ),
     ]);
@@ -288,50 +365,61 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // Split tile shows BOTH distinct initials.
-    expect(find.text('AR'), findsOneWidget);
-    expect(find.text('BN'), findsOneWidget);
-    // Two raw berths (one per distinct passenger) → 2/7 assigned.
-    expect(find.text('2/7 assigned'), findsOneWidget);
-
-    // Tapping the split tile opens the shared chooser listing both names.
-    await tester.tap(find.text('AR'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('is shared'), findsOneWidget);
-    expect(find.text('Arjun Rao'), findsOneWidget);
-    expect(find.text('Bela Nair'), findsOneWidget);
+    // Initials still render, and the one-way leg badge "GO" appears on the tile.
+    expect(find.text('RP'), findsOneWidget);
+    expect(find.text('GO'), findsWidgets);
   });
 
   testWidgets(
-      'Edit seats toggle opens the forward/reserved flag sheet and fires the '
-      'controller setters', (tester) async {
-    final ctrl = _FakeTourController();
-    Get.put<TourController>(ctrl);
-    ctrl.tours.assignAll([_fakeTour()]);
+    'LEG-SHARED seat (outbound-only GO + return-only RET on one seatId) '
+    'renders both initials and the leg-holders sheet lists both names',
+    (tester) async {
+      final ctrl = _FakeTourController();
+      Get.put<TourController>(ctrl);
+      ctrl.tours.assignAll([
+        _fakeTour().copyWith(
+          passengers: [
+            _booked('p20', 'Go Rider', 'DU2', tripType: TripType.outboundOnly),
+            _booked('p21', 'Ret Rider', 'DU2', tripType: TripType.returnOnly),
+          ],
+        ),
+      ]);
 
-    await tester.pumpWidget(_harness());
-    await tester.pump();
+      await tester.pumpWidget(_harness());
+      await tester.pump();
 
-    // Normal mode: the app-bar action reads "Edit seats".
-    expect(find.text('Edit seats'), findsOneWidget);
+      // Both holders' initials show on the stacked leg-shared tile.
+      expect(find.text('GR'), findsOneWidget); // Go Rider
+      expect(find.text('RR'), findsOneWidget); // Ret Rider
 
-    // Enter edit mode.
-    await tester.tap(find.text('Edit seats'));
-    await tester.pumpAndSettle();
-    expect(find.text('Done'), findsOneWidget);
-    expect(find.textContaining('Editing seats'), findsOneWidget);
+      // Tapping the seat opens the leg-holders sheet listing BOTH full names.
+      await tester.tap(find.text('GR'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('two legs'), findsOneWidget);
+      expect(find.text('Go Rider'), findsOneWidget);
+      expect(find.text('Ret Rider'), findsOneWidget);
+    },
+  );
 
-    // Tapping the free seat SU2 now opens the flag sheet (NOT the free info
-    // sheet) — it surfaces both switch labels.
-    await tester.tap(find.text('SU2'));
-    await tester.pumpAndSettle();
-    expect(find.text('Forward / premium seat'), findsOneWidget);
-    expect(find.text('Hold / reserved'), findsOneWidget);
+  testWidgets(
+    'List toggle switches to the roster showing full names + mobiles',
+    (tester) async {
+      final ctrl = _FakeTourController();
+      Get.put<TourController>(ctrl);
+      ctrl.tours.assignAll([_fakeTour()]);
 
-    // Flipping a switch fires the matching controller setter.
-    expect(ctrl.forwardCalls, isEmpty);
-    await tester.tap(find.byType(Switch).first);
-    await tester.pumpAndSettle();
-    expect(ctrl.forwardCalls, contains('b1:SU2:true'));
-  });
+      await tester.pumpWidget(_harness());
+      await tester.pump();
+
+      // Switch to the List view.
+      await tester.tap(find.text('List'));
+      await tester.pumpAndSettle();
+
+      // The roster shows FULL names (not just initials) and the mobile number.
+      expect(find.text('Ramesh Patel'), findsOneWidget);
+      expect(find.text('Sita Joshi'), findsOneWidget);
+      expect(find.text('Mohan Shah'), findsOneWidget);
+      expect(find.text('+919876500000'), findsWidgets);
+    },
+  );
 }

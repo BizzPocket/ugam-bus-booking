@@ -3,10 +3,12 @@ import 'package:get/get.dart';
 
 import '../components/combined_seat_grid.dart';
 import '../controllers/tour_controller.dart';
+import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
+import '../models/trip_type.dart';
 import '../services/group_cascade.dart';
 import '../services/swap_candidate_finder.dart';
 import '../utils/passenger_display.dart';
@@ -65,6 +67,12 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
   /// occupant detail / move flow. Toggled from the app-bar action.
   bool _editMode = false;
 
+  /// Grid (the seat chart) vs List (a readable roster of FULL name + mobile per
+  /// occupied seat). Toggled from the header. Edit-seats only makes sense on the
+  /// chart, so entering edit mode is ignored while in the list view (the toggle
+  /// hides the Edit action there).
+  _ViewMode _viewMode = _ViewMode.grid;
+
   /// Build a seatId → occupants map for [bus]. A `doubleSofa` cell may hold
   /// up to two DISTINCT passengers when the agent split the sofa between
   /// unrelated singles; every other seat holds at most one.
@@ -76,10 +84,7 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
   /// bogus chooser. After de-duping a whole double yields `[p]` (length 1 →
   /// booked tile) and a genuine shared double yields two distinct passengers
   /// (length 2 → split tile + chooser).
-  static Map<String, List<Passenger>> _occupantsBySeat(
-    dynamic tour,
-    Bus bus,
-  ) {
+  static Map<String, List<Passenger>> _occupantsBySeat(dynamic tour, Bus bus) {
     final out = <String, List<Passenger>>{};
     for (final p in (tour.passengers as List<Passenger>)) {
       for (final a in p.assignedSeats) {
@@ -90,6 +95,27 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
       }
     }
     return out;
+  }
+
+  /// Build a stable group-colour resolver for [tour]. When the tour carries a
+  /// [PassengerGroup] list each group's own [PassengerGroup.colorIndex] feeds
+  /// the infinite [groupColor] generator (so the colour is stable per group,
+  /// not per session-hash). Any groupId NOT present in that list — or when the
+  /// tour exposes no groups at all — falls back to [groupColorForId], which
+  /// hashes the id into the same golden-angle sequence.
+  static GroupColorResolver _resolverFor(dynamic tour) {
+    final byId = <String, int>{};
+    final groups = tour.groups;
+    if (groups is List) {
+      for (final g in groups) {
+        try {
+          byId[g.id as String] = g.colorIndex as int;
+        } catch (_) {
+          // Defensive: a malformed group entry just falls back to id-hashing.
+        }
+      }
+    }
+    return GroupColorResolver(byId);
   }
 
   /// Count every booked berth on [bus] from the RAW assignment entries — a
@@ -140,10 +166,13 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
 
           final layout = bus.layout;
           final occupants = _occupantsBySeat(tour, bus);
+          final groupColors = _resolverFor(tour);
           final total = layout?.totalSeats ?? 0;
           // Count raw berths (a whole double = 2 berths, one tile) so the
           // subtitle never undercounts consolidated doubles.
           final assigned = _assignedBerths(tour, bus);
+
+          final isList = _viewMode == _ViewMode.list;
 
           return Column(
             children: [
@@ -153,8 +182,17 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
                     ? 'Editing seats · tap a seat'
                     : '$assigned/$total assigned',
                 c: c,
+                // Edit-seats only applies to the chart; hide it in list view.
                 editMode: _editMode,
-                onToggleEdit: () => setState(() => _editMode = !_editMode),
+                onToggleEdit: isList
+                    ? null
+                    : () => setState(() => _editMode = !_editMode),
+                viewMode: _viewMode,
+                onSelectView: (m) => setState(() {
+                  _viewMode = m;
+                  // Leaving the chart cancels edit mode so it can't linger.
+                  if (m == _ViewMode.list) _editMode = false;
+                }),
               ),
               Expanded(
                 child: layout == null || layout.totalCells == 0
@@ -166,6 +204,20 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
                             textAlign: TextAlign.center,
                             style: UgamText.body.copyWith(color: c.ink2),
                           ),
+                        ),
+                      )
+                    : isList
+                    ? _RosterList(
+                        layout: layout,
+                        occupants: occupants,
+                        groupColors: groupColors,
+                        c: c,
+                        onTapSeat: (cell, seatOccupants) => _showOccupantSheet(
+                          context,
+                          cell: cell,
+                          occupants: seatOccupants,
+                          bus: bus,
+                          tourTitle: tour.title,
                         ),
                       )
                     : Padding(
@@ -188,29 +240,32 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
                               tileBuilder: (ctx, cell) {
                                 final seatOccupants = cell.seatId != null
                                     ? (occupants[cell.seatId] ??
-                                        const <Passenger>[])
+                                          const <Passenger>[])
                                     : const <Passenger>[];
                                 // In edit mode, every real seat routes to the
                                 // forward/reserved flag sheet — occupant detail
                                 // and free-info sheets are suppressed.
                                 final VoidCallback? editTap =
                                     (_editMode && cell.seatId != null)
-                                        ? () => _showSeatFlagsSheet(ctx, cell, bus)
-                                        : null;
+                                    ? () => _showSeatFlagsSheet(ctx, cell, bus)
+                                    : null;
                                 return RepaintBoundary(
                                   child: _SeatTile(
                                     cell: cell,
                                     occupants: seatOccupants,
+                                    groupColors: groupColors,
                                     editMode: _editMode,
-                                    onTapBooked: editTap ??
+                                    onTapBooked:
+                                        editTap ??
                                         () => _showOccupantSheet(
-                                              ctx,
-                                              cell: cell,
-                                              occupants: seatOccupants,
-                                              bus: bus,
-                                              tourTitle: tour.title,
-                                            ),
-                                    onTapFree: editTap ??
+                                          ctx,
+                                          cell: cell,
+                                          occupants: seatOccupants,
+                                          bus: bus,
+                                          tourTitle: tour.title,
+                                        ),
+                                    onTapFree:
+                                        editTap ??
                                         () => _showFreeSheet(ctx, cell, bus),
                                   ),
                                 );
@@ -220,9 +275,11 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
                         ),
                       ),
               ),
-              const SizedBox(height: UgamSpacing.sm),
-              _Legend(c: c),
-              const SizedBox(height: UgamSpacing.md),
+              if (!isList) ...[
+                const SizedBox(height: UgamSpacing.sm),
+                _Legend(c: c),
+                const SizedBox(height: UgamSpacing.md),
+              ],
             ],
           );
         }),
@@ -252,8 +309,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
         isScrollControlled: true,
         backgroundColor: c.card,
         shape: const RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(UgamRadius.sheet),
+          ),
         ),
         builder: (sheetCtx) => _OccupantSheet(
           occupant: occupant,
@@ -282,6 +340,33 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
       );
     }
 
+    // Leg reuse (GO outbound-only + RET return-only on disjoint legs) → list
+    // BOTH holders with their own name / phone / Call and a leg badge; the
+    // agent taps one to open its full detail sheet.
+    final legShare = _legShareOf(occupants);
+    if (legShare != null) {
+      final c = UgamColors.of(context);
+      showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: c.card,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(UgamRadius.sheet),
+          ),
+        ),
+        builder: (sheetCtx) => _LegHoldersSheet(
+          go: legShare.go,
+          ret: legShare.ret,
+          seatId: cell.seatId!,
+          onPick: (p) {
+            Navigator.of(sheetCtx).pop();
+            open(p);
+          },
+        ),
+      );
+      return;
+    }
+
     // Shared double → let the agent pick which of the two berth-holders to act
     // on before opening the detail sheet.
     if (occupants.length > 1) {
@@ -290,8 +375,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
         context: context,
         backgroundColor: c.card,
         shape: const RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(UgamRadius.sheet),
+          ),
         ),
         builder: (sheetCtx) => _SharedChooserSheet(
           occupants: occupants,
@@ -308,6 +394,26 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
     open(occupants.first);
   }
 
+  /// Classify a seat's [occupants] as a disjoint GO/RETURN leg reuse — exactly
+  /// one outbound-only and one return-only passenger. Mirrors the tile's
+  /// `_SeatTile._legShare`; kept here so the sheet routing agrees with the tile.
+  static ({Passenger go, Passenger ret})? _legShareOf(
+    List<Passenger> occupants,
+  ) {
+    if (occupants.length != 2) return null;
+    final a = occupants[0];
+    final b = occupants[1];
+    if (a.tripType == TripType.outboundOnly &&
+        b.tripType == TripType.returnOnly) {
+      return (go: a, ret: b);
+    }
+    if (a.tripType == TripType.returnOnly &&
+        b.tripType == TripType.outboundOnly) {
+      return (go: b, ret: a);
+    }
+    return null;
+  }
+
   /// Free-seat tap → a brief info sheet. No assignment happens here yet.
   void _showFreeSheet(BuildContext context, SeatCell cell, Bus bus) {
     final c = UgamColors.of(context);
@@ -316,8 +422,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
       context: context,
       backgroundColor: c.card,
       shape: const RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(UgamRadius.sheet),
+        ),
       ),
       builder: (_) => Padding(
         padding: const EdgeInsets.fromLTRB(
@@ -342,7 +449,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
                   ),
                   alignment: Alignment.center,
                   child: Icon(
-                    held ? Icons.lock_outline_rounded : Icons.event_seat_rounded,
+                    held
+                        ? Icons.lock_outline_rounded
+                        : Icons.event_seat_rounded,
                     size: 18,
                     color: held ? c.ink3 : c.accent,
                   ),
@@ -375,9 +484,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
             Text(
               held
                   ? 'Free this seat from the seat-assignment workbench to open '
-                      'it up for booking.'
+                        'it up for booking.'
                   : 'Open the seat-assignment workbench to place a passenger '
-                      'here.',
+                        'here.',
               style: UgamText.body.copyWith(color: c.ink2),
             ),
           ],
@@ -401,8 +510,12 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
     final buses = tour.buses;
     if (buses.isEmpty) return;
 
-    void run(Bus destination) =>
-        _openSwapAssist(context, mover: mover, fromCell: fromCell, destination: destination);
+    void run(Bus destination) => _openSwapAssist(
+      context,
+      mover: mover,
+      fromCell: fromCell,
+      destination: destination,
+    );
 
     // One bus → nothing to pick; go straight to that bus's swap assistant.
     if (buses.length == 1) {
@@ -415,8 +528,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
       context: context,
       backgroundColor: c.card,
       shape: const RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(UgamRadius.sheet),
+        ),
       ),
       builder: (sheetCtx) => _DestinationPickerSheet(
         mover: mover,
@@ -454,8 +568,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
       backgroundColor: c.card,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(UgamRadius.sheet),
+        ),
       ),
       builder: (sheetCtx) => _SwapAssistSheet(
         mover: mover,
@@ -739,8 +854,9 @@ class _SeatDetailScreenState extends State<SeatDetailScreen> {
       context: context,
       backgroundColor: c.card,
       shape: const RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(UgamRadius.sheet),
+        ),
       ),
       builder: (sheetCtx) => _SeatFlagsSheet(
         seatId: seatId,
@@ -770,8 +886,14 @@ class _Header extends StatelessWidget {
   /// Whether the chart is in "Edit seats" mode (forward/reserved toggling).
   final bool editMode;
 
-  /// Toggles edit mode. Null hides the action (e.g. the bus-not-found state).
+  /// Toggles edit mode. Null hides the action (e.g. the bus-not-found state or
+  /// the list view, where seat-flag editing doesn't apply).
   final VoidCallback? onToggleEdit;
+
+  /// Current Grid | List view, and its setter. Null hides the segmented toggle
+  /// (the bus-not-found state has nothing to view either way).
+  final _ViewMode? viewMode;
+  final ValueChanged<_ViewMode>? onSelectView;
 
   const _Header({
     required this.title,
@@ -779,6 +901,8 @@ class _Header extends StatelessWidget {
     required this.c,
     required this.editMode,
     required this.onToggleEdit,
+    this.viewMode,
+    this.onSelectView,
   });
 
   @override
@@ -790,88 +914,101 @@ class _Header extends StatelessWidget {
         UgamSpacing.gutter,
         UgamSpacing.md,
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title.isEmpty ? 'Seat detail' : title,
-                  style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    style: UgamText.tabular(
-                      UgamText.caption.copyWith(color: c.ink2),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              ],
-            ),
-          ),
-          if (onToggleEdit != null) ...[
-            const SizedBox(width: UgamSpacing.sm),
-            Semantics(
-              button: true,
-              toggled: editMode,
-              label: editMode ? 'Done editing seats' : 'Edit seats',
-              child: GestureDetector(
-                onTap: onToggleEdit,
+          Row(
+            children: [
+              GestureDetector(
+                onTap: () => Get.back(),
                 behavior: HitTestBehavior.opaque,
                 child: Container(
+                  width: 44,
                   height: 44,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.md,
-                  ),
                   decoration: BoxDecoration(
-                    color: editMode ? c.accent : c.cardElev,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    color: c.cardElev,
+                    shape: BoxShape.circle,
                   ),
                   alignment: Alignment.center,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        editMode
-                            ? Icons.check_rounded
-                            : Icons.tune_rounded,
-                        size: 16,
-                        color: editMode ? c.onAccent : c.ink,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        editMode ? 'Done' : 'Edit seats',
-                        style: UgamText.caption.copyWith(
-                          color: editMode ? c.onAccent : c.ink,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
                 ),
               ),
-            ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title.isEmpty ? 'Seat detail' : title,
+                      style: UgamText.titleL.copyWith(
+                        color: c.ink,
+                        fontSize: 20,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle!,
+                        style: UgamText.tabular(
+                          UgamText.caption.copyWith(color: c.ink2),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                  ],
+                ),
+              ),
+              if (onToggleEdit != null) ...[
+                const SizedBox(width: UgamSpacing.sm),
+                Semantics(
+                  button: true,
+                  toggled: editMode,
+                  label: editMode ? 'Done editing seats' : 'Edit seats',
+                  child: GestureDetector(
+                    onTap: onToggleEdit,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: UgamSpacing.md,
+                      ),
+                      decoration: BoxDecoration(
+                        color: editMode ? c.accent : c.cardElev,
+                        borderRadius: BorderRadius.circular(UgamRadius.chip),
+                      ),
+                      alignment: Alignment.center,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            editMode ? Icons.check_rounded : Icons.tune_rounded,
+                            size: 16,
+                            color: editMode ? c.onAccent : c.ink,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            editMode ? 'Done' : 'Edit seats',
+                            style: UgamText.caption.copyWith(
+                              color: editMode ? c.onAccent : c.ink,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          // Grid | List segmented toggle. The List view is the readable roster
+          // (FULL name + tappable mobile) the agent asked for; Grid is the seat
+          // chart. Hidden when there's nothing to view (bus-not-found).
+          if (viewMode != null && onSelectView != null) ...[
+            const SizedBox(height: UgamSpacing.md),
+            _ViewToggle(mode: viewMode!, onSelect: onSelectView!, c: c),
           ],
         ],
       ),
@@ -879,30 +1016,122 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ─── Group colour palette ──────────────────────────────────────────────
+// ─── Grid | List view toggle ────────────────────────────────────────────
 
-/// Six pleasant hues that read well as a thin ring on the near-black dark
-/// ground. A passenger's [Passenger.groupId] is hashed into this list so the
-/// same group always draws the same colour within a session.
-class _GroupPalette {
-  const _GroupPalette._();
+/// The two ways to read one bus: the seat [_ViewMode.grid] chart, or a
+/// [_ViewMode.list] roster (one row per occupied seat with the FULL passenger
+/// name + tappable mobile).
+enum _ViewMode { grid, list }
 
-  // All six hues deliberately avoid the 25-45 deg warm-amber band (so a group
-  // ring can never be mistaken for the `warm` priority ring) and the
-  // low-saturation brown accent band. The former "peach" Color(0xFFFFB86B)
-  // (H~31 deg) collided with `warm` and was swapped for a cool violet.
-  static const List<Color> hues = [
-    Color(0xFF6AA9FF), // sky blue
-    Color(0xFF8E7BFF), // periwinkle
-    Color(0xFF4FD1C5), // teal
-    Color(0xFFF6A5C0), // rose
-    Color(0xFFB892FF), // violet (was peach — warm-band collision)
-    Color(0xFF9AE6B4), // mint
-  ];
+/// A two-segment pill toggle. The selected segment fills with `accent`; the
+/// other stays on `cardElev`. Lives below the title row so it never competes
+/// with the title / Edit-seats action for horizontal space.
+class _ViewToggle extends StatelessWidget {
+  final _ViewMode mode;
+  final ValueChanged<_ViewMode> onSelect;
+  final UgamColorSet c;
 
-  static Color colorFor(String groupId) {
-    final idx = groupId.hashCode.abs() % hues.length;
-    return hues[idx];
+  const _ViewToggle({
+    required this.mode,
+    required this.onSelect,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        border: Border.all(color: c.border),
+      ),
+      child: Row(
+        children: [
+          _segment(
+            label: 'Grid',
+            icon: Icons.grid_view_rounded,
+            selected: mode == _ViewMode.grid,
+            onTap: () => onSelect(_ViewMode.grid),
+          ),
+          _segment(
+            label: 'List',
+            icon: Icons.format_list_bulleted_rounded,
+            selected: mode == _ViewMode.list,
+            onTap: () => onSelect(_ViewMode.list),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _segment({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: '$label view',
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            height: 36,
+            decoration: BoxDecoration(
+              color: selected ? c.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+            ),
+            alignment: Alignment.center,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 15, color: selected ? c.onAccent : c.ink2),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: UgamText.caption.copyWith(
+                    color: selected ? c.onAccent : c.ink2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Group colour resolver ─────────────────────────────────────────────
+
+/// Resolves a [Passenger.groupId] to its ring colour via the infinite
+/// golden-angle generator in `design/group_color.dart`.
+///
+/// Groups have no upper bound, so the old fixed 6-hue [_GroupPalette] (keyed by
+/// `groupId.hashCode % 6`) eventually recycled and two unrelated groups read as
+/// one. This resolver instead feeds the unbounded [groupColor] / [groupColorForId]
+/// sequence:
+///
+///   * When the tour carries a [PassengerGroup] list, each group's own stable
+///     [PassengerGroup.colorIndex] drives [groupColor(index)] — so the colour is
+///     deterministic per group across sessions, not a session-local hash.
+///   * Any id NOT in that map (or a tour with no groups) falls back to
+///     [groupColorForId], which hashes the id into the same sequence.
+class GroupColorResolver {
+  /// groupId → stable palette index (from [PassengerGroup.colorIndex]).
+  final Map<String, int> _indexById;
+
+  const GroupColorResolver(this._indexById);
+
+  Color colorFor(String groupId) {
+    final idx = _indexById[groupId];
+    if (idx != null) return groupColor(idx);
+    return groupColorForId(groupId);
   }
 }
 
@@ -914,6 +1143,11 @@ class _GroupPalette {
 class _SeatTile extends StatelessWidget {
   final SeatCell cell;
   final List<Passenger> occupants;
+
+  /// Resolves a [Passenger.groupId] to its ring colour (infinite golden-angle
+  /// generator, stable per group).
+  final GroupColorResolver groupColors;
+
   final VoidCallback onTapBooked;
   final VoidCallback onTapFree;
 
@@ -924,13 +1158,38 @@ class _SeatTile extends StatelessWidget {
   const _SeatTile({
     required this.cell,
     required this.occupants,
+    required this.groupColors,
     required this.onTapBooked,
     required this.onTapFree,
     this.editMode = false,
   });
 
   bool get _isBooked => occupants.isNotEmpty;
-  bool get _isShared => occupants.length > 1;
+
+  /// A genuine SHARED-double split: two DISTINCT passengers on one seatId that
+  /// is NOT a clean disjoint GO/RETURN leg reuse. Leg reuse is rendered by the
+  /// leg-aware path instead.
+  bool get _isShared => occupants.length > 1 && _legShare == null;
+
+  /// When this seat is reused across disjoint legs — exactly one outbound-only
+  /// GO holder and one return-only RETURN holder — returns that pair. Otherwise
+  /// null. A round-trip occupant holds BOTH legs exclusively, so its presence
+  /// rules out leg reuse.
+  ({Passenger go, Passenger ret})? get _legShare {
+    if (occupants.length != 2) return null;
+    final a = occupants[0];
+    final b = occupants[1];
+    // Both must be one-way and on opposite legs.
+    if (a.tripType == TripType.outboundOnly &&
+        b.tripType == TripType.returnOnly) {
+      return (go: a, ret: b);
+    }
+    if (a.tripType == TripType.returnOnly &&
+        b.tripType == TripType.outboundOnly) {
+      return (go: b, ret: a);
+    }
+    return null;
+  }
 
   static String initials(String displayName) {
     final n = displayName.trim();
@@ -942,13 +1201,30 @@ class _SeatTile extends StatelessWidget {
     return parts.first[0].toUpperCase();
   }
 
+  /// Short leg badge for a one-way occupant: "GO" (outbound-only) or "RET"
+  /// (return-only). Null for round-trip (no badge).
+  static String? legBadge(TripType t) {
+    switch (t) {
+      case TripType.outboundOnly:
+        return 'GO';
+      case TripType.returnOnly:
+        return 'RET';
+      case TripType.roundTrip:
+        return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
+    final legShare = _legShare;
     final Widget tile;
     final VoidCallback onTap;
-    if (_isShared) {
+    if (legShare != null) {
+      tile = _legShareTile(c, legShare.go, legShare.ret);
+      onTap = onTapBooked;
+    } else if (_isShared) {
       tile = _sharedTile(c);
       onTap = onTapBooked;
     } else if (_isBooked) {
@@ -1050,10 +1326,15 @@ class _SeatTile extends StatelessWidget {
   }
 
   // BOOKED — initials on card fill; group ring + warm priority ring/badge.
+  // A one-way occupant (outbound-only / return-only) also gets a kOneWayTint
+  // corner triangle + a "GO" / "RET" badge — a treatment distinct from the
+  // group ring and the warm priority ring.
   Widget _bookedTile(UgamColorSet c, Passenger p) {
     final priority = p.isPriorityApproved || cell.forward;
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    final groupColor = hasGroup ? _GroupPalette.colorFor(p.groupId!) : null;
+    final groupColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
+    final oneWay = p.tripType.isOneWay;
+    final badge = legBadge(p.tripType);
 
     // The outer ring colour signals belonging. Priority (warm) is attention,
     // so it always wins the ring; a group then shows as a small dot badge.
@@ -1078,8 +1359,20 @@ class _SeatTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(UgamRadius.seat),
         border: Border.all(color: ringColor, width: ringWidth),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
+          // One-way cool-cyan corner triangle (bottom-left) — never collides
+          // with the warm priority star (top-right) or the group ring colour.
+          if (oneWay)
+            Positioned(
+              left: 0,
+              bottom: 0,
+              child: CustomPaint(
+                size: const Size(16, 16),
+                painter: _OneWayCornerPainter(tint: kOneWayTint),
+              ),
+            ),
           Center(
             child: FittedBox(
               fit: BoxFit.scaleDown,
@@ -1100,10 +1393,7 @@ class _SeatTile extends StatelessWidget {
             child: Text(
               cell.seatId ?? '',
               style: UgamText.tabular(
-                UgamText.micro.copyWith(
-                  color: c.ink3,
-                  fontSize: 8,
-                ),
+                UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
               ),
             ),
           ),
@@ -1112,21 +1402,28 @@ class _SeatTile extends StatelessWidget {
             Positioned(
               top: 3,
               right: 3,
-              child: Icon(
-                Icons.star_rounded,
-                size: 12,
-                color: c.warm,
+              child: Icon(Icons.star_rounded, size: 12, color: c.warm),
+            ),
+          // One-way GO/RET pill, bottom-centre — reads the leg at a glance.
+          if (oneWay && badge != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 3,
+              child: Center(
+                child: _LegPill(label: badge, tint: kOneWayTint),
               ),
             ),
           // Group dot badge (only when not already the ring colour, i.e. a
           // priority booking that ALSO belongs to a group).
           if (priority && groupColor != null)
             Positioned(
-              bottom: 4,
+              top: 4,
               right: 4,
               child: Container(
                 width: 8,
                 height: 8,
+                margin: const EdgeInsets.only(top: 12),
                 decoration: BoxDecoration(
                   color: groupColor,
                   shape: BoxShape.circle,
@@ -1138,11 +1435,101 @@ class _SeatTile extends StatelessWidget {
     );
   }
 
+  // LEG-SHARED — one GO holder + one RETURN holder reuse the same physical seat
+  // across disjoint legs. Stacked top (GO) / bottom (RET), each with its initial
+  // + leg badge, a kOneWayTint divider, and a one-way corner accent.
+  Widget _legShareTile(UgamColorSet c, Passenger go, Passenger ret) {
+    final priority =
+        go.isPriorityApproved || ret.isPriorityApproved || cell.forward;
+    return Container(
+      width: _tileW,
+      height: _tileH,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
+        border: Border.all(
+          color: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
+          width: priority ? 2 : 1.5,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              Expanded(child: _legHalf(c, go, 'GO')),
+              Container(height: 1, color: kOneWayTint.withValues(alpha: 0.7)),
+              Expanded(child: _legHalf(c, ret, 'RET')),
+            ],
+          ),
+          // Seat id, top-left (over the GO half).
+          Positioned(
+            top: 3,
+            left: 4,
+            child: Text(
+              cell.seatId ?? '',
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(color: c.ink3, fontSize: 7.5),
+              ),
+            ),
+          ),
+          if (priority)
+            Positioned(
+              top: 3,
+              right: 3,
+              child: Icon(Icons.star_rounded, size: 11, color: c.warm),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _legHalf(UgamColorSet c, Passenger p, String badge) {
+    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
+    final groupColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
+    return Container(
+      color: c.cardElev,
+      alignment: Alignment.center,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _LegPill(label: badge, tint: kOneWayTint),
+          const SizedBox(width: 4),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                initials(p.displayName),
+                style: UgamText.bodyStrong.copyWith(
+                  color: c.ink,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+          if (groupColor != null) ...[
+            const SizedBox(width: 4),
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: groupColor,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   // SHARED double — split left/right, both initials.
   Widget _sharedTile(UgamColorSet c) {
     final a = occupants[0];
     final b = occupants[1];
-    final priority = a.isPriorityApproved || b.isPriorityApproved || cell.forward;
+    final priority =
+        a.isPriorityApproved || b.isPriorityApproved || cell.forward;
     return Container(
       width: _tileW,
       height: _tileH,
@@ -1189,7 +1576,8 @@ class _SeatTile extends StatelessWidget {
 
   Widget _half(UgamColorSet c, Passenger p) {
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    final groupColor = hasGroup ? _GroupPalette.colorFor(p.groupId!) : null;
+    final groupColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
+    final badge = legBadge(p.tripType);
     return Container(
       color: c.cardElev,
       alignment: Alignment.center,
@@ -1207,7 +1595,10 @@ class _SeatTile extends StatelessWidget {
               ),
             ),
           ),
-          if (groupColor != null) ...[
+          if (badge != null) ...[
+            const SizedBox(height: 2),
+            _LegPill(label: badge, tint: kOneWayTint),
+          ] else if (groupColor != null) ...[
             const SizedBox(height: 3),
             Container(
               width: 7,
@@ -1222,6 +1613,61 @@ class _SeatTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A tiny pill stamp for the one-way leg — "GO" / "RET" in [kOneWayTint]. Used
+/// on the booked tile, the leg-shared split, and the shared-double halves so a
+/// one-way leg reads the same everywhere.
+class _LegPill extends StatelessWidget {
+  final String label;
+  final Color tint;
+
+  const _LegPill({required this.label, required this.tint});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        border: Border.all(color: tint.withValues(alpha: 0.85), width: 0.8),
+      ),
+      child: Text(
+        label,
+        style: UgamText.micro.copyWith(
+          color: tint,
+          fontSize: 7.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+/// Paints a small filled corner triangle in the one-way [tint] — the
+/// bottom-left accent on a one-way booked tile.
+class _OneWayCornerPainter extends CustomPainter {
+  final Color tint;
+
+  _OneWayCornerPainter({required this.tint});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = tint.withValues(alpha: 0.9)
+      ..style = PaintingStyle.fill;
+    final path = Path()
+      ..moveTo(0, size.height)
+      ..lineTo(0, 0)
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _OneWayCornerPainter old) => old.tint != tint;
 }
 
 /// Paints a dashed rounded-rectangle border for the FREE tile. Kept local so
@@ -1282,6 +1728,11 @@ class _Legend extends StatelessWidget {
             label: 'Priority / forward',
             c: c,
           ),
+          _LegendItem(
+            swatch: _LegendSwatch.oneWay,
+            label: 'One-way (GO/RET)',
+            c: c,
+          ),
           _LegendItem(swatch: _LegendSwatch.held, label: 'Held', c: c),
         ],
       ),
@@ -1289,7 +1740,7 @@ class _Legend extends StatelessWidget {
   }
 }
 
-enum _LegendSwatch { dashed, filled, warmRing, held }
+enum _LegendSwatch { dashed, filled, warmRing, oneWay, held }
 
 class _LegendItem extends StatelessWidget {
   final _LegendSwatch swatch;
@@ -1332,6 +1783,16 @@ class _LegendItem extends StatelessWidget {
             color: c.cardElev,
             borderRadius: BorderRadius.circular(3),
             border: Border.all(color: c.warm, width: 2),
+          ),
+        );
+      case _LegendSwatch.oneWay:
+        dot = Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: kOneWayTint.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: kOneWayTint, width: 1.5),
           ),
         );
       case _LegendSwatch.held:
@@ -1520,13 +1981,9 @@ class _OccupantSheet extends StatelessWidget {
           ),
           // Requested lines summary.
           const SizedBox(height: UgamSpacing.md),
-          _SheetRow(
-            label: 'Requested',
-            value: requestSummary,
-            c: c,
-          ),
-          // Group / priority indicators.
-          if (priority || hasGroup) ...[
+          _SheetRow(label: 'Requested', value: requestSummary, c: c),
+          // Group / priority / trip indicators.
+          if (priority || hasGroup || occupant.tripType.isOneWay) ...[
             const SizedBox(height: UgamSpacing.sm + 2),
             Wrap(
               spacing: UgamSpacing.sm,
@@ -1541,13 +1998,30 @@ class _OccupantSheet extends StatelessWidget {
                     fill: c.warmFill,
                     tint: c.warm,
                   ),
+                // Trip leg — one-way occupants read as GO / RET in kOneWayTint.
+                _IndicatorChip(
+                  icon: occupant.tripType == TripType.returnOnly
+                      ? Icons.south_west_rounded
+                      : occupant.tripType == TripType.outboundOnly
+                      ? Icons.north_east_rounded
+                      : Icons.sync_alt_rounded,
+                  label: switch (occupant.tripType) {
+                    TripType.roundTrip => 'Round trip',
+                    TripType.outboundOnly => 'GO · outbound only',
+                    TripType.returnOnly => 'RET · return only',
+                  },
+                  fill: occupant.tripType.isOneWay
+                      ? kOneWayTint.withValues(alpha: 0.16)
+                      : c.cardElev,
+                  tint: occupant.tripType.isOneWay ? kOneWayTint : c.ink2,
+                ),
                 if (hasGroup)
                   _IndicatorChip(
                     icon: Icons.group_rounded,
                     label: 'Group ${occupant.groupId}',
                     fill: c.cardElev,
                     tint: c.ink2,
-                    dot: _GroupPalette.colorFor(occupant.groupId!),
+                    dot: groupColorForId(occupant.groupId!),
                   ),
               ],
             ),
@@ -1583,8 +2057,9 @@ class _OccupantSheet extends StatelessWidget {
                     foregroundColor: c.accent,
                     disabledForegroundColor: c.ink3,
                     side: BorderSide(
-                      color: (onSwap == null ? c.border : c.accent)
-                          .withValues(alpha: 0.5),
+                      color: (onSwap == null ? c.border : c.accent).withValues(
+                        alpha: 0.5,
+                      ),
                     ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(UgamRadius.input),
@@ -1706,13 +2181,429 @@ class _SharedChooserSheet extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                        color: c.ink3,
+                      ),
                     ],
                   ),
                 ),
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Roster (List view) ─────────────────────────────────────────────────
+
+/// The readable roster the agent asked for: one row per OCCUPIED seat showing
+/// the seat id, the FULL passenger name, the mobile number (tappable to call
+/// via [PhoneDialer]), a trip badge (Round / GO / RET) and the group-colour dot
+/// — instead of the chart's terse initials. A leg-reused seat (GO + RET on one
+/// seatId) yields a row PER holder so both names + mobiles are visible.
+///
+/// Tapping a row's body opens the same occupant sheet the chart uses, so Move /
+/// Swap / Free stay reachable from the list.
+class _RosterList extends StatelessWidget {
+  final BusLayout layout;
+  final Map<String, List<Passenger>> occupants;
+  final GroupColorResolver groupColors;
+  final UgamColorSet c;
+
+  /// Opens the occupant sheet for a tapped seat. Passes the seat's full
+  /// occupant list so a shared / leg-reused seat still routes correctly.
+  final void Function(SeatCell cell, List<Passenger> seatOccupants) onTapSeat;
+
+  const _RosterList({
+    required this.layout,
+    required this.occupants,
+    required this.groupColors,
+    required this.c,
+    required this.onTapSeat,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Occupied seats in a stable reading order (row, then column).
+    final occupiedCells =
+        layout.grid
+            .where(
+              (cell) =>
+                  cell.seatId != null &&
+                  (occupants[cell.seatId]?.isNotEmpty ?? false),
+            )
+            .toList()
+          ..sort((a, b) {
+            final r = a.row.compareTo(b.row);
+            return r != 0 ? r : a.col.compareTo(b.col);
+          });
+
+    // Flatten to one entry per (seat, holder) so a leg-reused seat lists both.
+    final rows = <_RosterEntry>[];
+    for (final cell in occupiedCells) {
+      final seatOccupants = occupants[cell.seatId] ?? const <Passenger>[];
+      for (final p in seatOccupants) {
+        rows.add(_RosterEntry(cell: cell, passenger: p, all: seatOccupants));
+      }
+    }
+
+    if (rows.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(UgamSpacing.huge),
+          child: Text(
+            'No seats are booked on this bus yet.',
+            textAlign: TextAlign.center,
+            style: UgamText.body.copyWith(color: c.ink2),
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.sm,
+        UgamSpacing.gutter,
+        UgamSpacing.xl,
+      ),
+      itemCount: rows.length,
+      separatorBuilder: (_, _) => const SizedBox(height: UgamSpacing.sm),
+      itemBuilder: (_, i) {
+        final e = rows[i];
+        return _RosterRow(
+          entry: e,
+          groupColors: groupColors,
+          c: c,
+          onTap: () => onTapSeat(e.cell, e.all),
+        );
+      },
+    );
+  }
+}
+
+/// One flattened roster line: a seat cell + the single holder this row is for,
+/// plus the seat's full occupant list (so a tap can route a shared/leg seat).
+class _RosterEntry {
+  final SeatCell cell;
+  final Passenger passenger;
+  final List<Passenger> all;
+
+  const _RosterEntry({
+    required this.cell,
+    required this.passenger,
+    required this.all,
+  });
+}
+
+class _RosterRow extends StatelessWidget {
+  final _RosterEntry entry;
+  final GroupColorResolver groupColors;
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _RosterRow({
+    required this.entry,
+    required this.groupColors,
+    required this.c,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = entry.passenger;
+    final cell = entry.cell;
+    final priority = p.isPriorityApproved || cell.forward;
+    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
+    final groupColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+          border: Border.all(
+            color: priority ? c.warm.withValues(alpha: 0.55) : c.border,
+          ),
+        ),
+        child: Row(
+          children: [
+            // Seat id pill.
+            Container(
+              width: 46,
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                cell.seatId ?? '',
+                style: UgamText.tabular(
+                  UgamText.caption.copyWith(
+                    color: c.accent,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            // Full name + mobile + badges.
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      if (groupColor != null) ...[
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: groupColor,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      Expanded(
+                        child: Text(
+                          p.displayName,
+                          style: UgamText.bodyStrong.copyWith(color: c.ink),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _TripBadge(tripType: p.tripType, c: c),
+                      if (priority) ...[
+                        const SizedBox(width: 4),
+                        Icon(Icons.star_rounded, size: 14, color: c.warm),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    p.phone.isEmpty ? 'No mobile on file' : p.phone,
+                    style: UgamText.tabular(
+                      UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Call button.
+            if (p.phone.isNotEmpty) ...[
+              const SizedBox(width: UgamSpacing.sm),
+              Semantics(
+                button: true,
+                label: 'Call ${p.phone}',
+                child: GestureDetector(
+                  onTap: () => PhoneDialer.call(p.phone),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.phone_rounded, size: 17, color: c.accent),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact trip badge: "Round" (neutral) or "GO" / "RET" in [kOneWayTint].
+class _TripBadge extends StatelessWidget {
+  final TripType tripType;
+  final UgamColorSet c;
+
+  const _TripBadge({required this.tripType, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOneWay = tripType.isOneWay;
+    final label = switch (tripType) {
+      TripType.roundTrip => 'Round',
+      TripType.outboundOnly => 'GO',
+      TripType.returnOnly => 'RET',
+    };
+    final tint = isOneWay ? kOneWayTint : c.ink2;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: isOneWay ? kOneWayTint.withValues(alpha: 0.16) : c.bg,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        border: Border.all(
+          color: isOneWay ? kOneWayTint.withValues(alpha: 0.85) : c.border,
+        ),
+      ),
+      child: Text(
+        label,
+        style: UgamText.micro.copyWith(
+          color: tint,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+/// Leg-reuse sheet: one seat reused across disjoint legs. Lists BOTH holders —
+/// the GO (outbound-only) and RET (return-only) passenger — each with name,
+/// phone, a Call button, and a leg badge. Tapping a row opens that holder's
+/// full detail sheet (Move / Swap / Free).
+class _LegHoldersSheet extends StatelessWidget {
+  final Passenger go;
+  final Passenger ret;
+  final String seatId;
+  final ValueChanged<Passenger> onPick;
+
+  const _LegHoldersSheet({
+    required this.go,
+    required this.ret,
+    required this.seatId,
+    required this.onPick,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.sm + 4,
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _SheetGrabber(),
+          Text(
+            'Seat $seatId — two legs',
+            style: UgamText.titleM.copyWith(color: c.ink),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'This seat is reused across legs: one passenger rides out (GO), a '
+            'different passenger rides back (RET). Tap one to manage.',
+            style: UgamText.body.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          _LegHolderRow(
+            passenger: go,
+            badge: 'GO',
+            c: c,
+            onTap: () => onPick(go),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          _LegHolderRow(
+            passenger: ret,
+            badge: 'RET',
+            c: c,
+            onTap: () => onPick(ret),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegHolderRow extends StatelessWidget {
+  final Passenger passenger;
+  final String badge;
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _LegHolderRow({
+    required this.passenger,
+    required this.badge,
+    required this.c,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+          border: Border.all(color: kOneWayTint.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          children: [
+            _LegPill(label: badge, tint: kOneWayTint),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    passenger.displayName,
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (passenger.phone.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      passenger.phone,
+                      style: UgamText.tabular(
+                        UgamText.caption.copyWith(color: c.ink2),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (passenger.phone.isNotEmpty) ...[
+              const SizedBox(width: UgamSpacing.sm),
+              Semantics(
+                button: true,
+                label: 'Call ${passenger.phone}',
+                child: GestureDetector(
+                  onTap: () => PhoneDialer.call(passenger.phone),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.phone_rounded, size: 16, color: c.accent),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(width: 6),
+            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+          ],
+        ),
       ),
     );
   }
@@ -1732,10 +2623,7 @@ class _SheetRow extends StatelessWidget {
       children: [
         SizedBox(
           width: 100,
-          child: Text(
-            label,
-            style: UgamText.caption.copyWith(color: c.ink2),
-          ),
+          child: Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
         ),
         Expanded(
           child: Text(
@@ -1876,7 +2764,11 @@ class _DestinationPickerSheet extends StatelessWidget {
                           tint: c.ink2,
                         ),
                       const SizedBox(width: 6),
-                      Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                        color: c.ink3,
+                      ),
                     ],
                   ),
                 ),
@@ -1912,7 +2804,8 @@ class _SwapAssistSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final hasAnything = assist.freeSeatIds.isNotEmpty ||
+    final hasAnything =
+        assist.freeSeatIds.isNotEmpty ||
         assist.movable.isNotEmpty ||
         assist.blocked.isNotEmpty;
 
@@ -1983,8 +2876,9 @@ class _SwapAssistSheet extends StatelessWidget {
                                 ),
                                 decoration: BoxDecoration(
                                   color: c.accentFill,
-                                  borderRadius:
-                                      BorderRadius.circular(UgamRadius.chip),
+                                  borderRadius: BorderRadius.circular(
+                                    UgamRadius.chip,
+                                  ),
                                   border: Border.all(
                                     color: c.accent.withValues(alpha: 0.3),
                                   ),
@@ -2024,7 +2918,9 @@ class _SwapAssistSheet extends StatelessWidget {
                       ),
                       for (final cand in assist.movable)
                         Padding(
-                          padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.sm,
+                          ),
                           child: GestureDetector(
                             onTap: () => onSwap(cand),
                             behavior: HitTestBehavior.opaque,
@@ -2032,8 +2928,9 @@ class _SwapAssistSheet extends StatelessWidget {
                               padding: const EdgeInsets.all(UgamSpacing.md),
                               decoration: BoxDecoration(
                                 color: c.cardElev,
-                                borderRadius:
-                                    BorderRadius.circular(UgamRadius.row),
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.row,
+                                ),
                               ),
                               child: Row(
                                 children: [
@@ -2062,16 +2959,18 @@ class _SwapAssistSheet extends StatelessWidget {
                                       children: [
                                         Text(
                                           cand.passengerName,
-                                          style: UgamText.bodyStrong
-                                              .copyWith(color: c.ink),
+                                          style: UgamText.bodyStrong.copyWith(
+                                            color: c.ink,
+                                          ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
                                           'Seat ${cand.seatId} · ${cand.reason}',
-                                          style: UgamText.micro
-                                              .copyWith(color: c.ink2),
+                                          style: UgamText.micro.copyWith(
+                                            color: c.ink2,
+                                          ),
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -2100,15 +2999,18 @@ class _SwapAssistSheet extends StatelessWidget {
                       ),
                       for (final b in assist.blocked)
                         Padding(
-                          padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.sm,
+                          ),
                           child: Opacity(
                             opacity: 0.55,
                             child: Container(
                               padding: const EdgeInsets.all(UgamSpacing.md),
                               decoration: BoxDecoration(
                                 color: c.cardElev.withValues(alpha: 0.5),
-                                borderRadius:
-                                    BorderRadius.circular(UgamRadius.row),
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.row,
+                                ),
                                 border: Border.all(color: c.border),
                               ),
                               child: Row(
@@ -2127,16 +3029,18 @@ class _SwapAssistSheet extends StatelessWidget {
                                       children: [
                                         Text(
                                           b.passengerName,
-                                          style: UgamText.bodyStrong
-                                              .copyWith(color: c.ink2),
+                                          style: UgamText.bodyStrong.copyWith(
+                                            color: c.ink2,
+                                          ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
                                           b.reason,
-                                          style: UgamText.micro
-                                              .copyWith(color: c.ink3),
+                                          style: UgamText.micro.copyWith(
+                                            color: c.ink3,
+                                          ),
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                         ),
@@ -2186,16 +3090,11 @@ class _SwapSectionLabel extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
       child: Row(
         children: [
-          Text(
-            label,
-            style: UgamText.titleS.copyWith(color: c.ink),
-          ),
+          Text(label, style: UgamText.titleS.copyWith(color: c.ink)),
           const SizedBox(width: 6),
           Text(
             '$count',
-            style: UgamText.tabular(
-              UgamText.caption.copyWith(color: c.ink3),
-            ),
+            style: UgamText.tabular(UgamText.caption.copyWith(color: c.ink3)),
           ),
         ],
       ),
@@ -2367,15 +3266,9 @@ class _FlagSwitch extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  title,
-                  style: UgamText.bodyStrong.copyWith(color: c.ink),
-                ),
+                Text(title, style: UgamText.bodyStrong.copyWith(color: c.ink)),
                 const SizedBox(height: 1),
-                Text(
-                  subtitle,
-                  style: UgamText.micro.copyWith(color: c.ink2),
-                ),
+                Text(subtitle, style: UgamText.micro.copyWith(color: c.ink2)),
               ],
             ),
           ),

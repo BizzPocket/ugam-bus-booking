@@ -16,9 +16,11 @@ import 'package:occubusbooking/screens/handler_bus_chart_screen.dart';
 ///     throwing — the manifest fetch raises (uninitialised Supabase), the
 ///     screen catches it and shows the "Couldn't load chart" copy.
 ///
-/// The richer per-seat tile look (initials, group/priority rings, Held look,
-/// money dots) is verified by eye against the agent seat-detail screen, whose
-/// own widget test (`seat_detail_screen_test.dart`) locks that tile contract.
+/// The richer per-seat tile look (initials, group/priority rings, the one-way
+/// GO/RET badge + cyan tint, leg-shared split tile, Held look, money dots) and
+/// the Grid|List roster toggle all need a loaded manifest, so they are verified
+/// by eye against the agent seat-detail screen, whose own widget test
+/// (`seat_detail_screen_test.dart`) locks the shared tile contract.
 void main() {
   tearDown(Get.reset);
 
