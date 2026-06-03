@@ -5,6 +5,7 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/tour.dart';
+import '../routes/app_routes.dart';
 
 /// SLICE 1 of the smart-seat UI: a per-tour cockpit for the "Fill bus"
 /// auto-assignment flow.
@@ -66,7 +67,10 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
   }
 
   void _onExceptionsTap() {
-    // TODO(seat-ui): wire to the exception-list route in a later slice.
+    Get.toNamed(
+      AppRoutes.seatingExceptions,
+      arguments: {'tourId': widget.tourId},
+    );
   }
 
   void _onBusTap(Bus bus) {
