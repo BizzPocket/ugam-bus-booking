@@ -1,6 +1,7 @@
 import 'package:uuid/uuid.dart';
 import 'age_group.dart';
 import 'payment_status.dart';
+import 'priority_status.dart';
 import 'request_line.dart';
 import 'seat_assignment.dart';
 import 'trip_type.dart';
@@ -42,6 +43,17 @@ class Passenger {
   /// fall back to round-trip via [TripType.fromString].
   final TripType tripType;
 
+  /// Cross-booking group this passenger belongs to (null = ungrouped).
+  /// Members of the same group are kept on one bus by the seating engine.
+  final String? groupId;
+
+  /// Whether this passenger has an approved priority (front/sofa) need.
+  /// Requested by the customer, approved by the agent.
+  final PriorityStatus priorityStatus;
+
+  /// Short reason for the priority request (e.g. "elderly, needs front").
+  final String? priorityReason;
+
   final DateTime createdAt;
 
   Passenger({
@@ -58,6 +70,9 @@ class Passenger {
     this.isWaitlisted = false,
     this.note,
     this.tripType = TripType.roundTrip,
+    this.groupId,
+    this.priorityStatus = PriorityStatus.none,
+    this.priorityReason,
     DateTime? createdAt,
   }) : id = id ?? const Uuid().v4(),
        createdAt = createdAt ?? DateTime.now();
@@ -89,6 +104,9 @@ class Passenger {
     return '$assigned/$total';
   }
 
+  bool get isPriorityApproved => priorityStatus.isApproved;
+  bool get isPriorityPending => priorityStatus.isPending;
+
   // ── Postgres serialization ────────────────────────────────
 
   Map<String, dynamic> toMap() {
@@ -106,6 +124,9 @@ class Passenger {
       'is_waitlisted': isWaitlisted,
       'note': note,
       'trip_type': tripType.storageKey,
+      'group_id': groupId,
+      'priority_status': priorityStatus.name,
+      'priority_reason': priorityReason,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -128,6 +149,9 @@ class Passenger {
       isWaitlisted: map['is_waitlisted'] as bool? ?? false,
       note: map['note'] as String?,
       tripType: TripType.fromString(map['trip_type'] as String?),
+      groupId: map['group_id'] as String?,
+      priorityStatus: PriorityStatus.fromString(map['priority_status'] as String?),
+      priorityReason: map['priority_reason'] as String?,
       createdAt: _parseDate(map['created_at']),
     );
   }
@@ -179,6 +203,9 @@ class Passenger {
     bool? isWaitlisted,
     String? note,
     TripType? tripType,
+    String? groupId,
+    PriorityStatus? priorityStatus,
+    String? priorityReason,
   }) {
     return Passenger(
       id: id,
@@ -194,6 +221,9 @@ class Passenger {
       isWaitlisted: isWaitlisted ?? this.isWaitlisted,
       note: note ?? this.note,
       tripType: tripType ?? this.tripType,
+      groupId: groupId ?? this.groupId,
+      priorityStatus: priorityStatus ?? this.priorityStatus,
+      priorityReason: priorityReason ?? this.priorityReason,
       createdAt: createdAt,
     );
   }
