@@ -178,8 +178,17 @@ create table public.buses (
   -- Optional rear-zone pricing: the last `rear_rows` rows are charged at
   -- `rear_price` per person instead of price_per_seat. rear_rows = 0 means
   -- no rear zone; rear_price null means rear rows fall back to the base price.
+  -- LEGACY: superseded by `price_bands` (see below). The app exposes the rear
+  -- zone to the pricing engine as a synthesized trailing band, so both keep
+  -- working together; explicit price_bands take priority on overlapping rows.
   rear_rows         integer not null default 0,
   rear_price        numeric(10, 2),
+  -- Flexible, named price bands: a JSON array of
+  --   { "label": text, "fromRow": int, "toRow": int, "price": numeric }
+  -- where rows are 0-based inclusive and price is PER BERTH (per person). A band
+  -- overrides the base + per-type pricing for the rows it covers; the FIRST
+  -- matching band wins on overlap. Defaults to an empty array (no bands).
+  price_bands       jsonb not null default '[]'::jsonb,
   -- Optional per-seat-type overrides; null means fall back to price_per_seat.
   single_sofa_price numeric(10, 2),
   double_sofa_price numeric(10, 2),
@@ -611,7 +620,8 @@ create policy "collections_owner_all" on public.collections
 -- READ: full tour manifest (all buses + all passengers + collections) for a
 -- handler, money-aware. Same gating/ordering/coalesce as the original; the
 -- buses payload also carries price_per_seat + the three per-seat-type prices +
--- the rear-zone fields (rear_rows / rear_price) so the handler app resolves the
+-- the rear-zone fields (rear_rows / rear_price) + the flexible price_bands so
+-- the handler app resolves the
 -- same per-row fares as the admin, each passenger carries trip_type +
 -- request_lines, and a top-level
 -- "collections" array carries the whole tour's money rows — the figures the
@@ -646,7 +656,8 @@ as $$
                      'double_sofa_price', b.double_sofa_price,
                      'seater_price',      b.seater_price,
                      'rear_rows',         b.rear_rows,
-                     'rear_price',        b.rear_price
+                     'rear_price',        b.rear_price,
+                     'price_bands',       b.price_bands
                    )
                    order by b.name
                  )

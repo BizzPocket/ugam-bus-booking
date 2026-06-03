@@ -48,6 +48,11 @@ class _AddBusScreenState extends State<AddBusScreen> {
   final _seaterPrice = TextEditingController();
   final _rearRows = TextEditingController();
   final _rearPrice = TextEditingController();
+
+  /// Flexible, named price bands for this bus (front premium, back discount,
+  /// or any explicit row range). Edited via the Step 3 "Price bands"
+  /// sub-section; serialized onto the Bus at save time.
+  List<PriceBand> _priceBands = const [];
   bool _isAC = true;
   int _totalSeats = 40;
   BusType _busType = BusType.sleeper;
@@ -97,6 +102,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
       if (e.rearPrice != null) {
         _rearPrice.text = e.rearPrice!.toStringAsFixed(0);
       }
+      _priceBands = List<PriceBand>.from(e.priceBands);
       _isAC = e.isAC;
       _totalSeats = e.totalSeats;
       _busType = BusType.fromString(e.busType);
@@ -294,6 +300,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
           seaterPrice: seaterPrice,
           rearRows: rearRows,
           rearPrice: rearRows == 0 ? null : rearPrice,
+          priceBands: _sanitizedBands(rowCount),
         );
         await _tourCtrl.updateBus(widget.tourId, updated);
         if (!mounted) return;
@@ -326,6 +333,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
         seaterPrice: seaterPrice,
         rearRows: rearRows,
         rearPrice: rearRows == 0 ? null : rearPrice,
+        priceBands: _sanitizedBands(layout.rows),
         layout: layout,
       );
 
@@ -340,6 +348,23 @@ class _AddBusScreenState extends State<AddBusScreen> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Clean the edited bands for persistence: drop bands with no price, normalise
+  /// each range (fromRow <= toRow) and clamp both ends to the bus's [rowCount]
+  /// so an out-of-range band can never silently shadow nothing.
+  List<PriceBand> _sanitizedBands(int rowCount) {
+    final maxRow = (rowCount - 1).clamp(0, 1 << 30);
+    final out = <PriceBand>[];
+    for (final b in _priceBands) {
+      if (b.price <= 0) continue;
+      var lo = b.fromRow <= b.toRow ? b.fromRow : b.toRow;
+      var hi = b.fromRow <= b.toRow ? b.toRow : b.fromRow;
+      lo = lo.clamp(0, maxRow);
+      hi = hi.clamp(0, maxRow);
+      out.add(b.copyWith(fromRow: lo, toRow: hi));
+    }
+    return out;
   }
 
   // ── Build ───────────────────────────────────────────────────────────
@@ -459,6 +484,8 @@ class _AddBusScreenState extends State<AddBusScreen> {
           seaterPrice: _seaterPrice,
           rearRows: _rearRows,
           rearPrice: _rearPrice,
+          priceBands: _priceBands,
+          onBandsChanged: (bands) => setState(() => _priceBands = bands),
           layout: widget.existing?.layout,
           tour: _tour,
           slotLabel: _slotLabel.text.trim().isEmpty
@@ -1226,6 +1253,11 @@ class _Step3Price extends StatefulWidget {
   final TextEditingController rearRows;
   final TextEditingController rearPrice;
 
+  /// Flexible price bands edited by the agent, owned by the parent state so they
+  /// survive step navigation. [onBandsChanged] hands an updated copy back up.
+  final List<PriceBand> priceBands;
+  final ValueChanged<List<PriceBand>> onBandsChanged;
+
   /// The saved layout (edit mode). Null in add mode — the layout is only built
   /// at save time there, so the rear-zone row count can't be clamped/previewed
   /// against a concrete grid until then.
@@ -1245,6 +1277,8 @@ class _Step3Price extends StatefulWidget {
     required this.seaterPrice,
     required this.rearRows,
     required this.rearPrice,
+    required this.priceBands,
+    required this.onBandsChanged,
     required this.layout,
     required this.tour,
     required this.slotLabel,
@@ -1260,6 +1294,7 @@ class _Step3Price extends StatefulWidget {
 
 class _Step3PriceState extends State<_Step3Price> {
   late bool _overridesOpen;
+  late bool _bandsOpen;
 
   @override
   void initState() {
@@ -1268,6 +1303,35 @@ class _Step3PriceState extends State<_Step3Price> {
     _overridesOpen = widget.singleSofaPrice.text.trim().isNotEmpty ||
         widget.doubleSofaPrice.text.trim().isNotEmpty ||
         widget.seaterPrice.text.trim().isNotEmpty;
+    // Auto-expand price bands when the bus already carries some.
+    _bandsOpen = widget.priceBands.isNotEmpty;
+  }
+
+  List<PriceBand> get _bands => widget.priceBands;
+
+  /// Hand an updated band list up to the parent and refresh this step.
+  void _commitBands(List<PriceBand> next) {
+    widget.onBandsChanged(next);
+    onChanged();
+  }
+
+  void _addBand(PriceBand band) {
+    HapticFeedback.selectionClick();
+    _commitBands([..._bands, band]);
+  }
+
+  void _updateBand(int index, PriceBand band) {
+    final next = [..._bands];
+    if (index >= 0 && index < next.length) {
+      next[index] = band;
+      _commitBands(next);
+    }
+  }
+
+  void _removeBand(int index) {
+    HapticFeedback.selectionClick();
+    final next = [..._bands]..removeAt(index);
+    _commitBands(next);
   }
 
   UgamColorSet get c => widget.c;
@@ -1360,6 +1424,8 @@ class _Step3PriceState extends State<_Step3Price> {
         ),
         const SizedBox(height: UgamSpacing.xl),
         _buildRearZone(),
+        const SizedBox(height: UgamSpacing.xl),
+        _buildBandsSection(),
         const SizedBox(height: UgamSpacing.xl),
         _buildOverridesSection(),
         const SizedBox(height: UgamSpacing.xl),
@@ -1493,6 +1559,325 @@ class _Step3PriceState extends State<_Step3Price> {
               : const SizedBox.shrink(),
         ),
       ],
+    );
+  }
+
+  /// Collapsible "Price bands" sub-section. Lets the agent add named bands —
+  /// a premium front range, a discounted back range, or any explicit row range
+  /// — each with a per-person price that overrides the base/per-type pricing for
+  /// the rows it covers. Bands are owned by the parent state (so they survive
+  /// step navigation) and are surfaced to pricing alongside the legacy rear zone.
+  Widget _buildBandsSection() {
+    final rowCount = _rowCount;
+    return Container(
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              setState(() => _bandsOpen = !_bandsOpen);
+            },
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.all(UgamSpacing.lg),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              'Price bands',
+                              style: UgamText.bodyStrong
+                                  .copyWith(color: c.ink, fontSize: 14),
+                            ),
+                            if (_bands.isNotEmpty) ...[
+                              const SizedBox(width: UgamSpacing.sm),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: c.accentFill,
+                                  borderRadius:
+                                      BorderRadius.circular(UgamRadius.chip),
+                                ),
+                                child: Text(
+                                  '${_bands.length}',
+                                  style: UgamText.tabular(
+                                    UgamText.micro.copyWith(color: c.accent),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Premium front rows or a discounted back range — '
+                          'price set per person.',
+                          style: UgamText.caption.copyWith(color: c.ink2),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: UgamSpacing.md),
+                  AnimatedRotation(
+                    duration: UgamMotion.tab,
+                    curve: UgamMotion.easeOut,
+                    turns: _bandsOpen ? 0.5 : 0,
+                    child: Icon(Icons.expand_more_rounded, color: c.ink3),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: UgamMotion.tab,
+            curve: UgamMotion.easeOut,
+            alignment: Alignment.topCenter,
+            child: _bandsOpen
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.lg,
+                      0,
+                      UgamSpacing.lg,
+                      UgamSpacing.lg,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (var i = 0; i < _bands.length; i++) ...[
+                          _BandRow(
+                            c: c,
+                            band: _bands[i],
+                            onEdit: () => _openBandSheet(index: i),
+                            onRemove: () => _removeBand(i),
+                          ),
+                          const SizedBox(height: UgamSpacing.sm),
+                        ],
+                        const SizedBox(height: UgamSpacing.xs),
+                        GestureDetector(
+                          onTap: () => _openBandSheet(),
+                          behavior: HitTestBehavior.opaque,
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              vertical: UgamSpacing.md,
+                            ),
+                            decoration: BoxDecoration(
+                              color: c.accentFill,
+                              borderRadius:
+                                  BorderRadius.circular(UgamRadius.row),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.add_rounded,
+                                    size: 18, color: c.accent),
+                                const SizedBox(width: UgamSpacing.sm),
+                                Text(
+                                  'Add price band',
+                                  style: UgamText.bodyStrong
+                                      .copyWith(color: c.accent, fontSize: 13),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (rowCount == null) ...[
+                          const SizedBox(height: UgamSpacing.sm),
+                          Text(
+                            'Rows are clamped to the bus once it is built.',
+                            style:
+                                UgamText.micro.copyWith(color: c.ink3),
+                          ),
+                        ],
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Open the add/edit sheet for a band. [index] null = adding a new band.
+  void _openBandSheet({int? index}) {
+    final existing = index != null ? _bands[index] : null;
+    final rowCount = _rowCount;
+    final maxRow = rowCount == null ? null : rowCount - 1;
+
+    final labelCtrl = TextEditingController(text: existing?.label ?? '');
+    // Display rows 1-based to the agent; store 0-based.
+    final fromCtrl = TextEditingController(
+        text: existing != null ? '${existing.fromRow + 1}' : '');
+    final toCtrl = TextEditingController(
+        text: existing != null ? '${existing.toRow + 1}' : '');
+    final priceCtrl = TextEditingController(
+        text: existing != null && existing.price > 0
+            ? existing.price.toStringAsFixed(0)
+            : '');
+
+    UgamSheet.show<void>(
+      context,
+      title: existing == null ? 'Add price band' : 'Edit price band',
+      builder: (sheetCtx) {
+        final sc = UgamColors.of(sheetCtx);
+        return SingleChildScrollView(
+          child: StatefulBuilder(
+            builder: (innerCtx, setSheetState) {
+              int? parseRow(TextEditingController ctl) {
+                final raw = int.tryParse(ctl.text.trim());
+                if (raw == null) return null;
+                return raw - 1; // back to 0-based
+              }
+
+              final from = parseRow(fromCtrl);
+              final to = parseRow(toCtrl);
+              final price = double.tryParse(priceCtrl.text.trim()) ?? 0;
+              final valid = from != null &&
+                  to != null &&
+                  from >= 0 &&
+                  to >= 0 &&
+                  price > 0;
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Label(c: sc, text: 'Label'),
+                  const SizedBox(height: UgamSpacing.sm),
+                  _Field(
+                    c: sc,
+                    controller: labelCtrl,
+                    hint: 'e.g. Front premium',
+                    textCapitalization: TextCapitalization.words,
+                    onChanged: (_) => setSheetState(() {}),
+                  ),
+                  const SizedBox(height: UgamSpacing.lg),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _Label(c: sc, text: 'From row'),
+                            const SizedBox(height: UgamSpacing.sm),
+                            _Field(
+                              c: sc,
+                              controller: fromCtrl,
+                              hint: '1',
+                              keyboardType: const TextInputType
+                                  .numberWithOptions(decimal: false),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9]')),
+                              ],
+                              onChanged: (_) => setSheetState(() {}),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: UgamSpacing.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _Label(c: sc, text: 'To row'),
+                            const SizedBox(height: UgamSpacing.sm),
+                            _Field(
+                              c: sc,
+                              controller: toCtrl,
+                              hint: maxRow == null ? '2' : '${maxRow + 1}',
+                              keyboardType: const TextInputType
+                                  .numberWithOptions(decimal: false),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[0-9]')),
+                              ],
+                              onChanged: (_) => setSheetState(() {}),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: UgamSpacing.sm),
+                  Text(
+                    maxRow == null
+                        ? 'Rows are 1-based. The range clamps to the bus once '
+                            'it is built.'
+                        : 'Rows are 1-based, 1 to ${maxRow + 1}.',
+                    style: UgamText.micro.copyWith(color: sc.ink3),
+                  ),
+                  const SizedBox(height: UgamSpacing.lg),
+                  _Label(c: sc, text: 'Price per person'),
+                  const SizedBox(height: UgamSpacing.sm),
+                  _Field(
+                    c: sc,
+                    controller: priceCtrl,
+                    hint: 'e.g. 1500',
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
+                    prefix: '₹',
+                    onChanged: (_) => setSheetState(() {}),
+                  ),
+                  const SizedBox(height: UgamSpacing.xl),
+                  UgamCTA(
+                    label: existing == null ? 'Add band' : 'Save band',
+                    onPressed: valid
+                        ? () {
+                            // `valid` promotes both from/to to non-null here.
+                            final f = from;
+                            final t = to;
+                            var lo = f <= t ? f : t;
+                            var hi = f <= t ? t : f;
+                            if (maxRow != null) {
+                              lo = lo.clamp(0, maxRow);
+                              hi = hi.clamp(0, maxRow);
+                            }
+                            final label = labelCtrl.text.trim().isEmpty
+                                ? 'Band'
+                                : labelCtrl.text.trim();
+                            final band = PriceBand(
+                              label: label,
+                              fromRow: lo,
+                              toRow: hi,
+                              price: price,
+                            );
+                            if (index == null) {
+                              _addBand(band);
+                            } else {
+                              _updateBand(index, band);
+                            }
+                            Navigator.of(sheetCtx).pop();
+                          }
+                        : null,
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -1702,6 +2087,79 @@ class _RearZoneLegend extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// One row in the "Price bands" list: the band's label, its 1-based row range,
+/// and its per-person price, with edit + remove affordances. Tapping the row
+/// opens the edit sheet; the trash icon removes it.
+class _BandRow extends StatelessWidget {
+  final UgamColorSet c;
+  final PriceBand band;
+  final VoidCallback onEdit;
+  final VoidCallback onRemove;
+
+  const _BandRow({
+    required this.c,
+    required this.band,
+    required this.onEdit,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rangeLabel = band.fromRow == band.toRow
+        ? 'Row ${band.fromRow + 1}'
+        : 'Rows ${band.fromRow + 1}–${band.toRow + 1}';
+    return GestureDetector(
+      onTap: onEdit,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    band.label.isEmpty ? 'Band' : band.label,
+                    style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    rangeLabel,
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              '₹${band.price.toStringAsFixed(0)}',
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(color: c.accent, fontSize: 14),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            GestureDetector(
+              onTap: onRemove,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.close_rounded, size: 18, color: c.ink3),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

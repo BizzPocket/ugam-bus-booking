@@ -11,6 +11,7 @@ import '../screens/tour_overview_screen.dart';
 import '../screens/seating_exceptions_screen.dart';
 import '../screens/seat_detail_screen.dart';
 import '../screens/tour_groups_screen.dart';
+import '../screens/tour_money_board_screen.dart';
 
 class AppRoutes {
   static const String splash = '/splash';
@@ -25,6 +26,7 @@ class AppRoutes {
   static const String seatingExceptions = '/seating-exceptions';
   static const String seatDetail = '/seat-detail';
   static const String tourGroups = '/tour-groups';
+  static const String tourMoney = '/tour-money';
 
   static final routes = [
     GetPage(name: splash, page: () => const SplashScreen()),
@@ -80,6 +82,15 @@ class AppRoutes {
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
         return TourGroupsScreen(
+          tourId: (args?['tourId'] as String?) ?? '',
+        );
+      },
+    ),
+    GetPage(
+      name: tourMoney,
+      page: () {
+        final args = Get.arguments as Map<String, dynamic>?;
+        return TourMoneyBoardScreen(
           tourId: (args?['tourId'] as String?) ?? '',
         );
       },

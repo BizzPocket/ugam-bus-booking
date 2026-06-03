@@ -55,19 +55,22 @@ class _CollectionScreenState extends State<CollectionScreen> {
   List<_SeatCollectionLine> get _seatLines {
     final lines = <_SeatCollectionLine>[];
     for (final p in widget.tour.passengers) {
-      for (final assignment in p.assignedSeats) {
-        if (assignment.busId != widget.bus.id) continue;
-        final due = widget.bus.amountDueForSeat(p, assignment.seatId);
+      // Distinct seats only: a whole double-sofa is stored as TWO assignment
+      // entries on the same seatId; amountDueForSeat already charges the full
+      // sofa for that case, so iterate per distinct seatId (not per entry) to
+      // avoid duplicate lines / double counting.
+      final seatIds = p.assignedSeats
+          .where((a) => a.busId == widget.bus.id)
+          .map((a) => a.seatId)
+          .toSet();
+      for (final seatId in seatIds) {
+        final due = widget.bus.amountDueForSeat(p, seatId);
         lines.add(
           _SeatCollectionLine(
             passenger: p,
-            seatId: assignment.seatId,
+            seatId: seatId,
             due: due,
-            col: controller.collectionFor(
-              p.id,
-              widget.bus.id,
-              assignment.seatId,
-            ),
+            col: controller.collectionFor(p.id, widget.bus.id, seatId),
           ),
         );
       }

@@ -177,6 +177,92 @@ void main() {
     });
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // WHOLE-SOFA FIX: amountDueForSeat is the per-collection-record amount.
+  // Collections are keyed (passenger, bus, seat), so a whole double sofa is ONE
+  // record that must carry the FULL sofa price; a shared double is half.
+  // ─────────────────────────────────────────────────────────────────────────
+  group('amountDueForSeat — whole vs shared double sofa', () {
+    test('sole occupant of a whole double sofa → FULL sofa price', () {
+      final bus = buildBus(); // doubleSofaPrice = 1550
+      // Two entries on the same seat held by one passenger = whole sofa.
+      final whole = passenger(seats: const [
+        SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+        SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+      ]);
+      // The single collection record for DL1 owes the full 1550, NOT 775.
+      expect(bus.amountDueForSeat(whole, 'DL1'), 1550);
+    });
+
+    test('shared double sofa (one berth held) → HALF price', () {
+      final bus = buildBus();
+      final shared = passenger(
+          seats: const [SeatAssignment(busId: 'bus1', seatId: 'DL1')]);
+      expect(bus.amountDueForSeat(shared, 'DL1'), closeTo(775, 1e-9));
+    });
+
+    test('whole double sofa honours the trip factor on the single leg', () {
+      final bus = buildBus();
+      final whole = passenger(
+        seats: const [
+          SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+          SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+        ],
+        tripType: TripType.outboundOnly,
+      );
+      expect(bus.amountDueForSeat(whole, 'DL1'), closeTo(775, 1e-9));
+    });
+
+    test('single sofa is always one berth', () {
+      final bus = buildBus(); // singleSofaPrice = 1200
+      final p = passenger(
+          seats: const [SeatAssignment(busId: 'bus1', seatId: 'SL1')]);
+      expect(bus.amountDueForSeat(p, 'SL1'), 1200);
+    });
+
+    test('seater is always one berth', () {
+      final bus = buildBus(); // seaterPrice = 900
+      final p = passenger(
+          seats: const [SeatAssignment(busId: 'bus1', seatId: 'ST1')]);
+      expect(bus.amountDueForSeat(p, 'ST1'), 900);
+    });
+
+    test('whole sofa with no doubleSofaPrice override → 2 × base', () {
+      final bus = Bus(
+        id: 'bus1',
+        name: 'Bus 1',
+        pricePerSeat: 1000, // no doubleSofaPrice override
+        layout: BusLayout(rows: 1, cols: 5, grid: const [
+          SeatCell(
+            row: 0,
+            col: 4,
+            seatType: SeatType.doubleSofa,
+            position: SeatPosition.lower,
+            seatId: 'DL1',
+          ),
+        ]),
+      );
+      final whole = passenger(seats: const [
+        SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+        SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+      ]);
+      // berth = 1000, both berths held = 2000.
+      expect(bus.amountDueForSeat(whole, 'DL1'), 2000);
+    });
+
+    test('amountDueFor and per-seat agree for a whole sofa', () {
+      // The passenger total (summed per entry) equals the single per-seat
+      // record amount for a whole sofa — both are the full 1550.
+      final bus = buildBus();
+      final whole = passenger(seats: const [
+        SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+        SeatAssignment(busId: 'bus1', seatId: 'DL1'),
+      ]);
+      expect(bus.amountDueFor(whole), 1550);
+      expect(bus.amountDueForSeat(whole, 'DL1'), 1550);
+    });
+  });
+
   group('rear-zone pricing', () {
     // 4-row bus, base 10/seat, last 2 rows (rows 2 & 3) priced at 8/seat, no
     // per-type overrides. Front seats live in rows 0–1, rear in rows 2–3.
@@ -423,6 +509,176 @@ void main() {
             'DLr'),
         closeTo(4, 1e-9),
       );
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // FLEXIBLE PRICE BANDS: named row ranges that override base/per-type pricing.
+  // ─────────────────────────────────────────────────────────────────────────
+  group('price bands', () {
+    // 4-row bus, base 10/berth, type overrides on single/seater. A FRONT band
+    // (rows 0-0) prices that row at 15/berth; a BACK band (rows 3-3) at 6/berth.
+    Bus bandedBus() => Bus(
+          id: 'pbus',
+          name: 'Banded Bus',
+          pricePerSeat: 10,
+          singleSofaPrice: 25,
+          seaterPrice: 12,
+          priceBands: const [
+            PriceBand(label: 'Front premium', fromRow: 0, toRow: 0, price: 15),
+            PriceBand(label: 'Back discount', fromRow: 3, toRow: 3, price: 6),
+          ],
+          layout: BusLayout(rows: 4, cols: 5, grid: const [
+            SeatCell(
+              row: 0,
+              col: 1,
+              seatType: SeatType.singleSofa,
+              position: SeatPosition.lower,
+              seatId: 'SL0',
+            ),
+            SeatCell(
+              row: 0,
+              col: 4,
+              seatType: SeatType.doubleSofa,
+              position: SeatPosition.lower,
+              seatId: 'DL0',
+            ),
+            SeatCell(
+              row: 1,
+              col: 1,
+              seatType: SeatType.singleSofa,
+              position: SeatPosition.lower,
+              seatId: 'SL1',
+            ),
+            SeatCell(
+              row: 3,
+              col: 4,
+              seatType: SeatType.doubleSofa,
+              position: SeatPosition.lower,
+              seatId: 'DL3',
+            ),
+          ]),
+        );
+
+    test('PriceBand.covers is inclusive and order-agnostic', () {
+      const b = PriceBand(label: 'x', fromRow: 1, toRow: 3, price: 5);
+      expect(b.covers(0), isFalse);
+      expect(b.covers(1), isTrue);
+      expect(b.covers(3), isTrue);
+      expect(b.covers(4), isFalse);
+      // Backwards bounds normalise to the same range.
+      const rev = PriceBand(label: 'x', fromRow: 3, toRow: 1, price: 5);
+      expect(rev.covers(2), isTrue);
+    });
+
+    test('band wins over per-type override and base, per type-independent', () {
+      final bus = bandedBus();
+      // Row 0 in the front band: every type prices at 15, ignoring overrides.
+      expect(bus.berthPriceFor(SeatType.singleSofa, 0), 15);
+      expect(bus.berthPriceFor(SeatType.doubleSofa, 0), 15);
+      // Row 1 has no band: single uses its override (25).
+      expect(bus.berthPriceFor(SeatType.singleSofa, 1), 25);
+      // Row 3 in the back band: 6 regardless of type.
+      expect(bus.berthPriceFor(SeatType.doubleSofa, 3), 6);
+    });
+
+    test('whole double sofa inside a band = 2 × band price', () {
+      final bus = bandedBus();
+      final wholeFront = passenger(seats: const [
+        SeatAssignment(busId: 'pbus', seatId: 'DL0'),
+        SeatAssignment(busId: 'pbus', seatId: 'DL0'),
+      ]);
+      // Front band 15/berth → whole = 30.
+      expect(bus.amountDueForSeat(wholeFront, 'DL0'), 30);
+      final wholeBack = passenger(seats: const [
+        SeatAssignment(busId: 'pbus', seatId: 'DL3'),
+        SeatAssignment(busId: 'pbus', seatId: 'DL3'),
+      ]);
+      // Back band 6/berth → whole = 12.
+      expect(bus.amountDueForSeat(wholeBack, 'DL3'), 12);
+    });
+
+    test('first matching band wins on overlap', () {
+      final bus = Bus(
+        id: 'ovl',
+        name: 'Overlap',
+        pricePerSeat: 10,
+        priceBands: const [
+          PriceBand(label: 'A', fromRow: 0, toRow: 2, price: 20),
+          PriceBand(label: 'B', fromRow: 1, toRow: 3, price: 30),
+        ],
+        layout: BusLayout.empty(4),
+      );
+      // Row 1 is covered by both; the first (A=20) wins.
+      expect(bus.berthPriceFor(SeatType.seater, 1), 20);
+      // Row 3 only by B.
+      expect(bus.berthPriceFor(SeatType.seater, 3), 30);
+    });
+
+    test('legacy rear zone becomes an effective trailing band', () {
+      // Only rear_rows/rear_price set (no explicit priceBands): the engine
+      // still prices the last rows via the synthesized band.
+      final bus = Bus(
+        id: 'legacy',
+        name: 'Legacy Rear',
+        pricePerSeat: 10,
+        rearRows: 2,
+        rearPrice: 8,
+        layout: BusLayout.empty(4),
+      );
+      expect(bus.berthPriceFor(SeatType.seater, 0), 10); // front
+      expect(bus.berthPriceFor(SeatType.seater, 2), 8); // rear
+      expect(bus.berthPriceFor(SeatType.seater, 3), 8); // rear
+      // effectiveBands exposes exactly one synthesized 'Rear' band.
+      expect(bus.effectiveBands.length, 1);
+      expect(bus.effectiveBands.first.label, 'Rear');
+      expect(bus.effectiveBands.first.fromRow, 2);
+      expect(bus.effectiveBands.first.toRow, 3);
+    });
+
+    test('explicit bands take priority over the legacy rear zone', () {
+      final bus = Bus(
+        id: 'mix',
+        name: 'Mix',
+        pricePerSeat: 10,
+        rearRows: 2, // rear band would cover rows 2-3 at 8
+        rearPrice: 8,
+        priceBands: const [
+          // Explicit band also covers row 3 at 5 — listed first, so it wins.
+          PriceBand(label: 'VIP back', fromRow: 3, toRow: 3, price: 5),
+        ],
+        layout: BusLayout.empty(4),
+      );
+      expect(bus.berthPriceFor(SeatType.seater, 3), 5); // explicit wins
+      expect(bus.berthPriceFor(SeatType.seater, 2), 8); // rear band only
+      expect(bus.berthPriceFor(SeatType.seater, 0), 10); // base
+    });
+
+    test('serialization round-trips price bands', () {
+      final bus = bandedBus();
+      final restored = Bus.fromMap(bus.toMap());
+      expect(restored.priceBands.length, 2);
+      expect(restored.priceBands.first.label, 'Front premium');
+      expect(restored.priceBands.first.price, 15);
+      expect(restored.berthPriceFor(SeatType.doubleSofa, 0), 15);
+      expect(restored.berthPriceFor(SeatType.singleSofa, 3), 6);
+    });
+
+    test('price_bands parses from a JSON string column', () {
+      final map = bandedBus().toMap();
+      // Simulate jsonb handed back as a String.
+      map['price_bands'] =
+          '[{"label":"Solo","fromRow":2,"toRow":2,"price":99}]';
+      final restored = Bus.fromMap(map);
+      expect(restored.priceBands.length, 1);
+      expect(restored.berthPriceFor(SeatType.seater, 2), 99);
+    });
+
+    test('malformed price_bands falls back to empty', () {
+      final map = bandedBus().toMap();
+      map['price_bands'] = 'not json at all';
+      final restored = Bus.fromMap(map);
+      expect(restored.priceBands, isEmpty);
     });
   });
 }

@@ -6,6 +6,79 @@ import 'seat_type.dart';
 import 'passenger.dart';
 import 'trip_type.dart';
 
+/// A named, flexible price band covering a contiguous range of rows.
+///
+/// Generalises the old single "rear zone" into any number of named tiers — a
+/// premium front band, a discounted back band, or any explicit row range. The
+/// [price] is PER BERTH (per person), exactly like the legacy `rear_price`, so a
+/// whole double sofa sitting inside a band costs 2 × [price].
+///
+/// Rows are 0-based and INCLUSIVE: a band with `fromRow: 0, toRow: 1` covers the
+/// first two rows. Bands take precedence over the per-seat-type overrides for the
+/// rows they cover (matching the old rear-zone-wins rule). When two bands overlap
+/// a row, the FIRST band in the list wins, so callers should order them by intent.
+class PriceBand {
+  final String label;
+  final int fromRow; // inclusive, 0-based
+  final int toRow; // inclusive, 0-based
+  final double price; // per berth / per person
+
+  const PriceBand({
+    required this.label,
+    required this.fromRow,
+    required this.toRow,
+    required this.price,
+  });
+
+  /// True when [row] falls inside this band (inclusive on both ends). The
+  /// bounds are normalised so a band entered "backwards" (toRow < fromRow)
+  /// still matches the intended range.
+  bool covers(int row) {
+    final lo = fromRow <= toRow ? fromRow : toRow;
+    final hi = fromRow <= toRow ? toRow : fromRow;
+    return row >= lo && row <= hi;
+  }
+
+  Map<String, dynamic> toMap() => {
+        'label': label,
+        'fromRow': fromRow,
+        'toRow': toRow,
+        'price': price,
+      };
+
+  factory PriceBand.fromMap(Map<String, dynamic> map) => PriceBand(
+        label: (map['label'] ?? '').toString(),
+        fromRow: (map['fromRow'] as num?)?.toInt() ?? 0,
+        toRow: (map['toRow'] as num?)?.toInt() ?? 0,
+        price: (map['price'] as num?)?.toDouble() ?? 0,
+      );
+
+  PriceBand copyWith({
+    String? label,
+    int? fromRow,
+    int? toRow,
+    double? price,
+  }) =>
+      PriceBand(
+        label: label ?? this.label,
+        fromRow: fromRow ?? this.fromRow,
+        toRow: toRow ?? this.toRow,
+        price: price ?? this.price,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PriceBand &&
+          other.label == label &&
+          other.fromRow == fromRow &&
+          other.toRow == toRow &&
+          other.price == price;
+
+  @override
+  int get hashCode => Object.hash(label, fromRow, toRow, price);
+}
+
 /// A bus in the admin's fleet (per-admin, not per-tour).
 ///
 /// The agent enters details when the bus owner provides them.
@@ -44,8 +117,18 @@ class Bus {
   /// [rearRows] == 0 (or a null [rearPrice]) means no rear zone — every row uses
   /// the base/override pricing. The rear zone takes precedence over per-type
   /// overrides for the rows it covers.
+  ///
+  /// Kept for back-compat. New code should use [priceBands]; the rear zone is
+  /// surfaced to the pricing engine as a synthesized trailing band via
+  /// [effectiveBands] so both paths behave identically.
   final int rearRows;
   final double? rearPrice;
+
+  /// Flexible, named price bands (front premium, back discount, or any explicit
+  /// row range). Each band's price is per berth. Bands win over per-type
+  /// overrides for the rows they cover; the FIRST matching band wins on overlap.
+  /// See [PriceBand] and [berthPriceFor].
+  final List<PriceBand> priceBands;
 
   final String? notes;
   final BusLayout? layout;
@@ -71,6 +154,7 @@ class Bus {
     this.seaterPrice,
     this.rearRows = 0,
     this.rearPrice,
+    this.priceBands = const [],
     this.notes,
     this.layout,
     DateTime? createdAt,
@@ -124,6 +208,7 @@ class Bus {
       'seater_price': seaterPrice,
       'rear_rows': rearRows,
       'rear_price': rearPrice,
+      'price_bands': priceBands.map((b) => b.toMap()).toList(),
       'notes': notes,
       'layout': layout?.toMap(),
       'created_at': createdAt.toIso8601String(),
@@ -153,11 +238,39 @@ class Bus {
       seaterPrice: (map['seater_price'] as num?)?.toDouble(),
       rearRows: (map['rear_rows'] as num?)?.toInt() ?? 0,
       rearPrice: (map['rear_price'] as num?)?.toDouble(),
+      priceBands: _parsePriceBands(map['price_bands']),
       notes: map['notes'] as String?,
       layout: _parseLayout(map['layout']),
       createdAt: _parseDate(map['created_at']),
       updatedAt: _parseDate(map['updated_at']),
     );
+  }
+
+  /// Parse the `price_bands` jsonb column. Accepts a decoded List, a JSON
+  /// string (when the driver hands jsonb back as text), or null/anything else
+  /// (→ empty). Malformed entries are skipped so one bad row can't break load.
+  static List<PriceBand> _parsePriceBands(dynamic value) {
+    dynamic decoded = value;
+    if (decoded is String) {
+      if (decoded.trim().isEmpty) return const [];
+      try {
+        decoded = jsonDecode(decoded);
+      } catch (_) {
+        return const [];
+      }
+    }
+    if (decoded is! List) return const [];
+    final bands = <PriceBand>[];
+    for (final e in decoded) {
+      if (e is Map) {
+        try {
+          bands.add(PriceBand.fromMap(Map<String, dynamic>.from(e)));
+        } catch (_) {
+          // skip malformed band
+        }
+      }
+    }
+    return bands;
   }
 
   static BusLayout? _parseLayout(dynamic value) {
@@ -202,6 +315,7 @@ class Bus {
     double? seaterPrice,
     int? rearRows,
     double? rearPrice,
+    List<PriceBand>? priceBands,
     String? notes,
     BusLayout? layout,
   }) {
@@ -224,6 +338,7 @@ class Bus {
       seaterPrice: seaterPrice ?? this.seaterPrice,
       rearRows: rearRows ?? this.rearRows,
       rearPrice: rearPrice ?? this.rearPrice,
+      priceBands: priceBands ?? this.priceBands,
       notes: notes ?? this.notes,
       layout: layout ?? this.layout,
       createdAt: createdAt,
@@ -233,23 +348,51 @@ class Bus {
 
   // ── Fare calculation ──────────────────────────────────────
 
+  /// The bands the pricing engine actually consults, in precedence order.
+  ///
+  /// The explicit [priceBands] come first (FIRST match wins), then the legacy
+  /// rear zone is appended as a synthesized trailing band so old buses that only
+  /// set [rearRows]/[rearPrice] keep pricing exactly as before. When both are
+  /// configured the explicit bands take priority for any rows they cover.
+  List<PriceBand> get effectiveBands {
+    final l = layout;
+    final out = <PriceBand>[...priceBands];
+    if (l != null && rearRows > 0 && rearPrice != null) {
+      final from = (l.rows - rearRows).clamp(0, l.rows - 1);
+      out.add(PriceBand(
+        label: 'Rear',
+        fromRow: from,
+        toRow: l.rows - 1,
+        price: rearPrice!,
+      ));
+    }
+    return out;
+  }
+
+  /// The first effective band covering [row], or null when no band applies.
+  PriceBand? bandForRow(int row) {
+    for (final b in effectiveBands) {
+      if (b.covers(row)) return b;
+    }
+    return null;
+  }
+
   /// Per-person (per-berth) price for a seat of [type] sitting in [row], BEFORE
   /// the trip-type factor. Pricing is per person and driven by row position:
   ///
-  ///   1. Rear zone — when [row] is among the last [rearRows] rows and
-  ///      [rearPrice] is set, every berth there costs [rearPrice] regardless of
-  ///      seat type (so a WHOLE double sofa in the rear zone = 2 × rearPrice,
-  ///      because it is two assignment entries). Rear pricing wins over per-type
-  ///      overrides for the rows it covers.
-  ///   2. Front rows — a per-type override when set, otherwise [pricePerSeat].
-  ///      [doubleSofaPrice] is the WHOLE-sofa override, so one berth is half of
-  ///      it; with no override a double berth is the full per-person base price
-  ///      (a whole double sofa therefore costs 2 × [pricePerSeat]).
+  ///   1. Price band — when [row] is covered by an [effectiveBands] entry, every
+  ///      berth there costs that band's per-person price regardless of seat type
+  ///      (so a WHOLE double sofa inside a band = 2 × band price). Bands win over
+  ///      per-type overrides for the rows they cover; the legacy rear zone is one
+  ///      such band (see [effectiveBands]).
+  ///   2. Front / unbanded rows — a per-type override when set, otherwise
+  ///      [pricePerSeat]. [doubleSofaPrice] is the WHOLE-sofa override, so one
+  ///      berth is half of it; with no override a double berth is the full
+  ///      per-person base price (a whole double sofa therefore costs
+  ///      2 × [pricePerSeat]).
   double berthPriceFor(SeatType type, int row) {
-    final l = layout;
-    if (l != null && rearRows > 0 && rearPrice != null && row >= l.rows - rearRows) {
-      return rearPrice!;
-    }
+    final band = bandForRow(row);
+    if (band != null) return band.price;
     switch (type) {
       case SeatType.singleSofa:
         return singleSofaPrice ?? pricePerSeat;
@@ -263,41 +406,74 @@ class Bus {
   /// Round trip pays full; a single leg (outbound-only / return-only) pays half.
   static double tripFactor(TripType t) => t == TripType.roundTrip ? 1.0 : 0.5;
 
-  /// Total a passenger owes for the berths they hold ON THIS bus, after the
-  /// trip-type factor. Handles whole-double (two SeatAssignment entries on the
-  /// same seatId => 2 berths) and shared-double (one entry => 1 berth)
-  /// automatically because we sum per assignment entry.
-  double amountDueFor(Passenger passenger) {
-    final l = layout;
-    if (l == null) return 0;
+  /// Index of every seat cell on this bus by its seat ID (only real seats).
+  Map<String, SeatCell> _cellsById() {
     final cellById = <String, SeatCell>{};
+    final l = layout;
+    if (l == null) return cellById;
     for (final c in l.grid) {
       final sid = c.seatId;
       if (sid != null && c.seatType != null) cellById[sid] = c;
     }
+    return cellById;
+  }
+
+  /// How many berths of [seatId] this passenger holds on this bus. A whole
+  /// double sofa shows up as TWO assignment entries on the same seatId; a shared
+  /// double as one. The base seat id is taken before any `#` suffix.
+  int _berthsHeld(Passenger passenger, String seatId) {
+    final base = seatId.split('#').first;
+    var n = 0;
+    for (final a in passenger.assignedSeats) {
+      if (a.busId != id) continue;
+      if (a.seatId.split('#').first == base) n++;
+    }
+    return n;
+  }
+
+  /// Total a passenger owes for the berths they hold ON THIS bus, after the
+  /// trip-type factor.
+  ///
+  /// Each assignment entry is one berth, so a WHOLE double sofa (two entries on
+  /// the same seatId held by this passenger) naturally sums to the full sofa
+  /// price (2 × the per-berth band/override price), while a SHARED double (one
+  /// entry) is half. Summing per entry keeps both cases correct.
+  double amountDueFor(Passenger passenger) {
+    final cellById = _cellsById();
+    if (cellById.isEmpty) return 0;
     double sum = 0;
     for (final a in passenger.assignedSeats) {
       if (a.busId != id) continue;
-      final c = cellById[a.seatId];
+      final c = cellById[a.seatId.split('#').first];
       if (c == null) continue;
       sum += berthPriceFor(c.seatType!, c.row);
     }
     return sum * tripFactor(passenger.tripType);
   }
 
-  /// Amount due for one assigned seat/berth on this bus, after the trip factor.
-  /// Collection rows are tracked per assignment entry, so a whole double sofa
-  /// (two entries on the same seatId) is charged twice — once per berth.
+  /// Amount due for one DISTINCT seat held by [passenger] on this bus, after the
+  /// trip factor. This is the per-collection-record amount — collections are
+  /// keyed `(passenger, bus, seat)`, so a whole double sofa is ONE record that
+  /// must carry the FULL sofa price.
+  ///
+  /// WHOLE-SOFA FIX: when [passenger] holds BOTH berths of a double-sofa cell
+  /// (two assignment entries on the same seatId → sole occupant), this returns
+  /// the FULL double-sofa price (2 × the per-berth price). When they hold just
+  /// one berth (a SHARED double) it returns the single-berth (half) price. Every
+  /// other seat type is always a single berth.
   double amountDueForSeat(Passenger passenger, String seatId) {
-    final l = layout;
-    if (l == null) return 0;
+    final cellById = _cellsById();
+    if (cellById.isEmpty) return 0;
     final baseSeatId = seatId.split('#').first;
-    for (final c in l.grid) {
-      if (c.seatId == baseSeatId && c.seatType != null) {
-        return berthPriceFor(c.seatType!, c.row) * tripFactor(passenger.tripType);
-      }
-    }
-    return 0;
+    final c = cellById[baseSeatId];
+    if (c == null) return 0;
+    final berthPrice = berthPriceFor(c.seatType!, c.row);
+    // A double sofa held in full (both berths by the same passenger) is charged
+    // for both berths on its single collection record; otherwise one berth.
+    final berths = c.seatType == SeatType.doubleSofa
+        ? _berthsHeld(passenger, baseSeatId).clamp(1, 2)
+        : 1;
+    return berthPrice * berths * tripFactor(passenger.tripType);
   }
 
   @override

@@ -238,4 +238,49 @@ class MoneyController extends GetxController {
     expenses: expenses.toList(),
     handovers: handovers.toList(),
   );
+
+  /// Read-only summaries for every bus id in [busIds], in the order given.
+  /// Pure aggregation over the currently held rows — no fetch. Used by the
+  /// tour money board to render one row per bus without each row recomputing
+  /// the same `where` scans against the shared lists.
+  List<BusMoneySummary> summariesForBuses(Iterable<String> busIds) {
+    final cols = collections.toList();
+    final exps = expenses.toList();
+    final hands = handovers.toList();
+    return [
+      for (final id in busIds)
+        BusMoneySummary.compute(
+          busId: id,
+          collections: cols,
+          expenses: exps,
+          handovers: hands,
+        ),
+    ];
+  }
+
+  /// Classifies a bus's money state for the board's attention ring. Pure
+  /// read-only derivation from a [BusMoneySummary]:
+  ///   * [BusMoneyState.actionNeeded] — handler still owes a handover
+  ///     (outstanding > 0) OR a passenger shortfall is still to be collected.
+  ///   * [BusMoneyState.settled] — money has moved (collected or handed over)
+  ///     and nothing is outstanding / to collect / to return.
+  ///   * [BusMoneyState.neutral] — nothing has happened on this bus yet.
+  /// A small epsilon absorbs floating-point dust so a fully-square bus never
+  /// reads as action-needed.
+  BusMoneyState stateForBusSummary(BusMoneySummary s) {
+    const eps = 0.005;
+    final outstanding = s.outstandingHandover > eps;
+    final toCollect = s.toCollectTotal > eps;
+    final toReturn = s.toReturnTotal > eps;
+    if (outstanding || toCollect) return BusMoneyState.actionNeeded;
+
+    final hasActivity = s.collected > eps || s.handedOver > eps;
+    if (hasActivity && !toReturn) return BusMoneyState.settled;
+    return BusMoneyState.neutral;
+  }
 }
+
+/// Per-bus money board state, driving the attention ring on the tour money
+/// board. Kept here (next to the aggregation helpers) so both the screen and
+/// its tests share one source of truth.
+enum BusMoneyState { actionNeeded, settled, neutral }

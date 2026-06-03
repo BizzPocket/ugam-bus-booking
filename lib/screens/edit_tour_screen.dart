@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
+import '../models/bus_details.dart';
 import '../utils/app_snackbar.dart';
 
 class EditTourScreen extends StatefulWidget {
@@ -166,6 +167,146 @@ class _EditTourScreenState extends State<EditTourScreen> {
       AppSnackBar.error(tr('edit_tour.snack_save_failed'));
       setState(() => _saving = false);
     }
+  }
+
+  /// One-tap "apply this price sheet to all buses". Lets the agent pick a
+  /// source bus, then copies its pricing — base price, the three per-type
+  /// overrides, the rear zone, and the flexible price bands — onto every OTHER
+  /// bus on this tour. Per-bus edits stay possible afterwards; this is just a
+  /// fast way to make one bus the template for the rest.
+  Future<void> _applyPriceSheet() async {
+    final ctrl = Get.find<TourController>();
+    final tour = ctrl.getTour(widget.tourId);
+    if (tour == null) return;
+    final buses = tour.buses;
+    if (buses.length < 2) {
+      AppSnackBar.warning(
+        'Add at least two buses to copy a price sheet between them.',
+      );
+      return;
+    }
+
+    final c = UgamColors.of(context);
+    final source = await UgamSheet.show<Bus>(
+      context,
+      title: 'Apply price sheet',
+      builder: (sheetCtx) {
+        final sc = UgamColors.of(sheetCtx);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Pick the bus whose prices become the template. Its base price, '
+              'per-type overrides, rear zone, and price bands copy to every '
+              'other bus on this tour.',
+              style: UgamText.body
+                  .copyWith(color: sc.ink2, fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: UgamSpacing.lg),
+            for (final b in buses) ...[
+              GestureDetector(
+                onTap: () => Navigator.of(sheetCtx).pop(b),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.all(UgamSpacing.md),
+                  decoration: BoxDecoration(
+                    color: sc.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.row),
+                    border: Border.all(color: sc.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              b.name,
+                              style: UgamText.bodyStrong
+                                  .copyWith(color: sc.ink, fontSize: 14),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _priceSummary(b),
+                              style:
+                                  UgamText.caption.copyWith(color: sc.ink2),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded, color: sc.ink3),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: UgamSpacing.sm),
+            ],
+          ],
+        );
+      },
+    );
+
+    if (source == null || !mounted) return;
+
+    final targets = buses.where((b) => b.id != source.id).toList();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.card,
+        title: const Text('Copy price sheet?'),
+        content: Text(
+          'Copy ${source.name}\'s prices to ${targets.length} other '
+          'bus${targets.length == 1 ? '' : 'es'}? This overwrites their '
+          'current pricing.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Copy'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _saving = true);
+    try {
+      for (final t in targets) {
+        final updated = t.copyWith(
+          pricePerSeat: source.pricePerSeat,
+          singleSofaPrice: source.singleSofaPrice,
+          doubleSofaPrice: source.doubleSofaPrice,
+          seaterPrice: source.seaterPrice,
+          rearRows: source.rearRows,
+          rearPrice: source.rearPrice,
+          priceBands: List<PriceBand>.from(source.priceBands),
+        );
+        await ctrl.updateBus(widget.tourId, updated);
+      }
+      if (!mounted) return;
+      AppSnackBar.success(
+        'Copied ${source.name}\'s price sheet to ${targets.length} '
+        'bus${targets.length == 1 ? '' : 'es'}.',
+      );
+    } catch (_) {
+      if (mounted) AppSnackBar.error('Could not copy the price sheet.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// Short price summary for a bus row in the source picker.
+  String _priceSummary(Bus b) {
+    final parts = <String>['₹${b.pricePerSeat.toStringAsFixed(0)}/seat'];
+    final bands = b.priceBands.length + (b.rearRows > 0 ? 1 : 0);
+    if (bands > 0) parts.add('$bands band${bands == 1 ? '' : 's'}');
+    return parts.join(' · ');
   }
 
   Future<void> _confirmAndDelete() async {
@@ -396,6 +537,18 @@ class _EditTourScreenState extends State<EditTourScreen> {
                       controller: _priceCtrl,
                       keyboardType: TextInputType.number,
                     ),
+                    if ((Get.find<TourController>()
+                                .getTour(widget.tourId)
+                                ?.buses
+                                .length ??
+                            0) >=
+                        2) ...[
+                      const SizedBox(height: UgamSpacing.lg),
+                      _ApplyPriceSheetCard(
+                        c: c,
+                        onTap: _saving ? null : _applyPriceSheet,
+                      ),
+                    ],
                     const SizedBox(height: UgamSpacing.lg),
                     UgamInput(
                       label: tr('create_tour.label.tour_description'),
@@ -470,6 +623,67 @@ class _CancelChangesPill extends StatelessWidget {
                 fontSize: 13,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One-tap entry into the "apply this price sheet to all buses" flow. Only
+/// shown when the tour has two or more buses (nothing to copy with one).
+class _ApplyPriceSheetCard extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback? onTap;
+
+  const _ApplyPriceSheetCard({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                borderRadius: BorderRadius.circular(UgamRadius.stat),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.content_copy_rounded,
+                  size: 18, color: enabled ? c.accent : c.ink3),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Apply price sheet to all buses',
+                    style: UgamText.bodyStrong
+                        .copyWith(color: c.ink, fontSize: 14),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Copy one bus\'s prices + bands to the rest',
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: c.ink3),
           ],
         ),
       ),

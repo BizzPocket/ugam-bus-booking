@@ -96,6 +96,11 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                 AppRoutes.tourGroups,
                 arguments: {'tourId': widget.tourId},
               ),
+              // TODO(seat-ui): money entry.
+              onMoney: () => Get.toNamed(
+                AppRoutes.tourMoney,
+                arguments: {'tourId': widget.tourId},
+              ),
               c: c,
             ),
             Expanded(
@@ -184,11 +189,13 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
 class _Header extends StatelessWidget {
   final String title;
   final VoidCallback onGroups;
+  final VoidCallback onMoney;
   final UgamColorSet c;
 
   const _Header({
     required this.title,
     required this.onGroups,
+    required this.onMoney,
     required this.c,
   });
 
@@ -224,6 +231,26 @@ class _Header extends StatelessWidget {
               style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          // Tour money board entry.
+          GestureDetector(
+            onTap: onMoney,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.account_balance_wallet_rounded,
+                size: 19,
+                color: c.ink,
+              ),
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
