@@ -196,11 +196,19 @@ class SyncService extends GetxService {
         .inFilter('tour_id', tourIds)
         .limit(500);
 
-    final results =
-        await Future.wait([passengersFuture, busesFuture, groupsFuture]);
-    final passengersRaw = results[0];
-    final busesRaw = results[1];
-    final groupsRaw = results[2];
+    // passengers + buses are the core relations and MUST load. passenger_groups
+    // is new (migration 006) and OPTIONAL — if that table isn't present yet (or
+    // its query fails for any reason) it must NOT take down the whole tour load
+    // via Future.wait. Degrade to "no groups" instead of breaking every screen.
+    final coreResults = await Future.wait([passengersFuture, busesFuture]);
+    final passengersRaw = coreResults[0];
+    final busesRaw = coreResults[1];
+    List<dynamic> groupsRaw;
+    try {
+      groupsRaw = await groupsFuture as List;
+    } catch (_) {
+      groupsRaw = const [];
+    }
 
     final passengersByTour = <String, List<Map<String, dynamic>>>{};
     for (final p in passengersRaw as List) {
@@ -217,7 +225,7 @@ class SyncService extends GetxService {
     }
 
     final groupsByTour = <String, List<Map<String, dynamic>>>{};
-    for (final g in groupsRaw as List) {
+    for (final g in groupsRaw) {
       final m = Map<String, dynamic>.from(g as Map);
       final tId = m['tour_id'] as String?;
       if (tId != null) groupsByTour.putIfAbsent(tId, () => []).add(m);
