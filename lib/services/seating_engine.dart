@@ -20,6 +20,24 @@ import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
+import '../models/trip_type.dart';
+
+/// A tour leg. Capacity is tracked PER LEG so the same physical berth can be
+/// reused across disjoint legs (an outbound-only passenger and a return-only
+/// passenger can hold the SAME seat at once). A round-trip passenger needs the
+/// berth on BOTH legs and therefore blocks any reuse.
+enum TripLeg {
+  go,
+  ret;
+
+  /// The legs a [tripType] actually occupies.
+  static List<TripLeg> forTrip(TripType t) {
+    final legs = <TripLeg>[];
+    if (t.usesOutbound) legs.add(TripLeg.go);
+    if (t.usesReturn) legs.add(TripLeg.ret);
+    return legs;
+  }
+}
 
 /// Why a particular berth was placed where it was. Every assignment the engine
 /// proposes carries one of these so the plan is fully explainable.
@@ -133,6 +151,58 @@ class SeatingPlan {
   List<SeatAssignment> get allAssignments => [
         for (final list in assignmentsByPassenger.values) ...list,
       ];
+
+  /// Per-seat GO vs RETURN occupancy across the whole plan.
+  ///
+  /// Because capacity is now LEG-AWARE (a berth has a GO slot and a RETURN
+  /// slot), the same physical seat can be held by different passengers on
+  /// different legs. This helper lets the UI render that: for every seat that
+  /// holds at least one berth, it reports how many berths are occupied on the
+  /// outbound (GO) leg vs the return (RETURN) leg, derived from each holder's
+  /// [Passenger.tripType].
+  ///
+  /// Pass the SAME passenger list given to [SeatingEngine.propose]; passengers
+  /// absent from the plan are ignored. Keyed by `"busId:seatId"`. A whole double
+  /// held solo contributes 2 to its leg(s); a shared double contributes 1 per
+  /// holder per leg.
+  Map<String, SeatLegOccupancy> legOccupancy(Iterable<Passenger> passengers) {
+    final tripById = <String, TripType>{
+      for (final p in passengers) p.id: p.tripType,
+    };
+    final out = <String, SeatLegOccupancy>{};
+    for (final entry in assignmentsByPassenger.entries) {
+      final trip = tripById[entry.key] ?? TripType.roundTrip;
+      final usesGo = trip.usesOutbound;
+      final usesReturn = trip.usesReturn;
+      for (final a in entry.value) {
+        final key = '${a.busId}:${a.seatId}';
+        final cur = out[key] ?? const SeatLegOccupancy(go: 0, ret: 0);
+        out[key] = SeatLegOccupancy(
+          go: cur.go + (usesGo ? 1 : 0),
+          ret: cur.ret + (usesReturn ? 1 : 0),
+        );
+      }
+    }
+    return out;
+  }
+}
+
+/// How many berths of a single seat are occupied on each tour leg.
+///
+/// Exposed so the UI can show leg-aware reuse: a seat can read e.g. `go: 1,
+/// ret: 1` from two DIFFERENT passengers (one outbound-only, one return-only)
+/// sharing the same berth across disjoint legs.
+class SeatLegOccupancy {
+  /// Berths occupied on the outbound (GO) leg.
+  final int go;
+
+  /// Berths occupied on the return (RETURN) leg.
+  final int ret;
+
+  const SeatLegOccupancy({required this.go, required this.ret});
+
+  @override
+  String toString() => 'SeatLegOccupancy(go: $go, ret: $ret)';
 }
 
 /// Deterministic greedy seat-assignment engine.
@@ -171,9 +241,10 @@ class SeatingEngine {
     state.seedReserved();
     // Locked assignments are preserved verbatim and their berths reserved.
     for (final p in sorted) {
+      final legs = TripLeg.forTrip(p.tripType);
       for (final a in p.assignedSeats) {
         if (!a.locked) continue;
-        state.seedLocked(p.id, a);
+        state.seedLocked(p.id, a, legs);
         reasons.add(PlacementReason(
           busId: a.busId,
           seatId: a.seatId,
@@ -463,6 +534,20 @@ class SeatingEngine {
       }
     }
 
+    // ── FILL, NO EMPTY SEATS ──────────────────────────────────────────────
+    // The balance/front-ordered passes above may stop short while a compatible
+    // berth-leg is still free on SOME bus (the early-break heuristics optimize
+    // for balance, not exhaustion). Before we ever waitlist this passenger,
+    // sweep EVERY bus once more with all preference gating dropped — plain
+    // relaxed placement, hard rules still intact — so no one is left unplaced
+    // while a compatible seat sits empty anywhere.
+    _fillSweep(
+      passenger: passenger,
+      pending: pending,
+      state: state,
+      reasons: reasons,
+    );
+
     // Whatever could not be placed becomes an exception.
     _raiseRemainingExceptions(
       passenger: passenger,
@@ -471,6 +556,44 @@ class SeatingEngine {
       exceptions: exceptions,
       priority: priority,
     );
+  }
+
+  /// Exhaustive last-resort fill for one passenger's still-[pending] lines.
+  ///
+  /// Iterates buses in stable id order and keeps re-attempting plain (no front
+  /// gating, no front-reserve guard) placement until a full sweep across all
+  /// buses places nothing more. This guarantees Change 2's contract: a
+  /// passenger is never waitlisted while ANY compatible free berth-leg remains
+  /// anywhere — including cross-fill and the leg-reuse GO/RETURN slots. Hard
+  /// rules (type/position match, capacity, reserved, locked) are still honored
+  /// because it routes through the same [_placeOnBus] path.
+  static void _fillSweep({
+    required Passenger passenger,
+    required List<_PendingLine> pending,
+    required _PlanState state,
+    required List<PlacementReason> reasons,
+  }) {
+    if (_remaining(pending) == 0) return;
+    final busOrder = [...state.buses]..sort((a, b) => a.id.compareTo(b.id));
+    var progressed = true;
+    while (progressed && _remaining(pending) > 0) {
+      progressed = false;
+      for (final bus in busOrder) {
+        if (_remaining(pending) == 0) break;
+        final before = _remaining(pending);
+        _placeOnBus(
+          passenger: passenger,
+          pending: pending,
+          busId: bus.id,
+          state: state,
+          reasons: reasons,
+          priority: false,
+          requireFront: false,
+          groupLabel: null,
+        );
+        if (_remaining(pending) < before) progressed = true;
+      }
+    }
   }
 
   /// Try to place as many of [passenger]'s [pending] berths as possible on a
@@ -548,6 +671,11 @@ class SeatingEngine {
     // still prefer forward-zone sofas over ordinary ones (the agent-marked
     // forward seats may sit on higher rows than ordinary seats).
     final preferFront = priority && !requireFront;
+    // Leg-aware capacity: this passenger only consumes the leg(s) their
+    // tripType travels (outbound-only = GO, return-only = RETURN, round-trip =
+    // BOTH). A berth is takeable only when free on EVERY leg in [legs], so a
+    // disjoint-leg passenger can reuse a berth a one-way passenger already holds.
+    final legs = TripLeg.forTrip(passenger.tripType);
 
     switch (line.seatType) {
       case SeatType.seater:
@@ -556,6 +684,7 @@ class SeatingEngine {
           type: SeatType.seater,
           position: null,
           frontOnly: false,
+          legs: legs,
         );
         if (cell == null) return null;
         state.assign(passenger.id, busId, cell.seatId!);
@@ -578,6 +707,7 @@ class SeatingEngine {
           type: SeatType.singleSofa,
           position: line.position,
           frontOnly: requireFront,
+          legs: legs,
           guardFrontReserve: !priority,
           preferFront: preferFront,
         );
@@ -601,6 +731,7 @@ class SeatingEngine {
           busId,
           position: line.position,
           frontOnly: requireFront,
+          legs: legs,
           guardFrontReserve: !priority,
           preferFront: preferFront,
         );
@@ -628,6 +759,7 @@ class SeatingEngine {
           type: SeatType.doubleSofa,
           position: line.position,
           frontOnly: requireFront,
+          legs: legs,
           guardFrontReserve: !priority,
           preferFront: preferFront,
         );
@@ -667,12 +799,14 @@ class SeatingEngine {
               type: SeatType.singleSofa,
               position: null,
               frontOnly: requireFront,
+              legs: legs,
               guardFrontReserve: !priority,
               preferFront: preferFront,
             ) ??
             state.takeHalfDouble(busId,
                 position: null,
                 frontOnly: requireFront,
+                legs: legs,
                 guardFrontReserve: !priority,
                 preferFront: preferFront);
         if (first == null) return null;
@@ -681,18 +815,20 @@ class SeatingEngine {
               type: SeatType.singleSofa,
               position: null,
               frontOnly: requireFront,
+              legs: legs,
               guardFrontReserve: !priority,
               preferFront: preferFront,
             ) ??
             state.takeHalfDouble(busId,
                 position: null,
                 frontOnly: requireFront,
+                legs: legs,
                 guardFrontReserve: !priority,
                 preferFront: preferFront);
         if (second == null) {
           // Only one single available — can't satisfy a double line by
           // cross-fill. Release the first so we don't strand it.
-          state.release(busId, first.seatId!);
+          state.release(busId, first.seatId!, legs);
           return null;
         }
         state.assign(passenger.id, busId, first.seatId!);
@@ -732,7 +868,14 @@ class SeatingEngine {
     required List<SeatingException> exceptions,
     required bool priority,
   }) {
-    final anyFreeCapacity = state.buses.any((b) => state.freeBerths(b.id) > 0);
+    // Leg-aware: capacity is "free" only on the leg(s) THIS passenger travels.
+    // A berth whose sole free slot is on a leg this passenger does not use is
+    // not capacity for them. With this view, overflowWaitlist fires only when
+    // there is genuinely zero berth-leg they could occupy anywhere; otherwise a
+    // compatible-but-wrong-type seat exists → seatTypeUnavailable.
+    final legs = TripLeg.forTrip(passenger.tripType);
+    final anyFreeCapacity =
+        state.buses.any((b) => state.freeBerths(b.id, legs) > 0);
     for (final line in pending) {
       if (line.remaining <= 0) continue;
       final rl = RequestLine(
@@ -834,7 +977,8 @@ class SeatingEngine {
             // fine for completing an already-locked cell. Otherwise fall back
             // to draining a single line, else bucket as a leftover single.
             if (_drainDoubleCrossFill(pending) &&
-                state.tryClaimPartnerBerth(g.busId, g.seatId)) {
+                state.tryClaimPartnerBerth(
+                    g.busId, g.seatId, TripLeg.forTrip(p.tripType))) {
               state.assign(p.id, g.busId, g.seatId);
             } else if (!_drain(pending, [SeatType.singleSofa], cell.position)) {
               leftoverSingleBerths++;
@@ -1000,16 +1144,27 @@ class _LockedCell {
   _LockedCell(this.busId, this.seatId);
 }
 
-/// Per-cell free-berth accounting for one bus, plus seat metadata.
+/// Per-cell, PER-LEG free-berth accounting for one bus, plus seat metadata.
+///
+/// Capacity is leg-aware: every berth has a GO slot and a RETURN slot, tracked
+/// independently. A round-trip passenger consumes a berth on BOTH legs; a
+/// one-way passenger consumes it on only their leg. Because berths within a
+/// cell are fungible, a simple per-leg free COUNT gives exactly the desired
+/// reuse: a doubleSofa (2 berths) starts GO=2/RETURN=2 and can host, e.g., one
+/// outbound-only + one return-only on the SAME berth while a second berth holds
+/// a round-trip — never letting either leg-count go negative.
 class _BusState {
   final Bus bus;
 
   /// seatId -> the cell (so we can read type/position/row).
   final Map<String, SeatCell> cells;
 
-  /// seatId -> berths still FREE on that cell. A doubleSofa starts at 2; every
-  /// other seat at 1. Reserved cells start at 0.
-  final Map<String, int> freeBerthsBySeat;
+  /// seatId -> berths still FREE on the GO (outbound) leg. A doubleSofa starts
+  /// at 2; every other seat at 1. Reserved cells start at 0.
+  final Map<String, int> freeGoBySeat;
+
+  /// seatId -> berths still FREE on the RETURN leg. Same capacities as GO.
+  final Map<String, int> freeReturnBySeat;
 
   /// True when this bus has at least one agent-marked forward sofa seat. When
   /// set, the FORWARD zone is exactly those flagged sofa cells; when false, the
@@ -1018,7 +1173,8 @@ class _BusState {
 
   _BusState(this.bus)
       : cells = {},
-        freeBerthsBySeat = {},
+        freeGoBySeat = {},
+        freeReturnBySeat = {},
         _hasForwardFlag = _detectForwardFlag(bus) {
     final layout = bus.layout;
     if (layout == null) return;
@@ -1026,16 +1182,51 @@ class _BusState {
       if (!c.hasSeat || c.seatId == null) continue;
       cells[c.seatId!] = c;
       final cap = c.seatType == SeatType.doubleSofa ? 2 : 1;
-      freeBerthsBySeat[c.seatId!] = c.reserved ? 0 : cap;
+      freeGoBySeat[c.seatId!] = c.reserved ? 0 : cap;
+      freeReturnBySeat[c.seatId!] = c.reserved ? 0 : cap;
     }
   }
 
-  _BusState._clone(this.bus, this.cells, Map<String, int> free,
-      this._hasForwardFlag)
-      : freeBerthsBySeat = Map<String, int>.from(free);
+  _BusState._clone(this.bus, this.cells, Map<String, int> go,
+      Map<String, int> ret, this._hasForwardFlag)
+      : freeGoBySeat = Map<String, int>.from(go),
+        freeReturnBySeat = Map<String, int>.from(ret);
 
-  _BusState fork() =>
-      _BusState._clone(bus, cells, freeBerthsBySeat, _hasForwardFlag);
+  _BusState fork() => _BusState._clone(
+      bus, cells, freeGoBySeat, freeReturnBySeat, _hasForwardFlag);
+
+  /// The free-berth map for one [leg].
+  Map<String, int> _legMap(TripLeg leg) =>
+      leg == TripLeg.go ? freeGoBySeat : freeReturnBySeat;
+
+  /// Berths on [seatId] free on EVERY leg in [legs] (the min across them) — the
+  /// number a passenger needing exactly [legs] could still claim there.
+  int freeForLegs(String seatId, List<TripLeg> legs) {
+    if (legs.isEmpty) return 0;
+    var min = 1 << 30;
+    for (final leg in legs) {
+      final f = _legMap(leg)[seatId] ?? 0;
+      if (f < min) min = f;
+    }
+    return min;
+  }
+
+  /// Consume [n] berths of [seatId] on each leg in [legs].
+  void consume(String seatId, List<TripLeg> legs, int n) {
+    for (final leg in legs) {
+      final m = _legMap(leg);
+      m[seatId] = ((m[seatId] ?? 0) - n).clamp(0, 1 << 30);
+    }
+  }
+
+  /// Give back [n] berths of [seatId] on each leg in [legs] (capped at cap).
+  void giveBack(String seatId, List<TripLeg> legs, int n) {
+    final cap = cells[seatId]?.seatType == SeatType.doubleSofa ? 2 : 1;
+    for (final leg in legs) {
+      final m = _legMap(leg);
+      m[seatId] = ((m[seatId] ?? 0) + n).clamp(0, cap);
+    }
+  }
 
   int get rows => bus.layout?.rows ?? 0;
 
@@ -1067,16 +1258,27 @@ class _BusState {
   bool isSofa(SeatType? t) =>
       t == SeatType.singleSofa || t == SeatType.doubleSofa;
 
-  int get freeBerths =>
-      freeBerthsBySeat.values.fold(0, (s, v) => s + v);
-
-  /// Free sofa berths in the front rows — the priority budget.
-  int get freeFrontSofa {
+  /// Free berths across the bus for a passenger needing exactly [legs]. With
+  /// [legs] omitted this reports berths free on BOTH legs (the conservative
+  /// "fully free" view used for balance ordering — leg-agnostic and stable).
+  int freeBerths([List<TripLeg>? legs]) {
+    final ls = legs ?? const [TripLeg.go, TripLeg.ret];
     var n = 0;
-    for (final e in freeBerthsBySeat.entries) {
-      if (e.value <= 0) continue;
-      final c = cells[e.key]!;
-      if (isSofa(c.seatType) && isFront(c)) n += e.value;
+    for (final id in cells.keys) {
+      n += freeForLegs(id, ls);
+    }
+    return n;
+  }
+
+  /// Free sofa berths in the front rows — the priority budget. Leg-aware as
+  /// [freeBerths]; [legs] omitted means berths free on both legs.
+  int freeFrontSofa([List<TripLeg>? legs]) {
+    final ls = legs ?? const [TripLeg.go, TripLeg.ret];
+    var n = 0;
+    for (final e in cells.entries) {
+      final c = e.value;
+      if (!isSofa(c.seatType) || !isFront(c)) continue;
+      n += freeForLegs(e.key, ls);
     }
     return n;
   }
@@ -1170,15 +1372,18 @@ class _PlanState {
   }
 
   /// Seed a locked assignment: reserve its berth and record it verbatim.
-  void seedLocked(String passengerId, SeatAssignment a) {
+  ///
+  /// A locked berth only blocks the legs its passenger actually travels: a
+  /// one-way locked passenger still leaves the OTHER leg of that berth free for
+  /// reuse by a disjoint-leg passenger.
+  void seedLocked(String passengerId, SeatAssignment a, List<TripLeg> legs) {
     final bs = _busStates[a.busId];
     final list = assignmentsByPassenger.putIfAbsent(passengerId, () => []);
     // Preserve the locked entry exactly (including locked:true).
     list.add(a);
     if (bs == null) return;
-    final free = bs.freeBerthsBySeat[a.seatId];
-    if (free != null && free > 0) {
-      bs.freeBerthsBySeat[a.seatId] = free - 1;
+    if (bs.freeForLegs(a.seatId, legs) > 0) {
+      bs.consume(a.seatId, legs, 1);
     }
     final cell = bs.cells[a.seatId];
     if (cell != null && bs.isSofa(cell.seatType) && bs.isFront(cell)) {
@@ -1189,19 +1394,29 @@ class _PlanState {
   SeatCell? cellFor(String busId, String seatId) =>
       _busStates[busId]?.cells[seatId];
 
-  int freeBerths(String busId) => _busStates[busId]?.freeBerths ?? 0;
+  /// Free berths on [busId] for a passenger needing exactly [legs] (omit for
+  /// the conservative both-legs view used by balance ordering).
+  int freeBerths(String busId, [List<TripLeg>? legs]) =>
+      _busStates[busId]?.freeBerths(legs) ?? 0;
 
-  int freeFrontSofa(String busId) => _busStates[busId]?.freeFrontSofa ?? 0;
+  int freeFrontSofa(String busId, [List<TripLeg>? legs]) =>
+      _busStates[busId]?.freeFrontSofa(legs) ?? 0;
 
-  /// Free FRONT sofa berths across every bus — the global priority budget.
-  int get totalFreeFrontSofa =>
-      _busStates.values.fold(0, (s, bs) => s + bs.freeFrontSofa);
+  /// Free FRONT sofa berths across every bus for a passenger needing [legs]
+  /// (omit for the conservative both-legs view that sizes [frontSofaReserve]).
+  int totalFreeFrontSofa([List<TripLeg>? legs]) =>
+      _busStates.values.fold(0, (s, bs) => s + bs.freeFrontSofa(legs));
 
   /// True when consuming ONE more front-sofa berth (for a non-priority
-  /// placement) would NOT eat into the reserve held for approved-priority
-  /// demand. A non-priority sofa take consults this before claiming a front
-  /// cell, so priority passengers keep getting the front seats first.
-  bool _frontTakeAllowed() => totalFreeFrontSofa - 1 >= frontSofaReserve;
+  /// placement needing [legs]) would NOT eat into the reserve held for
+  /// approved-priority demand. The check is LEG-AWARE: it measures front-sofa
+  /// capacity on the leg(s) actually being taken, so a one-way passenger may
+  /// still claim the free leg of a front sofa whose OTHER leg is occupied — that
+  /// leg was never part of the priority reserve. A non-priority sofa take
+  /// consults this before claiming a front cell, so priority passengers keep
+  /// getting the front seats first on the legs that are genuinely contended.
+  bool _frontTakeAllowed(List<TripLeg> legs) =>
+      totalFreeFrontSofa(legs) - 1 >= frontSofaReserve;
 
   bool hasFrontSofa(String passengerId) =>
       _hasFrontSofa[passengerId] ?? false;
@@ -1230,6 +1445,7 @@ class _PlanState {
     required SeatType type,
     required SeatPosition? position,
     required bool frontOnly,
+    required List<TripLeg> legs,
     bool guardFrontReserve = false,
     bool preferFront = false,
   }) {
@@ -1247,12 +1463,13 @@ class _PlanState {
         if (guardFrontReserve &&
             bs.isSofa(c.seatType) &&
             bs.isFront(c) &&
-            !_frontTakeAllowed()) {
+            !_frontTakeAllowed(legs)) {
           continue;
         }
-        final free = bs.freeBerthsBySeat[c.seatId] ?? 0;
-        if (free >= wholeNeeded) {
-          bs.freeBerthsBySeat[c.seatId!] = free - wholeNeeded;
+        // Leg-aware: the cell is takeable only if every leg this passenger
+        // needs still has [wholeNeeded] berths free there.
+        if (bs.freeForLegs(c.seatId!, legs) >= wholeNeeded) {
+          bs.consume(c.seatId!, legs, wholeNeeded);
           return c;
         }
       }
@@ -1262,11 +1479,12 @@ class _PlanState {
 
   /// Take ONE berth of a doubleSofa cell (a half-double) on [busId], matching
   /// [position] when given. Used for single-on-double and cross-fill.
-  /// [preferFront] behaves as in [takeFreeCell].
+  /// [preferFront] behaves as in [takeFreeCell]; [legs] gates leg-aware reuse.
   SeatCell? takeHalfDouble(
     String busId, {
     required SeatPosition? position,
     required bool frontOnly,
+    required List<TripLeg> legs,
     bool guardFrontReserve = false,
     bool preferFront = false,
   }) {
@@ -1278,12 +1496,11 @@ class _PlanState {
         if (position != null && c.position != position) continue;
         if (frontOnly && !bs.isFront(c)) continue;
         if (preferFront && forwardPass && !bs.isFront(c)) continue;
-        if (guardFrontReserve && bs.isFront(c) && !_frontTakeAllowed()) {
+        if (guardFrontReserve && bs.isFront(c) && !_frontTakeAllowed(legs)) {
           continue;
         }
-        final free = bs.freeBerthsBySeat[c.seatId] ?? 0;
-        if (free >= 1) {
-          bs.freeBerthsBySeat[c.seatId!] = free - 1;
+        if (bs.freeForLegs(c.seatId!, legs) >= 1) {
+          bs.consume(c.seatId!, legs, 1);
           return c;
         }
       }
@@ -1303,25 +1520,23 @@ class _PlanState {
   }
 
   /// Claim the remaining free berth of a specific (already-partly-occupied)
-  /// double-sofa [seatId] on [busId]. Used to complete a half-locked own-cell
-  /// double in place. Returns true if a free berth existed and was consumed.
-  bool tryClaimPartnerBerth(String busId, String seatId) {
+  /// double-sofa [seatId] on [busId], for a passenger needing [legs]. Used to
+  /// complete a half-locked own-cell double in place. Returns true if a berth
+  /// was free on every needed leg and was consumed.
+  bool tryClaimPartnerBerth(String busId, String seatId, List<TripLeg> legs) {
     final bs = _busStates[busId];
     if (bs == null) return false;
     final cell = bs.cells[seatId];
     if (cell == null || cell.seatType != SeatType.doubleSofa) return false;
-    final free = bs.freeBerthsBySeat[seatId] ?? 0;
-    if (free < 1) return false;
-    bs.freeBerthsBySeat[seatId] = free - 1;
+    if (bs.freeForLegs(seatId, legs) < 1) return false;
+    bs.consume(seatId, legs, 1);
     return true;
   }
 
-  /// Give back one free berth on a cell (used when a cross-fill aborts).
-  void release(String busId, String seatId) {
+  /// Give back one berth on a cell on each leg in [legs] (cross-fill abort).
+  void release(String busId, String seatId, List<TripLeg> legs) {
     final bs = _busStates[busId];
     if (bs == null) return;
-    final free = bs.freeBerthsBySeat[seatId] ?? 0;
-    final cap = bs.cells[seatId]?.seatType == SeatType.doubleSofa ? 2 : 1;
-    bs.freeBerthsBySeat[seatId] = (free + 1).clamp(0, cap);
+    bs.giveBack(seatId, legs, 1);
   }
 }

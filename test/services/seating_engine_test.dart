@@ -6,6 +6,7 @@ import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/services/seating_engine.dart';
 
 // ── Fixture helpers ─────────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ Passenger _p(
   String? groupId,
   PriorityStatus priority = PriorityStatus.none,
   String name = '',
+  TripType tripType = TripType.roundTrip,
 }) =>
     Passenger(
       id: id,
@@ -66,6 +68,7 @@ Passenger _p(
       assignedSeats: assigned,
       groupId: groupId,
       priorityStatus: priority,
+      tripType: tripType,
     );
 
 RequestLine _line(SeatType t, SeatPosition? pos, int qty) =>
@@ -1079,6 +1082,406 @@ void main() {
       final seats = plan.forPassenger('p1');
       expect(seats.length, 2);
       expect(seats.every((a) => a.seatId == 'DU1'), isTrue);
+    });
+  });
+
+  // ── CHANGE 1: leg-aware seat reuse (GO / RETURN slots) ────────────────────
+
+  group('leg-aware seat reuse', () {
+    test('outboundOnly + returnOnly share ONE seat — both placed, no overlap',
+        () {
+      // A single seater cell. One outbound-only and one return-only passenger
+      // must BOTH land on it: disjoint legs reuse the same berth.
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final go = _p('go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final ret = _p('ret',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [go, ret]);
+
+      expect(plan.exceptions, isEmpty,
+          reason: 'disjoint legs reuse the same physical berth');
+      expect(plan.forPassenger('go').single.seatId, 'ST1');
+      expect(plan.forPassenger('ret').single.seatId, 'ST1');
+      // Two DIFFERENT passengers on the SAME seat — the desired reuse.
+      final onST1 = plan.allAssignments.where((a) => a.seatId == 'ST1');
+      expect(onST1.length, 2);
+
+      // The leg-occupancy helper reports exactly one berth per leg, no overlap.
+      final occ = plan.legOccupancy([go, ret])['b1:ST1']!;
+      expect(occ.go, 1);
+      expect(occ.ret, 1);
+    });
+
+    test('a returnOnly reuses the RETURN slot of a seat an outboundOnly holds, '
+        'on a double sofa (each leg has 2 slots)', () {
+      // One doubleSofa (2 berths × 2 legs). Place 2 outbound-only singles and 2
+      // return-only singles — all four fit because GO and RETURN are disjoint.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final g1 = _p('g1',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final g2 = _p('g2',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final r1 = _p('r1',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final r2 = _p('r2',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(
+          buses: buses, passengers: [g1, g2, r1, r2]);
+
+      expect(plan.exceptions, isEmpty,
+          reason: '2 GO + 2 RETURN all fit the 2 berths via leg reuse');
+      for (final id in ['g1', 'g2', 'r1', 'r2']) {
+        expect(plan.forPassenger(id).single.seatId, 'DU1');
+      }
+      final occ = plan.legOccupancy([g1, g2, r1, r2])['b1:DU1']!;
+      expect(occ.go, 2, reason: 'both GO berths used by the two outbound-only');
+      expect(occ.ret, 2, reason: 'both RETURN berths used by the two return-only');
+    });
+
+    test('a roundTrip CANNOT share a berth with anyone (holds both legs)', () {
+      // One seater. A round-trip passenger takes it; a second passenger of ANY
+      // leg must overflow — the round-trip holds GO and RETURN.
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final rt = _p('a_rt', // sorts before the others
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final go = _p('b_go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final ret = _p('c_ret',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final plan =
+          SeatingEngine.propose(buses: buses, passengers: [rt, go, ret]);
+
+      // Round-trip got the only seat.
+      expect(plan.forPassenger('a_rt').single.seatId, 'ST1');
+      // Neither one-way passenger can reuse it — both unplaced.
+      expect(plan.forPassenger('b_go'), isEmpty);
+      expect(plan.forPassenger('c_ret'), isEmpty);
+      // Seat holds exactly ONE berth (the round-trip), never overbooked.
+      expect(plan.allAssignments.where((a) => a.seatId == 'ST1').length, 1);
+      final occ = plan.legOccupancy([rt, go, ret])['b1:ST1']!;
+      expect(occ.go, 1);
+      expect(occ.ret, 1);
+    });
+
+    test('a returnOnly is REFUSED the RETURN slot of a seat whose GO slot is a '
+        'roundTrip (the roundTrip holds BOTH legs)', () {
+      // One seater. A round-trip takes it (consuming GO and RETURN). A
+      // return-only passenger may NOT take the return slot — it is already gone.
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final rt = _p('a_rt',
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final ret = _p('b_ret',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [rt, ret]);
+
+      expect(plan.forPassenger('a_rt').single.seatId, 'ST1');
+      expect(plan.forPassenger('b_ret'), isEmpty,
+          reason: 'the roundTrip already holds the RETURN leg of ST1');
+      expect(
+          plan.exceptions.any((e) =>
+              e.type == SeatingExceptionType.overflowWaitlist ||
+              e.type == SeatingExceptionType.seatTypeUnavailable),
+          isTrue);
+    });
+
+    test('two roundTrips cannot share one berth (only one fits)', () {
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final a = _p('a',
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final b = _p('b',
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
+
+      expect(plan.forPassenger('a').single.seatId, 'ST1');
+      expect(plan.forPassenger('b'), isEmpty);
+      expect(plan.allAssignments.where((a) => a.seatId == 'ST1').length, 1);
+    });
+
+    test('roundTrip + outboundOnly cannot share — roundTrip needs RETURN too',
+        () {
+      // GO is free only if BOTH legs are free for the round-trip. Place an
+      // outbound-only first (sorts first), then a round-trip wanting the SAME
+      // single seat: the round-trip needs RETURN free too, GO is taken, so it
+      // cannot reuse — it overflows.
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final go = _p('a_go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final rt = _p('b_rt',
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [go, rt]);
+
+      expect(plan.forPassenger('a_go').single.seatId, 'ST1');
+      expect(plan.forPassenger('b_rt'), isEmpty,
+          reason: 'roundTrip needs the GO leg too, which is taken');
+    });
+
+    test('whole double held solo by a roundTrip blocks BOTH legs of BOTH berths',
+        () {
+      // A round-trip taking a whole double consumes go=2 and ret=2 → nothing
+      // left for any leg. A separate return-only single must overflow.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final rt = _p('a_rt',
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.doubleSofa, SeatPosition.upper, 1)]);
+      final ret = _p('b_ret',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [rt, ret]);
+
+      // Round-trip holds both berths (2 entries on DU1).
+      expect(plan.forPassenger('a_rt').length, 2);
+      expect(plan.forPassenger('a_rt').every((x) => x.seatId == 'DU1'), isTrue);
+      // No leg free anywhere → return-only overflows.
+      expect(plan.forPassenger('b_ret'), isEmpty);
+    });
+
+    test('a locked one-way berth still frees the OTHER leg for reuse', () {
+      // p_go is LOCKED on ST1 as outbound-only. A fresh return-only passenger
+      // re-uses ST1's RETURN slot (locked one-way berth does not block return).
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final goLocked = _p('go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.seater, null, 1)],
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'ST1', locked: true)]);
+      final ret = _p('ret',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final plan =
+          SeatingEngine.propose(buses: buses, passengers: [goLocked, ret]);
+
+      expect(plan.exceptions, isEmpty);
+      // Locked GO berth preserved.
+      final goSeats = plan.forPassenger('go');
+      expect(goSeats.single.seatId, 'ST1');
+      expect(goSeats.single.locked, isTrue);
+      // Return-only reused the RETURN slot of the same seat.
+      expect(plan.forPassenger('ret').single.seatId, 'ST1');
+      final occ = plan.legOccupancy([goLocked, ret])['b1:ST1']!;
+      expect(occ.go, 1);
+      expect(occ.ret, 1);
+    });
+  });
+
+  // ── CHANGE 2: fill — no compatible seat left empty while waitlisting ──────
+
+  group('fill completeness', () {
+    test('no passenger is waitlisted while a compatible berth-leg is free', () {
+      // 20 buses, 1 seater each = 20 GO + 20 RETURN seater slots. Mix of trip
+      // types whose total seater demand fits via leg reuse → ZERO overflow.
+      final buses = [
+        for (var i = 0; i < 20; i++)
+          _bus('bus${i.toString().padLeft(2, '0')}',
+              [_seat(0, 0, SeatType.seater, null, 'ST')]),
+      ];
+      // 20 round-trips fill every both-legs slot; then 0 free. Instead use a mix
+      // that exercises reuse: 20 outbound-only + 20 return-only = 40 pax, all fit
+      // by GO/RETURN reuse on the same 20 seats.
+      final pax = <Passenger>[
+        for (var i = 0; i < 20; i++)
+          _p('g${i.toString().padLeft(2, '0')}',
+              tripType: TripType.outboundOnly,
+              lines: [_line(SeatType.seater, null, 1)]),
+        for (var i = 0; i < 20; i++)
+          _p('r${i.toString().padLeft(2, '0')}',
+              tripType: TripType.returnOnly,
+              lines: [_line(SeatType.seater, null, 1)]),
+      ];
+      final plan = SeatingEngine.propose(buses: buses, passengers: pax);
+
+      expect(plan.exceptions, isEmpty,
+          reason: '40 one-way pax fit 20 seats via leg reuse — none waitlisted');
+      // Every passenger placed exactly once.
+      for (final p in pax) {
+        expect(plan.forPassenger(p.id).length, 1);
+      }
+      // No seat overbooked on a single leg: each seat is go<=1, ret<=1.
+      final occ = plan.legOccupancy(pax);
+      for (final o in occ.values) {
+        expect(o.go, lessThanOrEqualTo(1));
+        expect(o.ret, lessThanOrEqualTo(1));
+      }
+    });
+
+    test('a passenger is NOT waitlisted while a compatible seat sits empty on '
+        'another bus (balance heuristic must not strand fill)', () {
+      // Two buses. The first is fuller (a locked occupant), the second has a
+      // free compatible seater. A new passenger must land on bus2, never
+      // waitlisted while bus2 holds a compatible empty seat.
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'b1_ST1')]),
+        _bus('b2', [_seat(0, 0, SeatType.seater, null, 'b2_ST1')]),
+      ];
+      final filler = _p('a_filler',
+          lines: [_line(SeatType.seater, null, 1)],
+          assigned: [
+            SeatAssignment(busId: 'b1', seatId: 'b1_ST1', locked: true)
+          ]);
+      final p = _p('b_p', lines: [_line(SeatType.seater, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [filler, p]);
+
+      expect(plan.exceptions, isEmpty,
+          reason: 'a compatible seat was free on b2 — must be filled');
+      expect(plan.forPassenger('b_p').single.seatId, 'b2_ST1');
+    });
+
+    test('overflow fires ONLY when no compatible berth-leg remains anywhere',
+        () {
+      // One seater, two round-trips. The first fills both legs; the second has
+      // genuinely no compatible berth-leg → overflowWaitlist (correct).
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final a = _p('a', lines: [_line(SeatType.seater, null, 1)]);
+      final b = _p('b', lines: [_line(SeatType.seater, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
+
+      expect(plan.forPassenger('a').single.seatId, 'ST1');
+      expect(plan.forPassenger('b'), isEmpty);
+      expect(
+          plan.exceptions
+              .any((e) => e.type == SeatingExceptionType.overflowWaitlist),
+          isTrue,
+          reason: 'genuinely no compatible capacity → overflow is correct');
+    });
+
+    test('mixed types across many buses: leg reuse seats everyone, no empty '
+        'compatible berth-leg while anyone waitlists', () {
+      // 3 buses, each with 1 single-upper sofa = 3 GO + 3 RETURN slots. Demand:
+      // 3 outbound-only + 3 return-only single-upper requests. Every GO slot
+      // pairs with a RETURN slot on the SAME seat via leg reuse → all 6 placed,
+      // zero overflow, no compatible berth-leg left empty.
+      final buses = [
+        for (var i = 0; i < 3; i++)
+          _bus('b$i',
+              [_seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b${i}_S')]),
+      ];
+      final pax = <Passenger>[
+        for (var i = 0; i < 3; i++)
+          _p('go$i',
+              tripType: TripType.outboundOnly,
+              lines: [_line(SeatType.singleSofa, SeatPosition.upper, 1)]),
+        for (var i = 0; i < 3; i++)
+          _p('rt_ret$i',
+              tripType: TripType.returnOnly,
+              lines: [_line(SeatType.singleSofa, SeatPosition.upper, 1)]),
+      ];
+      final plan = SeatingEngine.propose(buses: buses, passengers: pax);
+
+      expect(plan.exceptions, isEmpty,
+          reason: 'leg reuse seats every one-way passenger');
+      for (final p in pax) {
+        expect(plan.forPassenger(p.id).length, 1);
+      }
+      // All 3 seats used; each holds exactly one GO and one RETURN berth.
+      final occ = plan.legOccupancy(pax);
+      expect(occ.length, 3);
+      for (final o in occ.values) {
+        expect(o.go, 1);
+        expect(o.ret, 1);
+      }
+    });
+  });
+
+  group('leg-aware determinism', () {
+    test('propose twice with mixed trip types yields identical output', () {
+      List<Bus> mk() => [
+            _bus('b1', [
+              _seat(0, 0, SeatType.seater, null, 'b1_ST1'),
+              _seat(0, 1, SeatType.singleSofa, SeatPosition.upper, 'b1_SU1'),
+              _seat(1, 3, SeatType.doubleSofa, SeatPosition.lower, 'b1_DL1'),
+            ]),
+            _bus('b2', [
+              _seat(0, 0, SeatType.seater, null, 'b2_ST1'),
+              _seat(0, 1, SeatType.singleSofa, SeatPosition.upper, 'b2_SU1'),
+            ]),
+          ];
+      List<Passenger> mkPax() => [
+            _p('go1',
+                tripType: TripType.outboundOnly,
+                lines: [_line(SeatType.seater, null, 1)]),
+            _p('ret1',
+                tripType: TripType.returnOnly,
+                lines: [_line(SeatType.seater, null, 1)]),
+            _p('rt1',
+                tripType: TripType.roundTrip,
+                lines: [_line(SeatType.singleSofa, SeatPosition.upper, 1)]),
+            _p('go2',
+                tripType: TripType.outboundOnly,
+                lines: [_line(SeatType.singleSofa, SeatPosition.upper, 1)]),
+            _p('rt2',
+                tripType: TripType.roundTrip,
+                lines: [_line(SeatType.doubleSofa, SeatPosition.lower, 1)]),
+          ];
+
+      String repr(SeatingPlan p) {
+        final keys = p.assignmentsByPassenger.keys.toList()..sort();
+        final lines = [
+          for (final k in keys)
+            '$k=${(p.forPassenger(k).map((a) => '${a.busId}:${a.seatId}:${a.locked}').toList()..sort()).join(",")}'
+        ];
+        final exc = p.exceptions.map((e) => e.toString()).toList()..sort();
+        return '${lines.join("|")}#${exc.join("|")}';
+      }
+
+      final plan1 = SeatingEngine.propose(buses: mk(), passengers: mkPax());
+      final plan2 = SeatingEngine.propose(buses: mk(), passengers: mkPax());
+      expect(repr(plan1), repr(plan2));
+    });
+
+    test('caller list order does not change leg-aware reuse outcome', () {
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final go = _p('go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+      final ret = _p('ret',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.seater, null, 1)]);
+
+      final p1 = SeatingEngine.propose(buses: buses, passengers: [go, ret]);
+      final p2 = SeatingEngine.propose(buses: buses, passengers: [ret, go]);
+
+      expect(_seatIds(p1, 'go'), _seatIds(p2, 'go'));
+      expect(_seatIds(p1, 'ret'), _seatIds(p2, 'ret'));
+      expect(p1.forPassenger('go').single.seatId, 'ST1');
+      expect(p1.forPassenger('ret').single.seatId, 'ST1');
     });
   });
 }
