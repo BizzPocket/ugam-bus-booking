@@ -52,6 +52,10 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
   int _tourIdx = 0;
   int _busIdx = 0;
 
+  /// True once the user explicitly taps a tour pill. Until then we may
+  /// auto-jump to the first tour that actually has buses.
+  bool _userPickedTour = false;
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -77,6 +81,13 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
             );
           }
           if (_tourIdx >= tours.length) _tourIdx = 0;
+          // Tour 1 may have been created first but has no bus yet, while a
+          // later tour has buses + passengers. Until the user picks a tour
+          // pill, default to the first tour that actually has buses.
+          if (!_userPickedTour && tours[_tourIdx].buses.isEmpty) {
+            final withBus = tours.indexWhere((t) => t.buses.isNotEmpty);
+            if (withBus >= 0) _tourIdx = withBus;
+          }
           final tour = tours[_tourIdx];
 
           if (tour.buses.isEmpty) {
@@ -139,6 +150,7 @@ class _SeatAssignmentScreenState extends State<SeatAssignmentScreen> {
                   onSelect: (i) => setState(() {
                     _tourIdx = i;
                     _busIdx = 0;
+                    _userPickedTour = true;
                   }),
                   c: c,
                 ),
