@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
+import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../routes/app_routes.dart';
 
@@ -120,6 +121,23 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                 final placed = tour.totalSeatsAssigned;
                 final total = tour.totalBusSeats;
 
+                // Demand summary: how many of each seat type the passengers
+                // requested, so the agent knows what to book. A Double Sofa
+                // counts as ONE unit (one tile), NOT its two berths.
+                var reqSingles = 0, reqDoubles = 0, reqSeaters = 0;
+                for (final p in tour.passengers) {
+                  for (final line in p.requestLines) {
+                    switch (line.seatType) {
+                      case SeatType.singleSofa:
+                        reqSingles += line.qty;
+                      case SeatType.doubleSofa:
+                        reqDoubles += line.qty;
+                      case SeatType.seater:
+                        reqSeaters += line.qty;
+                    }
+                  }
+                }
+
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(
                     UgamSpacing.gutter,
@@ -132,6 +150,13 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                     _SeatStat(
                       placed: placed,
                       total: total,
+                      c: c,
+                    ),
+                    const SizedBox(height: UgamSpacing.md),
+                    _RequirementsCard(
+                      singles: reqSingles,
+                      doubles: reqDoubles,
+                      seaters: reqSeaters,
                       c: c,
                     ),
                     if (exceptions.isNotEmpty) ...[
@@ -351,6 +376,82 @@ class _SeatStat extends StatelessWidget {
 }
 
 // ─── "N need your decision" chip ─────────────────────────────────────────
+
+/// Demand summary for the active tour: how many Single Sofas, Double Sofas
+/// (counted as ONE unit each, not two berths), and Seaters the passengers
+/// have requested — what the agent books buses against.
+class _RequirementsCard extends StatelessWidget {
+  final int singles;
+  final int doubles;
+  final int seaters;
+  final UgamColorSet c;
+
+  const _RequirementsCard({
+    required this.singles,
+    required this.doubles,
+    required this.seaters,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final total = singles + doubles + seaters;
+    final items = <(String, int)>[
+      ('Single sofa', singles),
+      ('Double sofa', doubles),
+      if (seaters > 0) ('Seater', seaters),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'BUS REQUIREMENTS',
+            style: UgamText.micro.copyWith(color: c.ink3),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          Row(
+            children: [
+              for (final it in items)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${it.$2}',
+                        style: UgamText.tabular(
+                          UgamText.titleL
+                              .copyWith(color: c.ink, fontSize: 26),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        it.$1,
+                        style: UgamText.caption.copyWith(color: c.ink2),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          Container(height: 1, color: c.border),
+          const SizedBox(height: UgamSpacing.sm + 2),
+          Text(
+            'Total $total to book  ·  a double sofa counts as 1',
+            style: UgamText.caption.copyWith(color: c.ink3),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _DecisionChip extends StatelessWidget {
   final int count;
