@@ -46,6 +46,12 @@ class SeatCell {
   /// The seating engine never auto-fills a reserved seat. Not part of identity.
   final bool reserved;
 
+  /// True when the agent has marked this seat as part of the "forward / premium"
+  /// zone — the seats elderly/sick priority passengers fill first (and which
+  /// carry the premium price). The seating engine seats approved-priority
+  /// passengers into forward seats before anything else. Not part of identity.
+  final bool forward;
+
   const SeatCell({
     required this.row,
     required this.col,
@@ -53,6 +59,7 @@ class SeatCell {
     this.position,
     this.seatId,
     this.reserved = false,
+    this.forward = false,
   });
 
   bool get isEmpty => seatType == null;
@@ -75,6 +82,7 @@ class SeatCell {
       if (position != null) 'position': position!.name,
       if (seatId != null) 'seatId': seatId,
       if (reserved) 'reserved': true,
+      if (forward) 'forward': true,
     };
   }
 
@@ -87,6 +95,7 @@ class SeatCell {
       position: SeatPosition.fromString(map['position'] as String?),
       seatId: map['seatId'] as String?,
       reserved: map['reserved'] as bool? ?? false,
+      forward: map['forward'] as bool? ?? false,
     );
   }
 
@@ -95,6 +104,7 @@ class SeatCell {
     SeatPosition? position,
     String? seatId,
     bool? reserved,
+    bool? forward,
     bool clearSeat = false,
   }) {
     if (clearSeat) {
@@ -107,6 +117,7 @@ class SeatCell {
       position: position ?? this.position,
       seatId: seatId ?? this.seatId,
       reserved: reserved ?? this.reserved,
+      forward: forward ?? this.forward,
     );
   }
 
@@ -405,13 +416,10 @@ class BusLayout {
       final prefix = seatIdPrefix(cell.seatType!, cell.position);
       final num = (counters[prefix] ?? 0) + 1;
       counters[prefix] = num;
-      return SeatCell(
-        row: cell.row,
-        col: cell.col,
-        seatType: cell.seatType,
-        position: cell.position,
-        seatId: '$prefix$num',
-      );
+      // copyWith threads reserved + forward (and keeps seatType/position and
+      // row/col), so agent-marked flags survive every re-numbering pass. A
+      // plain SeatCell(...) here would silently drop them — see regression test.
+      return cell.copyWith(seatId: '$prefix$num');
     }).toList();
 
     return BusLayout(
