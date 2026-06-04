@@ -176,10 +176,13 @@ void main() {
     });
   });
 
-  group('shared double sofa', () {
-    test('two unrelated singles each take one berth of the SAME double cell', () {
-      // The only sofa seating is ONE double cell (2 berths). Two separate
-      // passengers each requesting a single sofa must share it as a half-double.
+  group('shared double sofa — stranger-share rule', () {
+    test('two UNRELATED singles + only a double free → first takes a berth, '
+        'second is NOT auto-paired but raises sharedDoubleNeedsReview', () {
+      // The only sofa seating is ONE double cell (2 berths). Two UNRELATED
+      // passengers each request a single sofa. The first takes an EMPTY berth
+      // (no pairing created). The second can ONLY be seated by sharing with a
+      // stranger — the engine refuses and raises sharedDoubleNeedsReview.
       final buses = [
         _bus('b1', [
           _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
@@ -189,13 +192,307 @@ void main() {
       final b = _p('b', lines: [_line(SeatType.singleSofa, null, 1)]);
       final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
 
-      expect(plan.exceptions, isEmpty);
-      // Each holds exactly one berth on the shared double cell.
+      // 'a' (sorts first) takes one berth of the empty double — allowed.
+      expect(plan.forPassenger('a').single.seatId, 'DU1');
+      // 'b' is NOT auto-paired onto the stranger's sofa.
+      expect(plan.forPassenger('b'), isEmpty);
+      // Only ONE berth is occupied on DU1 — no silent stranger pairing.
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 1);
+      // The agent must broker the pairing.
+      final ex = plan.exceptions
+          .where((e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview)
+          .toList();
+      expect(ex.length, 1);
+      expect(ex.single.passengerId, 'b');
+      expect(ex.single.message.toLowerCase().contains('double sofa'), isTrue);
+    });
+
+    test('two SAME-GROUP singles + a double → they DO auto-share, no exception',
+        () {
+      // Same scenario but both passengers share a non-null groupId. A group is
+      // agent-tagged related, so they may auto-share the double sofa.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a =
+          _p('a', groupId: 'fam', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final b =
+          _p('b', groupId: 'fam', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
+
+      expect(plan.exceptions, isEmpty,
+          reason: 'same-group members are known-related — auto-share allowed');
       expect(plan.forPassenger('a').single.seatId, 'DU1');
       expect(plan.forPassenger('b').single.seatId, 'DU1');
-      // Two DIFFERENT passengers, one entry each = shared double.
-      final allOnDU1 = plan.allAssignments.where((x) => x.seatId == 'DU1');
-      expect(allOnDU1.length, 2);
+      // Two berths of the SAME cell held by two SAME-GROUP passengers.
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 2);
+    });
+
+    test('a single on an EMPTY double berth is allowed (no pairing, no exception)',
+        () {
+      // One passenger, one double cell. Taking one berth of an empty double
+      // creates no pairing → no review needed.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a = _p('a', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a]);
+
+      expect(plan.exceptions, isEmpty);
+      expect(plan.forPassenger('a').single.seatId, 'DU1');
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 1);
+    });
+
+    test('an EMPTY single sofa is preferred over sharing a stranger\'s double',
+        () {
+      // A free single sofa AND a double whose other berth is held by a stranger.
+      // The new single must land on the free single, never share the double.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'S1'),
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      // 'a' is locked onto one berth of DU1 (an existing stranger occupant).
+      final a = _p('a',
+          lines: [_line(SeatType.singleSofa, null, 1)],
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
+      final b = _p('b', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
+
+      expect(plan.exceptions, isEmpty);
+      expect(plan.forPassenger('b').single.seatId, 'S1',
+          reason: 'an empty single beats sharing a stranger double');
+      // DU1 still holds only the locked stranger berth.
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 1);
+    });
+
+    test('cross-fill is refused when the only second berth would be a stranger '
+        'double → sharedDoubleNeedsReview', () {
+      // One free single 'S1' plus a double 'DU1' whose other berth a stranger
+      // holds. A doubleSofa requester would need S1 + a DU1 berth via cross-fill,
+      // but the DU1 berth would pair strangers → review, no silent placement.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'S1'),
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final stranger = _p('stranger',
+          lines: [_line(SeatType.singleSofa, null, 1)],
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
+      final dbl =
+          _p('z_dbl', lines: [_line(SeatType.doubleSofa, null, 1)]);
+      final plan =
+          SeatingEngine.propose(buses: buses, passengers: [stranger, dbl]);
+
+      // The double requester is not seated by stranger-pairing.
+      expect(
+          plan.exceptions.any(
+              (e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview),
+          isTrue);
+      // DU1 still holds only the stranger's one berth.
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 1);
+    });
+
+    test('determinism: the stranger-share outcome is reproducible', () {
+      List<Bus> mk() => [
+            _bus('b1', [
+              _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+              _seat(1, 3, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+            ]),
+          ];
+      List<Passenger> mkPax() => [
+            _p('a', lines: [_line(SeatType.singleSofa, null, 1)]),
+            _p('b', lines: [_line(SeatType.singleSofa, null, 1)]),
+            _p('c', lines: [_line(SeatType.singleSofa, null, 1)]),
+          ];
+
+      String repr(SeatingPlan p) {
+        final keys = p.assignmentsByPassenger.keys.toList()..sort();
+        final lines = [
+          for (final k in keys)
+            '$k=${(p.forPassenger(k).map((a) => '${a.busId}:${a.seatId}').toList()..sort()).join(",")}'
+        ];
+        final exc = p.exceptions.map((e) => e.toString()).toList()..sort();
+        return '${lines.join("|")}#${exc.join("|")}';
+      }
+
+      final plan1 = SeatingEngine.propose(buses: mk(), passengers: mkPax());
+      final plan2 = SeatingEngine.propose(buses: mk(), passengers: mkPax());
+      expect(repr(plan1), repr(plan2));
+
+      // With two empty doubles, a + b each get an EMPTY berth (different cells);
+      // c then would have to stranger-share → review.
+      expect(plan1.forPassenger('a').single.seatId, 'DU1');
+      expect(plan1.forPassenger('b').single.seatId, 'DL1');
+      expect(plan1.forPassenger('c'), isEmpty);
+      expect(
+          plan1.exceptions
+              .any((e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview),
+          isTrue,
+          reason: 'third single must stranger-share one of the two doubles');
+    });
+  });
+
+  group('shared double sofa — stranger-share rule for GROUPED members', () {
+    // Parity with the UNGROUPED stranger-share rule above: a grouped member
+    // whose ONLY possible seat is a stranger-shared double must surface as
+    // sharedDoubleNeedsReview (so the agent brokers the pairing), NOT a
+    // misleading groupWontFit that hides the brokerable berth. Mirrors PROBE
+    // AB/AD/AE. Safety in every case: the stranger double keeps exactly its one
+    // existing berth — no auto-pairing.
+
+    test(
+        'a 1-member group whose only seat is a stranger double → '
+        'sharedDoubleNeedsReview (not groupWontFit), no auto-pairing', () {
+      // DU1 is locked by a famA member. z_req is in a DIFFERENT group famB, so
+      // it is processed as a group-of-one. Its only seat is the free berth of
+      // DU1 — but pairing famB with famA is a stranger-share → review.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a = _p('a',
+          groupId: 'famA',
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
+      final zReq = _p('z_req',
+          groupId: 'famB', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, zReq]);
+
+      // The brokerable berth is surfaced as a review, not hidden as groupWontFit.
+      final review = plan.exceptions
+          .where((e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview)
+          .toList();
+      expect(review.length, 1);
+      expect(review.single.passengerId, 'z_req');
+      expect(review.single.groupId, 'famB');
+      expect(
+          plan.exceptions
+              .any((e) => e.type == SeatingExceptionType.groupWontFit),
+          isFalse,
+          reason: 'the bus HAS a berth — this is a brokerable pairing, not a '
+              'capacity shortage');
+      // z_req is NOT seated; DU1 still holds exactly the one famA berth.
+      expect(plan.forPassenger('z_req'), isEmpty);
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 1);
+    });
+
+    test(
+        'GROUPED vs UNGROUPED parity: the SAME passenger made ungrouped also '
+        'yields sharedDoubleNeedsReview', () {
+      // Identical fixture, z_req with NO group → already-correct ungrouped path.
+      // The grouped test above must reach the same exception type.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a = _p('a',
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
+      final zReq = _p('z_req', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, zReq]);
+
+      expect(
+          plan.exceptions.any(
+              (e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview),
+          isTrue);
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 1);
+    });
+
+    test(
+        'a 2-member famB group against two famA-locked doubles (one free berth '
+        'each) → sharedDoubleNeedsReview per blocked member, not groupWontFit',
+        () {
+      // DU1 + DU2 each have one berth locked by a famA member. A famB group of
+      // two single-sofa requesters can ONLY be seated by stranger-sharing one
+      // of those doubles each → review for the famB members, no auto-pairing.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+          _seat(1, 3, SeatType.doubleSofa, SeatPosition.lower, 'DU2'),
+        ]),
+      ];
+      final a1 = _p('a1',
+          groupId: 'famA',
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
+      final a2 = _p('a2',
+          groupId: 'famA',
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU2', locked: true)]);
+      final b1 = _p('z_b1',
+          groupId: 'famB', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final b2 = _p('z_b2',
+          groupId: 'famB', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan =
+          SeatingEngine.propose(buses: buses, passengers: [a1, a2, b1, b2]);
+
+      final review = plan.exceptions
+          .where((e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview)
+          .toList();
+      // Both famB members are blocked by a stranger-double → both surfaced.
+      expect(review.map((e) => e.passengerId).toSet(), {'z_b1', 'z_b2'});
+      expect(review.every((e) => e.groupId == 'famB'), isTrue);
+      expect(
+          plan.exceptions
+              .any((e) => e.type == SeatingExceptionType.groupWontFit),
+          isFalse);
+      // Neither famB member is seated; each double keeps exactly its famA berth.
+      expect(plan.forPassenger('z_b1'), isEmpty);
+      expect(plan.forPassenger('z_b2'), isEmpty);
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 1);
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU2').length, 1);
+    });
+
+    test(
+        'same-group members STILL auto-share a partly-locked double — no review',
+        () {
+      // The fix must not over-fire: a famB requester whose only seat is a double
+      // whose other berth is held by ITS OWN group is known-related → it auto-
+      // shares, no exception.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a = _p('a',
+          groupId: 'famB',
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
+      final zReq = _p('z_req',
+          groupId: 'famB', lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, zReq]);
+
+      expect(plan.exceptions, isEmpty,
+          reason: 'same-group members are known-related — auto-share allowed');
+      expect(plan.forPassenger('z_req').single.seatId, 'DU1');
+      expect(plan.allAssignments.where((x) => x.seatId == 'DU1').length, 2);
+    });
+
+    test(
+        'a genuine capacity shortage for a group still raises groupWontFit '
+        '(no false stranger-share review)', () {
+      // No stranger double anywhere; the group simply needs more seaters than
+      // any one bus has. Must remain groupWontFit, never sharedDoubleNeedsReview.
+      final buses = [
+        _bus('b1', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+        _bus('b2', [_seat(0, 0, SeatType.seater, null, 'ST1')]),
+      ];
+      final a = _p('a', groupId: 'g1', lines: [_line(SeatType.seater, null, 1)]);
+      final b = _p('b', groupId: 'g1', lines: [_line(SeatType.seater, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
+
+      expect(
+          plan.exceptions
+              .any((e) => e.type == SeatingExceptionType.groupWontFit),
+          isTrue);
+      expect(
+          plan.exceptions.any(
+              (e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview),
+          isFalse);
     });
   });
 
@@ -833,9 +1130,12 @@ void main() {
       expect(plan.forPassenger('p1').map((a) => a.seatId).toSet().length, 2);
     });
 
-    test('a doubleSofa(lower) line cross-fills two UPPER half-doubles', () {
+    test('a doubleSofa(lower) line cross-fills two UPPER half-doubles '
+        '(SAME-GROUP fillers — known-related so the share is allowed)', () {
       // Two separate double cells, both upper, each contributing one berth.
-      // Single berths from doubles must satisfy a positioned double line.
+      // Single berths from doubles must satisfy a positioned double line. The
+      // half-double partners (f1, f2) and p1 share one group, so completing
+      // each cell pairs known-related passengers — no stranger-share review.
       final buses = [
         _bus('b1', [
           _seat(0, 0, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
@@ -845,19 +1145,51 @@ void main() {
       // Pre-occupy one berth of each double so neither is a WHOLE double, only
       // a half-double each is free → cross-fill must pair them.
       final filler1 = _p('f1',
+          groupId: 'grp',
           lines: [_line(SeatType.singleSofa, null, 1)],
           assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
       final filler2 = _p('f2',
+          groupId: 'grp',
           lines: [_line(SeatType.singleSofa, null, 1)],
           assigned: [SeatAssignment(busId: 'b1', seatId: 'DU2', locked: true)]);
-      final p =
-          _p('p1', lines: [_line(SeatType.doubleSofa, SeatPosition.lower, 1)]);
+      final p = _p('p1',
+          groupId: 'grp',
+          lines: [_line(SeatType.doubleSofa, SeatPosition.lower, 1)]);
       final plan = SeatingEngine.propose(
           buses: buses, passengers: [filler1, filler2, p]);
 
       expect(plan.exceptions, isEmpty);
       // p1 gets one berth on each remaining half-double (cross-fill).
       expect(_seatIds(plan, 'p1'), ['DU1', 'DU2']);
+    });
+
+    test('cross-filling two STRANGER half-doubles is refused → '
+        'sharedDoubleNeedsReview', () {
+      // Same layout but the half-double partners are UNRELATED to p1. Completing
+      // either cell would seat strangers side by side → the engine refuses to
+      // auto-pair and raises sharedDoubleNeedsReview instead.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 0, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+          _seat(0, 2, SeatType.doubleSofa, SeatPosition.upper, 'DU2'),
+        ]),
+      ];
+      final filler1 = _p('f1',
+          lines: [_line(SeatType.singleSofa, null, 1)],
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU1', locked: true)]);
+      final filler2 = _p('f2',
+          lines: [_line(SeatType.singleSofa, null, 1)],
+          assigned: [SeatAssignment(busId: 'b1', seatId: 'DU2', locked: true)]);
+      final p =
+          _p('z_p1', lines: [_line(SeatType.doubleSofa, SeatPosition.lower, 1)]);
+      final plan = SeatingEngine.propose(
+          buses: buses, passengers: [filler1, filler2, p]);
+
+      expect(plan.forPassenger('z_p1'), isEmpty);
+      expect(
+          plan.exceptions.any(
+              (e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview),
+          isTrue);
     });
   });
 
@@ -1117,25 +1449,33 @@ void main() {
       expect(occ.ret, 1);
     });
 
-    test('a returnOnly reuses the RETURN slot of a seat an outboundOnly holds, '
-        'on a double sofa (each leg has 2 slots)', () {
-      // One doubleSofa (2 berths × 2 legs). Place 2 outbound-only singles and 2
-      // return-only singles — all four fit because GO and RETURN are disjoint.
+    test('SAME-GROUP outbound + return singles reuse a double across legs — all '
+        'four fit (each leg has 2 slots; same group may co-seat)', () {
+      // One doubleSofa (2 berths × 2 legs). Place 2 outbound-only + 2 return-only
+      // singles. Filling BOTH berths of one leg means two passengers SIT
+      // TOGETHER on that leg, so they must be agent-tagged related — here all
+      // four share one group. Disjoint-leg reuse (a GO berth and a RETURN berth
+      // on the same physical seat) needs no relation, but same-leg co-seating
+      // does, and same-group satisfies it → all four fit, no review.
       final buses = [
         _bus('b1', [
           _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
         ]),
       ];
       final g1 = _p('g1',
+          groupId: 'fam',
           tripType: TripType.outboundOnly,
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final g2 = _p('g2',
+          groupId: 'fam',
           tripType: TripType.outboundOnly,
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final r1 = _p('r1',
+          groupId: 'fam',
           tripType: TripType.returnOnly,
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final r2 = _p('r2',
+          groupId: 'fam',
           tripType: TripType.returnOnly,
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final plan = SeatingEngine.propose(
@@ -1149,6 +1489,33 @@ void main() {
       final occ = plan.legOccupancy([g1, g2, r1, r2])['b1:DU1']!;
       expect(occ.go, 2, reason: 'both GO berths used by the two outbound-only');
       expect(occ.ret, 2, reason: 'both RETURN berths used by the two return-only');
+    });
+
+    test('a returnOnly reuses the RETURN slot of a double an UNRELATED '
+        'outboundOnly holds — disjoint legs never co-seat, so no review', () {
+      // The narrow disjoint-leg case: one outbound-only and one return-only,
+      // UNRELATED, on the SAME berth of a double. They never share the bus at
+      // once, so the stranger-share rule does NOT apply — both placed cleanly.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final go = _p('go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final ret = _p('ret',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [go, ret]);
+
+      expect(plan.exceptions, isEmpty,
+          reason: 'disjoint-leg reuse never co-seats strangers');
+      expect(plan.forPassenger('go').single.seatId, 'DU1');
+      expect(plan.forPassenger('ret').single.seatId, 'DU1');
+      final occ = plan.legOccupancy([go, ret])['b1:DU1']!;
+      expect(occ.go, 1);
+      expect(occ.ret, 1);
     });
 
     test('a roundTrip CANNOT share a berth with anyone (holds both legs)', () {

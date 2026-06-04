@@ -89,6 +89,13 @@ enum SeatingExceptionType {
   /// A coupled double-sofa's two berths could not be kept together, or a
   /// locked pair was broken by surrounding state.
   brokenPair,
+
+  /// A passenger could only be seated by SHARING a Double Sofa with an
+  /// UNRELATED occupant (the other berth is held by someone who does NOT share
+  /// the passenger's group), and no other compatible seat/leg was free. Two
+  /// strangers must not be auto-paired on one sofa — the agent confirms the
+  /// pairing (e.g. checks gender) before this berth can be granted.
+  sharedDoubleNeedsReview,
 }
 
 /// A single thing the agent must decide. Plain-language, stable, deterministic.
@@ -244,7 +251,7 @@ class SeatingEngine {
       final legs = TripLeg.forTrip(p.tripType);
       for (final a in p.assignedSeats) {
         if (!a.locked) continue;
-        state.seedLocked(p.id, a, legs);
+        state.seedLocked(p.id, a, legs, groupId: p.groupId);
         reasons.add(PlacementReason(
           busId: a.busId,
           seatId: a.seatId,
@@ -467,7 +474,99 @@ class SeatingEngine {
       }
     }
 
-    // No bus could hold the whole group.
+    // No bus could hold the whole group under the hard rules.
+    //
+    // STRANGER-SHARE PARITY (locked rule): before declaring the group simply
+    // "won't fit", check whether the ONLY obstacle was the stranger-share
+    // refusal — i.e. the group WOULD fit on some candidate bus if its members
+    // were allowed to share a Double Sofa with an unrelated occupant. If so, the
+    // bus genuinely HAS room; the agent must broker the stranger pairing, so the
+    // affected member(s) get [sharedDoubleNeedsReview] (exactly what an
+    // UNGROUPED passenger in the same spot would get) instead of a misleading
+    // groupWontFit that hides the brokerable berth. No berth is ever
+    // auto-paired: the relaxed trial below is detection-only and is never
+    // committed.
+    final orderMembers = ([...members]
+      ..sort((a, b) {
+        final pa = a.isPriorityApproved ? 0 : 1;
+        final pb = b.isPriorityApproved ? 0 : 1;
+        if (pa != pb) return pa.compareTo(pb);
+        return a.id.compareTo(b.id);
+      }));
+    for (final bus in ordered) {
+      // Would the whole group fit on THIS bus if strangers could share doubles?
+      final relaxed = state.fork();
+      final discard = <PlacementReason>[];
+      var fitsWithStrangers = true;
+      for (final m in orderMembers) {
+        final pending = _clonePending(pendingByPassenger[m.id]!);
+        final placed = _placeOnBus(
+          passenger: m,
+          pending: pending,
+          busId: bus.id,
+          state: relaxed,
+          reasons: discard,
+          priority: m.isPriorityApproved,
+          requireFront: false,
+          groupLabel: groupId,
+          allowStrangerShare: true,
+        );
+        if (!placed) {
+          fitsWithStrangers = false;
+          break;
+        }
+      }
+      if (!fitsWithStrangers) continue;
+
+      // The group fits ONLY when strangers may share → the sole obstacle is the
+      // stranger-share rule. Replay a STRICT (rule-enforcing) trial on this bus
+      // to find which members are blocked by a stranger-double, and surface them
+      // for the agent to broker.
+      final strict = state.fork();
+      final strictDiscard = <PlacementReason>[];
+      final affected = <Passenger>[];
+      for (final m in orderMembers) {
+        final pending = _clonePending(pendingByPassenger[m.id]!);
+        _placeOnBus(
+          passenger: m,
+          pending: pending,
+          busId: bus.id,
+          state: strict,
+          reasons: strictDiscard,
+          priority: m.isPriorityApproved,
+          requireFront: false,
+          groupLabel: groupId,
+        );
+        // Lines that remain unplaced under the strict rule, blocked precisely
+        // by a stranger-double on this bus → this member needs review.
+        final legs = TripLeg.forTrip(m.tripType);
+        final blocked = pending.any((l) =>
+            l.remaining > 0 &&
+            ((l.seatType == SeatType.singleSofa &&
+                    strict.hasBlockedShareDoubleOnBus(bus.id, legs, m.groupId,
+                        position: l.position)) ||
+                (l.seatType == SeatType.doubleSofa &&
+                    strict.hasBlockedShareDoubleOnBus(
+                        bus.id, legs, m.groupId))));
+        if (blocked) affected.add(m);
+      }
+      if (affected.isNotEmpty) {
+        for (final m in affected) {
+          exceptions.add(SeatingException(
+            type: SeatingExceptionType.sharedDoubleNeedsReview,
+            passengerId: m.id,
+            groupId: groupId,
+            message:
+                '${_name(m)} (group $groupId) can only be seated by sharing a '
+                'Double Sofa with another passenger — confirm the pairing.',
+          ));
+        }
+        return;
+      }
+    }
+
+    // Genuine capacity shortage (not a brokerable stranger-share): the group
+    // does not fit on any single bus.
     exceptions.add(SeatingException(
       type: SeatingExceptionType.groupWontFit,
       groupId: groupId,
@@ -621,6 +720,7 @@ class SeatingEngine {
     required bool priority,
     required bool requireFront,
     required String? groupLabel,
+    bool allowStrangerShare = false,
   }) {
     // Process lines in a stable order: sofas before seaters, doubles before
     // singles (so doubleSofa lines claim whole doubles before singles get
@@ -647,6 +747,7 @@ class SeatingEngine {
           priority: priority,
           requireFront: requireFront,
           groupLabel: groupLabel,
+          allowStrangerShare: allowStrangerShare,
         );
         if (placed == null) break; // nothing compatible free on this bus
         line = line.copyDecrementedBy(placed);
@@ -673,8 +774,12 @@ class SeatingEngine {
     required bool priority,
     required bool requireFront,
     required String? groupLabel,
+    bool allowStrangerShare = false,
   }) {
     final reasonTag = _reasonPrefix(priority, groupLabel);
+    // The requester's group drives the stranger-share rule on doubles: a member
+    // may auto-share only with another member of the SAME non-null group.
+    final reqGroup = passenger.groupId;
     // A priority placement that is not ALREADY pinned to the forward zone should
     // still prefer forward-zone sofas over ordinary ones (the agent-marked
     // forward seats may sit on higher rows than ordinary seats).
@@ -740,11 +845,14 @@ class SeatingEngine {
           position: line.position,
           frontOnly: requireFront,
           legs: legs,
+          requesterGroupId: reqGroup,
           guardFrontReserve: !priority,
           preferFront: preferFront,
+          allowStrangerShare: allowStrangerShare,
         );
         if (halfDouble != null) {
-          state.assign(passenger.id, busId, halfDouble.seatId!);
+          state.assign(passenger.id, busId, halfDouble.seatId!,
+              groupId: reqGroup, legs: legs);
           reasons.add(PlacementReason(
             busId: busId,
             seatId: halfDouble.seatId!,
@@ -781,14 +889,16 @@ class SeatingEngine {
             detail:
                 'type match: ${seatTypeLabel(SeatType.doubleSofa, whole.position)} (whole)',
           );
-          state.assign(passenger.id, busId, whole.seatId!);
+          state.assign(passenger.id, busId, whole.seatId!,
+              groupId: reqGroup, legs: legs);
           reasons.add(PlacementReason(
             busId: busId,
             seatId: whole.seatId!,
             passengerId: passenger.id,
             reason: wholeReason,
           ));
-          state.assign(passenger.id, busId, whole.seatId!);
+          state.assign(passenger.id, busId, whole.seatId!,
+              groupId: reqGroup, legs: legs);
           reasons.add(PlacementReason(
             busId: busId,
             seatId: whole.seatId!,
@@ -815,8 +925,10 @@ class SeatingEngine {
                 position: null,
                 frontOnly: requireFront,
                 legs: legs,
+                requesterGroupId: reqGroup,
                 guardFrontReserve: !priority,
-                preferFront: preferFront);
+                preferFront: preferFront,
+                allowStrangerShare: allowStrangerShare);
         if (first == null) return null;
         final second = state.takeFreeCell(
               busId,
@@ -831,16 +943,20 @@ class SeatingEngine {
                 position: null,
                 frontOnly: requireFront,
                 legs: legs,
+                requesterGroupId: reqGroup,
                 guardFrontReserve: !priority,
-                preferFront: preferFront);
+                preferFront: preferFront,
+                allowStrangerShare: allowStrangerShare);
         if (second == null) {
           // Only one single available — can't satisfy a double line by
           // cross-fill. Release the first so we don't strand it.
           state.release(busId, first.seatId!, legs);
           return null;
         }
-        state.assign(passenger.id, busId, first.seatId!);
-        state.assign(passenger.id, busId, second.seatId!);
+        state.assign(passenger.id, busId, first.seatId!,
+            groupId: reqGroup, legs: legs);
+        state.assign(passenger.id, busId, second.seatId!,
+            groupId: reqGroup, legs: legs);
         reasons.add(PlacementReason(
           busId: busId,
           seatId: first.seatId!,
@@ -882,6 +998,7 @@ class SeatingEngine {
     // there is genuinely zero berth-leg they could occupy anywhere; otherwise a
     // compatible-but-wrong-type seat exists → seatTypeUnavailable.
     final legs = TripLeg.forTrip(passenger.tripType);
+    final reqGroup = passenger.groupId;
     final anyFreeCapacity =
         state.buses.any((b) => state.freeBerths(b.id, legs) > 0);
     for (final line in pending) {
@@ -891,7 +1008,27 @@ class SeatingEngine {
         position: line.position,
         qty: line.remaining,
       );
-      if (!anyFreeCapacity) {
+      // STRANGER-SHARE: this passenger could ONLY be seated by sharing a Double
+      // Sofa whose other berth an unrelated passenger already holds (a single
+      // line takes one such berth; a double line would cross-fill onto one).
+      // The engine refuses to auto-pair strangers, so surface it for the agent
+      // to broker rather than as a generic seat/overflow miss.
+      final blockedShare = (line.seatType == SeatType.singleSofa &&
+              state.hasBlockedShareDouble(legs, reqGroup,
+                  position: line.position)) ||
+          (line.seatType == SeatType.doubleSofa &&
+              state.hasBlockedShareDouble(legs, reqGroup));
+      if (blockedShare) {
+        exceptions.add(SeatingException(
+          type: SeatingExceptionType.sharedDoubleNeedsReview,
+          passengerId: passenger.id,
+          groupId: reqGroup,
+          requestLine: rl,
+          message:
+              '${_name(passenger)} can only be seated by sharing a Double Sofa '
+              'with another passenger — confirm the pairing.',
+        ));
+      } else if (!anyFreeCapacity) {
         exceptions.add(SeatingException(
           type: SeatingExceptionType.overflowWaitlist,
           passengerId: passenger.id,
@@ -987,7 +1124,8 @@ class SeatingEngine {
             if (_drainDoubleCrossFill(pending) &&
                 state.tryClaimPartnerBerth(
                     g.busId, g.seatId, TripLeg.forTrip(p.tripType))) {
-              state.assign(p.id, g.busId, g.seatId);
+              state.assign(p.id, g.busId, g.seatId,
+                  groupId: p.groupId, legs: TripLeg.forTrip(p.tripType));
             } else if (!_drain(pending, [SeatType.singleSofa], cell.position)) {
               leftoverSingleBerths++;
             }
@@ -1152,6 +1290,16 @@ class _LockedCell {
   _LockedCell(this.busId, this.seatId);
 }
 
+/// One held berth on a doubleSofa cell, tagged with its holder's group and the
+/// legs they travel. Drives the leg-aware stranger-share check: two holders only
+/// "sit together" (and so only need agent review when unrelated) when their legs
+/// OVERLAP — disjoint-leg holders reuse the cell without ever co-occupying it.
+class _Occupant {
+  final String? groupId;
+  final List<TripLeg> legs;
+  const _Occupant(this.groupId, this.legs);
+}
+
 /// Per-cell, PER-LEG free-berth accounting for one bus, plus seat metadata.
 ///
 /// Capacity is leg-aware: every berth has a GO slot and a RETURN slot, tracked
@@ -1174,6 +1322,14 @@ class _BusState {
   /// seatId -> berths still FREE on the RETURN leg. Same capacities as GO.
   final Map<String, int> freeReturnBySeat;
 
+  /// seatId -> every passenger berth currently held on that cell, recorded as
+  /// (groupId, legs). A `null` group means an UNGROUPED holder. Used only for
+  /// doubleSofa cells to enforce the stranger-share rule: a half-double berth
+  /// may be granted to a requester only when the cell holds no UNRELATED holder
+  /// on a leg the requester also travels. Two passengers on DISJOINT legs reuse
+  /// the same cell without ever sitting together, so they never trigger review.
+  final Map<String, List<_Occupant>> occupantGroupsBySeat;
+
   /// True when this bus has at least one agent-marked forward sofa seat. When
   /// set, the FORWARD zone is exactly those flagged sofa cells; when false, the
   /// engine falls back to the lowest [SeatingEngine.frontRowCount] rows.
@@ -1183,6 +1339,7 @@ class _BusState {
       : cells = {},
         freeGoBySeat = {},
         freeReturnBySeat = {},
+        occupantGroupsBySeat = {},
         _hasForwardFlag = _detectForwardFlag(bus) {
     final layout = bus.layout;
     if (layout == null) return;
@@ -1196,12 +1353,15 @@ class _BusState {
   }
 
   _BusState._clone(this.bus, this.cells, Map<String, int> go,
-      Map<String, int> ret, this._hasForwardFlag)
+      Map<String, int> ret, Map<String, List<_Occupant>> occ, this._hasForwardFlag)
       : freeGoBySeat = Map<String, int>.from(go),
-        freeReturnBySeat = Map<String, int>.from(ret);
+        freeReturnBySeat = Map<String, int>.from(ret),
+        occupantGroupsBySeat = {
+          for (final e in occ.entries) e.key: List<_Occupant>.from(e.value),
+        };
 
-  _BusState fork() => _BusState._clone(
-      bus, cells, freeGoBySeat, freeReturnBySeat, _hasForwardFlag);
+  _BusState fork() => _BusState._clone(bus, cells, freeGoBySeat,
+      freeReturnBySeat, occupantGroupsBySeat, _hasForwardFlag);
 
   /// The free-berth map for one [leg].
   Map<String, int> _legMap(TripLeg leg) =>
@@ -1234,6 +1394,49 @@ class _BusState {
       final m = _legMap(leg);
       m[seatId] = ((m[seatId] ?? 0) + n).clamp(0, cap);
     }
+  }
+
+  /// Record that a passenger with [groupId] travelling [legs] now holds a berth
+  /// on [seatId] (one entry per berth). Drives the stranger-share check below.
+  void recordOccupant(String seatId, String? groupId, List<TripLeg> legs) {
+    (occupantGroupsBySeat[seatId] ??= <_Occupant>[])
+        .add(_Occupant(groupId, legs));
+  }
+
+  /// Drop the LAST recorded occupant entry for [seatId] (used when a tentative
+  /// cross-fill berth is released so its occupancy record is undone too).
+  void unrecordOccupant(String seatId) {
+    final list = occupantGroupsBySeat[seatId];
+    if (list != null && list.isNotEmpty) list.removeLast();
+  }
+
+  /// Whether a requester with [requesterGroupId] travelling [legs] may take a
+  /// SHARED berth of the doubleSofa [seatId] WITHOUT agent review.
+  ///
+  /// The check is LEG-AWARE: two passengers only physically SIT TOGETHER when
+  /// their legs OVERLAP. A holder whose legs are DISJOINT from the requester's
+  /// (e.g. an outbound-only holder vs a return-only requester) is reusing the
+  /// cell across separate legs and never co-occupies it, so it never triggers
+  /// review. Among holders who DO overlap the requester's legs, the take is
+  /// allowed only when every overlapping holder shares the requester's NON-NULL
+  /// group (known-related). An ungrouped requester, or any overlapping
+  /// ungrouped/other-group holder, makes the pair "strangers" → refused.
+  bool canShareDouble(
+      String seatId, String? requesterGroupId, List<TripLeg> legs) {
+    final holders = occupantGroupsBySeat[seatId];
+    if (holders == null || holders.isEmpty) return true; // empty cell.
+    for (final h in holders) {
+      // Only holders sharing a leg with the requester could sit beside them.
+      final overlaps = h.legs.any(legs.contains);
+      if (!overlaps) continue;
+      // Same non-null group = known-related; anything else is a stranger.
+      if (requesterGroupId == null ||
+          requesterGroupId.isEmpty ||
+          h.groupId != requesterGroupId) {
+        return false;
+      }
+    }
+    return true;
   }
 
   int get rows => bus.layout?.rows ?? 0;
@@ -1384,7 +1587,8 @@ class _PlanState {
   /// A locked berth only blocks the legs its passenger actually travels: a
   /// one-way locked passenger still leaves the OTHER leg of that berth free for
   /// reuse by a disjoint-leg passenger.
-  void seedLocked(String passengerId, SeatAssignment a, List<TripLeg> legs) {
+  void seedLocked(String passengerId, SeatAssignment a, List<TripLeg> legs,
+      {String? groupId}) {
     final bs = _busStates[a.busId];
     final list = assignmentsByPassenger.putIfAbsent(passengerId, () => []);
     // Preserve the locked entry exactly (including locked:true).
@@ -1394,6 +1598,12 @@ class _PlanState {
       bs.consume(a.seatId, legs, 1);
     }
     final cell = bs.cells[a.seatId];
+    if (cell != null && cell.seatType == SeatType.doubleSofa) {
+      // A locked double berth is an EXISTING occupant for the stranger-share
+      // check — record its holder's group + legs so later half-double takes see
+      // it (and disjoint-leg reuse still passes).
+      bs.recordOccupant(a.seatId, groupId, legs);
+    }
     if (cell != null && bs.isSofa(cell.seatType) && bs.isFront(cell)) {
       _hasFrontSofa[passengerId] = true;
     }
@@ -1488,13 +1698,25 @@ class _PlanState {
   /// Take ONE berth of a doubleSofa cell (a half-double) on [busId], matching
   /// [position] when given. Used for single-on-double and cross-fill.
   /// [preferFront] behaves as in [takeFreeCell]; [legs] gates leg-aware reuse.
+  ///
+  /// STRANGER-SHARE RULE: a half-double berth is granted only when the cell is
+  /// EMPTY or every existing holder shares [requesterGroupId] (a non-null group
+  /// = agent-tagged related). A cell whose other berth is held by an UNRELATED
+  /// passenger is SKIPPED here — never auto-paired — so the caller can raise
+  /// [SeatingExceptionType.sharedDoubleNeedsReview] instead. [sawBlockedShare]
+  /// (when given) is set true if at least one candidate cell was skipped ONLY
+  /// because of this rule, so the caller can distinguish "no double at all" from
+  /// "a double exists but would pair strangers".
   SeatCell? takeHalfDouble(
     String busId, {
     required SeatPosition? position,
     required bool frontOnly,
     required List<TripLeg> legs,
+    String? requesterGroupId,
     bool guardFrontReserve = false,
     bool preferFront = false,
+    bool allowStrangerShare = false,
+    List<bool>? sawBlockedShare,
   }) {
     final bs = _busStates[busId];
     if (bs == null) return null;
@@ -1508,6 +1730,17 @@ class _PlanState {
           continue;
         }
         if (bs.freeForLegs(c.seatId!, legs) >= 1) {
+          // Hard rule: never auto-share a double with an UNRELATED occupant.
+          // [allowStrangerShare] relaxes this for the DETECTION-ONLY trial in
+          // _placeGroup that asks "would the group fit if strangers could
+          // share?" — it is never used by a committed placement.
+          if (!allowStrangerShare &&
+              !bs.canShareDouble(c.seatId!, requesterGroupId, legs)) {
+            if (sawBlockedShare != null && sawBlockedShare.isNotEmpty) {
+              sawBlockedShare[0] = true;
+            }
+            continue;
+          }
           bs.consume(c.seatId!, legs, 1);
           return c;
         }
@@ -1517,13 +1750,26 @@ class _PlanState {
   }
 
   /// Record a placed berth for a passenger and update front-sofa tracking.
-  void assign(String passengerId, String busId, String seatId) {
+  ///
+  /// [groupId] is the placing passenger's group (null = ungrouped) and [legs]
+  /// the legs they travel. For a doubleSofa cell both are recorded as the
+  /// berth's occupant tag so the leg-aware stranger-share rule
+  /// ([_BusState.canShareDouble]) can see who already holds the cell — and on
+  /// which legs. Pass them for every placement so shared-double review stays
+  /// exact and disjoint-leg reuse stays allowed.
+  void assign(String passengerId, String busId, String seatId,
+      {String? groupId, List<TripLeg> legs = const [TripLeg.go, TripLeg.ret]}) {
     final list = assignmentsByPassenger.putIfAbsent(passengerId, () => []);
     list.add(SeatAssignment(busId: busId, seatId: seatId));
     final cell = _busStates[busId]?.cells[seatId];
     final bs = _busStates[busId];
-    if (cell != null && bs != null && bs.isSofa(cell.seatType) && bs.isFront(cell)) {
-      _hasFrontSofa[passengerId] = true;
+    if (cell != null && bs != null) {
+      if (cell.seatType == SeatType.doubleSofa) {
+        bs.recordOccupant(seatId, groupId, legs);
+      }
+      if (bs.isSofa(cell.seatType) && bs.isFront(cell)) {
+        _hasFrontSofa[passengerId] = true;
+      }
     }
   }
 
@@ -1546,5 +1792,58 @@ class _PlanState {
     final bs = _busStates[busId];
     if (bs == null) return;
     bs.giveBack(seatId, legs, 1);
+  }
+
+  /// True when, ANYWHERE across the buses, there is a doubleSofa cell with a
+  /// berth still free on every leg in [legs] BUT whose existing occupant is
+  /// UNRELATED to a requester with [requesterGroupId] — i.e. the only seat that
+  /// could host this passenger is a stranger-shared double the engine refuses to
+  /// auto-pair. When [position] is non-null it must match the cell's position
+  /// (mirrors a positioned singleSofa line; a null position matches any double).
+  /// This is exactly the capacity that [takeHalfDouble] skips for the rule, so
+  /// it lets the exception layer report [sharedDoubleNeedsReview] rather than a
+  /// generic seat-type/overflow message.
+  bool hasBlockedShareDouble(
+    List<TripLeg> legs,
+    String? requesterGroupId, {
+    SeatPosition? position,
+  }) {
+    for (final bs in _busStates.values) {
+      if (_busHasBlockedShareDouble(bs, legs, requesterGroupId,
+          position: position)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Same blocked-stranger-double test as [hasBlockedShareDouble] but scoped to
+  /// a SINGLE bus [busId]. Used by group placement (a group must fit on ONE bus,
+  /// so the relevant capacity is that one candidate bus, not the whole fleet).
+  bool hasBlockedShareDoubleOnBus(
+    String busId,
+    List<TripLeg> legs,
+    String? requesterGroupId, {
+    SeatPosition? position,
+  }) {
+    final bs = _busStates[busId];
+    if (bs == null) return false;
+    return _busHasBlockedShareDouble(bs, legs, requesterGroupId,
+        position: position);
+  }
+
+  static bool _busHasBlockedShareDouble(
+    _BusState bs,
+    List<TripLeg> legs,
+    String? requesterGroupId, {
+    SeatPosition? position,
+  }) {
+    for (final c in bs.cells.values) {
+      if (c.seatType != SeatType.doubleSofa) continue;
+      if (position != null && c.position != position) continue;
+      if (bs.freeForLegs(c.seatId!, legs) < 1) continue;
+      if (!bs.canShareDouble(c.seatId!, requesterGroupId, legs)) return true;
+    }
+    return false;
   }
 }

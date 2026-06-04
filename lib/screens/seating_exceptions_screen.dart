@@ -183,6 +183,7 @@ class SeatingExceptionsScreen extends StatelessWidget {
         return _Category.priority;
       case SeatingExceptionType.groupWontFit:
       case SeatingExceptionType.brokenPair:
+      case SeatingExceptionType.sharedDoubleNeedsReview:
         return _Category.groups;
       case SeatingExceptionType.seatTypeUnavailable:
         return _Category.seatType;
