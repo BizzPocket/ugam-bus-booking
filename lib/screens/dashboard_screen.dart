@@ -156,7 +156,9 @@ class DashboardScreen extends StatelessWidget {
                         _SectionLabel(
                           label: tr('dashboard.section_recent'),
                           action: tr('dashboard.see_all'),
-                          onAction: () => shell.switchTab(2), // Requests tab
+                          // Tabs: 0=Dashboard 1=Tours 2=Charts 3=Requests
+                          // 4=Settings. Requests is 3 (was wrongly 2=Charts).
+                          onAction: () => shell.switchTab(3),
                           c: c,
                         ),
                         const SizedBox(height: UgamSpacing.md),

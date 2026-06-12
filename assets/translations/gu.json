@@ -1558,7 +1558,12 @@
     "rollup_total_expenses": "કુલ ખર્ચ",
     "rollup_net": "ચોખ્ખું",
     "rollup_to_return": "પાછું આપવાનું",
-    "bus_owner_rent": "બસ માલિકનું ભાડું"
+    "bus_owner_rent": "બસ માલિકનું ભાડું",
+    "delete_expense_title": "આ ખર્ચ કાઢી નાખવો છે?",
+    "delete_expense_body": "આ ખર્ચનો રેકોર્ડ કાયમ માટે દૂર થઈ જશે. આ પાછું લાવી શકાશે નહીં.",
+    "delete_handover_title": "આ સોંપણી કાઢી નાખવી છે?",
+    "delete_handover_body": "આ સોંપણીનો રેકોર્ડ કાયમ માટે દૂર થઈ જશે. આ પાછું લાવી શકાશે નહીં.",
+    "delete_confirm": "કાઢી નાખો"
   },
   "collection": {
     "app_bar_title": "એકઠી રકમ · {bus}",

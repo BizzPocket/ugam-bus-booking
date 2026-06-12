@@ -1558,7 +1558,12 @@
     "rollup_total_expenses": "कुल खर्च",
     "rollup_net": "शुद्ध",
     "rollup_to_return": "लौटाना है",
-    "bus_owner_rent": "बस मालिक का किराया"
+    "bus_owner_rent": "बस मालिक का किराया",
+    "delete_expense_title": "यह खर्च हटाएँ?",
+    "delete_expense_body": "यह खर्च रिकॉर्ड स्थायी रूप से हटा दिया जाएगा. इसे वापस नहीं लाया जा सकता.",
+    "delete_handover_title": "यह सौंपना हटाएँ?",
+    "delete_handover_body": "यह सौंपने का रिकॉर्ड स्थायी रूप से हटा दिया जाएगा. इसे वापस नहीं लाया जा सकता.",
+    "delete_confirm": "हटाएँ"
   },
   "collection": {
     "app_bar_title": "एकत्र राशि · {bus}",

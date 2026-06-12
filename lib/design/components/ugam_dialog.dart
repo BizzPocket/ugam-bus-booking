@@ -8,8 +8,16 @@ import '../tokens.dart';
 /// pick intent ("this is the primary action", "this destroys data")
 /// rather than re-deriving colors at every call site.
 enum UgamButtonKind {
-  /// Solid accent. The single affirmative action on a surface.
+  /// Solid accent. The single affirmative action on a surface. Per the
+  /// accent-rationing law, use AT MOST ONE per screen (usually the sticky
+  /// [UgamCTA]); every other "primary-ish" action should be [tonal].
   primary,
+
+  /// Tonal accent — champagne ink on [accentFill] with a hairline accent
+  /// border. The canonical "quiet primary": repeated/per-row primaries
+  /// (Confirm, Collect, Send, Book, Apply) so solid gold stays rationed to
+  /// one focal point per screen.
+  tonal,
 
   /// Quiet, transparent. Cancel / dismiss — never competes with primary.
   ghost,
@@ -57,6 +65,11 @@ class UgamButton extends StatelessWidget {
 
     final (Color bg, Color fg, Color? border) = switch (kind) {
       UgamButtonKind.primary => (c.accent, c.onAccent, null),
+      UgamButtonKind.tonal => (
+        c.accentFill,
+        c.accent,
+        c.accent.withValues(alpha: 0.28),
+      ),
       UgamButtonKind.ghost => (Colors.transparent, c.ink2, null),
       UgamButtonKind.neutral => (c.cardElev, c.ink, c.border),
       UgamButtonKind.danger => (c.danger, Colors.white, null),

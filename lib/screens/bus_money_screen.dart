@@ -169,6 +169,19 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                             // without this the rethrow becomes an uncaught
                             // async exception.
                             onDelete: () async {
+                              // Money records are irreversible — gate the delete
+                              // behind a destructive confirm (was a one-tap
+                              // data-loss footgun on a small icon).
+                              final ok = await UgamDialog.confirm(
+                                context,
+                                title: tr('bus_money.delete_expense_title'),
+                                message: tr('bus_money.delete_expense_body'),
+                                cancelLabel: tr('app.action.cancel'),
+                                confirmLabel: tr('bus_money.delete_confirm'),
+                                destructive: true,
+                                confirmIcon: Icons.delete_outline_rounded,
+                              );
+                              if (!ok) return;
                               try {
                                 await controller.deleteExpense(e.id);
                               } catch (_) {}
@@ -203,6 +216,18 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                               existing: h,
                             ),
                             onDelete: () async {
+                              // Irreversible handover record — destructive
+                              // confirm before delete.
+                              final ok = await UgamDialog.confirm(
+                                context,
+                                title: tr('bus_money.delete_handover_title'),
+                                message: tr('bus_money.delete_handover_body'),
+                                cancelLabel: tr('app.action.cancel'),
+                                confirmLabel: tr('bus_money.delete_confirm'),
+                                destructive: true,
+                                confirmIcon: Icons.delete_outline_rounded,
+                              );
+                              if (!ok) return;
                               try {
                                 await controller.deleteHandover(h.id);
                               } catch (_) {}

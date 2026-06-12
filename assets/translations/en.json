@@ -1558,7 +1558,12 @@
     "rollup_total_expenses": "Total expenses",
     "rollup_net": "Net",
     "rollup_to_return": "To return",
-    "bus_owner_rent": "Bus owner rent"
+    "bus_owner_rent": "Bus owner rent",
+    "delete_expense_title": "Delete this expense?",
+    "delete_expense_body": "This expense record will be permanently removed. This can't be undone.",
+    "delete_handover_title": "Delete this handover?",
+    "delete_handover_body": "This handover record will be permanently removed. This can't be undone.",
+    "delete_confirm": "Delete"
   },
   "collection": {
     "app_bar_title": "Collection · {bus}",
