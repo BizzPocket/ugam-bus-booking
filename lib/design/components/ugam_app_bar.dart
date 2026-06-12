@@ -15,11 +15,16 @@ import '../tokens.dart';
 ///
 /// Slots:
 ///   * [title] (required) — screen heading, single line with ellipsis
+///   * [eyebrow] — optional small champagne label ABOVE the title (section
+///     context, e.g. "FINANCE" / "TOUR MONEY"). Rendered uppercase.
+///   * [subtitle] — optional muted line BELOW the title (e.g. a route, a date)
 ///   * [showBack] — render the circular back button (default `true`)
 ///   * [onBack] — override the default `Get.back` pop behaviour
 ///   * [actions] — trailing [UgamAppBarAction]s, laid out right of the title
 class UgamAppBar extends StatelessWidget {
   final String title;
+  final String? eyebrow;
+  final String? subtitle;
   final bool showBack;
   final VoidCallback? onBack;
   final List<Widget> actions;
@@ -27,6 +32,8 @@ class UgamAppBar extends StatelessWidget {
   const UgamAppBar({
     super.key,
     required this.title,
+    this.eyebrow,
+    this.subtitle,
     this.showBack = true,
     this.onBack,
     this.actions = const [],
@@ -73,11 +80,39 @@ class UgamAppBar extends StatelessWidget {
             const SizedBox(width: UgamSpacing.md),
           ],
           Expanded(
-            child: Text(
-              title,
-              style: UgamText.titleL.copyWith(color: c.ink),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (eyebrow != null) ...[
+                  Text(
+                    eyebrow!.toUpperCase(),
+                    style: UgamText.micro.copyWith(
+                      color: c.accent,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                ],
+                Text(
+                  title,
+                  style: UgamText.titleL.copyWith(color: c.ink),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
             ),
           ),
           for (final action in actions) ...[

@@ -3,6 +3,11 @@ import 'package:flutter/services.dart';
 
 import '../tokens.dart';
 
+/// Optional semantic tint for a [UgamCard]. `none` is the default neutral
+/// surface; the others tint the fill + add a hairline tone border so
+/// attention/danger/success cards stop being hand-rolled per screen.
+enum UgamCardTone { none, accent, good, warm, danger }
+
 /// Base card surface. Two variants:
 ///
 /// * [UgamCard.plain] — text-only card, default 14 px inner padding.
@@ -20,6 +25,7 @@ class UgamCard extends StatefulWidget {
   final VoidCallback? onTap;
   final bool elev;
   final double radius;
+  final UgamCardTone tone;
 
   const UgamCard.plain({
     super.key,
@@ -28,6 +34,7 @@ class UgamCard extends StatefulWidget {
     this.onTap,
     this.elev = false,
     this.radius = UgamRadius.card,
+    this.tone = UgamCardTone.none,
   });
 
   /// Media variant: caller is responsible for placing a photo as the
@@ -40,6 +47,7 @@ class UgamCard extends StatefulWidget {
     this.onTap,
     this.elev = false,
     this.radius = UgamRadius.card,
+    this.tone = UgamCardTone.none,
   }) : padding = const EdgeInsets.all(UgamSpacing.sm);
 
   @override
@@ -100,11 +108,26 @@ class _UgamCardState extends State<UgamCard>
     final c = UgamColors.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // Semantic tone → tinted fill + hairline border. `none` falls back to the
+    // neutral card/cardElev surface and keeps the soft light-mode shadow.
+    final (Color? toneFill, Color? toneBorder) = switch (widget.tone) {
+      UgamCardTone.none => (null, null),
+      UgamCardTone.accent => (c.accentFill, c.accent.withValues(alpha: 0.30)),
+      UgamCardTone.good => (c.goodFill, c.good.withValues(alpha: 0.30)),
+      UgamCardTone.warm => (c.warmFill, c.warm.withValues(alpha: 0.30)),
+      UgamCardTone.danger => (
+        c.danger.withValues(alpha: 0.12),
+        c.danger.withValues(alpha: 0.32),
+      ),
+    };
+    final bool tinted = widget.tone != UgamCardTone.none;
+
     Widget surface = Container(
       decoration: BoxDecoration(
-        color: widget.elev ? c.cardElev : c.card,
+        color: toneFill ?? (widget.elev ? c.cardElev : c.card),
         borderRadius: BorderRadius.circular(widget.radius),
-        boxShadow: isDark
+        border: toneBorder == null ? null : Border.all(color: toneBorder),
+        boxShadow: (isDark || tinted)
             ? null
             : const [
                 BoxShadow(
