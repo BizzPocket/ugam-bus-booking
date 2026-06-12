@@ -18,20 +18,18 @@ import 'notify_screen.dart';
 import 'settings_screen.dart';
 import 'tour_detail_screen.dart';
 
-/// Admin home, reimagined as a CONTROL BOARD. A transit-cockpit layout:
-/// a quiet greeting bar, then an oversized week-revenue HERO that anchors
-/// the screen, a confident action strip (one gold primary), a tight strip
-/// of big tabular stats, and strongly eyebrow'd "attention" + "recent"
-/// sections.
+/// Admin home — actual control center. Tells the agent what matters
+/// THIS hour, not just what's in the database.
 ///
 /// Order top-to-bottom:
-///   1. Greeting bar — eyebrow greeting + date, name, avatar (→ settings)
-///   2. (Gated) today's-trip hero / next-trip tile
-///   3. REVENUE HERO — the visual anchor: huge week-revenue numeral
-///   4. Action strip — Create (gold) / Requests / Assign (tonal)
-///   5. Stats strip — active / today / waitlist as big numerals
-///   6. "Needs attention" — eyebrow'd, one-tap fixes
-///   7. "Recent requests" — eyebrow'd, last 5 new passengers
+///   1. Greeting + date pill + avatar (links to settings)
+///   2. "TODAY" hero card if a trip departs in the next 24h, otherwise
+///      a quieter "Next trip in N days" tile
+///   3. Quick action row — 4 chunky tiles (Create / Requests / Assign / Notify)
+///   4. Revenue hero — ONE big number (this week) with seats-sold subline
+///   5. Small stats trio (Active tours / Today's seats / Waitlist)
+///   6. "Needs attention" — tours blocked on agent action, with one-tap fix
+///   7. Recent requests — last 5 new passengers across all tours
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
@@ -110,28 +108,21 @@ class DashboardScreen extends StatelessWidget {
                 if (_showTodayTrip)
                   Padding(
                     // Bottom spacer lives inside the section so hiding it
-                    // leaves one clean gap before the hero.
+                    // leaves one clean gap before the quick actions.
                     padding: const EdgeInsets.only(bottom: UgamSpacing.xl),
                     child: todayTour != null
                         ? _TodayHeroCard(tour: todayTour, c: c)
                         : _NoTripsTodayTile(nextTour: nextTour, c: c),
                   ),
-                // ── THE ANCHOR: oversized week-revenue hero ───────────────
+                _QuickActions(c: c, shell: shell),
+                const SizedBox(height: UgamSpacing.xl),
                 _RevenueHero(
                   revenue: revenue,
                   seatsSold: seatsSold,
                   c: c,
                 ),
-                const SizedBox(height: UgamSpacing.xl + UgamSpacing.xs),
-                // ── Action strip ─────────────────────────────────────────
-                _SectionEyebrow(label: tr('dashboard.eyebrow_actions'), c: c),
                 const SizedBox(height: UgamSpacing.md),
-                _QuickActions(c: c, shell: shell),
-                const SizedBox(height: UgamSpacing.xl + UgamSpacing.xs),
-                // ── Stats strip ──────────────────────────────────────────
-                _SectionEyebrow(label: tr('dashboard.eyebrow_pulse'), c: c),
-                const SizedBox(height: UgamSpacing.md),
-                _StatsStrip(
+                _SmallStatsRow(
                   active: activeCount,
                   todaySeats: todaySeats,
                   waitlist: waitlist,
@@ -143,7 +134,7 @@ class DashboardScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      _SectionEyebrow(
+                      _SectionLabel(
                         label: tr('dashboard.section_attention'),
                         meta: '${attention.length}',
                         c: c,
@@ -163,7 +154,7 @@ class DashboardScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _SectionEyebrow(
+                        _SectionLabel(
                           label: tr('dashboard.section_recent'),
                           action: tr('dashboard.see_all'),
                           // Tabs: 0=Dashboard 1=Tours 2=Charts 3=Requests
@@ -417,11 +408,8 @@ class _Greeting extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  // Gold eyebrow greeting — transit-signage cue.
-                  Text(
-                    greeting.toUpperCase(),
-                    style: UgamText.micro.copyWith(color: c.accent),
-                  ),
+                  Text(greeting,
+                      style: UgamText.caption.copyWith(color: c.ink2)),
                   const SizedBox(width: UgamSpacing.sm),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -746,105 +734,9 @@ class _NoTripsTodayTile extends StatelessWidget {
   }
 }
 
-/// REVENUE HERO — the visual anchor of the control board. A bold full-bleed
-/// band: small gold "THIS WEEK" eyebrow over a huge tabular money numeral,
-/// with the seats-sold subline and a quiet trend badge. This is the single
-/// biggest moment on the screen by scale; the gold FILL focal stays on the
-/// Create tile, so this hero is tonal (eyebrow + numeral, no solid slab).
-class _RevenueHero extends StatelessWidget {
-  final double revenue;
-  final int seatsSold;
-  final UgamColorSet c;
-
-  const _RevenueHero({
-    required this.revenue,
-    required this.seatsSold,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.xl,
-        UgamSpacing.xl,
-        UgamSpacing.xl,
-        UgamSpacing.xl,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(color: c.accent.withValues(alpha: 0.16)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              // Gold eyebrow — the section signage cue.
-              Text(
-                tr('dashboard.this_week'),
-                style: UgamText.micro.copyWith(color: c.accent),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.sm + 2, vertical: 2),
-                decoration: BoxDecoration(
-                  color: c.goodFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.chip),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.trending_up_rounded,
-                        size: 11, color: c.good),
-                    const SizedBox(width: 3),
-                    Text(
-                      tr('dashboard.stat_revenue'),
-                      style: UgamText.micro
-                          .copyWith(color: c.good, fontSize: 9.5),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          // The hero numeral. numXl is the heaviest tabular role; the
-          // deliberate size bump here is the ONE hero-size copyWith on this
-          // screen, per the accent/scale law.
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              Formatters.formatMoneyInrCompact(revenue),
-              style: UgamText.numXl.copyWith(
-                color: c.ink,
-                fontSize: 56,
-                letterSpacing: -1.6,
-                height: 0.95,
-              ),
-            ),
-          ),
-          const SizedBox(height: UgamSpacing.sm),
-          Text(
-            seatsSold == 0
-                ? tr('dashboard.no_seats_sold')
-                : tr('dashboard.seats_sold', namedArgs: {'n': '$seatsSold'}),
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// High-frequency quick-action strip. The agent's daily drivers: spin up a
-/// tour, triage incoming requests, jump into seat assignment. Create is the
-/// ONE solid-champagne focal on this screen; the rest are tonal.
+/// High-frequency quick-action tiles in a single row. The agent's daily
+/// drivers: spin up a tour, triage incoming requests, jump into seat
+/// assignment. Settings lives in the nav, so it's dropped here.
 class _QuickActions extends StatelessWidget {
   final UgamColorSet c;
   final ShellController shell;
@@ -921,14 +813,11 @@ class _QA extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       child: Container(
         padding: const EdgeInsets.symmetric(
-          vertical: UgamSpacing.lg,
+          vertical: UgamSpacing.md,
         ),
         decoration: BoxDecoration(
           color: primary ? c.accent : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.card),
-          border: primary
-              ? null
-              : Border.all(color: c.accent.withValues(alpha: 0.14)),
+          borderRadius: BorderRadius.circular(20),
         ),
         child: Column(
           children: [
@@ -938,14 +827,14 @@ class _QA extends StatelessWidget {
               decoration: BoxDecoration(
                 color: primary
                     ? c.onAccent.withValues(alpha: 0.18)
-                    : c.accentFill,
+                    : c.card,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
               child: Icon(
                 icon,
                 size: 20,
-                color: primary ? c.onAccent : c.accent,
+                color: primary ? c.onAccent : c.ink,
               ),
             ),
             const SizedBox(height: UgamSpacing.sm + 2),
@@ -965,16 +854,99 @@ class _QA extends StatelessWidget {
   }
 }
 
-/// Tight cockpit stats strip: three big tabular numerals with tiny labels,
-/// divided by hairlines — scale contrast over equal-card stacking. Active is
-/// the only accented numeral so the strip keeps one quiet focus.
-class _StatsStrip extends StatelessWidget {
+/// Big revenue number, week-of-context. The hero metric of the dashboard.
+class _RevenueHero extends StatelessWidget {
+  final double revenue;
+  final int seatsSold;
+  final UgamColorSet c;
+
+  const _RevenueHero({
+    required this.revenue,
+    required this.seatsSold,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.xl,
+        UgamSpacing.lg,
+        UgamSpacing.xl,
+        UgamSpacing.lg,
+      ),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Text(
+                tr('dashboard.this_week'),
+                style: UgamText.micro.copyWith(color: c.ink3),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.sm + 2, vertical: 2),
+                decoration: BoxDecoration(
+                  color: c.goodFill,
+                  borderRadius: BorderRadius.circular(UgamRadius.chip),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.trending_up_rounded,
+                        size: 11, color: c.good),
+                    const SizedBox(width: 3),
+                    Text(
+                      tr('dashboard.stat_revenue'),
+                      style: UgamText.micro
+                          .copyWith(color: c.good, fontSize: 9.5),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm + 2),
+          Text(
+            Formatters.formatMoneyInrCompact(revenue),
+            style: UgamText.tabular(
+              UgamText.display.copyWith(
+                color: c.ink,
+                fontSize: 40,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -1.2,
+                height: 1,
+              ),
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            seatsSold == 0
+                ? tr('dashboard.no_seats_sold')
+                : tr('dashboard.seats_sold', namedArgs: {'n': '$seatsSold'}),
+            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SmallStatsRow extends StatelessWidget {
   final int active;
   final int todaySeats;
   final int waitlist;
   final UgamColorSet c;
 
-  const _StatsStrip({
+  const _SmallStatsRow({
     required this.active,
     required this.todaySeats,
     required this.waitlist,
@@ -983,108 +955,48 @@ class _StatsStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.lg,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Expanded(
-            child: _StatCell(
-              value: '$active',
-              label: tr('dashboard.mini_active'),
-              valueColor: c.accent,
-              c: c,
-            ),
-          ),
-          _Divider(c: c),
-          Expanded(
-            child: _StatCell(
-              value: '$todaySeats',
-              label: tr('dashboard.mini_today'),
-              valueColor: c.ink,
-              c: c,
-            ),
-          ),
-          _Divider(c: c),
-          Expanded(
-            child: _StatCell(
-              value: '$waitlist',
-              label: tr('dashboard.mini_waitlist'),
-              valueColor: waitlist > 0 ? c.warm : c.ink,
-              c: c,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatCell extends StatelessWidget {
-  final String value;
-  final String label;
-  final Color valueColor;
-  final UgamColorSet c;
-
-  const _StatCell({
-    required this.value,
-    required this.label,
-    required this.valueColor,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    return Row(
       children: [
-        Text(
-          value,
-          style: UgamText.numXl.copyWith(color: valueColor),
+        Expanded(
+          child: UgamStatTile(
+            icon: Icons.location_on_rounded,
+            value: '$active',
+            label: tr('dashboard.mini_active'),
+            variant: UgamStatVariant.accent,
+          ),
         ),
-        const SizedBox(height: UgamSpacing.xs),
-        Text(
-          label.toUpperCase(),
-          style: UgamText.micro.copyWith(color: c.ink3),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+        const SizedBox(width: UgamSpacing.md - 4),
+        Expanded(
+          child: UgamStatTile(
+            icon: Icons.event_seat_rounded,
+            value: '$todaySeats',
+            label: tr('dashboard.mini_today'),
+            variant: UgamStatVariant.neutral,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.md - 4),
+        Expanded(
+          child: UgamStatTile(
+            icon: Icons.hourglass_bottom_rounded,
+            value: '$waitlist',
+            label: tr('dashboard.mini_waitlist'),
+            variant:
+                waitlist > 0 ? UgamStatVariant.warm : UgamStatVariant.neutral,
+          ),
         ),
       ],
     );
   }
 }
 
-class _Divider extends StatelessWidget {
-  final UgamColorSet c;
-  const _Divider({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 40,
-      color: c.border,
-    );
-  }
-}
-
-/// Uppercase gold section eyebrow — the transit-signage header over every
-/// block. Optional count badge (meta) and a trailing text action.
-class _SectionEyebrow extends StatelessWidget {
+class _SectionLabel extends StatelessWidget {
   final String label;
   final String? meta;
   final String? action;
   final VoidCallback? onAction;
   final UgamColorSet c;
 
-  const _SectionEyebrow({
+  const _SectionLabel({
     required this.label,
     required this.c,
     this.meta,
@@ -1096,20 +1008,7 @@ class _SectionEyebrow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Short gold tick before the eyebrow — signage accent.
-        Container(
-          width: 14,
-          height: 2,
-          decoration: BoxDecoration(
-            color: c.accent,
-            borderRadius: BorderRadius.circular(1),
-          ),
-        ),
-        const SizedBox(width: UgamSpacing.sm),
-        Text(
-          label.toUpperCase(),
-          style: UgamText.micro.copyWith(color: c.accent),
-        ),
+        Text(label, style: UgamText.titleM.copyWith(color: c.ink)),
         if (meta != null) ...[
           const SizedBox(width: UgamSpacing.sm),
           Container(
@@ -1280,17 +1179,19 @@ class _LoadingShimmer extends StatelessWidget {
       children: const [
         UgamSkeleton(height: 60, radius: 16),
         SizedBox(height: UgamSpacing.xl),
-        UgamSkeleton(height: 150, radius: 16),
+        UgamSkeleton(height: 220, radius: 28),
         SizedBox(height: UgamSpacing.xl),
         Row(children: [
-          Expanded(child: UgamSkeleton(height: 92, radius: 16)),
+          Expanded(child: UgamSkeleton(height: 92, radius: 20)),
           SizedBox(width: 8),
-          Expanded(child: UgamSkeleton(height: 92, radius: 16)),
+          Expanded(child: UgamSkeleton(height: 92, radius: 20)),
           SizedBox(width: 8),
-          Expanded(child: UgamSkeleton(height: 92, radius: 16)),
+          Expanded(child: UgamSkeleton(height: 92, radius: 20)),
+          SizedBox(width: 8),
+          Expanded(child: UgamSkeleton(height: 92, radius: 20)),
         ]),
         SizedBox(height: UgamSpacing.xl),
-        UgamSkeleton(height: 84, radius: 16),
+        UgamSkeleton(height: 140, radius: 22),
         SizedBox(height: UgamSpacing.xl),
         UgamSkeleton(height: 56, radius: 18),
         SizedBox(height: 8),
