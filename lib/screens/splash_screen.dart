@@ -61,7 +61,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.dark;
+    final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
       body: Center(

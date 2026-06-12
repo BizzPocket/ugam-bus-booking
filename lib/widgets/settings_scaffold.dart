@@ -1,6 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
 import '../design/ugam.dart';
 
@@ -35,43 +34,7 @@ class SettingsScaffold extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.md,
-                UgamSpacing.sm,
-                UgamSpacing.md,
-                UgamSpacing.md,
-              ),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => Get.back(),
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: c.cardElev,
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.arrow_back_rounded,
-                        size: 19,
-                        color: c.ink,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: UgamText.titleL.copyWith(color: c.ink),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            UgamAppBar(title: title),
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(

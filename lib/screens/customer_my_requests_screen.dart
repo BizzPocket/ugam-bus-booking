@@ -264,11 +264,9 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
 
   void _openFullChart(CustomerRequestEntry entry) {
     HapticFeedback.selectionClick();
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => HandlerBusChartScreen(requestId: entry.id),
-      ),
+    Get.to(
+      () => HandlerBusChartScreen(requestId: entry.id),
+      transition: Transition.cupertino,
     );
   }
 }

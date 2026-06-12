@@ -27,15 +27,28 @@ class UgamDockNav extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return ChromeMeasure(
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            UgamSpacing.md,
-            UgamSpacing.sm,
-            UgamSpacing.md,
-            UgamSpacing.md,
+      // Bottom fade behind the floating capsule: the body uses extendBody, so
+      // the list scrolls into the transparent strip around/below the dock. This
+      // gradient hides that content (fades it into the scaffold bg) before the
+      // screen edge, so nothing peeks out below the bar.
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [c.bg.withValues(alpha: 0), c.bg],
+            stops: const [0, 0.55],
           ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              UgamSpacing.md,
+              UgamSpacing.lg,
+              UgamSpacing.md,
+              UgamSpacing.md,
+            ),
           // Solid, opaque capsule — no BackdropFilter. Real-time Gaussian
           // blur behind the dock was re-sampling the scrolling content
           // every frame on all 5 tabs (the single worst low-end GPU cost
@@ -77,6 +90,7 @@ class UgamDockNav extends StatelessWidget {
               ),
             ),
           ),
+        ),
         ),
       ),
     );

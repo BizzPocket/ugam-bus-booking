@@ -564,7 +564,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                     ),
                     itemCount: passengers.length,
                     separatorBuilder: (_, _) =>
-                        const SizedBox(height: UgamSpacing.md),
+                        const SizedBox(height: UgamSpacing.sm + 2),
                     itemBuilder: (_, i) {
                       final p = passengers[i];
                       final selected = _selectedIds.contains(p.id);
@@ -1222,8 +1222,8 @@ class _RequestCard extends StatelessWidget {
     Widget leading;
     if (selectionMode) {
       leading = Container(
-        width: 36,
-        height: 36,
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(
           color: selected ? c.accent : c.cardElev,
           shape: BoxShape.circle,
@@ -1236,8 +1236,8 @@ class _RequestCard extends StatelessWidget {
       );
     } else {
       leading = Container(
-        width: 36,
-        height: 36,
+        width: 32,
+        height: 32,
         decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
         alignment: Alignment.center,
         child: Text(
@@ -1258,6 +1258,10 @@ class _RequestCard extends StatelessWidget {
         ),
       ),
       child: UgamCard.plain(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.sm + 2,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -1406,7 +1410,7 @@ class _RequestCard extends StatelessWidget {
               ),
             ],
             if (passenger.requestLines.isNotEmpty) ...[
-              const SizedBox(height: UgamSpacing.md),
+              const SizedBox(height: UgamSpacing.sm),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
@@ -1457,7 +1461,7 @@ class _RequestCard extends StatelessWidget {
               ),
             ],
             if (!selectionMode) ...[
-              const SizedBox(height: UgamSpacing.md),
+              const SizedBox(height: UgamSpacing.sm + 2),
               _CardActions(
                 passenger: passenger,
                 tour: tour,
@@ -1772,11 +1776,11 @@ class _CardActions extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 40,
-        height: 40,
+        width: 38,
+        height: 38,
         decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
         alignment: Alignment.center,
-        child: Icon(icon, size: 18, color: iconColor),
+        child: Icon(icon, size: 17, color: iconColor),
       ),
     );
     return tooltip == null ? btn : Tooltip(message: tooltip, child: btn);
@@ -1920,7 +1924,7 @@ class _CardActions extends StatelessWidget {
             onTap: primaryAction,
             behavior: HitTestBehavior.opaque,
             child: Container(
-              height: 40,
+              height: 38,
               decoration: BoxDecoration(
                 color: primaryFill,
                 borderRadius: BorderRadius.circular(UgamRadius.chip),
@@ -1964,12 +1968,12 @@ class _CardActions extends StatelessWidget {
         secondary,
         const SizedBox(width: UgamSpacing.sm),
         Container(
-          width: 40,
-          height: 40,
+          width: 38,
+          height: 38,
           decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
           child: PopupMenuButton<_MenuItem>(
             tooltip: tr('requests.action.more_actions'),
-            icon: Icon(Icons.more_vert_rounded, size: 18, color: c.ink2),
+            icon: Icon(Icons.more_vert_rounded, size: 17, color: c.ink2),
             position: PopupMenuPosition.under,
             onSelected: (item) => item.onTap(),
             color: c.card,

@@ -62,7 +62,7 @@ class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
     final inner = Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.xl,
-        vertical: UgamSpacing.lg + 2,
+        vertical: UgamSpacing.md, // compact button height (~44px tap target)
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -98,8 +98,8 @@ class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
             ),
             const SizedBox(width: UgamSpacing.sm),
             Container(
-              width: 26,
-              height: 26,
+              width: 22,
+              height: 22,
               decoration: BoxDecoration(
                 color: c.onAccent.withValues(alpha: 0.18),
                 shape: BoxShape.circle,
@@ -107,7 +107,7 @@ class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
               alignment: Alignment.center,
               child: Icon(
                 Icons.arrow_forward_rounded,
-                size: 14,
+                size: 13,
                 color: c.onAccent,
               ),
             ),
@@ -157,7 +157,7 @@ class UgamStickyCTA extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.fromLTRB(
             UgamSpacing.gutter,
-            UgamSpacing.xxl,
+            UgamSpacing.lg,
             UgamSpacing.gutter,
             UgamSpacing.md,
           ),
