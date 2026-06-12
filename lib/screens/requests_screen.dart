@@ -283,33 +283,6 @@ class _RequestsScreenState extends State<RequestsScreen> {
     return out;
   }
 
-  /// Count of passengers in the CURRENTLY active filter bucket — the hero
-  /// numeral in the triage header. Mirrors the per-bucket derivation in
-  /// [_buildBody] so the header number always tracks the visible list (minus
-  /// the search query, which only narrows the rendered rows).
-  int _activeFilterCount(Tour tour) {
-    final all = tour.passengers.where((p) => !p.journeyDone);
-    return switch (_filter) {
-      _RequestFilter.newRequests => all
-          .where((p) => !p.isWaitlisted && !p.isConfirmed && !p.isFullyAssigned)
-          .length,
-      _RequestFilter.waitlist =>
-        all.where((p) => p.isWaitlisted && !p.isFullyAssigned).length,
-      _RequestFilter.confirmed => all
-          .where((p) =>
-              p.isConfirmed && !p.isWaitlisted && !p.isFullyAssigned)
-          .length,
-      _RequestFilter.assigned => all.where((p) => p.isFullyAssigned).length,
-    };
-  }
-
-  String _filterLabel(_RequestFilter f) => switch (f) {
-    _RequestFilter.newRequests => tr('requests.filter.new'),
-    _RequestFilter.waitlist => tr('requests.filter.waitlist'),
-    _RequestFilter.confirmed => tr('requests.filter.confirmed'),
-    _RequestFilter.assigned => tr('requests.filter.assigned'),
-  };
-
   // ── Build ────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -332,12 +305,8 @@ class _RequestsScreenState extends State<RequestsScreen> {
             children: [
               Column(
                 children: [
-                  _TriageHeader(
+                  _TopBar(
                     c: c,
-                    activeCount: selectedTour == null
-                        ? 0
-                        : _activeFilterCount(selectedTour),
-                    activeLabel: _filterLabel(_filter),
                     searchActive: _searchVisible,
                     onToggleSearch: _toggleSearch,
                     onAdd: selectedTour == null
@@ -472,19 +441,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
         const SizedBox(height: UgamSpacing.md),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-          child: _SectionEyebrow(c: c, label: tr('requests.section.capacity')),
+          child: _CapacityBanner(c: c, tour: selectedTour),
         ),
-        const SizedBox(height: UgamSpacing.sm),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-          child: _CapacityHero(c: c, tour: selectedTour),
-        ),
-        const SizedBox(height: UgamSpacing.lg),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-          child: _SectionEyebrow(c: c, label: tr('requests.section.triage')),
-        ),
-        const SizedBox(height: UgamSpacing.sm),
+        const SizedBox(height: UgamSpacing.md),
         // One filter row: pills (with counts) + a compact sort toggle. The old
         // stats strip was redundant with these counts, so it's gone.
         Padding(
@@ -627,20 +586,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
   }
 }
 
-// ─── Triage header ────────────────────────────────────────────────────
+// ─── Top bar ──────────────────────────────────────────────────────────
 
-/// Bold triage-board header. Replaces the old flat title row with a
-/// control-cockpit masthead: a gold "REQUESTS" eyebrow, the screen title,
-/// and — as the hero moment — the active filter's count rendered as a heavy
-/// hero numeral beside its label ("12 NEW"). The search / add / overflow
-/// controls keep their exact callbacks; only the composition changed.
-///
-/// Selection mode swaps the whole zone for a close-X + "N selected" line,
-/// preserving the original behaviour.
-class _TriageHeader extends StatelessWidget {
+class _TopBar extends StatelessWidget {
   final UgamColorSet c;
-  final int activeCount;
-  final String activeLabel;
   final bool searchActive;
   final VoidCallback onToggleSearch;
   final VoidCallback? onAdd;
@@ -649,10 +598,8 @@ class _TriageHeader extends StatelessWidget {
   final int selectedCount;
   final VoidCallback onExitSelection;
 
-  const _TriageHeader({
+  const _TopBar({
     required this.c,
-    required this.activeCount,
-    required this.activeLabel,
     required this.searchActive,
     required this.onToggleSearch,
     required this.onAdd,
@@ -679,7 +626,7 @@ class _TriageHeader extends StatelessWidget {
             Expanded(
               child: Text(
                 tr('requests.selected_count', namedArgs: {'n': '$selectedCount'}),
-                style: UgamText.titleM.copyWith(color: c.ink),
+                style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
               ),
             ),
           ],
@@ -694,117 +641,47 @@ class _TriageHeader extends StatelessWidget {
         UgamSpacing.gutter,
         UgamSpacing.md,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
         children: [
-          // Title row keeps the controls; the title sits under a gold eyebrow.
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tr('requests.eyebrow').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.accent),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      tr('requests.title'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: UgamText.display.copyWith(color: c.ink),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: UgamSpacing.sm),
-              _CircleBtn(
-                icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
-                c: c,
-                onTap: onToggleSearch,
-                active: searchActive,
-              ),
-              if (onEmptyBus != null) ...[
-                const SizedBox(width: UgamSpacing.sm),
-                _MoreMenu(c: c, onEmptyBus: onEmptyBus),
-              ],
-              const SizedBox(width: UgamSpacing.sm),
-              GestureDetector(
-                onTap: onAdd,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: onAdd == null
-                        ? c.accent.withValues(alpha: 0.4)
-                        : c.accent,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.person_add_alt_rounded,
-                    size: 19,
-                    color: c.onAccent,
-                  ),
-                ),
-              ),
-            ],
+          Expanded(
+            child: Text(
+              tr('requests.title'),
+              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
+            ),
           ),
-          const SizedBox(height: UgamSpacing.md),
-          // HERO: the active filter's live count as a heavy numeral, with its
-          // bucket label trailing in small caps — the masthead's focal moment.
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '$activeCount',
-                style: UgamText.tabular(
-                  UgamText.numXl.copyWith(color: c.ink, fontSize: 44),
-                ),
+          _CircleBtn(
+            icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
+            c: c,
+            onTap: onToggleSearch,
+            active: searchActive,
+          ),
+          if (onEmptyBus != null) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            _MoreMenu(c: c, onEmptyBus: onEmptyBus),
+          ],
+          const SizedBox(width: UgamSpacing.sm),
+          GestureDetector(
+            onTap: onAdd,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: onAdd == null
+                    ? c.accent.withValues(alpha: 0.4)
+                    : c.accent,
+                shape: BoxShape.circle,
               ),
-              const SizedBox(width: UgamSpacing.sm),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  activeLabel.toUpperCase(),
-                  style: UgamText.micro.copyWith(
-                    color: c.ink3,
-                    letterSpacing: 1.0,
-                  ),
-                ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.person_add_alt_rounded,
+                size: 19,
+                color: c.onAccent,
               ),
-            ],
+            ),
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Uppercase gold section eyebrow — the "transit-board" label that heads each
-/// block (capacity / triage), giving the screen its strong section structure.
-class _SectionEyebrow extends StatelessWidget {
-  final UgamColorSet c;
-  final String label;
-  const _SectionEyebrow({required this.c, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(
-          label.toUpperCase(),
-          style: UgamText.micro.copyWith(color: c.accent, letterSpacing: 1.0),
-        ),
-        const SizedBox(width: UgamSpacing.sm),
-        Expanded(child: Container(height: 1, color: c.border)),
-      ],
     );
   }
 }
@@ -916,19 +793,17 @@ class _MenuRow extends StatelessWidget {
   }
 }
 
-// ─── Capacity hero ────────────────────────────────────────────────────
+// ─── Capacity banner ──────────────────────────────────────────────────
 
-/// Bold demand-vs-capacity HERO status bar. The single most important signal
-/// on this screen — does the bus have room? — rendered as a control-cockpit
-/// readout: a tone eyebrow ("ROOM TO SPARE" / "OVER CAPACITY" / "NO BUS YET")
-/// over a heavy hero numeral (free berths / overflow), with demand·capacity
-/// meta to the right and a thick full-width fill bar beneath. Counted in
-/// berths — a Double Sofa request line costs 2 berths — matching
-/// [Tour.totalBusSeats]. Demand excludes waitlisted requests.
-class _CapacityHero extends StatelessWidget {
+/// At-a-glance demand-vs-capacity strip: how many berths the ACTIVE (non-
+/// waitlisted) requests need, the bus capacity, and whether there's room or
+/// an overflow. This is the screen where the agent decides who to waitlist,
+/// so the capacity pressure belongs right here. Counted in berths — a Double
+/// Sofa request line costs 2 berths — matching [Tour.totalBusSeats].
+class _CapacityBanner extends StatelessWidget {
   final UgamColorSet c;
   final Tour tour;
-  const _CapacityHero({required this.c, required this.tour});
+  const _CapacityBanner({required this.c, required this.tour});
 
   @override
   Widget build(BuildContext context) {
@@ -956,76 +831,55 @@ class _CapacityHero extends StatelessWidget {
             tr('requests.capacity.free'));
 
     return Container(
-      padding: const EdgeInsets.all(UgamSpacing.lg),
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm + 2,
+      ),
       decoration: BoxDecoration(
         color: fill,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
+        borderRadius: BorderRadius.circular(UgamRadius.stat),
         border: Border.all(color: tone.withValues(alpha: 0.35)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // HERO: status eyebrow + giant free/overflow numeral.
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(icon, size: 14, color: tone),
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(
-                            statusLabel.toUpperCase(),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: UgamText.micro.copyWith(
-                              color: tone,
-                              letterSpacing: 1.0,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      statusValue,
-                      style: UgamText.tabular(
-                        UgamText.numXl.copyWith(color: tone, fontSize: 40),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: UgamSpacing.md),
-              // Meta: demand vs capacity, small + tabular, right-aligned.
-              _CapMeta(
+              Icon(icon, size: 18, color: tone),
+              const SizedBox(width: UgamSpacing.sm),
+              _CapSeg(
                 c: c,
                 value: '$demand',
                 label: tr('requests.capacity.requested'),
+                color: c.ink,
               ),
               _CapDivider(c: c),
-              _CapMeta(
+              _CapSeg(
                 c: c,
                 value: noBus ? '—' : '$capacity',
                 label: tr('requests.capacity.seats'),
+                color: c.ink,
+              ),
+              _CapDivider(c: c),
+              _CapSeg(
+                c: c,
+                value: statusValue,
+                label: statusLabel,
+                color: tone,
               ),
             ],
           ),
-          // Thick demand-vs-capacity fill bar — reads "how full the bus is" at a
-          // glance. Hidden when there's no bus yet (no capacity to fill).
+          // Glanceable demand-vs-capacity fill bar — reads "how full the bus is"
+          // at a glance, without parsing the three numbers. Hidden when there's
+          // no bus yet (no capacity to fill).
           if (!noBus) ...[
-            const SizedBox(height: UgamSpacing.md),
+            const SizedBox(height: UgamSpacing.sm),
             ClipRRect(
               borderRadius: BorderRadius.circular(999),
               child: LinearProgressIndicator(
                 value: capacity <= 0 ? 0 : (demand / capacity).clamp(0.0, 1.0),
-                minHeight: 8,
-                backgroundColor: c.bg.withValues(alpha: 0.45),
+                minHeight: 4,
+                backgroundColor: c.border,
                 valueColor: AlwaysStoppedAnimation<Color>(tone),
               ),
             ),
@@ -1036,32 +890,40 @@ class _CapacityHero extends StatelessWidget {
   }
 }
 
-class _CapMeta extends StatelessWidget {
+class _CapSeg extends StatelessWidget {
   final UgamColorSet c;
   final String value;
   final String label;
-  const _CapMeta({required this.c, required this.value, required this.label});
+  final Color color;
+  const _CapSeg({
+    required this.c,
+    required this.value,
+    required this.label,
+    required this.color,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          value,
-          style: UgamText.tabular(
-            UgamText.numLg.copyWith(color: c.ink, fontSize: 18),
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            value,
+            style: UgamText.tabular(
+              UgamText.numLg.copyWith(color: color, fontSize: 18),
+            ),
           ),
-        ),
-        const SizedBox(height: 1),
-        Text(
-          label.toUpperCase(),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: UgamText.micro.copyWith(color: c.ink3, fontSize: 10),
-        ),
-      ],
+          const SizedBox(height: 1),
+          Text(
+            label.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: UgamText.micro.copyWith(color: c.ink3, fontSize: 10),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1360,30 +1222,27 @@ class _RequestCard extends StatelessWidget {
     Widget leading;
     if (selectionMode) {
       leading = Container(
-        width: 44,
-        height: 44,
+        width: 36,
+        height: 36,
         decoration: BoxDecoration(
           color: selected ? c.accent : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.stat),
+          shape: BoxShape.circle,
           border: Border.all(color: selected ? c.accent : c.border, width: 1.5),
         ),
         alignment: Alignment.center,
         child: selected
-            ? Icon(Icons.check_rounded, size: 20, color: c.onAccent)
+            ? Icon(Icons.check_rounded, size: 18, color: c.onAccent)
             : null,
       );
     } else {
       leading = Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.stat),
-        ),
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
         alignment: Alignment.center,
         child: Text(
           _initials(passenger.name),
-          style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+          style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
         ),
       );
     }
@@ -1416,9 +1275,9 @@ class _RequestCard extends StatelessWidget {
                         passenger.displayName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: UgamText.titleM.copyWith(
+                        style: UgamText.titleS.copyWith(
                           color: c.ink,
-                          fontSize: 16,
+                          fontSize: 14,
                         ),
                       ),
                       const SizedBox(height: 3),
