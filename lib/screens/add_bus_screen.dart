@@ -11,6 +11,7 @@ import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 
 /// 3-step wizard for adding (or editing) a bus on a tour.
@@ -524,15 +525,17 @@ class _AddBusScreenState extends State<AddBusScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _WizardHeader(
-              c: c,
+            UgamAppBar(
               title: widget.isEditing
                   ? tr('add_bus.title_edit')
                   : tr('add_bus.title'),
-              subtitle: _subtitle,
+              subtitle: _subtitle.isEmpty ? null : _subtitle,
+              onBack: _goBack,
+            ),
+            _WizardProgress(
+              c: c,
               steps: _stepSequence.length,
               index: _indexInSequence,
-              onBack: _goBack,
             ),
             Expanded(
               child: AnimatedSwitcher(
@@ -644,111 +647,48 @@ class _AddBusScreenState extends State<AddBusScreen> {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Header — back chevron + title + step dots
+// Wizard progress — slim step-dot bar under the app bar
 // ════════════════════════════════════════════════════════════════════════
 
-class _WizardHeader extends StatelessWidget {
+class _WizardProgress extends StatelessWidget {
   final UgamColorSet c;
-  final String title;
-  final String subtitle;
   final int steps;
   final int index;
-  final VoidCallback onBack;
 
-  const _WizardHeader({
+  const _WizardProgress({
     required this.c,
-    required this.title,
-    required this.subtitle,
     required this.steps,
     required this.index,
-    required this.onBack,
   });
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
         UgamSpacing.md,
+        UgamSpacing.gutter,
         UgamSpacing.sm,
-        UgamSpacing.md,
-        UgamSpacing.md,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              GestureDetector(
-                onTap: onBack,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: c.cardElev,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    index == 0
-                        ? Icons.arrow_back_rounded
-                        : Icons.chevron_left_rounded,
-                    size: 21,
-                    color: c.ink,
-                  ),
+      child: Row(
+        children: List.generate(steps, (i) {
+          final active = i == index;
+          final done = i < index;
+          return Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(right: i == steps - 1 ? 0 : 6),
+              child: AnimatedContainer(
+                duration: UgamMotion.tab,
+                curve: UgamMotion.easeOut,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: active || done ? c.accent : c.cardElev,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(title, style: UgamText.titleL.copyWith(color: c.ink)),
-                    if (subtitle.isNotEmpty)
-                      Text(
-                        subtitle,
-                        style: UgamText.caption.copyWith(color: c.ink2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                  ],
-                ),
-              ),
-              Text(
-                tr(
-                  'add_bus.step_progress',
-                  namedArgs: {'current': '${index + 1}', 'total': '$steps'},
-                ),
-                style: UgamText.tabular(
-                  UgamText.micro.copyWith(color: c.ink3, fontSize: 10),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Row(
-            children: List.generate(steps, (i) {
-              final active = i == index;
-              final done = i < index;
-              return Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(right: i == steps - 1 ? 0 : 6),
-                  child: AnimatedContainer(
-                    duration: UgamMotion.tab,
-                    curve: UgamMotion.easeOut,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: active || done ? c.accent : c.cardElev,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-        ],
+            ),
+          );
+        }),
       ),
     );
   }
@@ -904,57 +844,47 @@ class _Step1Identity extends StatelessWidget {
         const SizedBox(height: UgamSpacing.sm),
         _SlotBadge(c: c, label: slotBadge),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.bus_name')),
-        const SizedBox(height: UgamSpacing.sm),
-        _Field(
-          c: c,
+        UgamInput(
+          label: tr('add_bus.label.bus_name'),
           controller: busName,
           hint: tr('add_bus.hint.bus_name'),
-          textCapitalization: TextCapitalization.words,
           onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.bus_number')),
-        const SizedBox(height: UgamSpacing.sm),
-        _Field(
-          c: c,
+        UgamInput(
+          label: tr('add_bus.label.bus_number'),
           controller: busNumber,
           hint: tr('add_bus.hint.bus_number_plain'),
-          textCapitalization: TextCapitalization.characters,
           onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.boarding_point')),
-        const SizedBox(height: UgamSpacing.sm),
-        _Field(
-          c: c,
+        UgamInput(
+          label: tr('add_bus.label.boarding_point'),
           controller: boardingPoint,
           hint: tr('add_bus.hint.boarding_point'),
-          textCapitalization: TextCapitalization.words,
           onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.departure_time')),
-        const SizedBox(height: UgamSpacing.sm),
-        _TimeField(
-          c: c,
-          hint: tr('add_bus.hint.departure_time'),
-          time: departureTime,
+        UgamPickerField(
+          label: tr('add_bus.label.departure_time'),
+          value: departureTime != null
+              ? (formatHhMm(hhmmFromTimeOfDay(departureTime!)) ?? '')
+              : '',
+          placeholder: tr('add_bus.hint.departure_time'),
+          icon: Icons.access_time_rounded,
           onTap: onPickDepartureTime,
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.driver_name')),
-        const SizedBox(height: UgamSpacing.sm),
-        _Field(
-          c: c,
+        UgamInput(
+          label: tr('add_bus.label.driver_name'),
           controller: driverName,
           hint: tr('add_bus.hint.driver_name_plain'),
-          textCapitalization: TextCapitalization.words,
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.driver_phone')),
-        const SizedBox(height: UgamSpacing.sm),
-        UgamPhoneInput(controller: driverPhone),
+        UgamPhoneInput(
+          label: tr('add_bus.label.driver_phone'),
+          controller: driverPhone,
+        ),
         const SizedBox(height: UgamSpacing.lg),
         _ACToggle(c: c, value: isAC, onChanged: onToggleAC),
         const SizedBox(height: UgamSpacing.xl),
@@ -1449,22 +1379,6 @@ class _Step3PriceState extends State<_Step3Price> {
     return double.tryParse(raw) ?? tour?.pricePerSeat ?? 0;
   }
 
-  String _formatINR(double value) {
-    if (value >= 100000) {
-      final lakhs = value / 100000;
-      return lakhs == lakhs.roundToDouble()
-          ? '₹${lakhs.toInt()}L'
-          : '₹${lakhs.toStringAsFixed(2)}L';
-    }
-    if (value >= 1000) {
-      final k = value / 1000;
-      return k == k.roundToDouble()
-          ? '₹${k.toInt()}K'
-          : '₹${k.toStringAsFixed(1)}K';
-    }
-    return '₹${value.toInt()}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final per = _parsedPrice;
@@ -1492,31 +1406,27 @@ class _Step3PriceState extends State<_Step3Price> {
           body: tr('add_bus.step3.body'),
         ),
         const SizedBox(height: UgamSpacing.xl),
-        _Label(c: c, text: tr('add_bus.label.price_per_seat')),
-        const SizedBox(height: UgamSpacing.sm),
-        _Field(
-          c: c,
+        UgamInput(
+          label: tr('add_bus.label.price_per_seat'),
           controller: price,
           hint: hint,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
           ],
-          prefix: '₹',
+          prefix: _RupeePrefix(c: c),
           onChanged: (_) => onChanged(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.bus_price')),
-        const SizedBox(height: UgamSpacing.sm),
-        _Field(
-          c: c,
+        UgamInput(
+          label: tr('add_bus.label.bus_price'),
           controller: busPrice,
           hint: tr('add_bus.hint.bus_price'),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
           ],
-          prefix: '₹',
+          prefix: _RupeePrefix(c: c),
           onChanged: (_) => onChanged(),
         ),
         const SizedBox(height: UgamSpacing.xl),
@@ -1556,12 +1466,13 @@ class _Step3PriceState extends State<_Step3Price> {
               Container(
                 padding: const EdgeInsets.all(UgamSpacing.md),
                 decoration: BoxDecoration(
-                  color: c.accentFill,
+                  color: c.card,
                   borderRadius: BorderRadius.circular(UgamRadius.row),
+                  border: Border.all(color: c.border),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.calculate_rounded, size: 18, color: c.accent),
+                    Icon(Icons.calculate_rounded, size: 18, color: c.ink2),
                     const SizedBox(width: UgamSpacing.sm),
                     Expanded(
                       child: Text(
@@ -1579,9 +1490,9 @@ class _Step3PriceState extends State<_Step3Price> {
                       ),
                     ),
                     Text(
-                      '= ${_formatINR(ifFull)}',
+                      '= ${Formatters.formatMoneyInrCompact(ifFull)}',
                       style: UgamText.tabular(
-                        UgamText.titleS.copyWith(color: c.accent, fontSize: 14),
+                        UgamText.titleS.copyWith(color: c.ink, fontSize: 14),
                       ),
                     ),
                   ],
@@ -1617,10 +1528,8 @@ class _Step3PriceState extends State<_Step3Price> {
           body: tr('add_bus.section.rear_zone_body'),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: tr('add_bus.label.rear_rows')),
-        const SizedBox(height: UgamSpacing.sm),
-        _Field(
-          c: c,
+        UgamInput(
+          label: tr('add_bus.label.rear_rows'),
           controller: this.rearRows,
           hint: rowCount == null
               ? tr('add_bus.hint.rear_rows')
@@ -1644,10 +1553,8 @@ class _Step3PriceState extends State<_Step3Price> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(height: UgamSpacing.lg),
-                    _Label(c: c, text: tr('add_bus.label.rear_price')),
-                    const SizedBox(height: UgamSpacing.sm),
-                    _Field(
-                      c: c,
+                    UgamInput(
+                      label: tr('add_bus.label.rear_price'),
                       controller: rearPrice,
                       hint: tr('add_bus.hint.rear_price'),
                       keyboardType: const TextInputType.numberWithOptions(
@@ -1656,7 +1563,7 @@ class _Step3PriceState extends State<_Step3Price> {
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                       ],
-                      prefix: '₹',
+                      prefix: _RupeePrefix(c: c),
                       onChanged: (_) => onChanged(),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
@@ -1680,154 +1587,58 @@ class _Step3PriceState extends State<_Step3Price> {
   /// step navigation) and are surfaced to pricing alongside the legacy rear zone.
   Widget _buildBandsSection() {
     final rowCount = _rowCount;
-    return Container(
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(color: c.border),
-      ),
+    return UgamExpander(
+      title: tr('add_bus.bands.title'),
+      subtitle: tr('add_bus.bands.subtitle'),
+      icon: Icons.tune_rounded,
+      initiallyExpanded: _bandsOpen,
+      trailing: _bands.isNotEmpty
+          ? Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+                border: Border.all(color: c.border),
+              ),
+              child: Text(
+                '${_bands.length}',
+                style: UgamText.tabular(
+                  UgamText.micro.copyWith(color: c.ink2),
+                ),
+              ),
+            )
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              setState(() => _bandsOpen = !_bandsOpen);
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.all(UgamSpacing.lg),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              tr('add_bus.bands.title'),
-                              style: UgamText.bodyStrong.copyWith(
-                                color: c.ink,
-                                fontSize: 14,
-                              ),
-                            ),
-                            if (_bands.isNotEmpty) ...[
-                              const SizedBox(width: UgamSpacing.sm),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: c.accentFill,
-                                  borderRadius: BorderRadius.circular(
-                                    UgamRadius.chip,
-                                  ),
-                                ),
-                                child: Text(
-                                  '${_bands.length}',
-                                  style: UgamText.tabular(
-                                    UgamText.micro.copyWith(color: c.accent),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          tr('add_bus.bands.subtitle'),
-                          style: UgamText.caption.copyWith(color: c.ink2),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  AnimatedRotation(
-                    duration: UgamMotion.tab,
-                    curve: UgamMotion.easeOut,
-                    turns: _bandsOpen ? 0.5 : 0,
-                    child: Icon(Icons.expand_more_rounded, color: c.ink3),
-                  ),
-                ],
-              ),
+          for (var i = 0; i < _bands.length; i++) ...[
+            _BandRow(
+              c: c,
+              band: _bands[i],
+              onEdit: () => _openBandSheet(index: i),
+              onRemove: () => _removeBand(i),
             ),
+            const SizedBox(height: UgamSpacing.sm),
+          ],
+          const SizedBox(height: UgamSpacing.xs),
+          UgamButton(
+            label: tr('add_bus.bands.add'),
+            kind: UgamButtonKind.tonal,
+            icon: Icons.add_rounded,
+            expand: true,
+            onPressed: () => _openBandSheet(),
           ),
-          AnimatedSize(
-            duration: UgamMotion.tab,
-            curve: UgamMotion.easeOut,
-            alignment: Alignment.topCenter,
-            child: _bandsOpen
-                ? Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      UgamSpacing.lg,
-                      0,
-                      UgamSpacing.lg,
-                      UgamSpacing.lg,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (var i = 0; i < _bands.length; i++) ...[
-                          _BandRow(
-                            c: c,
-                            band: _bands[i],
-                            onEdit: () => _openBandSheet(index: i),
-                            onRemove: () => _removeBand(i),
-                          ),
-                          const SizedBox(height: UgamSpacing.sm),
-                        ],
-                        const SizedBox(height: UgamSpacing.xs),
-                        GestureDetector(
-                          onTap: () => _openBandSheet(),
-                          behavior: HitTestBehavior.opaque,
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: UgamSpacing.md,
-                            ),
-                            decoration: BoxDecoration(
-                              color: c.accentFill,
-                              borderRadius: BorderRadius.circular(
-                                UgamRadius.row,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.add_rounded,
-                                  size: 18,
-                                  color: c.accent,
-                                ),
-                                const SizedBox(width: UgamSpacing.sm),
-                                Text(
-                                  tr('add_bus.bands.add'),
-                                  style: UgamText.bodyStrong.copyWith(
-                                    color: c.accent,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        if (rowCount == null) ...[
-                          const SizedBox(height: UgamSpacing.sm),
-                          Text(
-                            tr('add_bus.bands.rows_clamped_note'),
-                            style: UgamText.micro.copyWith(color: c.ink3),
-                          ),
-                        ],
-                      ],
-                    ),
-                  )
-                : const SizedBox.shrink(),
-          ),
+          if (rowCount == null) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Text(
+              tr('add_bus.bands.rows_clamped_note'),
+              style: UgamText.micro.copyWith(color: c.ink3),
+            ),
+          ],
         ],
       ),
     );
@@ -1886,13 +1697,10 @@ class _Step3PriceState extends State<_Step3Price> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _Label(c: sc, text: tr('add_bus.band_sheet.label')),
-                  const SizedBox(height: UgamSpacing.sm),
-                  _Field(
-                    c: sc,
+                  UgamInput(
+                    label: tr('add_bus.band_sheet.label'),
                     controller: labelCtrl,
                     hint: tr('add_bus.band_sheet.label_hint'),
-                    textCapitalization: TextCapitalization.words,
                     onChanged: (_) => setSheetState(() {}),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
@@ -1900,52 +1708,32 @@ class _Step3PriceState extends State<_Step3Price> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _Label(c: sc, text: tr('add_bus.band_sheet.from_row')),
-                            const SizedBox(height: UgamSpacing.sm),
-                            _Field(
-                              c: sc,
-                              controller: fromCtrl,
-                              hint: '1',
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: false,
-                                  ),
-                              inputFormatters: [
-                                FilteringTextInputFormatter.allow(
-                                  RegExp(r'[0-9]'),
-                                ),
-                              ],
-                              onChanged: (_) => setSheetState(() {}),
-                            ),
+                        child: UgamInput(
+                          label: tr('add_bus.band_sheet.from_row'),
+                          controller: fromCtrl,
+                          hint: '1',
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: false,
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(RegExp(r'[0-9]')),
                           ],
+                          onChanged: (_) => setSheetState(() {}),
                         ),
                       ),
                       const SizedBox(width: UgamSpacing.md),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _Label(c: sc, text: tr('add_bus.band_sheet.to_row')),
-                            const SizedBox(height: UgamSpacing.sm),
-                            _Field(
-                              c: sc,
-                              controller: toCtrl,
-                              hint: tr('add_bus.band_sheet.to_row_hint'),
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: false,
-                                  ),
-                              inputFormatters: [
-                                FilteringTextInputFormatter.allow(
-                                  RegExp(r'[0-9]'),
-                                ),
-                              ],
-                              onChanged: (_) => setSheetState(() {}),
-                            ),
+                        child: UgamInput(
+                          label: tr('add_bus.band_sheet.to_row'),
+                          controller: toCtrl,
+                          hint: tr('add_bus.band_sheet.to_row_hint'),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: false,
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(RegExp(r'[0-9]')),
                           ],
+                          onChanged: (_) => setSheetState(() {}),
                         ),
                       ),
                     ],
@@ -1961,10 +1749,8 @@ class _Step3PriceState extends State<_Step3Price> {
                     style: UgamText.micro.copyWith(color: sc.ink3),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
-                  _Label(c: sc, text: tr('add_bus.band_sheet.price_per_person')),
-                  const SizedBox(height: UgamSpacing.sm),
-                  _Field(
-                    c: sc,
+                  UgamInput(
+                    label: tr('add_bus.band_sheet.price_per_person'),
                     controller: priceCtrl,
                     hint: tr('add_bus.band_sheet.price_hint'),
                     keyboardType: const TextInputType.numberWithOptions(
@@ -1973,7 +1759,7 @@ class _Step3PriceState extends State<_Step3Price> {
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                     ],
-                    prefix: '₹',
+                    prefix: _RupeePrefix(c: sc),
                     onChanged: (_) => setSheetState(() {}),
                   ),
                   const SizedBox(height: UgamSpacing.xl),
@@ -2023,112 +1809,41 @@ class _Step3PriceState extends State<_Step3Price> {
   /// existing single/double/seater price fields. Collapsed by default to reduce
   /// clutter; their wiring (controllers + onChanged) is unchanged.
   Widget _buildOverridesSection() {
-    return Container(
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(color: c.border),
-      ),
+    return UgamExpander(
+      title: tr('add_bus.section.overrides_title'),
+      subtitle: tr('add_bus.section.overrides_body'),
+      icon: Icons.price_change_rounded,
+      initiallyExpanded: _overridesOpen,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              setState(() => _overridesOpen = !_overridesOpen);
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.all(UgamSpacing.lg),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          tr('add_bus.section.overrides_title'),
-                          style: UgamText.bodyStrong.copyWith(
-                            color: c.ink,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          tr('add_bus.section.overrides_body'),
-                          style: UgamText.caption.copyWith(color: c.ink2),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  AnimatedRotation(
-                    duration: UgamMotion.tab,
-                    curve: UgamMotion.easeOut,
-                    turns: _overridesOpen ? 0.5 : 0,
-                    child: Icon(Icons.expand_more_rounded, color: c.ink3),
-                  ),
-                ],
-              ),
+          UgamInput(
+            label: tr('add_bus.overrides.single_price'),
+            controller: singleSofaPrice,
+            hint: tr('add_bus.overrides.defaults_to_base'),
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
             ),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+            prefix: _RupeePrefix(c: c),
+            onChanged: (_) => onChanged(),
           ),
-          AnimatedSize(
-            duration: UgamMotion.tab,
-            curve: UgamMotion.easeOut,
-            alignment: Alignment.topCenter,
-            child: _overridesOpen
-                ? Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      UgamSpacing.lg,
-                      0,
-                      UgamSpacing.lg,
-                      UgamSpacing.lg,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _Label(c: c, text: tr('add_bus.overrides.single_price')),
-                        const SizedBox(height: UgamSpacing.sm),
-                        _Field(
-                          c: c,
-                          controller: singleSofaPrice,
-                          hint: tr('add_bus.overrides.defaults_to_base'),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'[0-9.]'),
-                            ),
-                          ],
-                          prefix: '₹',
-                          onChanged: (_) => onChanged(),
-                        ),
-                        const SizedBox(height: UgamSpacing.lg),
-                        _Label(c: c, text: tr('add_bus.overrides.double_price')),
-                        const SizedBox(height: UgamSpacing.sm),
-                        _Field(
-                          c: c,
-                          controller: doubleSofaPrice,
-                          hint: tr('add_bus.overrides.defaults_to_base'),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(
-                              RegExp(r'[0-9.]'),
-                            ),
-                          ],
-                          prefix: '₹',
-                          onChanged: (_) => onChanged(),
-                        ),
-                      ],
-                    ),
-                  )
-                : const SizedBox.shrink(),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('add_bus.overrides.double_price'),
+            controller: doubleSofaPrice,
+            hint: tr('add_bus.overrides.defaults_to_base'),
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+            ),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+            prefix: _RupeePrefix(c: c),
+            onChanged: (_) => onChanged(),
           ),
         ],
       ),
@@ -2158,8 +1873,9 @@ class _RearZoneLegend extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(UgamSpacing.md),
       decoration: BoxDecoration(
-        color: c.accentFill,
+        color: c.card,
         borderRadius: BorderRadius.circular(UgamRadius.row),
+        border: Border.all(color: c.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2168,7 +1884,7 @@ class _RearZoneLegend extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.layers_rounded, size: 16, color: c.accent),
+              Icon(Icons.layers_rounded, size: 16, color: c.ink2),
               const SizedBox(width: UgamSpacing.sm),
               Expanded(
                 child: Text(
@@ -2201,7 +1917,7 @@ class _RearZoneLegend extends StatelessWidget {
                   height: 22,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: rear ? c.accent : c.card,
+                    color: rear ? c.accentFill : c.cardElev,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
                       color: rear ? c.accent : c.border,
@@ -2212,7 +1928,7 @@ class _RearZoneLegend extends StatelessWidget {
                     '${row + 1}',
                     style: UgamText.tabular(
                       UgamText.micro.copyWith(
-                        color: rear ? c.onAccent : c.ink3,
+                        color: rear ? c.accent : c.ink3,
                         fontSize: 9.5,
                       ),
                     ),
@@ -2428,107 +2144,21 @@ class _SlotBadge extends StatelessWidget {
   }
 }
 
-/// Tap target mirroring [_Field] for a time-of-day. Shows a locale-aware
-/// period-word time (via [formatHhMm]) once picked, or the hint while unset.
-class _TimeField extends StatelessWidget {
+/// Rupee glyph for the `prefix` (prefixIcon) slot of a [UgamInput] money field.
+/// Sized down so it reads as an adornment, not a leading icon.
+class _RupeePrefix extends StatelessWidget {
   final UgamColorSet c;
-  final String hint;
-  final TimeOfDay? time;
-  final VoidCallback onTap;
-
-  const _TimeField({
-    required this.c,
-    required this.hint,
-    required this.time,
-    required this.onTap,
-  });
+  const _RupeePrefix({required this.c});
 
   @override
   Widget build(BuildContext context) {
-    final t = time;
-    final label = t != null ? formatHhMm(hhmmFromTimeOfDay(t)) : null;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.input),
-        ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.lg,
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.access_time_rounded, size: 18, color: c.ink2),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: Text(
-                label ?? hint,
-                style: UgamText.body.copyWith(
-                  color: label != null ? c.ink : c.ink3,
-                  fontSize: 15,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Field extends StatelessWidget {
-  final UgamColorSet c;
-  final TextEditingController controller;
-  final String? hint;
-  final String? prefix;
-  final TextInputType? keyboardType;
-  final List<TextInputFormatter> inputFormatters;
-  final TextCapitalization textCapitalization;
-  final ValueChanged<String>? onChanged;
-
-  const _Field({
-    required this.c,
-    required this.controller,
-    this.hint,
-    this.prefix,
-    this.keyboardType,
-    this.inputFormatters = const [],
-    this.textCapitalization = TextCapitalization.none,
-    this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.input),
-      ),
-      child: TextField(
-        controller: controller,
-        keyboardType: keyboardType,
-        inputFormatters: inputFormatters,
-        textCapitalization: textCapitalization,
-        onChanged: onChanged,
-        style: UgamText.body.copyWith(color: c.ink, fontSize: 15),
-        decoration: InputDecoration(
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: UgamSpacing.lg,
-            vertical: UgamSpacing.lg,
-          ),
-          hintText: hint,
-          hintStyle: UgamText.body.copyWith(color: c.ink3, fontSize: 15),
-          prefixText: prefix == null ? null : '$prefix ',
-          prefixStyle: UgamText.body.copyWith(color: c.ink, fontSize: 15),
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          filled: false,
+    return SizedBox(
+      width: 34,
+      child: Center(
+        widthFactor: 1,
+        child: Text(
+          '₹',
+          style: UgamText.body.copyWith(color: c.ink2, fontSize: 15),
         ),
       ),
     );

@@ -156,8 +156,15 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
   }
 
   /// Simple text dialog for the new group's label. Returns null on cancel.
+  ///
+  /// Pre-fills "Group N" (N = next group number) so the agent can accept a
+  /// sensible default with one tap and still rename inline. Uses only the
+  /// existing group count — no new logic or persistence.
   Future<String?> _promptLabel() {
-    final textCtrl = TextEditingController();
+    final next = _ctrl.groupsForTour(widget.tourId).length + 1;
+    final textCtrl = TextEditingController(
+      text: tr('tour_groups.default_group_name', namedArgs: {'n': '$next'}),
+    );
     return UgamDialog.show<String>(
       context,
       title: tr('tour_groups.name_this_group'),
@@ -215,11 +222,22 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
         bottom: false,
         child: Column(
           children: [
-            _Header(
-              selecting: _selecting,
-              onNewGroup: _enterSelect,
-              onCancelSelect: _cancelSelect,
-              c: c,
+            UgamAppBar(
+              title: _selecting
+                  ? tr('tour_groups.select_passengers')
+                  : tr('tour_groups.title'),
+              actions: [
+                UgamAppBarAction(
+                  icon: _selecting
+                      ? Icons.close_rounded
+                      : Icons.group_add_rounded,
+                  active: !_selecting,
+                  onTap: _selecting ? _cancelSelect : _enterSelect,
+                  tooltip: _selecting
+                      ? tr('app.action.cancel')
+                      : tr('tour_groups.new_group'),
+                ),
+              ],
             ),
             Expanded(
               child: Obx(() {
@@ -301,14 +319,15 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     if (tour.passengers.isEmpty)
-                      _NoPassengers(c: c)
+                      const _NoPassengers()
                     else ...[
                       // Search the full roster by name / phone, so the agent
                       // can jump to a person on a long tour.
-                      _RosterSearchField(
+                      UgamSearchField(
                         controller: _searchCtrl,
+                        hint: tr('tour_groups.search_hint'),
                         onChanged: (v) => setState(() => _query = v.trim()),
-                        c: c,
+                        onClear: () => setState(() => _query = ''),
                       ),
                       const SizedBox(height: UgamSpacing.sm),
                       ...() {
@@ -322,7 +341,7 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                                 .toList();
                         if (roster.isEmpty) {
                           return <Widget>[
-                            _NoSearchResults(query: _query, c: c),
+                            _NoSearchResults(query: _query),
                           ];
                         }
                         return roster
@@ -388,98 +407,6 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
               }),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ─── Header ────────────────────────────────────────────────────────────
-
-class _Header extends StatelessWidget {
-  final bool selecting;
-  final VoidCallback onNewGroup;
-  final VoidCallback onCancelSelect;
-  final UgamColorSet c;
-
-  const _Header({
-    required this.selecting,
-    required this.onNewGroup,
-    required this.onCancelSelect,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              selecting
-                  ? tr('tour_groups.select_passengers')
-                  : tr('tour_groups.title'),
-              style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // New-group / cancel-select action.
-          GestureDetector(
-            onTap: selecting ? onCancelSelect : onNewGroup,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.md,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: selecting ? c.cardElev : c.accentFill,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    selecting ? Icons.close_rounded : Icons.group_add_rounded,
-                    size: 16,
-                    color: selecting ? c.ink2 : c.accent,
-                  ),
-                  const SizedBox(width: UgamSpacing.xs + 2),
-                  Text(
-                    selecting
-                        ? tr('app.action.cancel')
-                        : tr('tour_groups.new_group'),
-                    style: UgamText.bodyStrong.copyWith(
-                      color: selecting ? c.ink2 : c.accent,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -677,13 +604,10 @@ class _SuggestionCard extends StatelessWidget {
         .map((m) =>
             m.name.trim().isEmpty ? tr('tour_groups.unnamed') : m.name.trim())
         .join(' · ');
-    return Container(
+    return UgamCard.plain(
+      tone: UgamCardTone.accent,
+      radius: UgamRadius.row,
       padding: const EdgeInsets.all(UgamSpacing.lg),
-      decoration: BoxDecoration(
-        color: c.accentFill,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-        border: Border.all(color: c.accent.withValues(alpha: 0.22)),
-      ),
       child: Row(
         children: [
           Container(
@@ -717,41 +641,12 @@ class _SuggestionCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          GestureDetector(
-            onTap: busy ? null : onApply,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.md,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: c.accent,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: busy
-                  ? SizedBox(
-                      width: 15,
-                      height: 15,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: c.onAccent,
-                      ),
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.group_add_rounded,
-                            size: 15, color: c.onAccent),
-                        const SizedBox(width: UgamSpacing.xs + 2),
-                        Text(
-                          tr('tour_groups.group'),
-                          style: UgamText.bodyStrong
-                              .copyWith(color: c.onAccent, fontSize: 13),
-                        ),
-                      ],
-                    ),
-            ),
+          UgamButton(
+            label: tr('tour_groups.group'),
+            icon: Icons.group_add_rounded,
+            kind: UgamButtonKind.tonal,
+            loading: busy,
+            onPressed: busy ? null : onApply,
           ),
         ],
       ),
@@ -870,23 +765,11 @@ class _GroupCard extends StatelessWidget {
               ),
               const SizedBox(width: UgamSpacing.sm),
               // Delete the whole group.
-              GestureDetector(
+              UgamIconButton(
+                icon: Icons.delete_outline_rounded,
+                tone: UgamIconButtonTone.danger,
                 onTap: onDelete,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: c.cardElev,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.delete_outline_rounded,
-                    size: 17,
-                    color: c.ink3,
-                  ),
-                ),
+                semanticLabel: tr('tour_groups.delete_group'),
               ),
             ],
           ),
@@ -948,17 +831,11 @@ class _GroupCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    GestureDetector(
+                    UgamIconButton(
+                      icon: Icons.close_rounded,
+                      iconSize: 16,
                       onTap: () => onRemoveMember(m.id),
-                      behavior: HitTestBehavior.opaque,
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(
-                          Icons.close_rounded,
-                          size: 16,
-                          color: c.ink3,
-                        ),
-                      ),
+                      semanticLabel: tr('tour_groups.remove_member'),
                     ),
                   ],
                 ),
@@ -993,140 +870,47 @@ class _AddMemberButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Opacity(
-      opacity: enabled ? 1 : 0.5,
-      child: GestureDetector(
-        onTap: enabled ? onTap : null,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          width: double.infinity,
-          height: 42,
-          decoration: BoxDecoration(
-            color: c.accentFill,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-          ),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                enabled ? Icons.person_add_alt_rounded : Icons.block_rounded,
-                size: 17,
-                color: enabled ? c.accent : c.ink3,
-              ),
-              const SizedBox(width: UgamSpacing.sm),
-              Text(
-                enabled
-                    ? tr('tour_groups.add_member')
-                    : tr('tour_groups.full_for_bus'),
-                style: UgamText.bodyStrong.copyWith(
-                  color: enabled ? c.accent : c.ink3,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return UgamButton(
+      label: enabled
+          ? tr('tour_groups.add_member')
+          : tr('tour_groups.full_for_bus'),
+      icon: enabled ? Icons.person_add_alt_rounded : Icons.block_rounded,
+      kind: UgamButtonKind.tonal,
+      expand: true,
+      onPressed: enabled ? onTap : null,
     );
   }
 }
 
-// ─── Roster search ─────────────────────────────────────────────────────────
-
-/// Filled search field over the full passenger roster (by name / phone). Lives
-/// inline at the top of the Passengers section so the agent can jump to anyone
-/// on a long tour.
-class _RosterSearchField extends StatelessWidget {
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-  final UgamColorSet c;
-
-  const _RosterSearchField({
-    required this.controller,
-    required this.onChanged,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 46,
-      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.search_rounded, size: 18, color: c.ink2),
-          const SizedBox(width: UgamSpacing.sm),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: onChanged,
-              style: UgamText.body.copyWith(color: c.ink, fontSize: 14),
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                hintText: tr('tour_groups.search_hint'),
-                hintStyle: UgamText.body.copyWith(color: c.ink3, fontSize: 14),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// ─── Empty states ─────────────────────────────────────────────────────────
 
 class _NoSearchResults extends StatelessWidget {
   final String query;
-  final UgamColorSet c;
 
-  const _NoSearchResults({required this.query, required this.c});
+  const _NoSearchResults({required this.query});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xl),
-      child: Center(
-        child: Text(
-          tr('tour_groups.no_search_results', namedArgs: {'q': query}),
-          style: UgamText.body.copyWith(color: c.ink3),
-          textAlign: TextAlign.center,
-        ),
+      child: UgamEmpty(
+        icon: Icons.search_off_rounded,
+        title: tr('tour_groups.no_search_results', namedArgs: {'q': query}),
       ),
     );
   }
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────
-
 class _NoPassengers extends StatelessWidget {
-  final UgamColorSet c;
-
-  const _NoPassengers({required this.c});
+  const _NoPassengers();
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.people_outline_rounded, size: 40, color: c.ink3),
-            const SizedBox(height: UgamSpacing.md),
-            Text(
-              tr('tour_groups.no_passengers_yet'),
-              style: UgamText.body.copyWith(color: c.ink2),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+      child: UgamEmpty(
+        icon: Icons.people_outline_rounded,
+        title: tr('tour_groups.no_passengers_yet'),
       ),
     );
   }

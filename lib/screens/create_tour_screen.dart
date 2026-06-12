@@ -12,6 +12,7 @@ import '../design/ugam.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 import 'tour_detail_screen.dart';
 
@@ -222,43 +223,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.md,
-                UgamSpacing.sm,
-                UgamSpacing.md,
-                UgamSpacing.md,
-              ),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => Get.back(),
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: c.cardElev,
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.arrow_back_rounded,
-                        size: 19,
-                        color: c.ink,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  Expanded(
-                    child: Text(
-                      tr('create_tour.title'),
-                      style: UgamText.titleL.copyWith(color: c.ink),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            UgamAppBar(title: tr('create_tour.title')),
             Expanded(
               child: Form(
                 key: _formKey,
@@ -364,20 +329,27 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       children: [
                         Expanded(
                           flex: 3,
-                          child: _DateField(
-                            c: c,
-                            hint: tr('create_tour.hint.start_date'),
-                            date: _departureDate,
+                          child: UgamPickerField(
+                            icon: Icons.calendar_today_rounded,
+                            placeholder: tr('create_tour.hint.start_date'),
+                            value: _departureDate != null
+                                ? Formatters.formatDateMedium(
+                                    _departureDate!,
+                                    locale: context.locale.languageCode,
+                                  )
+                                : '',
                             onTap: () => _pickDate(false),
                           ),
                         ),
                         const SizedBox(width: UgamSpacing.sm),
                         Expanded(
                           flex: 2,
-                          child: _TimeField(
-                            c: c,
-                            hint: tr('create_tour.hint.departure_time'),
-                            time: _departureTime,
+                          child: UgamPickerField(
+                            icon: Icons.access_time_rounded,
+                            placeholder: tr('create_tour.hint.departure_time'),
+                            value: _departureTime != null
+                                ? _departureTime!.format(context)
+                                : '',
                             onTap: () => _pickTime(false),
                           ),
                         ),
@@ -389,20 +361,27 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       children: [
                         Expanded(
                           flex: 3,
-                          child: _DateField(
-                            c: c,
-                            hint: tr('create_tour.hint.end_date'),
-                            date: _returnDate,
+                          child: UgamPickerField(
+                            icon: Icons.calendar_today_rounded,
+                            placeholder: tr('create_tour.hint.end_date'),
+                            value: _returnDate != null
+                                ? Formatters.formatDateMedium(
+                                    _returnDate!,
+                                    locale: context.locale.languageCode,
+                                  )
+                                : '',
                             onTap: () => _pickDate(true),
                           ),
                         ),
                         const SizedBox(width: UgamSpacing.sm),
                         Expanded(
                           flex: 2,
-                          child: _TimeField(
-                            c: c,
-                            hint: tr('create_tour.hint.return_time'),
-                            time: _returnTime,
+                          child: UgamPickerField(
+                            icon: Icons.access_time_rounded,
+                            placeholder: tr('create_tour.hint.return_time'),
+                            value: _returnTime != null
+                                ? _returnTime!.format(context)
+                                : '',
                             onTap: () => _pickTime(true),
                           ),
                         ),
@@ -519,7 +498,10 @@ class _TourPreviewCard extends StatelessWidget {
     final to = toCity.isNotEmpty ? toCity : tr('create_tour.hint.to_city');
     final route = '$from → $to';
     final dateText = departureDate != null
-        ? DateFormat('MMM d, yyyy').format(departureDate!)
+        ? Formatters.formatDateMedium(
+            departureDate!,
+            locale: context.locale.languageCode,
+          )
         : tr('create_tour.preview.pick_date');
     final setPriceLabel = tr('create_tour.preview.set_price');
     final priceText = () {
@@ -568,7 +550,6 @@ class _TourPreviewCard extends StatelessWidget {
                   shownTitle,
                   style: UgamText.titleM.copyWith(
                     color: title.isNotEmpty ? c.ink : c.ink3,
-                    fontSize: 16,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -589,65 +570,22 @@ class _TourPreviewCard extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 6,
                   children: [
-                    _PreviewPill(
-                      c: c,
-                      icon: Icons.calendar_today_rounded,
+                    UgamReqChip(
                       label: dateText,
-                      muted: departureDate == null,
+                      variant: departureDate == null
+                          ? UgamChipVariant.neutral
+                          : UgamChipVariant.accent,
                     ),
-                    _PreviewPill(
-                      c: c,
-                      icon: Icons.currency_rupee_rounded,
+                    UgamReqChip(
                       label: priceText,
-                      muted: priceText == setPriceLabel,
+                      variant: priceText == setPriceLabel
+                          ? UgamChipVariant.neutral
+                          : UgamChipVariant.accent,
                     ),
                   ],
                 ),
               ],
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PreviewPill extends StatelessWidget {
-  final UgamColorSet c;
-  final IconData icon;
-  final String label;
-  final bool muted;
-
-  const _PreviewPill({
-    required this.c,
-    required this.icon,
-    required this.label,
-    required this.muted,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: muted ? c.cardElev : c.accentFill,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: muted ? c.ink3 : c.accent),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: UgamText.tabular(
-              UgamText.caption.copyWith(
-                color: muted ? c.ink3 : c.accent,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -692,7 +630,7 @@ class _BroadcastImagePicker extends StatelessWidget {
               Expanded(
                 child: Text(
                   tr('create_tour.broadcast_add_image'),
-                  style: UgamText.body.copyWith(color: c.ink2, fontSize: 14),
+                  style: UgamText.body.copyWith(color: c.ink2),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -741,96 +679,3 @@ class _BroadcastImagePicker extends StatelessWidget {
   }
 }
 
-class _DateField extends StatelessWidget {
-  final UgamColorSet c;
-  final String hint;
-  final DateTime? date;
-  final VoidCallback onTap;
-
-  const _DateField({
-    required this.c,
-    required this.hint,
-    required this.date,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 54,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.input),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.calendar_today_rounded, size: 16, color: c.ink2),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: Text(
-                date != null ? DateFormat('MMM d, yyyy').format(date!) : hint,
-                style: UgamText.body.copyWith(
-                  color: date != null ? c.ink : c.ink3,
-                  fontSize: 14,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Tap target mirroring [_DateField] for a time-of-day. Shows a locale-aware
-/// time once picked, or the hint while unset.
-class _TimeField extends StatelessWidget {
-  final UgamColorSet c;
-  final String hint;
-  final TimeOfDay? time;
-  final VoidCallback onTap;
-
-  const _TimeField({
-    required this.c,
-    required this.hint,
-    required this.time,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 54,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.input),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.access_time_rounded, size: 16, color: c.ink2),
-            const SizedBox(width: UgamSpacing.xs),
-            Expanded(
-              child: Text(
-                time != null ? time!.format(context) : hint,
-                style: UgamText.body.copyWith(
-                  color: time != null ? c.ink : c.ink3,
-                  fontSize: 14,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

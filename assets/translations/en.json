@@ -1793,6 +1793,9 @@
     }
   },
   "tour_groups": {
+    "default_group_name": "Group {n}",
+    "delete_group": "Delete group",
+    "remove_member": "Remove member",
     "title": "Groups & priority",
     "new_group": "New group",
     "name_this_group": "Name this group",

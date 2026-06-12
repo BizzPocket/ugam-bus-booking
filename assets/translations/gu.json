@@ -1793,6 +1793,9 @@
     }
   },
   "tour_groups": {
+    "default_group_name": "જૂથ {n}",
+    "delete_group": "જૂથ કાઢી નાખો",
+    "remove_member": "સભ્ય દૂર કરો",
     "title": "ગ્રૂપ અને પ્રાથમિકતા",
     "new_group": "નવું ગ્રૂપ",
     "name_this_group": "ગ્રૂપનું નામ આપો",

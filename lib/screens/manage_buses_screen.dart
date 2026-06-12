@@ -9,6 +9,7 @@ import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/time_format.dart';
 import 'add_bus_screen.dart';
@@ -24,23 +25,11 @@ class ManageBusesScreen extends StatelessWidget {
 
   TourController get _tourCtrl => Get.find<TourController>();
 
-  String _formatDateRange(Tour tour) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    final dep = tour.departureDate;
-    var label = '${months[dep.month - 1]} ${dep.day}';
+  /// Localized departure(-return) label, e.g. `12 Jun` or `12 Jun–14`.
+  /// Month names follow the active app locale via [Formatters.formatDateShort].
+  String _formatDateRange(BuildContext context, Tour tour) {
+    final locale = context.locale.languageCode;
+    var label = Formatters.formatDateShort(tour.departureDate, locale: locale);
     if (tour.returnDate != null) {
       label += '–${tour.returnDate!.day}';
     }
@@ -74,18 +63,6 @@ class ManageBusesScreen extends StatelessWidget {
                 Navigator.of(ctx).pop();
                 Get.to(
                   () => AddBusScreen(tourId: tourId, existing: bus),
-                  transition: Transition.cupertino,
-                );
-              },
-            ),
-            _BusMenuTile(
-              c: c,
-              icon: Icons.event_seat_rounded,
-              label: tr('manage_buses.menu_view_status'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                Get.to(
-                  () => BusStatusScreen(tourId: tourId, busId: bus.id),
                   transition: Transition.cupertino,
                 );
               },
@@ -277,10 +254,10 @@ class ManageBusesScreen extends StatelessWidget {
 
           return Column(
             children: [
-              _TopBar(
-                c: c,
-                title: tour.title,
-                subtitle: _formatDateRange(tour),
+              UgamAppBar(
+                title: tr('manage_buses.title'),
+                subtitle:
+                    '${tour.title} · ${_formatDateRange(context, tour)}',
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(
@@ -372,63 +349,6 @@ class ManageBusesScreen extends StatelessWidget {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  final UgamColorSet c;
-  final String title;
-  final String subtitle;
-
-  const _TopBar({required this.c, required this.title, required this.subtitle});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.md,
-        UgamSpacing.sm,
-        UgamSpacing.md,
-        UgamSpacing.sm,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr('manage_buses.title'),
-                  style: UgamText.titleL.copyWith(color: c.ink),
-                ),
-                Text(
-                  '$title · $subtitle',
-                  style: UgamText.caption.copyWith(color: c.ink2),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _BusListItem extends StatelessWidget {
   final UgamColorSet c;
   final Bus bus;
@@ -470,23 +390,17 @@ class _BusListItem extends StatelessWidget {
     final cap = bus.totalSeats;
     final pct = cap > 0 ? (assigned / cap).clamp(0.0, 1.0) : 0.0;
 
-    return GestureDetector(
+    return UgamCard.media(
       onTap: onOpen,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.sm),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Column(
+      elev: true,
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(UgamRadius.photo),
                   child: SizedBox(
                     width: 76,
                     height: 76,
@@ -559,23 +473,10 @@ class _BusListItem extends StatelessWidget {
                     ],
                   ),
                 ),
-                GestureDetector(
+                UgamIconButton(
+                  icon: Icons.more_vert_rounded,
                   onTap: onMore,
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: c.card,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      Icons.more_vert_rounded,
-                      size: 18,
-                      color: c.ink,
-                    ),
-                  ),
+                  semanticLabel: tr('manage_buses.menu_edit'),
                 ),
               ],
             ),
@@ -587,7 +488,8 @@ class _BusListItem extends StatelessWidget {
                   children: [
                     Expanded(
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius:
+                            BorderRadius.circular(UgamRadius.chip),
                         child: LinearProgressIndicator(
                           value: pct,
                           minHeight: 6,
@@ -615,7 +517,6 @@ class _BusListItem extends StatelessWidget {
             _HandlerRow(c: c, handlerName: handlerName, onTap: onHandler),
           ],
         ),
-      ),
     );
   }
 }

@@ -54,24 +54,30 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
           final tour = tourCtrl.getTour(widget.tourId);
           final bus = tour?.buses.firstWhereOrNull((b) => b.id == widget.busId);
           if (tour == null || bus == null) {
-            return Center(
-              child: Text(
-                tr('bus_status.bus_not_found'),
-                style: UgamText.body.copyWith(color: c.ink2),
-              ),
+            return Column(
+              children: [
+                UgamAppBar(title: tr('bus_status.bus_not_found')),
+                Expanded(
+                  child: UgamEmpty(
+                    icon: Icons.directions_bus_filled_outlined,
+                    title: tr('bus_status.bus_not_found'),
+                  ),
+                ),
+              ],
             );
           }
           final layout = bus.layout;
           if (layout == null) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(40),
-                child: Text(
-                  tr('bus_status.no_layout'),
-                  textAlign: TextAlign.center,
-                  style: UgamText.body.copyWith(color: c.ink2),
+            return Column(
+              children: [
+                _StatusAppBar(bus: bus, tourTitle: tour.title),
+                Expanded(
+                  child: UgamEmpty(
+                    icon: Icons.event_seat_outlined,
+                    title: tr('bus_status.no_layout'),
+                  ),
                 ),
-              ),
+              ],
             );
           }
 
@@ -95,7 +101,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
 
           return Column(
             children: [
-              _Header(bus: bus, tourTitle: tour.title),
+              _StatusAppBar(bus: bus, tourTitle: tour.title),
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   UgamSpacing.gutter,
@@ -243,48 +249,19 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
   }
 }
 
-class _Header extends StatelessWidget {
+class _StatusAppBar extends StatelessWidget {
   final Bus bus;
   final String tourTitle;
 
-  const _Header({required this.bus, required this.tourTitle});
+  const _StatusAppBar({required this.bus, required this.tourTitle});
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.md,
-        UgamSpacing.sm,
-        UgamSpacing.md,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          UgamIconButton(
-            icon: Icons.arrow_back_rounded,
-            size: 42,
-            onTap: () => Get.back(),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(bus.name, style: UgamText.titleL.copyWith(color: c.ink)),
-                Text(
-                  '$tourTitle'
-                  '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
-                  style: UgamText.caption.copyWith(color: c.ink2),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return UgamAppBar(
+      title: bus.name,
+      subtitle:
+          '$tourTitle'
+          '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
     );
   }
 }
@@ -570,12 +547,15 @@ class _SheetRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 130,
+          Flexible(
+            flex: 2,
             child: Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
           ),
+          const SizedBox(width: UgamSpacing.md),
           Expanded(
+            flex: 3,
             child: Text(
               value.isEmpty ? '—' : value,
               style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
@@ -619,12 +599,7 @@ class _DriverHeroCard extends StatelessWidget {
     final c = UgamColors.of(context);
     final phone = bus.driverPhone;
     final hasPhone = phone.trim().isNotEmpty;
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.sm),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
+    return UgamCard.media(
       child: Row(
         children: [
           ClipRRect(
@@ -739,7 +714,6 @@ class _BottomActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
       child: Column(
@@ -747,11 +721,12 @@ class _BottomActions extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _OutlinedPill(
-                  c: c,
+                child: UgamButton(
+                  kind: UgamButtonKind.neutral,
+                  expand: true,
                   icon: Icons.edit_rounded,
                   label: tr('bus_status.action.edit_bus'),
-                  onTap: () => Get.to(
+                  onPressed: () => Get.to(
                     () => AddBusScreen(tourId: tourId, existing: bus),
                     transition: Transition.cupertino,
                   ),
@@ -759,11 +734,12 @@ class _BottomActions extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _OutlinedPill(
-                  c: c,
+                child: UgamButton(
+                  kind: UgamButtonKind.neutral,
+                  expand: true,
                   icon: Icons.grid_view_rounded,
                   label: tr('bus_status.action.open_seat_assignment'),
-                  onTap: () => Get.to(
+                  onPressed: () => Get.to(
                     () => SeatsScreen(
                       tourId: tourId,
                       initialMode: SeatsMode.grid,
@@ -776,11 +752,12 @@ class _BottomActions extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          _OutlinedPill(
-            c: c,
+          UgamButton(
+            kind: UgamButtonKind.neutral,
+            expand: true,
             icon: Icons.payments_rounded,
             label: tr('bus_status.action.collection_money'),
-            onTap: () {
+            onPressed: () {
               final tour = Get.find<TourController>().getTour(tourId);
               if (tour == null) {
                 AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
@@ -793,57 +770,6 @@ class _BottomActions extends StatelessWidget {
             },
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _OutlinedPill extends StatelessWidget {
-  final UgamColorSet c;
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _OutlinedPill({
-    required this.c,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
-          border: Border.all(color: c.border),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 15, color: c.ink),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                style: UgamText.bodyStrong.copyWith(
-                  color: c.ink,
-                  fontSize: 12.5,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

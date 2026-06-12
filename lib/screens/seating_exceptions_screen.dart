@@ -21,13 +21,14 @@ import '../widgets/edit_request_sheet.dart';
 ///   * overflowWaitlist               → "Waitlist"
 ///
 /// Each section has a header with a tabular count; each exception is a
-/// warm attention card (a warm left rule + warm icon) showing the
-/// engine's message, the affected passenger name (resolved from the tour
-/// via [passengerId]), and the group label when [groupId] is set. Tapping
-/// a card is reserved for the future per-bus seat-detail route.
+/// warm/danger-toned [UgamCard] showing the engine's message, the affected
+/// passenger name (resolved from the tour via [passengerId]), and the group
+/// label when [groupId] is set. Tapping a card routes into the unified seat
+/// grid — pre-selected to the affected passenger so the agent lands exactly
+/// where the fix is made.
 ///
-/// When there are NO exceptions the screen shows a calm "All clear" panel
-/// in good/ink tones — never warm, because an empty state is not an
+/// When there are NO exceptions the screen shows a calm "All clear"
+/// [UgamEmpty] — never an attention tone, because an empty state is not an
 /// attention item.
 ///
 /// All colour comes from [UgamColors.of] — nothing hardcoded — and the
@@ -41,12 +42,13 @@ class SeatingExceptionsScreen extends StatelessWidget {
 
   TourController get _ctrl => Get.find<TourController>();
 
-  /// Open the unified seat grid pre-selected to the bus the affected passenger
-  /// sits on, when resolvable. An exception is passenger-scoped (priority /
-  /// seat-type) or group-scoped (group won't fit / broken pair); we resolve the
-  /// first affected passenger that actually holds a seat and jump to that bus.
-  /// When nothing is placed yet (the common case for an unfit group), there is
-  /// no bus to show — surface a gentle hint instead of a dead tap.
+  /// Open the unified seat grid pre-selected to the affected passenger. When
+  /// that passenger already holds a seat we also jump to their bus; otherwise
+  /// (the common case for an unfit group / overflow) we still hand the grid the
+  /// passenger id so it opens with them pre-selected — the existing
+  /// [AppRoutes.seatAssignment] arg supports this, so a not-yet-placed tap is
+  /// no longer a dead end. Only when there is no resolvable passenger at all do
+  /// we surface a gentle hint.
   void _onExceptionTap(SeatingException ex) {
     final tour = _ctrl.getTour(tourId);
     if (tour == null) return;
@@ -61,17 +63,37 @@ class SeatingExceptionsScreen extends StatelessWidget {
             .map((p) => p.id),
     ];
 
+    // Prefer a passenger that already holds a seat (we can jump to their bus);
+    // otherwise fall back to the first resolvable passenger so the grid still
+    // opens pre-selected to them.
+    String? firstPassengerId;
     for (final pid in candidates) {
       if (pid == null) continue;
       final p = tour.passengers.where((x) => x.id == pid).firstOrNull;
-      final seat = p?.assignedSeats.firstOrNull;
+      if (p == null) continue;
+      firstPassengerId ??= p.id;
+      final seat = p.assignedSeats.firstOrNull;
       if (seat != null) {
         Get.toNamed(
           AppRoutes.seatAssignment,
-          arguments: {'tourId': tourId, 'busId': seat.busId},
+          arguments: {
+            'tourId': tourId,
+            'busId': seat.busId,
+            'passengerId': p.id,
+          },
         );
         return;
       }
+    }
+
+    // Nobody is placed yet — route into the grid pre-selected to the affected
+    // passenger so the agent can place them directly.
+    if (firstPassengerId != null) {
+      Get.toNamed(
+        AppRoutes.seatAssignment,
+        arguments: {'tourId': tourId, 'passengerId': firstPassengerId},
+      );
+      return;
     }
 
     AppSnackBar.info(
@@ -124,7 +146,7 @@ class SeatingExceptionsScreen extends StatelessWidget {
         bottom: false,
         child: Column(
           children: [
-            _Header(c: c),
+            UgamAppBar(title: tr('seating_exceptions.title')),
             Expanded(
               child: Obx(() {
                 // Touch lastPlanByTour so this rebuilds when a fresh fill
@@ -147,7 +169,11 @@ class SeatingExceptionsScreen extends StatelessWidget {
                 }).toList();
 
                 if (exceptions.isEmpty) {
-                  return _AllClear(c: c);
+                  return UgamEmpty(
+                    icon: Icons.check_circle_outline_rounded,
+                    title: tr('seating_exceptions.all_clear_title'),
+                    body: tr('seating_exceptions.all_clear_body'),
+                  );
                 }
 
                 final sections = _groupByCategory(exceptions);
@@ -290,53 +316,6 @@ class _Section {
   const _Section({required this.label, required this.items});
 }
 
-// ─── Header ────────────────────────────────────────────────────────────
-
-class _Header extends StatelessWidget {
-  final UgamColorSet c;
-
-  const _Header({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              tr('seating_exceptions.title'),
-              style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Section header ──────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
@@ -396,9 +375,9 @@ class _ExceptionCard extends StatelessWidget {
   /// lean on the passenger name + engine message instead.
   final String? title;
 
-  /// When true the card is rendered as a prominent danger-toned ALERT (red
-  /// left rule, red icon badge, tinted background + border) rather than the
-  /// default warm attention card. Used for priority-no-lower-berth misses.
+  /// When true the card is rendered in danger tones (a prominent ALERT) rather
+  /// than the default warm attention card. Used for priority-no-lower-berth
+  /// misses.
   final bool alert;
 
   /// Inline remedies for a waitlist/overflow item. Null on every other
@@ -421,193 +400,109 @@ class _ExceptionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final inner = IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Left rule = this is an attention item (red when an alert).
-          Container(
-            width: 4,
-            decoration: BoxDecoration(
-              color: alert ? c.danger : c.warm,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(UgamRadius.row),
-                bottomLeft: Radius.circular(UgamRadius.row),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(UgamSpacing.lg),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: alert
-                          ? c.danger.withValues(alpha: 0.14)
-                          : c.warmFill,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      alert
-                          ? Icons.report_problem_rounded
-                          : Icons.error_outline_rounded,
-                      size: 18,
-                      color: alert ? c.danger : c.warm,
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (title != null) ...[
-                          Text(
-                            title!,
-                            style: UgamText.titleS.copyWith(
-                              color: alert ? c.danger : c.ink,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                        ],
-                        if (passengerName != null) ...[
-                          Text(
-                            passengerName!,
-                            style: UgamText.titleS.copyWith(color: c.ink),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 3),
-                        ],
-                        Text(
-                          message,
-                          style: UgamText.body.copyWith(
-                            color: (passengerName != null || title != null)
-                                ? c.ink2
-                                : c.ink,
-                          ),
-                        ),
-                        if (groupLabel != null && groupLabel!.isNotEmpty) ...[
-                          const SizedBox(height: UgamSpacing.sm),
-                          _GroupChip(label: groupLabel!, c: c),
-                        ],
-                        if (onEdit != null || onHold != null) ...[
-                          const SizedBox(height: UgamSpacing.md),
-                          Row(
-                            children: [
-                              if (onHold != null)
-                                _WaitlistAction(
-                                  label: tr('seating_exceptions.action_hold'),
-                                  icon: Icons.pause_circle_outline_rounded,
-                                  onTap: onHold!,
-                                  c: c,
-                                ),
-                              if (onHold != null && onEdit != null)
-                                const SizedBox(width: UgamSpacing.sm),
-                              if (onEdit != null)
-                                _WaitlistAction(
-                                  label: tr('seating_exceptions.action_edit'),
-                                  icon: Icons.edit_note_rounded,
-                                  onTap: onEdit!,
-                                  c: c,
-                                ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.sm),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 20,
-                    color: c.ink3,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    // Alert items render as a prominent danger-tinted card (UgamCard has no
-    // colour override, so the alert variant is a styled Container that mirrors
-    // the same tap/haptic affordance); everything else keeps the calm warm
-    // attention card.
-    if (alert) {
-      return GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          decoration: BoxDecoration(
-            color: c.danger.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(UgamRadius.row),
-            border: Border.all(color: c.danger.withValues(alpha: 0.45)),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: inner,
-        ),
-      );
-    }
+    // The attention colour drives the icon badge + accents; the card surface
+    // itself is toned by [UgamCard] (warm vs danger).
+    final Color toneInk = alert ? c.danger : c.warm;
+    final Color toneFill =
+        alert ? c.danger.withValues(alpha: 0.14) : c.warmFill;
 
     return UgamCard.plain(
       onTap: onTap,
+      tone: alert ? UgamCardTone.danger : UgamCardTone.warm,
       radius: UgamRadius.row,
-      padding: EdgeInsets.zero,
-      child: inner,
-    );
-  }
-}
-
-/// A small warm-outline action button used inline on overflow/waitlist cards.
-class _WaitlistAction extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final UgamColorSet c;
-
-  const _WaitlistAction({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm,
-        ),
-        decoration: BoxDecoration(
-          color: c.warmFill,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
-          border: Border.all(color: c.warm.withValues(alpha: 0.5)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 15, color: c.warm),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: UgamText.caption.copyWith(
-                color: c.warm,
-                fontWeight: FontWeight.w700,
-              ),
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: toneFill,
+              borderRadius: BorderRadius.circular(UgamRadius.seat + 2),
             ),
-          ],
-        ),
+            alignment: Alignment.center,
+            child: Icon(
+              alert
+                  ? Icons.report_problem_rounded
+                  : Icons.error_outline_rounded,
+              size: 18,
+              color: toneInk,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (title != null) ...[
+                  Text(
+                    title!,
+                    style: UgamText.titleS.copyWith(
+                      color: alert ? c.danger : c.ink,
+                    ),
+                  ),
+                  const SizedBox(height: UgamSpacing.xs - 1),
+                ],
+                if (passengerName != null) ...[
+                  Text(
+                    passengerName!,
+                    style: UgamText.titleS.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: UgamSpacing.xs - 1),
+                ],
+                Text(
+                  message,
+                  style: UgamText.body.copyWith(
+                    color: (passengerName != null || title != null)
+                        ? c.ink2
+                        : c.ink,
+                  ),
+                ),
+                if (groupLabel != null && groupLabel!.isNotEmpty) ...[
+                  const SizedBox(height: UgamSpacing.sm),
+                  _GroupChip(label: groupLabel!, c: c),
+                ],
+                if (onEdit != null || onHold != null) ...[
+                  const SizedBox(height: UgamSpacing.md),
+                  Row(
+                    children: [
+                      if (onHold != null)
+                        Expanded(
+                          child: UgamButton(
+                            label: tr('seating_exceptions.action_hold'),
+                            icon: Icons.pause_circle_outline_rounded,
+                            kind: UgamButtonKind.neutral,
+                            onPressed: onHold,
+                          ),
+                        ),
+                      if (onHold != null && onEdit != null)
+                        const SizedBox(width: UgamSpacing.sm),
+                      if (onEdit != null)
+                        Expanded(
+                          child: UgamButton(
+                            label: tr('seating_exceptions.action_edit'),
+                            icon: Icons.edit_note_rounded,
+                            kind: UgamButtonKind.tonal,
+                            onPressed: onEdit,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 20,
+            color: c.ink3,
+          ),
+        ],
       ),
     );
   }
@@ -646,57 +541,6 @@ class _GroupChip extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ─── Empty ("All clear") state ────────────────────────────────────────────
-
-class _AllClear extends StatelessWidget {
-  final UgamColorSet c;
-
-  const _AllClear({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.xl,
-        vertical: UgamSpacing.huge,
-      ),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: c.goodFill,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Icons.check_circle_outline_rounded,
-                size: 30,
-                color: c.good,
-              ),
-            ),
-            const SizedBox(height: UgamSpacing.lg),
-            Text(
-              tr('seating_exceptions.all_clear_title'),
-              style: UgamText.titleM.copyWith(color: c.ink),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: UgamSpacing.sm),
-            Text(
-              tr('seating_exceptions.all_clear_body'),
-              style: UgamText.body.copyWith(color: c.ink2),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
       ),
     );
   }
