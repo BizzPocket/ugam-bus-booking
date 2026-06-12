@@ -91,6 +91,12 @@ class Bus {
   /// exist in the fleet without yet being assigned to a tour.
   final String? tourId;
 
+  /// The passenger who handles THIS bus (per-bus handler). Set via
+  /// [TourController.setBusHandler]; cleared via [TourController.removeBusHandler].
+  /// Nullable so a bus can exist without a handler assigned yet. A per-bus
+  /// handler later sees ONLY their own bus(es).
+  final String? handlerPassengerId;
+
   final String name; // "Bus 1", "Bus 2", …
   final String busNumber; // GJ05HU7162
   final String driverName;
@@ -104,6 +110,21 @@ class Bus {
   /// Per-seat price for this bus. Overrides the tour-level price.
   /// Defaults to 0; agents may set it when adding the bus.
   final double pricePerSeat;
+
+  /// Full rent paid to the bus owner for this bus. Auto-counted as a
+  /// `busOwner` expense in the money summaries (single source of truth — it is
+  /// NOT a DB expense row), so the handler can never add it manually.
+  /// Defaults to 0; agents set it when adding the bus.
+  final double busPrice;
+
+  /// Per-bus departure place / venue. Overrides the tour-level boarding place
+  /// wherever boarding is shown (esp. the PDF footer). Defaults to ''.
+  final String boardingPoint;
+
+  /// Per-bus departure time, canonical 'HH:mm' (mirrors [Tour.departureTime]).
+  /// Overrides the tour-level / chart-footer departure time wherever boarding
+  /// is shown. Nullable; null/'' means no per-bus time set.
+  final String? departureTime;
 
   /// Optional per-seat-type overrides for the FRONT (non-rear) rows. Each falls
   /// back to [pricePerSeat] when null. [doubleSofaPrice] is the WHOLE double-sofa
@@ -139,6 +160,7 @@ class Bus {
     String? id,
     this.ownerId,
     this.tourId,
+    this.handlerPassengerId,
     required this.name,
     this.busNumber = '',
     this.driverName = '',
@@ -149,6 +171,9 @@ class Bus {
     this.busType = 'Semi-Sleeper',
     this.totalSeatsLegacy = 0,
     this.pricePerSeat = 0,
+    this.busPrice = 0,
+    this.boardingPoint = '',
+    this.departureTime,
     this.singleSofaPrice,
     this.doubleSofaPrice,
     this.seaterPrice,
@@ -189,6 +214,7 @@ class Bus {
       'id': id,
       'owner_id': ownerId,
       'tour_id': tourId,
+      'handler_passenger_id': handlerPassengerId,
       'name': name,
       // Empty registration must be NULL, not ''. The partial unique index
       // `buses(owner_id, registration_no) where registration_no is not null`
@@ -203,6 +229,9 @@ class Bus {
       'bus_type': busType,
       'total_seats': totalSeatsLegacy,
       'price_per_seat': pricePerSeat,
+      'bus_price': busPrice,
+      'boarding_point': boardingPoint,
+      'departure_time': departureTime,
       'single_sofa_price': singleSofaPrice,
       'double_sofa_price': doubleSofaPrice,
       'seater_price': seaterPrice,
@@ -221,6 +250,7 @@ class Bus {
       id: ((map['id']) as String?) ?? const Uuid().v4(),
       ownerId: map['owner_id'] as String?,
       tourId: map['tour_id'] as String?,
+      handlerPassengerId: map['handler_passenger_id'] as String?,
       name: (map['name'] as String?)?.trim().isNotEmpty == true
           ? map['name'] as String
           : 'Bus',
@@ -233,6 +263,11 @@ class Bus {
       busType: map['bus_type'] as String? ?? 'Semi-Sleeper',
       totalSeatsLegacy: map['total_seats'] as int? ?? 0,
       pricePerSeat: (map['price_per_seat'] as num?)?.toDouble() ?? 0,
+      busPrice: (map['bus_price'] as num?)?.toDouble() ?? 0,
+      boardingPoint: (map['boarding_point'] ?? '').toString(),
+      departureTime: (map['departure_time'] as String?)?.isNotEmpty == true
+          ? map['departure_time'] as String
+          : null,
       singleSofaPrice: (map['single_sofa_price'] as num?)?.toDouble(),
       doubleSofaPrice: (map['double_sofa_price'] as num?)?.toDouble(),
       seaterPrice: (map['seater_price'] as num?)?.toDouble(),
@@ -300,6 +335,7 @@ class Bus {
   Bus copyWith({
     String? ownerId,
     String? tourId,
+    String? handlerPassengerId,
     String? name,
     String? busNumber,
     String? driverName,
@@ -310,6 +346,9 @@ class Bus {
     String? busType,
     int? totalSeatsLegacy,
     double? pricePerSeat,
+    double? busPrice,
+    String? boardingPoint,
+    String? departureTime,
     double? singleSofaPrice,
     double? doubleSofaPrice,
     double? seaterPrice,
@@ -323,6 +362,7 @@ class Bus {
       id: id,
       ownerId: ownerId ?? this.ownerId,
       tourId: tourId ?? this.tourId,
+      handlerPassengerId: handlerPassengerId ?? this.handlerPassengerId,
       name: name ?? this.name,
       busNumber: busNumber ?? this.busNumber,
       driverName: driverName ?? this.driverName,
@@ -333,6 +373,9 @@ class Bus {
       busType: busType ?? this.busType,
       totalSeatsLegacy: totalSeatsLegacy ?? this.totalSeatsLegacy,
       pricePerSeat: pricePerSeat ?? this.pricePerSeat,
+      busPrice: busPrice ?? this.busPrice,
+      boardingPoint: boardingPoint ?? this.boardingPoint,
+      departureTime: departureTime ?? this.departureTime,
       singleSofaPrice: singleSofaPrice ?? this.singleSofaPrice,
       doubleSofaPrice: doubleSofaPrice ?? this.doubleSofaPrice,
       seaterPrice: seaterPrice ?? this.seaterPrice,
@@ -373,6 +416,18 @@ class Bus {
   PriceBand? bandForRow(int row) {
     for (final b in effectiveBands) {
       if (b.covers(row)) return b;
+    }
+    return null;
+  }
+
+  /// Index of the first effective band covering [row] within [effectiveBands]
+  /// (precedence order), or null when no band applies. Drives the stable
+  /// per-band colour on the handler chart so a row's wash and the band key
+  /// agree — see `priceBandColor`.
+  int? bandIndexForRow(int row) {
+    final bands = effectiveBands;
+    for (var i = 0; i < bands.length; i++) {
+      if (bands[i].covers(row)) return i;
     }
     return null;
   }

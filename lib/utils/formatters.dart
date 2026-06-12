@@ -2,7 +2,9 @@ import 'package:intl/intl.dart';
 
 class Formatters {
   static String formatDateTime(DateTime dateTime) {
-    return DateFormat('MMM dd, yyyy hh:mm a').format(dateTime);
+    // Pin the locale to 'en_US' so the AM/PM ('a') marker always renders;
+    // it is locale-dependent and comes out empty under some locales (e.g. gu).
+    return DateFormat('MMM dd, yyyy hh:mm a', 'en_US').format(dateTime);
   }
 
   static String formatSeatDetails(List<String> seats) {

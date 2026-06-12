@@ -1,0 +1,18 @@
+# ============================================================
+# Supabase local / deploy config — Edge Function JWT verification.
+# ------------------------------------------------------------
+# By default Edge Functions require a valid Supabase JWT. The handler-facing
+# `bus-message` function is called by an ANONYMOUS tour handler (no session), so
+# it must skip JWT verification and authorize the caller in code instead (see
+# supabase/functions/bus-message/index.ts: is_request_handler + bus ownership).
+# ============================================================
+
+[functions.bus-message]
+verify_jwt = false
+
+# `send-push` is invoked by the booking_requests Postgres trigger (pg_net), not
+# a signed-in user, so it skips JWT verification and authorizes via a shared
+# secret header (x-push-secret == PUSH_TRIGGER_SECRET). See
+# supabase/functions/send-push/index.ts and database.sql §9b.
+[functions.send-push]
+verify_jwt = false

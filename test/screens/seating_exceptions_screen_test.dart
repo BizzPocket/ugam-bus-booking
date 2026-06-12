@@ -77,7 +77,9 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    expect(find.text('Needs your decision'), findsOneWidget);
+    // tr() falls back to the key when EasyLocalization isn't initialized in
+    // the test harness, so we assert the translation keys (not the English).
+    expect(find.text('seating_exceptions.title'), findsOneWidget);
   });
 
   testWidgets(
@@ -89,10 +91,10 @@ void main() {
     ctrl.seedPlan('t1', const [
       // → "Priority"
       SeatingException(
-        type: SeatingExceptionType.priorityNoFrontSeat,
+        type: SeatingExceptionType.priorityNoLowerBerth,
         passengerId: 'p1',
-        message: 'Approved-priority Ramesh Patel was seated, but no front '
-            'sofa seat was available.',
+        message: 'Approved-priority Ramesh Patel was seated, but no lower '
+            'berth was available.',
       ),
       // → "Seat type"
       SeatingException(
@@ -112,16 +114,16 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // Section headers (uppercased) with their counts.
-    expect(find.text('PRIORITY'), findsOneWidget);
-    expect(find.text('GROUPS'), findsOneWidget);
-    expect(find.text('SEAT TYPE'), findsOneWidget);
+    // Section headers (uppercased category keys) with their counts.
+    expect(find.text('SEATING_EXCEPTIONS.CAT_PRIORITY'), findsOneWidget);
+    expect(find.text('SEATING_EXCEPTIONS.CAT_GROUPS'), findsOneWidget);
+    expect(find.text('SEATING_EXCEPTIONS.CAT_SEAT_TYPE'), findsOneWidget);
     // No waitlist exception was seeded → no Waitlist section.
-    expect(find.text('WAITLIST'), findsNothing);
+    expect(find.text('SEATING_EXCEPTIONS.CAT_WAITLIST'), findsNothing);
 
     // Per-exception messages render.
     expect(
-      find.textContaining('no front sofa seat was available'),
+      find.textContaining('no lower berth was available'),
       findsOneWidget,
     );
     expect(
@@ -137,8 +139,8 @@ void main() {
     expect(find.text('Ramesh Patel'), findsOneWidget);
     expect(find.text('Mohan Shah'), findsOneWidget);
 
-    // The group-scoped exception surfaces its group label.
-    expect(find.text('Group patel'), findsOneWidget);
+    // The group-scoped exception surfaces its group label (key fallback).
+    expect(find.text('seating_exceptions.group_label'), findsOneWidget);
   });
 
   testWidgets('shows the calm "All clear" panel when there are no exceptions',
@@ -151,14 +153,11 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    expect(find.text('All clear'), findsOneWidget);
-    expect(
-      find.textContaining('No seating decisions need your attention'),
-      findsOneWidget,
-    );
+    expect(find.text('seating_exceptions.all_clear_title'), findsOneWidget);
+    expect(find.text('seating_exceptions.all_clear_body'), findsOneWidget);
 
     // No section headers in the empty state.
-    expect(find.text('PRIORITY'), findsNothing);
-    expect(find.text('GROUPS'), findsNothing);
+    expect(find.text('SEATING_EXCEPTIONS.CAT_PRIORITY'), findsNothing);
+    expect(find.text('SEATING_EXCEPTIONS.CAT_GROUPS'), findsNothing);
   });
 }

@@ -8,14 +8,22 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/bus_type.dart';
 import '../models/seat_layout.dart';
+import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/time_format.dart';
 
 /// 3-step wizard for adding (or editing) a bus on a tour.
 ///
 /// Add mode:  Step 1 → Step 2 → Step 3 (identity → capacity → price)
-/// Edit mode: Step 1 → Step 3            (structural fields are locked
-///            because passengers may already hold seat IDs)
+/// Edit mode: Step 1 → Step 2 → Step 3 (same — capacity is now editable)
+///
+/// Editing the capacity REGENERATES the seat layout, which renumbers every seat
+/// ID. So when the bus already has passengers seated, [_save] warns and clears
+/// those seat assignments on this bus (via [TourController.unassignBus] — the
+/// people return to "unassigned", request lines intact) before applying the new
+/// size. When the capacity isn't touched, the saved layout is reused untouched
+/// so seat IDs (and assignments) stay exactly as they were.
 ///
 /// All controller calls (`addBus`, `updateBus`) and the layout-generation
 /// math are preserved bit-for-bit from the legacy single-page form — only
@@ -24,11 +32,7 @@ class AddBusScreen extends StatefulWidget {
   final String tourId;
   final Bus? existing;
 
-  const AddBusScreen({
-    super.key,
-    required this.tourId,
-    this.existing,
-  });
+  const AddBusScreen({super.key, required this.tourId, this.existing});
 
   bool get isEditing => existing != null;
 
@@ -40,14 +44,19 @@ class _AddBusScreenState extends State<AddBusScreen> {
   // ── Form state (1:1 with the legacy screen) ─────────────────────────
   final _slotLabel = TextEditingController();
   final _busNumber = TextEditingController();
+  final _boardingPoint = TextEditingController();
   final _driverName = TextEditingController();
   final _driverPhone = TextEditingController();
   final _price = TextEditingController();
+  final _busPrice = TextEditingController();
   final _singleSofaPrice = TextEditingController();
   final _doubleSofaPrice = TextEditingController();
-  final _seaterPrice = TextEditingController();
   final _rearRows = TextEditingController();
   final _rearPrice = TextEditingController();
+
+  /// Per-bus departure time. Stored as a [TimeOfDay] while editing the form and
+  /// serialized to canonical 'HH:mm' (via [hhmmFromTimeOfDay]) on save.
+  TimeOfDay? _departureTime;
 
   /// Flexible, named price bands for this bus (front premium, back discount,
   /// or any explicit row range). Edited via the Step 3 "Price bands"
@@ -55,21 +64,29 @@ class _AddBusScreenState extends State<AddBusScreen> {
   List<PriceBand> _priceBands = const [];
   bool _isAC = true;
   int _totalSeats = 40;
-  BusType _busType = BusType.sleeper;
-  int _seaterCountForMixed = 6;
+  // Every bus is a sleeper coach — no seater/mixed types in this app.
+  static const BusType _busType = BusType.sleeper;
   int _singleSofaCount = 0;
   bool _hasBalcony = false;
   bool _saving = false;
   bool _priceInitialized = false;
+
+  /// Capacity values as first shown when EDITING an existing bus (derived from
+  /// its saved layout in [initState]). Used to detect whether the admin actually
+  /// touched the capacity, so a plain field edit (driver, price, …) never
+  /// regenerates the layout or threatens existing seat assignments.
+  int _initTotalSeats = 40;
+  int _initSingleSofaCount = 0;
+  bool _initHasBalcony = false;
 
   // ── Wizard state ────────────────────────────────────────────────────
   /// 0 = identity, 1 = capacity (add only), 2 = price.
   /// In edit mode the user moves from 0 → 2 directly (step 1 is skipped).
   int _currentStep = 0;
 
-  /// Steps the wizard actually walks through, in order.
-  List<int> get _stepSequence =>
-      widget.isEditing ? const [0, 2] : const [0, 1, 2];
+  /// Steps the wizard actually walks through, in order. Capacity (step 1) is now
+  /// included in edit mode too, so an admin can resize an existing bus.
+  List<int> get _stepSequence => const [0, 1, 2];
 
   int get _indexInSequence => _stepSequence.indexOf(_currentStep);
   bool get _isFirstStep => _indexInSequence == 0;
@@ -82,19 +99,19 @@ class _AddBusScreenState extends State<AddBusScreen> {
     if (e != null) {
       _slotLabel.text = e.name;
       _busNumber.text = e.busNumber;
+      _boardingPoint.text = e.boardingPoint;
+      _departureTime = timeOfDayFromHhmm(e.departureTime);
       _driverName.text = e.driverName;
       _driverPhone.text = e.driverPhone;
-      _price.text = e.pricePerSeat > 0
-          ? e.pricePerSeat.toStringAsFixed(0)
-          : '';
+      _price.text = e.pricePerSeat > 0 ? e.pricePerSeat.toStringAsFixed(0) : '';
+      if (e.busPrice > 0) {
+        _busPrice.text = e.busPrice.toStringAsFixed(0);
+      }
       if (e.singleSofaPrice != null) {
         _singleSofaPrice.text = e.singleSofaPrice!.toStringAsFixed(0);
       }
       if (e.doubleSofaPrice != null) {
         _doubleSofaPrice.text = e.doubleSofaPrice!.toStringAsFixed(0);
-      }
-      if (e.seaterPrice != null) {
-        _seaterPrice.text = e.seaterPrice!.toStringAsFixed(0);
       }
       if (e.rearRows > 0) {
         _rearRows.text = '${e.rearRows}';
@@ -104,22 +121,51 @@ class _AddBusScreenState extends State<AddBusScreen> {
       }
       _priceBands = List<PriceBand>.from(e.priceBands);
       _isAC = e.isAC;
-      _totalSeats = e.totalSeats;
-      _busType = BusType.fromString(e.busType);
+      _seedCapacityFromLayout(e);
       _priceInitialized = true;
     }
+  }
+
+  /// Reconstruct the capacity-step inputs from a saved bus so EDIT mode shows the
+  /// bus's current size. The toggle balcony adds a 2-berth aisle pair on top, so
+  /// it shows as exactly two aisle cells; a single relocated "orphan" berth shows
+  /// as one. `totalSeats` for the stepper is the sleeper berths EXCLUDING that
+  /// toggle pair (matching what [BusLayout.generate] expects as its `totalSeats`).
+  /// The derived values are snapshotted so [_save] can tell whether the admin
+  /// actually changed the capacity.
+  void _seedCapacityFromLayout(Bus e) {
+    final layout = e.layout;
+    if (layout != null) {
+      final balconyAisle = layout.grid.where((cl) => cl.isBalconyAisle).length;
+      _hasBalcony = balconyAisle >= 2;
+      _singleSofaCount = layout.grid
+          .where((cl) =>
+              cl.hasSeat &&
+              cl.seatType == SeatType.singleSofa &&
+              (cl.col == SeatGridCols.singleUpper ||
+                  cl.col == SeatGridCols.singleLower))
+          .length;
+      _totalSeats =
+          (layout.totalSeats - (_hasBalcony ? 2 : 0)).clamp(1, 100);
+    } else {
+      _totalSeats = e.totalSeats;
+    }
+    _initTotalSeats = _totalSeats;
+    _initSingleSofaCount = _singleSofaCount;
+    _initHasBalcony = _hasBalcony;
   }
 
   @override
   void dispose() {
     _slotLabel.dispose();
     _busNumber.dispose();
+    _boardingPoint.dispose();
     _driverName.dispose();
     _driverPhone.dispose();
     _price.dispose();
+    _busPrice.dispose();
     _singleSofaPrice.dispose();
     _doubleSofaPrice.dispose();
-    _seaterPrice.dispose();
     _rearRows.dispose();
     _rearPrice.dispose();
     super.dispose();
@@ -133,20 +179,61 @@ class _AddBusScreenState extends State<AddBusScreen> {
   /// field blank. Computed, never stored, so it stays correct as buses change.
   String get _slotPositionLabel {
     final tour = _tour;
-    if (tour == null) return 'Bus 1';
+    if (tour == null) {
+      return tr('add_bus.slot_position', namedArgs: {'n': '1'});
+    }
     final e = widget.existing;
     if (e != null) {
       final idx = tour.buses.indexWhere((b) => b.id == e.id);
-      return 'Bus ${(idx < 0 ? tour.buses.length : idx) + 1}';
+      return tr(
+        'add_bus.slot_position',
+        namedArgs: {'n': '${(idx < 0 ? tour.buses.length : idx) + 1}'},
+      );
     }
-    return 'Bus ${tour.buses.length + 1}';
+    return tr(
+      'add_bus.slot_position',
+      namedArgs: {'n': '${tour.buses.length + 1}'},
+    );
   }
 
-  int get _sleeperSeats => switch (_busType) {
-        BusType.sleeper => _totalSeats,
-        BusType.mixed => _totalSeats - _seaterCountForMixed,
-        BusType.seater => 0,
-      };
+  // Always a full sleeper coach now, so every seat is a sleeper berth.
+  int get _sleeperSeats => _totalSeats;
+
+  /// Distinct passengers currently holding at least one seat on the bus being
+  /// edited (0 in add mode). Drives the resize warning banner and the
+  /// clear-on-resize confirm flow.
+  int get _seatedOnThisBus {
+    final e = widget.existing;
+    final tour = _tour;
+    if (e == null || tour == null) return 0;
+    return tour.passengers
+        .where((p) => p.assignedSeats.any((a) => a.busId == e.id))
+        .length;
+  }
+
+  /// True when the admin has changed any capacity value from what the edited bus
+  /// started with — so the layout (and seat IDs) will be regenerated on save.
+  bool get _capacityChanged =>
+      widget.isEditing &&
+      (_totalSeats != _initTotalSeats ||
+          _singleSofaCount != _initSingleSofaCount ||
+          _hasBalcony != _initHasBalcony);
+
+  /// The layout the price step previews its rear-zone / price-band rows against:
+  /// the freshly-sized layout when editing and capacity was changed, otherwise
+  /// the bus's saved layout. Keeps the band editor's row range in sync with a
+  /// just-changed seat count.
+  BusLayout? get _previewLayout {
+    if (!widget.isEditing) return null;
+    if (!_capacityChanged) return widget.existing?.layout;
+    return BusLayout.generate(
+      busType: _busType,
+      totalSeats: _totalSeats,
+      seaterCount: 0,
+      singleSofaCount: _singleSofaCount,
+      hasBalcony: _hasBalcony,
+    );
+  }
 
   String get _subtitle {
     final tour = _tour;
@@ -167,21 +254,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
     _priceInitialized = true;
   }
 
-  String get _mixedSummary {
-    final sleeperCount = _totalSeats - _seaterCountForMixed;
-    final sleeperKey = sleeperCount == 1
-        ? 'add_bus.summary.mixed_one_sleeper'
-        : 'add_bus.summary.mixed_many_sleeper';
-    final seaterLabel = _seaterCountForMixed == 1
-        ? tr('add_bus.summary.seater')
-        : tr('add_bus.summary.seaters');
-    return tr(sleeperKey, namedArgs: {
-      'sleeper': '$sleeperCount',
-      'seater': '$_seaterCountForMixed',
-      'seater_label': seaterLabel,
-    });
-  }
-
   /// Berths left for doubles after the singles; odd means one spare berth that
   /// can't pair into a whole double sofa.
   int get _doubleBerths => _sleeperSeats - _singleSofaCount;
@@ -196,11 +268,14 @@ class _AddBusScreenState extends State<AddBusScreen> {
     final doubleLabel = doubleCount == 1
         ? tr('add_bus.summary.double_sofa')
         : tr('add_bus.summary.double_sofas');
-    return tr(summaryKey, namedArgs: {
-      'single': '$_singleSofaCount',
-      'double': '$doubleCount',
-      'double_label': doubleLabel,
-    });
+    return tr(
+      summaryKey,
+      namedArgs: {
+        'single': '$_singleSofaCount',
+        'double': '$doubleCount',
+        'double_label': doubleLabel,
+      },
+    );
   }
 
   // ── Navigation ──────────────────────────────────────────────────────
@@ -223,6 +298,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
     }
   }
 
+  /// True when more single sofas were requested than there are sleeper berths.
+  /// Surfaced inline under the single-sofa stepper and blocks advancing.
+  bool get _singleSofaInvalid => _singleSofaCount > _sleeperSeats;
+
   bool get _canAdvance {
     switch (_currentStep) {
       case 0:
@@ -230,26 +309,35 @@ class _AddBusScreenState extends State<AddBusScreen> {
         // be filled in later when the owner confirms the vehicle.
         return true;
       case 1:
-        // Capacity step always advances; layout validation happens on save.
-        return true;
+        // Capacity advances only when the layout is buildable. The invalid
+        // state is shown inline under the single-sofa stepper.
+        return !_singleSofaInvalid;
       case 2:
         return true;
     }
     return false;
   }
 
+  /// Pick this bus's departure time. Mirrors the tour-level time picker — the
+  /// chosen [TimeOfDay] is held in [_departureTime] and serialized to canonical
+  /// 'HH:mm' at save time.
+  Future<void> _pickDepartureTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _departureTime ?? const TimeOfDay(hour: 9, minute: 0),
+    );
+    if (picked != null) {
+      setState(() => _departureTime = picked);
+    }
+  }
+
   // ── Save ────────────────────────────────────────────────────────────
 
   Future<void> _save() async {
     if (!widget.isEditing) {
-      if (_busType == BusType.mixed && _seaterCountForMixed >= _totalSeats) {
-        AppSnackBar.error(tr('add_bus.snackbar.error_seater_count'));
-        return;
-      }
-      if (_singleSofaCount > _sleeperSeats) {
-        AppSnackBar.error(tr('add_bus.snackbar.error_single_sofa'));
-        return;
-      }
+      // Layout-buildability is enforced inline on Step 2 (see _canAdvance);
+      // these guards are a final safety net and surface no toast.
+      if (_singleSofaInvalid) return;
     }
 
     final tour = _tour;
@@ -263,6 +351,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
         ? tour.pricePerSeat
         : (double.tryParse(priceText) ?? tour.pricePerSeat);
 
+    // Full bus rent paid to the owner — auto-counted as a busOwner expense.
+    final busPrice = double.tryParse(_busPrice.text.trim()) ?? 0;
+    final boardingPoint = _boardingPoint.text.trim();
+
     double? parseOpt(TextEditingController c) {
       final t = c.text.trim();
       return t.isEmpty ? null : double.tryParse(t);
@@ -270,7 +362,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
 
     final singleSofaPrice = parseOpt(_singleSofaPrice);
     final doubleSofaPrice = parseOpt(_doubleSofaPrice);
-    final seaterPrice = parseOpt(_seaterPrice);
 
     // Rear-zone: how many of the LAST rows are priced differently, and at what
     // per-person rate. Clamped to the layout's row count below (different per
@@ -286,25 +377,75 @@ class _AddBusScreenState extends State<AddBusScreen> {
     try {
       if (widget.isEditing) {
         final source = widget.existing!;
-        final rowCount = source.layout?.rows ?? rearRowsRaw;
+
+        // A plain field edit (driver, price, …) reuses the saved layout
+        // untouched, so seat IDs — and every existing seat assignment — stay
+        // exactly as they were. Only a touched capacity regenerates the layout.
+        final newLayout = _capacityChanged
+            ? BusLayout.generate(
+                busType: _busType,
+                totalSeats: _totalSeats,
+                seaterCount: 0,
+                singleSofaCount: _singleSofaCount,
+                hasBalcony: _hasBalcony,
+              )
+            : source.layout;
+
+        // A real resize renumbers the seat IDs, so anyone seated on this bus
+        // would be orphaned. Confirm-then-clear those assignments first.
+        final oldIds = source.layout?.allSeatIds.toSet() ?? <String>{};
+        final newIds = newLayout?.allSeatIds.toSet() ?? <String>{};
+        final structuralChange = _capacityChanged &&
+            (oldIds.length != newIds.length || !oldIds.containsAll(newIds));
+
+        final seated = _seatedOnThisBus;
+        if (structuralChange && seated > 0) {
+          final ok = await UgamDialog.confirm(
+            context,
+            title: tr('add_bus.resize_confirm_title'),
+            message: tr(
+              'add_bus.resize_confirm_msg',
+              namedArgs: {'count': '$seated'},
+            ),
+            confirmLabel: tr('add_bus.resize_confirm_cta'),
+            destructive: true,
+          );
+          if (ok != true) {
+            if (mounted) setState(() => _saving = false);
+            return;
+          }
+          // Frees every seat on this bus; the passengers' request lines stay
+          // intact so they reappear as needing assignment and can be re-seated.
+          await _tourCtrl.unassignBus(widget.tourId, source.id);
+        }
+
+        final rowCount = newLayout?.rows ?? rearRowsRaw;
         final rearRows = rearRowsRaw.clamp(0, rowCount);
         final updated = source.copyWith(
           name: slotLabel,
           busNumber: _busNumber.text.trim(),
+          boardingPoint: boardingPoint,
+          departureTime: _departureTime != null
+              ? hhmmFromTimeOfDay(_departureTime!)
+              : null,
           driverName: _driverName.text.trim(),
           driverPhone: _driverPhone.text.trim(),
           isAC: _isAC,
           pricePerSeat: pricePerSeat,
+          busPrice: busPrice,
           singleSofaPrice: singleSofaPrice,
           doubleSofaPrice: doubleSofaPrice,
-          seaterPrice: seaterPrice,
           rearRows: rearRows,
           rearPrice: rearRows == 0 ? null : rearPrice,
           priceBands: _sanitizedBands(rowCount),
+          layout: newLayout,
+          totalSeatsLegacy: structuralChange ? _totalSeats : null,
         );
         await _tourCtrl.updateBus(widget.tourId, updated);
         if (!mounted) return;
-        AppSnackBar.success('Updated ${updated.name}.');
+        AppSnackBar.success(
+          tr('add_bus.snackbar.updated', namedArgs: {'name': updated.name}),
+        );
         Get.back();
         return;
       }
@@ -312,7 +453,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
       final layout = BusLayout.generate(
         busType: _busType,
         totalSeats: _totalSeats,
-        seaterCount: _busType == BusType.mixed ? _seaterCountForMixed : 0,
+        seaterCount: 0,
         singleSofaCount: _singleSofaCount,
         hasBalcony: _hasBalcony,
       );
@@ -322,15 +463,19 @@ class _AddBusScreenState extends State<AddBusScreen> {
       final bus = Bus(
         name: slotLabel,
         busNumber: _busNumber.text.trim(),
+        boardingPoint: boardingPoint,
+        departureTime: _departureTime != null
+            ? hhmmFromTimeOfDay(_departureTime!)
+            : null,
         driverName: _driverName.text.trim(),
         driverPhone: _driverPhone.text.trim(),
         isAC: _isAC,
         busType: _busType.displayName,
         totalSeatsLegacy: _totalSeats,
         pricePerSeat: pricePerSeat,
+        busPrice: busPrice,
         singleSofaPrice: singleSofaPrice,
         doubleSofaPrice: doubleSofaPrice,
-        seaterPrice: seaterPrice,
         rearRows: rearRows,
         rearPrice: rearRows == 0 ? null : rearPrice,
         priceBands: _sanitizedBands(layout.rows),
@@ -381,7 +526,9 @@ class _AddBusScreenState extends State<AddBusScreen> {
           children: [
             _WizardHeader(
               c: c,
-              title: widget.isEditing ? 'Edit Bus' : tr('add_bus.title'),
+              title: widget.isEditing
+                  ? tr('add_bus.title_edit')
+                  : tr('add_bus.title'),
               subtitle: _subtitle,
               steps: _stepSequence.length,
               index: _indexInSequence,
@@ -431,42 +578,38 @@ class _AddBusScreenState extends State<AddBusScreen> {
           c: c,
           busName: _slotLabel,
           busNumber: _busNumber,
+          boardingPoint: _boardingPoint,
+          departureTime: _departureTime,
           driverName: _driverName,
           driverPhone: _driverPhone,
           isAC: _isAC,
           slotBadge: _slotPositionLabel,
           onToggleAC: (v) => setState(() => _isAC = v),
+          onPickDepartureTime: _pickDepartureTime,
           onAnyChange: () => setState(() {}),
         );
       case 1:
         return _Step2Capacity(
           c: c,
-          busType: _busType,
           totalSeats: _totalSeats,
-          seaterCountForMixed: _seaterCountForMixed,
           singleSofaCount: _singleSofaCount,
           sleeperSeats: _sleeperSeats,
-          mixedSummary: _mixedSummary,
           singleSofaSummary: _singleSofaSummary,
           hasOddSleeperBerth: _hasOddSleeperBerth,
           hasBalcony: _hasBalcony,
-          onBusType: (t) => setState(() {
-            _busType = t;
-            if (_singleSofaCount > _sleeperSeats) {
-              _singleSofaCount = _sleeperSeats;
-            }
-          }),
+          // Edit mode only: warn that resizing will unassign the people already
+          // seated on this bus (their seat IDs change when the layout rebuilds).
+          seatedWarning: (widget.isEditing && _seatedOnThisBus > 0)
+              ? tr(
+                  'add_bus.resize_warning',
+                  namedArgs: {'count': '$_seatedOnThisBus'},
+                )
+              : null,
+          singleSofaError: _singleSofaInvalid
+              ? tr('add_bus.snackbar.error_single_sofa')
+              : null,
           onTotalSeats: (v) => setState(() {
             _totalSeats = v;
-            if (_seaterCountForMixed >= v) {
-              _seaterCountForMixed = (v - 1).clamp(0, v);
-            }
-            if (_singleSofaCount > _sleeperSeats) {
-              _singleSofaCount = _sleeperSeats;
-            }
-          }),
-          onSeaterCount: (v) => setState(() {
-            _seaterCountForMixed = v;
             if (_singleSofaCount > _sleeperSeats) {
               _singleSofaCount = _sleeperSeats;
             }
@@ -479,14 +622,14 @@ class _AddBusScreenState extends State<AddBusScreen> {
         return _Step3Price(
           c: c,
           price: _price,
+          busPrice: _busPrice,
           singleSofaPrice: _singleSofaPrice,
           doubleSofaPrice: _doubleSofaPrice,
-          seaterPrice: _seaterPrice,
           rearRows: _rearRows,
           rearPrice: _rearPrice,
           priceBands: _priceBands,
           onBandsChanged: (bands) => setState(() => _priceBands = bands),
-          layout: widget.existing?.layout,
+          layout: _previewLayout,
           tour: _tour,
           slotLabel: _slotLabel.text.trim().isEmpty
               ? _slotPositionLabel
@@ -562,8 +705,7 @@ class _WizardHeader extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(title,
-                        style: UgamText.titleL.copyWith(color: c.ink)),
+                    Text(title, style: UgamText.titleL.copyWith(color: c.ink)),
                     if (subtitle.isNotEmpty)
                       Text(
                         subtitle,
@@ -575,7 +717,10 @@ class _WizardHeader extends StatelessWidget {
                 ),
               ),
               Text(
-                'Step ${index + 1} / $steps',
+                tr(
+                  'add_bus.step_progress',
+                  namedArgs: {'current': '${index + 1}', 'total': '$steps'},
+                ),
                 style: UgamText.tabular(
                   UgamText.micro.copyWith(color: c.ink3, fontSize: 10),
                 ),
@@ -638,9 +783,11 @@ class _BottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ctaLabel = isLast
         ? (saving
-            ? tr('add_bus.action.saving')
-            : (isEditing ? 'Save changes' : tr('add_bus.action.save')))
-        : 'Next';
+              ? tr('add_bus.action.saving')
+              : (isEditing
+                    ? tr('add_bus.action.save_changes')
+                    : tr('add_bus.action.save')))
+        : tr('app.action.next');
     final ctaIcon = isLast
         ? (isEditing ? Icons.check_rounded : Icons.add_rounded)
         : Icons.arrow_forward_rounded;
@@ -691,8 +838,10 @@ class _BackPill extends StatelessWidget {
           children: [
             Icon(Icons.chevron_left_rounded, size: 18, color: c.ink),
             const SizedBox(width: 4),
-            Text('Back',
-                style: UgamText.titleS.copyWith(color: c.ink)),
+            Text(
+              tr('app.action.back'),
+              style: UgamText.titleS.copyWith(color: c.ink),
+            ),
           ],
         ),
       ),
@@ -708,22 +857,28 @@ class _Step1Identity extends StatelessWidget {
   final UgamColorSet c;
   final TextEditingController busName;
   final TextEditingController busNumber;
+  final TextEditingController boardingPoint;
+  final TimeOfDay? departureTime;
   final TextEditingController driverName;
   final TextEditingController driverPhone;
   final bool isAC;
   final String slotBadge;
   final ValueChanged<bool> onToggleAC;
+  final VoidCallback onPickDepartureTime;
   final VoidCallback onAnyChange;
 
   const _Step1Identity({
     required this.c,
     required this.busName,
     required this.busNumber,
+    required this.boardingPoint,
+    required this.departureTime,
     required this.driverName,
     required this.driverPhone,
     required this.isAC,
     required this.slotBadge,
     required this.onToggleAC,
+    required this.onPickDepartureTime,
     required this.onAnyChange,
   });
 
@@ -740,47 +895,64 @@ class _Step1Identity extends StatelessWidget {
       children: [
         _StepIntro(
           c: c,
-          eyebrow: 'IDENTITY',
-          title: 'Who is this bus?',
-          body: 'Name the bus, add its registration and driver. The slot '
-              '($slotBadge) is assigned automatically by position; driver '
-              'fields can stay blank until the owner confirms.',
+          eyebrow: tr('add_bus.step1.eyebrow'),
+          title: tr('add_bus.step1.title'),
+          body: tr('add_bus.step1.body', namedArgs: {'slot': slotBadge}),
         ),
         const SizedBox(height: UgamSpacing.xl),
-        _Label(c: c, text: 'Slot'),
+        _Label(c: c, text: tr('add_bus.label.slot')),
         const SizedBox(height: UgamSpacing.sm),
         _SlotBadge(c: c, label: slotBadge),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: 'Bus name'),
+        _Label(c: c, text: tr('add_bus.label.bus_name')),
         const SizedBox(height: UgamSpacing.sm),
         _Field(
           c: c,
           controller: busName,
-          hint: 'e.g. Volvo A/C Sleeper',
+          hint: tr('add_bus.hint.bus_name'),
           textCapitalization: TextCapitalization.words,
           onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: 'Bus number'),
+        _Label(c: c, text: tr('add_bus.label.bus_number')),
         const SizedBox(height: UgamSpacing.sm),
         _Field(
           c: c,
           controller: busNumber,
-          hint: 'e.g. GJ-05-AB-1234',
+          hint: tr('add_bus.hint.bus_number_plain'),
           textCapitalization: TextCapitalization.characters,
           onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: 'Driver name'),
+        _Label(c: c, text: tr('add_bus.label.boarding_point')),
+        const SizedBox(height: UgamSpacing.sm),
+        _Field(
+          c: c,
+          controller: boardingPoint,
+          hint: tr('add_bus.hint.boarding_point'),
+          textCapitalization: TextCapitalization.words,
+          onChanged: (_) => onAnyChange(),
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        _Label(c: c, text: tr('add_bus.label.departure_time')),
+        const SizedBox(height: UgamSpacing.sm),
+        _TimeField(
+          c: c,
+          hint: tr('add_bus.hint.departure_time'),
+          time: departureTime,
+          onTap: onPickDepartureTime,
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        _Label(c: c, text: tr('add_bus.label.driver_name')),
         const SizedBox(height: UgamSpacing.sm),
         _Field(
           c: c,
           controller: driverName,
-          hint: 'Add later when owner confirms',
+          hint: tr('add_bus.hint.driver_name_plain'),
           textCapitalization: TextCapitalization.words,
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _Label(c: c, text: 'Driver phone'),
+        _Label(c: c, text: tr('add_bus.label.driver_phone')),
         const SizedBox(height: UgamSpacing.sm),
         UgamPhoneInput(controller: driverPhone),
         const SizedBox(height: UgamSpacing.lg),
@@ -838,24 +1010,30 @@ class _ACToggle extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('AC bus',
-                      style:
-                          UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 14)),
+                  Text(
+                    tr('add_bus.ac_toggle.label'),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 14,
+                    ),
+                  ),
                   Text(
                     value
-                        ? 'Air-conditioned coach'
-                        : 'Non-AC / fan-cooled',
-                    style:
-                        UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                        ? tr('add_bus.ac_toggle.on')
+                        : tr('add_bus.ac_toggle.off'),
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontSize: 12,
+                    ),
                   ),
                 ],
               ),
             ),
-            Switch.adaptive(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: c.accent,
-            ),
+            // No per-switch colour overrides — the global SwitchTheme already
+            // renders a white thumb on the accent track. Overriding the thumb
+            // to accent made it orange-on-orange (a solid pill, no visible
+            // thumb).
+            Switch(value: value, onChanged: onChanged),
           ],
         ),
       ),
@@ -869,35 +1047,35 @@ class _ACToggle extends StatelessWidget {
 
 class _Step2Capacity extends StatelessWidget {
   final UgamColorSet c;
-  final BusType busType;
   final int totalSeats;
-  final int seaterCountForMixed;
   final int singleSofaCount;
   final int sleeperSeats;
-  final String mixedSummary;
   final String singleSofaSummary;
   final bool hasOddSleeperBerth;
   final bool hasBalcony;
-  final ValueChanged<BusType> onBusType;
+
+  /// Inline validation caption shown under the single-sofa stepper, or null
+  /// when the value is valid. Replaces the legacy save-time toast.
+  final String? singleSofaError;
+
+  /// Edit-mode resize warning shown above the controls when the bus already has
+  /// passengers seated — changing the size will unassign them. Null hides it.
+  final String? seatedWarning;
   final ValueChanged<int> onTotalSeats;
-  final ValueChanged<int> onSeaterCount;
   final ValueChanged<int> onSingleSofa;
   final ValueChanged<bool> onBalcony;
 
   const _Step2Capacity({
     required this.c,
-    required this.busType,
     required this.totalSeats,
-    required this.seaterCountForMixed,
     required this.singleSofaCount,
     required this.sleeperSeats,
-    required this.mixedSummary,
     required this.singleSofaSummary,
     required this.hasOddSleeperBerth,
     required this.hasBalcony,
-    required this.onBusType,
+    this.singleSofaError,
+    this.seatedWarning,
     required this.onTotalSeats,
-    required this.onSeaterCount,
     required this.onSingleSofa,
     required this.onBalcony,
   });
@@ -915,52 +1093,18 @@ class _Step2Capacity extends StatelessWidget {
       children: [
         _StepIntro(
           c: c,
-          eyebrow: 'CAPACITY',
-          title: 'Pick the layout',
-          body: 'How many seats — and what kind. Once saved, the layout is '
-              'locked because passengers will start holding seat IDs.',
+          eyebrow: tr('add_bus.step2.eyebrow'),
+          title: tr('add_bus.step2.title'),
+          body: tr('add_bus.step2.body'),
         ),
+        if (seatedWarning != null) ...[
+          const SizedBox(height: UgamSpacing.lg),
+          _ResizeWarning(c: c, text: seatedWarning!),
+        ],
         const SizedBox(height: UgamSpacing.xl),
-        _Label(c: c, text: 'Bus type'),
-        const SizedBox(height: UgamSpacing.sm),
-        Row(
-          children: [
-            Expanded(
-              child: _BusTypeCard(
-                c: c,
-                type: BusType.sleeper,
-                active: busType == BusType.sleeper,
-                icon: Icons.bed_rounded,
-                subline: 'berths',
-                onTap: () => onBusType(BusType.sleeper),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: _BusTypeCard(
-                c: c,
-                type: BusType.mixed,
-                active: busType == BusType.mixed,
-                icon: Icons.view_agenda_rounded,
-                subline: 'mix',
-                onTap: () => onBusType(BusType.mixed),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: _BusTypeCard(
-                c: c,
-                type: BusType.seater,
-                active: busType == BusType.seater,
-                icon: Icons.event_seat_rounded,
-                subline: 'seats',
-                onTap: () => onBusType(BusType.seater),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: UgamSpacing.xl),
-        _Label(c: c, text: 'Total seats'),
+        // Every bus in this app is a sleeper coach, so there's no bus-type
+        // picker — the layout is always sleeper berths (single + double sofa).
+        _Label(c: c, text: tr('add_bus.label.total_seats')),
         const SizedBox(height: UgamSpacing.sm),
         _StepperRow(
           c: c,
@@ -969,24 +1113,9 @@ class _Step2Capacity extends StatelessWidget {
           max: 100,
           onChanged: onTotalSeats,
         ),
-        if (busType == BusType.mixed) ...[
-          const SizedBox(height: UgamSpacing.xl),
-          _Label(c: c, text: 'Seater count (rest are sleeper)'),
-          const SizedBox(height: UgamSpacing.sm),
-          _StepperRow(
-            c: c,
-            value: seaterCountForMixed,
-            min: 1,
-            max: totalSeats - 1,
-            onChanged: onSeaterCount,
-          ),
-          const SizedBox(height: UgamSpacing.sm),
-          Text(mixedSummary,
-              style: UgamText.caption.copyWith(color: c.ink2)),
-        ],
         if (sleeperSeats > 0) ...[
           const SizedBox(height: UgamSpacing.xl),
-          _Label(c: c, text: 'Single sofa count (rest become double sofa)'),
+          _Label(c: c, text: tr('add_bus.label.single_sofa_count')),
           const SizedBox(height: UgamSpacing.sm),
           _StepperRow(
             c: c,
@@ -996,14 +1125,20 @@ class _Step2Capacity extends StatelessWidget {
             onChanged: onSingleSofa,
           ),
           const SizedBox(height: UgamSpacing.sm),
-          Text(singleSofaSummary,
-              style: UgamText.caption.copyWith(color: c.ink2)),
+          Text(
+            singleSofaSummary,
+            style: UgamText.caption.copyWith(color: c.ink2),
+          ),
+          if (singleSofaError != null) ...[
+            const SizedBox(height: UgamSpacing.xs),
+            _InlineError(c: c, text: singleSofaError!),
+          ],
           if (hasOddSleeperBerth) ...[
             const SizedBox(height: UgamSpacing.sm),
             _OddBerthWarning(c: c),
           ],
           const SizedBox(height: UgamSpacing.xl),
-          _Label(c: c, text: 'Back row (balcony)'),
+          _Label(c: c, text: tr('add_bus.label.back_row_balcony')),
           const SizedBox(height: UgamSpacing.sm),
           Container(
             padding: const EdgeInsets.symmetric(
@@ -1019,8 +1154,7 @@ class _Step2Capacity extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'Add a full-width back row with an upper + lower berth in '
-                    'the aisle (+2 berths).',
+                    tr('add_bus.balcony_body'),
                     style: UgamText.caption.copyWith(color: c.ink2),
                   ),
                 ),
@@ -1032,6 +1166,41 @@ class _Step2Capacity extends StatelessWidget {
         ],
         const SizedBox(height: UgamSpacing.xl),
       ],
+    );
+  }
+}
+
+/// Edit-mode caution shown above the capacity controls when the bus already has
+/// passengers seated: resizing renumbers the seats, so those people will be
+/// unassigned (and returned to the pool) if the admin changes the size.
+class _ResizeWarning extends StatelessWidget {
+  final UgamColorSet c;
+  final String text;
+
+  const _ResizeWarning({required this.c, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      decoration: BoxDecoration(
+        color: c.warmFill,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        border: Border.all(color: c.warm.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 16, color: c.warm),
+          const SizedBox(width: UgamSpacing.sm),
+          Expanded(
+            child: Text(
+              text,
+              style: UgamText.caption.copyWith(color: c.ink2, height: 1.4),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1059,93 +1228,11 @@ class _OddBerthWarning extends StatelessWidget {
           const SizedBox(width: UgamSpacing.sm),
           Expanded(
             child: Text(
-              'Odd sleeper count — one berth can’t pair into a double, so '
-              'it’s placed as an extra single sofa. Adjust the counts if '
-              'that’s not what you want.',
+              tr('add_bus.odd_berth_warning'),
               style: UgamText.caption.copyWith(color: c.ink2, height: 1.4),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _BusTypeCard extends StatelessWidget {
-  final UgamColorSet c;
-  final BusType type;
-  final bool active;
-  final IconData icon;
-  final String subline;
-  final VoidCallback onTap;
-
-  const _BusTypeCard({
-    required this.c,
-    required this.type,
-    required this.active,
-    required this.icon,
-    required this.subline,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: UgamMotion.tab,
-        curve: UgamMotion.easeOut,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.sm,
-          vertical: UgamSpacing.lg,
-        ),
-        decoration: BoxDecoration(
-          color: active ? c.accentFill : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.card),
-          border: Border.all(
-            color: active ? c.accent : c.border,
-            width: active ? 1.6 : 1,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: active ? c.accent : c.card,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                icon,
-                size: 20,
-                color: active ? c.onAccent : c.ink,
-              ),
-            ),
-            const SizedBox(height: UgamSpacing.sm),
-            Text(
-              type.displayName,
-              style: UgamText.titleS.copyWith(
-                color: active ? c.accent : c.ink,
-                fontSize: 13,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              subline,
-              style: UgamText.micro.copyWith(
-                color: active ? c.accent : c.ink3,
-                fontSize: 9.5,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1230,11 +1317,7 @@ class _StepperBtn extends StatelessWidget {
         width: 56,
         height: 56,
         alignment: Alignment.center,
-        child: Icon(
-          icon,
-          size: 20,
-          color: enabled ? c.ink : c.ink3,
-        ),
+        child: Icon(icon, size: 20, color: enabled ? c.ink : c.ink3),
       ),
     );
   }
@@ -1247,9 +1330,9 @@ class _StepperBtn extends StatelessWidget {
 class _Step3Price extends StatefulWidget {
   final UgamColorSet c;
   final TextEditingController price;
+  final TextEditingController busPrice;
   final TextEditingController singleSofaPrice;
   final TextEditingController doubleSofaPrice;
-  final TextEditingController seaterPrice;
   final TextEditingController rearRows;
   final TextEditingController rearPrice;
 
@@ -1272,9 +1355,9 @@ class _Step3Price extends StatefulWidget {
   const _Step3Price({
     required this.c,
     required this.price,
+    required this.busPrice,
     required this.singleSofaPrice,
     required this.doubleSofaPrice,
-    required this.seaterPrice,
     required this.rearRows,
     required this.rearPrice,
     required this.priceBands,
@@ -1300,9 +1383,9 @@ class _Step3PriceState extends State<_Step3Price> {
   void initState() {
     super.initState();
     // Auto-expand the per-type overrides if any are already set (edit mode).
-    _overridesOpen = widget.singleSofaPrice.text.trim().isNotEmpty ||
-        widget.doubleSofaPrice.text.trim().isNotEmpty ||
-        widget.seaterPrice.text.trim().isNotEmpty;
+    _overridesOpen =
+        widget.singleSofaPrice.text.trim().isNotEmpty ||
+        widget.doubleSofaPrice.text.trim().isNotEmpty;
     // Auto-expand price bands when the bus already carries some.
     _bandsOpen = widget.priceBands.isNotEmpty;
   }
@@ -1337,9 +1420,9 @@ class _Step3PriceState extends State<_Step3Price> {
   UgamColorSet get c => widget.c;
   Tour? get tour => widget.tour;
   TextEditingController get price => widget.price;
+  TextEditingController get busPrice => widget.busPrice;
   TextEditingController get singleSofaPrice => widget.singleSofaPrice;
   TextEditingController get doubleSofaPrice => widget.doubleSofaPrice;
-  TextEditingController get seaterPrice => widget.seaterPrice;
   TextEditingController get rearRows => widget.rearRows;
   TextEditingController get rearPrice => widget.rearPrice;
   String get slotLabel => widget.slotLabel;
@@ -1387,9 +1470,10 @@ class _Step3PriceState extends State<_Step3Price> {
     final per = _parsedPrice;
     final ifFull = per * totalSeats;
     final hint = tour != null && tour!.pricePerSeat > 0
-        ? tr('add_bus.hint.price_default', namedArgs: {
-            'price': tour!.pricePerSeat.toStringAsFixed(0),
-          })
+        ? tr(
+            'add_bus.hint.price_default',
+            namedArgs: {'price': tour!.pricePerSeat.toStringAsFixed(0)},
+          )
         : tr('add_bus.hint.price_plain');
 
     return ListView(
@@ -1403,18 +1487,31 @@ class _Step3PriceState extends State<_Step3Price> {
       children: [
         _StepIntro(
           c: c,
-          eyebrow: 'PRICE',
-          title: 'Set the per-seat price',
-          body: 'Defaults to the tour-level price. Overriding here only '
-              'affects this bus.',
+          eyebrow: tr('add_bus.step3.eyebrow'),
+          title: tr('add_bus.step3.title'),
+          body: tr('add_bus.step3.body'),
         ),
         const SizedBox(height: UgamSpacing.xl),
-        _Label(c: c, text: 'Price per seat'),
+        _Label(c: c, text: tr('add_bus.label.price_per_seat')),
         const SizedBox(height: UgamSpacing.sm),
         _Field(
           c: c,
           controller: price,
           hint: hint,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+          ],
+          prefix: '₹',
+          onChanged: (_) => onChanged(),
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        _Label(c: c, text: tr('add_bus.label.bus_price')),
+        const SizedBox(height: UgamSpacing.sm),
+        _Field(
+          c: c,
+          controller: busPrice,
+          hint: tr('add_bus.hint.bus_price'),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
@@ -1440,19 +1537,18 @@ class _Step3PriceState extends State<_Step3Price> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('PREVIEW',
-                  style: UgamText.micro.copyWith(color: c.ink3)),
-              const SizedBox(height: UgamSpacing.sm),
               Text(
-                slotLabel,
-                style: UgamText.titleM.copyWith(color: c.ink),
+                tr('add_bus.preview.eyebrow'),
+                style: UgamText.micro.copyWith(color: c.ink3),
               ),
+              const SizedBox(height: UgamSpacing.sm),
+              Text(slotLabel, style: UgamText.titleM.copyWith(color: c.ink)),
               const SizedBox(height: 2),
               Text(
                 [
                   if (busNumber.isNotEmpty) busNumber,
-                  isAC ? 'AC' : 'Non-AC',
-                  '$totalSeats seats',
+                  isAC ? tr('add_bus.ac') : tr('add_bus.non_ac'),
+                  tr('add_bus.seats_count', namedArgs: {'count': '$totalSeats'}),
                 ].join(' · '),
                 style: UgamText.caption.copyWith(color: c.ink2),
               ),
@@ -1465,14 +1561,21 @@ class _Step3PriceState extends State<_Step3Price> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.calculate_rounded,
-                        size: 18, color: c.accent),
+                    Icon(Icons.calculate_rounded, size: 18, color: c.accent),
                     const SizedBox(width: UgamSpacing.sm),
                     Expanded(
                       child: Text(
-                        '$totalSeats seats × ₹${per.toStringAsFixed(0)}',
-                        style: UgamText.bodyStrong
-                            .copyWith(color: c.ink, fontSize: 13),
+                        tr(
+                          'add_bus.preview.seats_times_price',
+                          namedArgs: {
+                            'count': '$totalSeats',
+                            'price': per.toStringAsFixed(0),
+                          },
+                        ),
+                        style: UgamText.bodyStrong.copyWith(
+                          color: c.ink,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                     Text(
@@ -1486,7 +1589,7 @@ class _Step3PriceState extends State<_Step3Price> {
               ),
               const SizedBox(height: UgamSpacing.sm),
               Text(
-                'if fully booked',
+                tr('add_bus.preview.if_fully_booked'),
                 style: UgamText.caption.copyWith(color: c.ink3, fontSize: 11),
               ),
             ],
@@ -1521,7 +1624,10 @@ class _Step3PriceState extends State<_Step3Price> {
           controller: this.rearRows,
           hint: rowCount == null
               ? tr('add_bus.hint.rear_rows')
-              : tr('add_bus.hint.rear_rows_max', namedArgs: {'max': '$rowCount'}),
+              : tr(
+                  'add_bus.hint.rear_rows_max',
+                  namedArgs: {'max': '$rowCount'},
+                ),
           keyboardType: const TextInputType.numberWithOptions(decimal: false),
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[0-9]')),
@@ -1545,7 +1651,8 @@ class _Step3PriceState extends State<_Step3Price> {
                       controller: rearPrice,
                       hint: tr('add_bus.hint.rear_price'),
                       keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true),
+                        decimal: true,
+                      ),
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                       ],
@@ -1553,7 +1660,11 @@ class _Step3PriceState extends State<_Step3Price> {
                       onChanged: (_) => onChanged(),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
-                    _RearZoneLegend(c: c, rearRows: rearRows, layout: widget.layout),
+                    _RearZoneLegend(
+                      c: c,
+                      rearRows: rearRows,
+                      layout: widget.layout,
+                    ),
                   ],
                 )
               : const SizedBox.shrink(),
@@ -1597,9 +1708,11 @@ class _Step3PriceState extends State<_Step3Price> {
                         Row(
                           children: [
                             Text(
-                              'Price bands',
-                              style: UgamText.bodyStrong
-                                  .copyWith(color: c.ink, fontSize: 14),
+                              tr('add_bus.bands.title'),
+                              style: UgamText.bodyStrong.copyWith(
+                                color: c.ink,
+                                fontSize: 14,
+                              ),
                             ),
                             if (_bands.isNotEmpty) ...[
                               const SizedBox(width: UgamSpacing.sm),
@@ -1610,8 +1723,9 @@ class _Step3PriceState extends State<_Step3Price> {
                                 ),
                                 decoration: BoxDecoration(
                                   color: c.accentFill,
-                                  borderRadius:
-                                      BorderRadius.circular(UgamRadius.chip),
+                                  borderRadius: BorderRadius.circular(
+                                    UgamRadius.chip,
+                                  ),
                                 ),
                                 child: Text(
                                   '${_bands.length}',
@@ -1625,8 +1739,7 @@ class _Step3PriceState extends State<_Step3Price> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Premium front rows or a discounted back range — '
-                          'price set per person.',
+                          tr('add_bus.bands.subtitle'),
                           style: UgamText.caption.copyWith(color: c.ink2),
                         ),
                       ],
@@ -1679,19 +1792,25 @@ class _Step3PriceState extends State<_Step3Price> {
                             ),
                             decoration: BoxDecoration(
                               color: c.accentFill,
-                              borderRadius:
-                                  BorderRadius.circular(UgamRadius.row),
+                              borderRadius: BorderRadius.circular(
+                                UgamRadius.row,
+                              ),
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.add_rounded,
-                                    size: 18, color: c.accent),
+                                Icon(
+                                  Icons.add_rounded,
+                                  size: 18,
+                                  color: c.accent,
+                                ),
                                 const SizedBox(width: UgamSpacing.sm),
                                 Text(
-                                  'Add price band',
-                                  style: UgamText.bodyStrong
-                                      .copyWith(color: c.accent, fontSize: 13),
+                                  tr('add_bus.bands.add'),
+                                  style: UgamText.bodyStrong.copyWith(
+                                    color: c.accent,
+                                    fontSize: 13,
+                                  ),
                                 ),
                               ],
                             ),
@@ -1700,9 +1819,8 @@ class _Step3PriceState extends State<_Step3Price> {
                         if (rowCount == null) ...[
                           const SizedBox(height: UgamSpacing.sm),
                           Text(
-                            'Rows are clamped to the bus once it is built.',
-                            style:
-                                UgamText.micro.copyWith(color: c.ink3),
+                            tr('add_bus.bands.rows_clamped_note'),
+                            style: UgamText.micro.copyWith(color: c.ink3),
                           ),
                         ],
                       ],
@@ -1724,17 +1842,22 @@ class _Step3PriceState extends State<_Step3Price> {
     final labelCtrl = TextEditingController(text: existing?.label ?? '');
     // Display rows 1-based to the agent; store 0-based.
     final fromCtrl = TextEditingController(
-        text: existing != null ? '${existing.fromRow + 1}' : '');
+      text: existing != null ? '${existing.fromRow + 1}' : '',
+    );
     final toCtrl = TextEditingController(
-        text: existing != null ? '${existing.toRow + 1}' : '');
+      text: existing != null ? '${existing.toRow + 1}' : '',
+    );
     final priceCtrl = TextEditingController(
-        text: existing != null && existing.price > 0
-            ? existing.price.toStringAsFixed(0)
-            : '');
+      text: existing != null && existing.price > 0
+          ? existing.price.toStringAsFixed(0)
+          : '',
+    );
 
     UgamSheet.show<void>(
       context,
-      title: existing == null ? 'Add price band' : 'Edit price band',
+      title: existing == null
+          ? tr('add_bus.band_sheet.title_add')
+          : tr('add_bus.band_sheet.title_edit'),
       builder: (sheetCtx) {
         final sc = UgamColors.of(sheetCtx);
         return SingleChildScrollView(
@@ -1747,9 +1870,13 @@ class _Step3PriceState extends State<_Step3Price> {
               }
 
               final from = parseRow(fromCtrl);
-              final to = parseRow(toCtrl);
+              // Blank "To row" → a single-row band (just the From row), so
+              // pricing one seat/row (e.g. row 5) is "From 5", To left empty.
+              final to =
+                  toCtrl.text.trim().isEmpty ? from : parseRow(toCtrl);
               final price = double.tryParse(priceCtrl.text.trim()) ?? 0;
-              final valid = from != null &&
+              final valid =
+                  from != null &&
                   to != null &&
                   from >= 0 &&
                   to >= 0 &&
@@ -1759,12 +1886,12 @@ class _Step3PriceState extends State<_Step3Price> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _Label(c: sc, text: 'Label'),
+                  _Label(c: sc, text: tr('add_bus.band_sheet.label')),
                   const SizedBox(height: UgamSpacing.sm),
                   _Field(
                     c: sc,
                     controller: labelCtrl,
-                    hint: 'e.g. Front premium',
+                    hint: tr('add_bus.band_sheet.label_hint'),
                     textCapitalization: TextCapitalization.words,
                     onChanged: (_) => setSheetState(() {}),
                   ),
@@ -1776,17 +1903,20 @@ class _Step3PriceState extends State<_Step3Price> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _Label(c: sc, text: 'From row'),
+                            _Label(c: sc, text: tr('add_bus.band_sheet.from_row')),
                             const SizedBox(height: UgamSpacing.sm),
                             _Field(
                               c: sc,
                               controller: fromCtrl,
                               hint: '1',
-                              keyboardType: const TextInputType
-                                  .numberWithOptions(decimal: false),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: false,
+                                  ),
                               inputFormatters: [
                                 FilteringTextInputFormatter.allow(
-                                    RegExp(r'[0-9]')),
+                                  RegExp(r'[0-9]'),
+                                ),
                               ],
                               onChanged: (_) => setSheetState(() {}),
                             ),
@@ -1798,17 +1928,20 @@ class _Step3PriceState extends State<_Step3Price> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _Label(c: sc, text: 'To row'),
+                            _Label(c: sc, text: tr('add_bus.band_sheet.to_row')),
                             const SizedBox(height: UgamSpacing.sm),
                             _Field(
                               c: sc,
                               controller: toCtrl,
-                              hint: maxRow == null ? '2' : '${maxRow + 1}',
-                              keyboardType: const TextInputType
-                                  .numberWithOptions(decimal: false),
+                              hint: tr('add_bus.band_sheet.to_row_hint'),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: false,
+                                  ),
                               inputFormatters: [
                                 FilteringTextInputFormatter.allow(
-                                    RegExp(r'[0-9]')),
+                                  RegExp(r'[0-9]'),
+                                ),
                               ],
                               onChanged: (_) => setSheetState(() {}),
                             ),
@@ -1820,20 +1953,23 @@ class _Step3PriceState extends State<_Step3Price> {
                   const SizedBox(height: UgamSpacing.sm),
                   Text(
                     maxRow == null
-                        ? 'Rows are 1-based. The range clamps to the bus once '
-                            'it is built.'
-                        : 'Rows are 1-based, 1 to ${maxRow + 1}.',
+                        ? tr('add_bus.band_sheet.rows_help')
+                        : tr(
+                            'add_bus.band_sheet.rows_help_max',
+                            namedArgs: {'max': '${maxRow + 1}'},
+                          ),
                     style: UgamText.micro.copyWith(color: sc.ink3),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
-                  _Label(c: sc, text: 'Price per person'),
+                  _Label(c: sc, text: tr('add_bus.band_sheet.price_per_person')),
                   const SizedBox(height: UgamSpacing.sm),
                   _Field(
                     c: sc,
                     controller: priceCtrl,
-                    hint: 'e.g. 1500',
+                    hint: tr('add_bus.band_sheet.price_hint'),
                     keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
+                      decimal: true,
+                    ),
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                     ],
@@ -1842,7 +1978,9 @@ class _Step3PriceState extends State<_Step3Price> {
                   ),
                   const SizedBox(height: UgamSpacing.xl),
                   UgamCTA(
-                    label: existing == null ? 'Add band' : 'Save band',
+                    label: existing == null
+                        ? tr('add_bus.band_sheet.cta_add')
+                        : tr('add_bus.band_sheet.cta_save'),
                     onPressed: valid
                         ? () {
                             // `valid` promotes both from/to to non-null here.
@@ -1855,7 +1993,7 @@ class _Step3PriceState extends State<_Step3Price> {
                               hi = hi.clamp(0, maxRow);
                             }
                             final label = labelCtrl.text.trim().isEmpty
-                                ? 'Band'
+                                ? tr('add_bus.band_sheet.default_label')
                                 : labelCtrl.text.trim();
                             final band = PriceBand(
                               label: label,
@@ -1912,8 +2050,10 @@ class _Step3PriceState extends State<_Step3Price> {
                       children: [
                         Text(
                           tr('add_bus.section.overrides_title'),
-                          style: UgamText.bodyStrong
-                              .copyWith(color: c.ink, fontSize: 14),
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.ink,
+                            fontSize: 14,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -1950,46 +2090,37 @@ class _Step3PriceState extends State<_Step3Price> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _Label(c: c, text: 'Single sofa price'),
+                        _Label(c: c, text: tr('add_bus.overrides.single_price')),
                         const SizedBox(height: UgamSpacing.sm),
                         _Field(
                           c: c,
                           controller: singleSofaPrice,
-                          hint: 'Defaults to base price',
+                          hint: tr('add_bus.overrides.defaults_to_base'),
                           keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
+                            decimal: true,
+                          ),
                           inputFormatters: [
-                            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'[0-9.]'),
+                            ),
                           ],
                           prefix: '₹',
                           onChanged: (_) => onChanged(),
                         ),
                         const SizedBox(height: UgamSpacing.lg),
-                        _Label(c: c, text: 'Double sofa price'),
+                        _Label(c: c, text: tr('add_bus.overrides.double_price')),
                         const SizedBox(height: UgamSpacing.sm),
                         _Field(
                           c: c,
                           controller: doubleSofaPrice,
-                          hint: 'Defaults to base price',
+                          hint: tr('add_bus.overrides.defaults_to_base'),
                           keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
+                            decimal: true,
+                          ),
                           inputFormatters: [
-                            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                          ],
-                          prefix: '₹',
-                          onChanged: (_) => onChanged(),
-                        ),
-                        const SizedBox(height: UgamSpacing.lg),
-                        _Label(c: c, text: 'Seater price'),
-                        const SizedBox(height: UgamSpacing.sm),
-                        _Field(
-                          c: c,
-                          controller: seaterPrice,
-                          hint: 'Defaults to base price',
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          inputFormatters: [
-                            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'[0-9.]'),
+                            ),
                           ],
                           prefix: '₹',
                           onChanged: (_) => onChanged(),
@@ -2042,14 +2173,18 @@ class _RearZoneLegend extends StatelessWidget {
               Expanded(
                 child: Text(
                   l == null
-                      ? tr('add_bus.rear_zone.legend_plain',
-                          namedArgs: {'rows': '$rearRows'})
-                      : tr('add_bus.rear_zone.legend', namedArgs: {
-                          'rows': '$rearRows',
-                          'total': '${l.rows}',
-                        }),
-                  style:
-                      UgamText.caption.copyWith(color: c.ink2, height: 1.4),
+                      ? tr(
+                          'add_bus.rear_zone.legend_plain',
+                          namedArgs: {'rows': '$rearRows'},
+                        )
+                      : tr(
+                          'add_bus.rear_zone.legend',
+                          namedArgs: {
+                            'rows': '$rearRows',
+                            'total': '${l.rows}',
+                          },
+                        ),
+                  style: UgamText.caption.copyWith(color: c.ink2, height: 1.4),
                 ),
               ),
             ],
@@ -2111,8 +2246,11 @@ class _BandRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rangeLabel = band.fromRow == band.toRow
-        ? 'Row ${band.fromRow + 1}'
-        : 'Rows ${band.fromRow + 1}–${band.toRow + 1}';
+        ? tr('add_bus.band_row.single', namedArgs: {'row': '${band.fromRow + 1}'})
+        : tr(
+            'add_bus.band_row.range',
+            namedArgs: {'from': '${band.fromRow + 1}', 'to': '${band.toRow + 1}'},
+          );
     return GestureDetector(
       onTap: onEdit,
       behavior: HitTestBehavior.opaque,
@@ -2131,8 +2269,13 @@ class _BandRow extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    band.label.isEmpty ? 'Band' : band.label,
-                    style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                    band.label.isEmpty
+                        ? tr('add_bus.band_sheet.default_label')
+                        : band.label,
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 13,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -2192,9 +2335,14 @@ class _StepIntro extends StatelessWidget {
         const SizedBox(height: UgamSpacing.sm),
         Text(title, style: UgamText.titleXl.copyWith(color: c.ink)),
         const SizedBox(height: UgamSpacing.sm),
-        Text(body,
-            style: UgamText.body
-                .copyWith(color: c.ink2, fontSize: 13, height: 1.5)),
+        Text(
+          body,
+          style: UgamText.body.copyWith(
+            color: c.ink2,
+            fontSize: 13,
+            height: 1.5,
+          ),
+        ),
       ],
     );
   }
@@ -2203,15 +2351,41 @@ class _StepIntro extends StatelessWidget {
 class _Label extends StatelessWidget {
   final UgamColorSet c;
   final String text;
-  const _Label({
-    required this.c,
-    required this.text,
-  });
+  const _Label({required this.c, required this.text});
 
   @override
   Widget build(BuildContext context) {
-    return Text(text.toUpperCase(),
-        style: UgamText.micro.copyWith(color: c.ink2));
+    return Text(
+      text.toUpperCase(),
+      style: UgamText.micro.copyWith(color: c.ink2),
+    );
+  }
+}
+
+/// Small inline validation caption (danger-tinted) shown beneath a non-input
+/// control — used in place of a save-time error toast for layout/stepper
+/// validations that can't attach to a UgamInput errorText.
+class _InlineError extends StatelessWidget {
+  final UgamColorSet c;
+  final String text;
+
+  const _InlineError({required this.c, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.error_outline_rounded, size: 14, color: c.danger),
+        const SizedBox(width: UgamSpacing.xs),
+        Expanded(
+          child: Text(
+            text,
+            style: UgamText.caption.copyWith(color: c.danger, height: 1.35),
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -2245,10 +2419,62 @@ class _SlotBadge extends StatelessWidget {
           ),
           const SizedBox(width: UgamSpacing.sm),
           Text(
-            'auto',
+            tr('add_bus.slot_auto'),
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Tap target mirroring [_Field] for a time-of-day. Shows a locale-aware
+/// period-word time (via [formatHhMm]) once picked, or the hint while unset.
+class _TimeField extends StatelessWidget {
+  final UgamColorSet c;
+  final String hint;
+  final TimeOfDay? time;
+  final VoidCallback onTap;
+
+  const _TimeField({
+    required this.c,
+    required this.hint,
+    required this.time,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = time;
+    final label = t != null ? formatHhMm(hhmmFromTimeOfDay(t)) : null;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.lg,
+          vertical: UgamSpacing.lg,
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.access_time_rounded, size: 18, color: c.ink2),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: Text(
+                label ?? hint,
+                style: UgamText.body.copyWith(
+                  color: label != null ? c.ink : c.ink3,
+                  fontSize: 15,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

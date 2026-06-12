@@ -210,6 +210,76 @@ void main() {
     });
   });
 
+  // A deliberate manual move by the agent (sourceBusId provided) relaxes the
+  // protection: priority is always displaceable, and a grouped occupant is
+  // displaceable when the move is SAME-bus (the group never leaves the bus).
+  group('manual move relaxes protection (sourceBusId)', () {
+    test('SAME-bus manual: a grouped occupant becomes movable, not blocked', () {
+      final bus = _bus('b1', [
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+      ]);
+      final occupant = _p('o1',
+          assigned: [_a('b1', 'SU1')], groupId: 'Patel', name: 'Asha');
+      final mover = _p('m1',
+          lines: [_line(SeatType.singleSofa, SeatPosition.upper, 1)]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [occupant, mover],
+        sourceBusId: 'b1', // same bus as destination
+      );
+
+      expect(r.blocked, isEmpty);
+      expect(r.movable.single.passengerId, 'o1');
+    });
+
+    test('CROSS-bus manual: a grouped occupant stays blocked (group must move whole)',
+        () {
+      final bus = _bus('b2', [
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+      ]);
+      final occupant = _p('o1',
+          assigned: [_a('b2', 'SU1')], groupId: 'Patel', name: 'Asha');
+      final mover = _p('m1',
+          lines: [_line(SeatType.singleSofa, SeatPosition.upper, 1)]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [occupant, mover],
+        sourceBusId: 'b1', // different bus -> cross-bus
+      );
+
+      expect(r.movable, isEmpty);
+      expect(r.blocked.single.reason, 'in group Patel');
+    });
+
+    test('manual move: an approved-priority occupant becomes movable (any bus)',
+        () {
+      final bus = _bus('b2', [
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+      ]);
+      final occupant = _p('o1',
+          assigned: [_a('b2', 'SU1')],
+          priority: PriorityStatus.approved,
+          name: 'Dada');
+      final mover = _p('m1',
+          lines: [_line(SeatType.singleSofa, SeatPosition.upper, 1)]);
+
+      // Even cross-bus, a deliberate manual move may displace a priority person.
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [occupant, mover],
+        sourceBusId: 'b1',
+      );
+
+      expect(r.blocked, isEmpty);
+      expect(r.movable.single.passengerId, 'o1');
+    });
+  });
+
   group('type-compatibility + ranking', () {
     test('exact type+position occupant ranks above type-only occupant', () {
       final bus = _bus('b1', [

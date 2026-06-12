@@ -6,12 +6,15 @@ import '../screens/admin_setup_screen.dart';
 import '../screens/customer_tour_list_screen.dart';
 import '../screens/customer_my_requests_screen.dart';
 import '../screens/create_tour_screen.dart';
-import '../screens/tour_seat_assignment_screen.dart';
-import '../screens/tour_overview_screen.dart';
+import '../screens/seats_screen.dart';
 import '../screens/seating_exceptions_screen.dart';
-import '../screens/seat_detail_screen.dart';
 import '../screens/tour_groups_screen.dart';
 import '../screens/tour_money_board_screen.dart';
+import '../screens/account_details_screen.dart';
+import '../screens/whatsapp_settings_screen.dart';
+import '../screens/payment_settings_screen.dart';
+import '../screens/notifications_settings_screen.dart';
+import '../screens/finance_screen.dart';
 
 class AppRoutes {
   static const String splash = '/splash';
@@ -24,9 +27,13 @@ class AppRoutes {
   static const String seatAssignment = '/seat-assignment';
   static const String tourOverview = '/tour-overview';
   static const String seatingExceptions = '/seating-exceptions';
-  static const String seatDetail = '/seat-detail';
   static const String tourGroups = '/tour-groups';
   static const String tourMoney = '/tour-money';
+  static const String accountDetails = '/settings/account';
+  static const String whatsappSettings = '/settings/whatsapp';
+  static const String paymentSettings = '/settings/payment';
+  static const String notificationsSettings = '/settings/notifications';
+  static const String finance = '/settings/finance';
 
   static final routes = [
     GetPage(name: splash, page: () => const SplashScreen()),
@@ -43,9 +50,11 @@ class AppRoutes {
       name: seatAssignment,
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
-        return TourSeatAssignmentScreen(
+        return SeatsScreen(
           tourId: (args?['tourId'] as String?) ?? '',
+          initialMode: SeatsMode.grid,
           initialPassengerId: args?['passengerId'] as String?,
+          initialBusId: args?['busId'] as String?,
         );
       },
     ),
@@ -53,8 +62,9 @@ class AppRoutes {
       name: tourOverview,
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
-        return TourOverviewScreen(
+        return SeatsScreen(
           tourId: (args?['tourId'] as String?) ?? '',
+          initialMode: SeatsMode.summary,
         );
       },
     ),
@@ -64,16 +74,6 @@ class AppRoutes {
         final args = Get.arguments as Map<String, dynamic>?;
         return SeatingExceptionsScreen(
           tourId: (args?['tourId'] as String?) ?? '',
-        );
-      },
-    ),
-    GetPage(
-      name: seatDetail,
-      page: () {
-        final args = Get.arguments as Map<String, dynamic>?;
-        return SeatDetailScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
-          busId: (args?['busId'] as String?) ?? '',
         );
       },
     ),
@@ -94,6 +94,26 @@ class AppRoutes {
           tourId: (args?['tourId'] as String?) ?? '',
         );
       },
+    ),
+    GetPage(
+      name: accountDetails,
+      page: () => const AccountDetailsScreen(),
+    ),
+    GetPage(
+      name: whatsappSettings,
+      page: () => const WhatsAppSettingsScreen(),
+    ),
+    GetPage(
+      name: paymentSettings,
+      page: () => const PaymentSettingsScreen(),
+    ),
+    GetPage(
+      name: notificationsSettings,
+      page: () => const NotificationsSettingsScreen(),
+    ),
+    GetPage(
+      name: finance,
+      page: () => const FinanceScreen(),
     ),
   ];
 }

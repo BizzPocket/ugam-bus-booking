@@ -1,13 +1,21 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
+import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../services/chart_footer_store.dart';
+import '../services/seat_chart_pdf.dart';
+import '../services/whatsapp_cloud_service.dart';
+import '../services/whatsapp_outbound.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
@@ -19,7 +27,12 @@ import '../utils/passenger_display.dart';
 ///   * LOCKED → tracker (hero summary card, progress bar, filter pills,
 ///     collapsible search, flat passenger list, bulk send CTA)
 class NotifyScreen extends StatefulWidget {
-  const NotifyScreen({super.key});
+  /// When set, the screen is locked to this one tour (tour-first workspace
+  /// entry) — the internal tour selector is hidden and a back button appears.
+  /// Null is the legacy global mode (no longer used by the nav, kept harmless).
+  final String? tourId;
+
+  const NotifyScreen({super.key, this.tourId});
 
   @override
   State<NotifyScreen> createState() => _NotifyScreenState();
@@ -37,6 +50,15 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
   String? _selectedTourId;
   _NotifyFilter _filter = _NotifyFilter.all;
+
+  /// True when launched as a tour-scoped, pushed screen (vs the old tab).
+  bool get _scoped => widget.tourId != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTourId = widget.tourId;
+  }
 
   @override
   void dispose() {
@@ -65,6 +87,65 @@ class _NotifyScreenState extends State<NotifyScreen> {
     required String driverName,
     required String? driverPhone,
   }) async {
+    // Try sharing the highlighted seating chart image(s) + ticket caption via
+    // the OS share sheet. If the chart can't be built (no seats, font/raster
+    // failure), fall back to the text-only WhatsApp deep-link below.
+    final caption = WhatsAppService().buildTicketMessage(
+      passenger: p,
+      tour: tour,
+      busNumber: busNo,
+      driverName: driverName,
+      driverPhone: driverPhone,
+      handlerPhone: tour.handler?.phone,
+    );
+
+    // The handler coordinates the whole bus, so they get the full chart of
+    // everyone with NO highlight. Every other passenger gets their own bus with
+    // their seats highlighted.
+    final isHandler = tour.handlerId != null && p.id == tour.handlerId;
+
+    List<Uint8List> images = const [];
+    try {
+      final footer = await ChartFooterStore.load(tour.id);
+      images = isHandler
+          ? await SeatChartPdf.buildTourChartImages(tour: tour, footer: footer)
+          : await SeatChartPdf.buildPassengerChartImages(
+              tour: tour,
+              passenger: p,
+              footer: footer,
+            );
+    } catch (_) {
+      images = const [];
+    }
+    if (!mounted) return;
+
+    if (images.isNotEmpty) {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            for (final (i, png) in images.indexed)
+              XFile.fromData(
+                png,
+                name: 'seating_${i + 1}.png',
+                mimeType: 'image/png',
+              ),
+          ],
+          text: caption,
+        ),
+      );
+      if (!mounted) return;
+      _onSent(p.id);
+      AppSnackBar.success(
+        tr('notify.send_now_help'),
+        title: tr(
+          'notify.send_now_opened_title',
+          namedArgs: {'name': p.displayName},
+        ),
+      );
+      return;
+    }
+
+    // Fallback: text-only WhatsApp deep-link (unchanged behaviour).
     final ok = await WhatsAppService().sendToPassenger(
       passenger: p,
       tour: tour,
@@ -78,34 +159,13 @@ class _NotifyScreenState extends State<NotifyScreen> {
       _onSent(p.id);
       AppSnackBar.success(
         tr('notify.send_now_help'),
-        title: tr('notify.send_now_opened_title',
-            namedArgs: {'name': p.displayName}),
+        title: tr(
+          'notify.send_now_opened_title',
+          namedArgs: {'name': p.displayName},
+        ),
       );
     } else {
       AppSnackBar.error(tr('notify.whatsapp_unavailable'));
-    }
-  }
-
-  Future<void> _sendAllPending({
-    required Tour tour,
-    required List<Passenger> assigned,
-    required String busNo,
-    required String driverName,
-    required String? driverPhone,
-  }) async {
-    final pending =
-        assigned.where((p) => !_sentIds.contains(p.id)).toList();
-    if (pending.isEmpty) return;
-    HapticFeedback.lightImpact();
-    for (final p in pending) {
-      await _sendOne(
-        p,
-        tour: tour,
-        busNo: busNo,
-        driverName: driverName,
-        driverPhone: driverPhone,
-      );
-      if (!mounted) return;
     }
   }
 
@@ -120,16 +180,17 @@ class _NotifyScreenState extends State<NotifyScreen> {
       body: SafeArea(
         bottom: false,
         child: Obx(() {
-          final activeTours = tourCtrl.tours
-              .where((t) => t.status != TourStatus.completed)
-              .toList()
-            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          final activeTours =
+              tourCtrl.tours
+                  .where((t) => t.status != TourStatus.completed)
+                  .toList()
+                ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
           final selected = _selectedTourId != null
               ? activeTours.firstWhereOrNull((t) => t.id == _selectedTourId)
               : null;
-          final Tour? tour = selected ??
-              (activeTours.isEmpty ? null : activeTours.first);
+          final Tour? tour =
+              selected ?? (activeTours.isEmpty ? null : activeTours.first);
 
           if (tour == null) {
             return Column(
@@ -141,6 +202,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                   showSearch: false,
                   onReset: null,
                   showReset: false,
+                  onBack: _scoped ? () => Get.back() : null,
                 ),
                 Expanded(
                   child: UgamEmpty(
@@ -157,8 +219,9 @@ class _NotifyScreenState extends State<NotifyScreen> {
           final assigned = tour.passengers
               .where((p) => p.assignedSeats.isNotEmpty)
               .toList();
-          final sentCount =
-              assigned.where((p) => _sentIds.contains(p.id)).length;
+          final sentCount = assigned
+              .where((p) => _sentIds.contains(p.id))
+              .length;
           final pendingCount = assigned.length - sentCount;
 
           final busInfo = _resolveBusInfo(tour);
@@ -174,6 +237,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                     showSearch: isLocked,
                     onReset: _resetSent,
                     showReset: isLocked && _sentIds.isNotEmpty,
+                    onBack: _scoped ? () => Get.back() : null,
                   ),
                   if (isLocked)
                     AnimatedSize(
@@ -188,7 +252,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
                             )
                           : const SizedBox.shrink(),
                     ),
-                  if (activeTours.length > 1)
+                  if (!_scoped && activeTours.length > 1)
                     _TourSelector(
                       c: c,
                       tours: activeTours,
@@ -221,16 +285,10 @@ class _NotifyScreenState extends State<NotifyScreen> {
                   bottom: 0,
                   child: UgamStickyCTA(
                     child: UgamCTA(
-                      label: 'Send to all pending',
+                      label: tr('notify.send_all_pending'),
                       leadingIcon: Icons.chat_rounded,
                       trailingValue: '$pendingCount',
-                      onPressed: () => _sendAllPending(
-                        tour: tour,
-                        assigned: assigned,
-                        busNo: busInfo.busNo,
-                        driverName: busInfo.driverName,
-                        driverPhone: busInfo.driverPhone,
-                      ),
+                      onPressed: () => _sendSeatAllocations(tour),
                     ),
                   ),
                 ),
@@ -276,10 +334,12 @@ class _NotifyScreenState extends State<NotifyScreen> {
     final filtered = q.isEmpty
         ? baseByFilter
         : baseByFilter
-            .where((p) =>
-                p.displayName.toLowerCase().contains(q) ||
-                p.phone.toLowerCase().contains(q))
-            .toList();
+              .where(
+                (p) =>
+                    p.displayName.toLowerCase().contains(q) ||
+                    p.phone.toLowerCase().contains(q),
+              )
+              .toList();
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
@@ -294,20 +354,19 @@ class _NotifyScreenState extends State<NotifyScreen> {
       children: [
         _HeroSummaryCard(tour: tour, busInfo: busInfo, c: c),
         const SizedBox(height: UgamSpacing.md),
-        _ProgressCard(
-          c: c,
-          sent: sentCount,
-          total: assigned.length,
-        ),
+        _ProgressCard(c: c, sent: sentCount, total: assigned.length),
+        if (tour.buses.isNotEmpty) ...[
+          const SizedBox(height: UgamSpacing.md),
+          _BusMessageCard(c: c, onTap: () => _openBusMessageComposer(tour)),
+        ],
         const SizedBox(height: UgamSpacing.md),
         UgamTabPills(
           currentIndex: _filter.index,
-          onChanged: (i) =>
-              setState(() => _filter = _NotifyFilter.values[i]),
+          onChanged: (i) => setState(() => _filter = _NotifyFilter.values[i]),
           items: [
-            UgamTabItem(label: 'All', count: assigned.length),
-            UgamTabItem(label: 'Pending', count: pendingCount),
-            UgamTabItem(label: 'Notified', count: sentCount),
+            UgamTabItem(label: tr('notify.filter_all'), count: assigned.length),
+            UgamTabItem(label: tr('notify.filter_pending'), count: pendingCount),
+            UgamTabItem(label: tr('notify.filter_notified'), count: sentCount),
           ],
         ),
         const SizedBox(height: UgamSpacing.md),
@@ -318,7 +377,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
               child: Text(
                 _query.isNotEmpty
                     ? tr('notify.no_matches', namedArgs: {'query': _query})
-                    : 'Nothing here',
+                    : tr('notify.nothing_here'),
                 style: UgamText.body.copyWith(color: c.ink2),
               ),
             ),
@@ -362,11 +421,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
         160,
       ),
       children: [
-        _HeroSummaryCard(
-          tour: tour,
-          busInfo: _resolveBusInfo(tour),
-          c: c,
-        ),
+        _HeroSummaryCard(tour: tour, busInfo: _resolveBusInfo(tour), c: c),
         const SizedBox(height: UgamSpacing.lg),
         UgamCard.plain(
           padding: const EdgeInsets.fromLTRB(
@@ -389,8 +444,11 @@ class _NotifyScreenState extends State<NotifyScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     alignment: Alignment.center,
-                    child: Icon(Icons.lock_outline_rounded,
-                        size: 19, color: c.accent),
+                    child: Icon(
+                      Icons.lock_outline_rounded,
+                      size: 19,
+                      color: c.accent,
+                    ),
                   ),
                   const SizedBox(width: UgamSpacing.md),
                   Expanded(
@@ -399,15 +457,19 @@ class _NotifyScreenState extends State<NotifyScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'Ready to lock?',
-                          style: UgamText.titleM
-                              .copyWith(color: c.ink, fontSize: 17),
+                          tr('notify.lock_gate_ready'),
+                          style: UgamText.titleM.copyWith(
+                            color: c.ink,
+                            fontSize: 17,
+                          ),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           tr('notify.lock_gate_body'),
-                          style: UgamText.caption
-                              .copyWith(color: c.ink2, fontSize: 12),
+                          style: UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
@@ -440,34 +502,204 @@ class _NotifyScreenState extends State<NotifyScreen> {
   }
 
   Future<void> _lockTour(Tour tour) async {
-    final confirmed = await Get.dialog<bool>(
-      AlertDialog(
-        title: Text(tr('notify.lock_dialog_title')),
-        content: Text(
-          tr(
-            'notify.lock_dialog_body',
-            namedArgs: {'count': tour.passengers.length.toString()},
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Get.back(result: false),
-            child: Text(tr('app.action.cancel')),
-          ),
-          TextButton(
-            onPressed: () => Get.back(result: true),
-            child: Text(tr('notify.lock_dialog_lock')),
-          ),
-        ],
+    debugPrint('[WA] _lockTour tapped: tour=${tour.id} '
+        'passengers=${tour.passengers.length}');
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('notify.lock_dialog_title'),
+      message: tr(
+        'notify.lock_dialog_body',
+        namedArgs: {'count': tour.passengers.length.toString()},
       ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('notify.lock_dialog_lock'),
+      confirmIcon: Icons.lock_rounded,
     );
-    if (confirmed != true) return;
+    debugPrint('[WA] _lockTour confirm dialog => $confirmed');
+    if (!confirmed) return;
     await Get.find<TourController>().lockTour(tour.id);
     if (!mounted) return;
     AppSnackBar.success(
       tr('notify.locked_snack_body'),
       title: tr('notify.locked_snack_title'),
     );
+
+    // Phase 8 — push each seated passenger their seat allocation via the Cloud
+    // API (seat_allotment template).
+    debugPrint('[WA] _lockTour: locked, now calling _sendSeatAllocations');
+    await _sendSeatAllocations(tour);
+  }
+
+  Future<void> _sendSeatAllocations(Tour tour) async {
+    // Use the FRESHEST tour from the controller — the passed snapshot can be
+    // stale (captured before the seat plan was applied/persisted), which would
+    // make the send think nobody is seated and bail out silently.
+    final t = Get.find<TourController>().getTour(tour.id) ?? tour;
+    final seated =
+        t.passengers.where((p) => p.assignedSeats.isNotEmpty).toList();
+    debugPrint('[WA] _sendSeatAllocations: tour=${t.id} '
+        'passengers=${t.passengers.length} seated=${seated.length}');
+    if (seated.isEmpty) {
+      AppSnackBar.error(
+        'No seated passengers to notify — assignedSeats is empty on this tour.',
+      );
+      return;
+    }
+
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('notify.alloc_dialog_title'),
+      message: tr(
+        'notify.alloc_dialog_body',
+        namedArgs: {'count': seated.length.toString()},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('notify.alloc_dialog_send'),
+      confirmIcon: Icons.send_rounded,
+    );
+    debugPrint('[WA] _sendSeatAllocations confirm dialog => $ok');
+    if (!ok) return;
+
+    await _dispatchSeatAllocations(t, seated.map((p) => p.id).toSet());
+  }
+
+  /// Send the seat-allotment messages to [passengerIds] on [t], showing a live
+  /// "preparing X of N" dialog while the charts build + upload (the slow part),
+  /// then a result summary. On partial/total failure the summary offers a
+  /// one-tap RETRY that re-sends only the recipients that failed.
+  Future<void> _dispatchSeatAllocations(Tour t, Set<String> passengerIds) async {
+    if (passengerIds.isEmpty) return;
+    final progress = ValueNotifier<int>(0);
+    final total = passengerIds.length;
+    var dialogOpen = true;
+    // Live progress dialog (non-dismissible) — updates as each chart finishes.
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _SendProgressDialog(progress: progress, total: total),
+    ).then((_) => dialogOpen = false));
+
+    WaSendResult result;
+    try {
+      result = await WhatsAppOutbound().sendSeatAllocations(
+        tour: t,
+        onlyPassengerIds: passengerIds,
+        onProgress: (done, _) => progress.value = done,
+      );
+    } catch (e) {
+      if (mounted && dialogOpen) Navigator.of(context, rootNavigator: true).pop();
+      progress.dispose();
+      if (mounted) AppSnackBar.error('${tr('notify.alloc_failed_body')}\n$e');
+      return;
+    }
+    if (mounted && dialogOpen) Navigator.of(context, rootNavigator: true).pop();
+    progress.dispose();
+    if (!mounted) return;
+
+    debugPrint('[WA] _dispatchSeatAllocations result: '
+        'sent=${result.sent} failed=${result.failed} '
+        'results=${result.results.map((r) => '${r.to}:${r.ok ? 'ok' : r.error}').toList()}');
+
+    // Mark the successfully-notified passengers so the tracker + pending count
+    // update and the "Send to all pending" CTA hides once everyone's done.
+    final okPhones = result.results.where((r) => r.ok).map((r) => r.to).toSet();
+    final batch =
+        t.passengers.where((p) => passengerIds.contains(p.id)).toList();
+    final justSent = batch
+        .where(
+            (p) => okPhones.contains(WhatsAppCloudService.graphPhone(p.phone)))
+        .map((p) => p.id)
+        .toSet();
+    if (justSent.isNotEmpty) setState(() => _sentIds.addAll(justSent));
+
+    if (result.allSent) {
+      AppSnackBar.success(
+        tr('notify.alloc_sent_body', namedArgs: {'count': '${result.sent}'}),
+        title: tr('notify.alloc_sent_title'),
+      );
+      return;
+    }
+
+    // Partial or total failure → summary dialog with a retry of only the
+    // recipients that didn't go through.
+    final failedIds =
+        batch.where((p) => !justSent.contains(p.id)).map((p) => p.id).toSet();
+    final retry = await UgamDialog.confirm(
+      context,
+      title: result.anySent
+          ? tr('notify.alloc_partial_title')
+          : tr('notify.alloc_failed_title'),
+      message: result.anySent
+          ? '${tr('notify.alloc_partial_body', namedArgs: {
+              'sent': '${result.sent}',
+              'failed': '${failedIds.length}',
+            })}${_firstError(result)}'
+          : '${tr('notify.alloc_failed_body')}${_firstError(result)}',
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel:
+          tr('notify.alloc_retry', namedArgs: {'count': '${failedIds.length}'}),
+      confirmIcon: Icons.refresh_rounded,
+    );
+    if (retry && mounted && failedIds.isNotEmpty) {
+      await _dispatchSeatAllocations(t, failedIds);
+    }
+  }
+
+  /// ADMIN per-bus announcement (F4). Opens a composer where the agent picks a
+  /// bus (auto-selected when there's only one) and types a free-text message,
+  /// then sends it to every passenger seated on that bus via the Cloud API.
+  Future<void> _openBusMessageComposer(Tour tour) async {
+    final t = Get.find<TourController>().getTour(tour.id) ?? tour;
+    if (t.buses.isEmpty) return;
+    await UgamSheet.show<void>(
+      context,
+      title: tr('bus_message.composer_title'),
+      builder: (sheetCtx) => _BusMessageComposer(
+        buses: t.buses,
+        recipientCountFor: (busId) => t.passengers
+            .where((p) => p.assignedSeats.any((a) => a.busId == busId))
+            .length,
+        onSend: (busId, text) async {
+          final result = await WhatsAppOutbound().sendBusMessage(
+            tour: t,
+            busId: busId,
+            messageText: text,
+          );
+          if (!mounted) return;
+          if (result.allSent) {
+            AppSnackBar.success(
+              tr('bus_message.sent_body', namedArgs: {'count': '${result.sent}'}),
+              title: tr('bus_message.sent_title'),
+            );
+          } else if (result.anySent) {
+            AppSnackBar.warning(
+              '${tr('bus_message.partial_body', namedArgs: {
+                'sent': '${result.sent}',
+                'failed': '${result.failed}',
+              })}${_firstError(result)}',
+              title: tr('bus_message.partial_title'),
+            );
+          } else if (result.results.isEmpty && result.sent == 0) {
+            AppSnackBar.warning(tr('bus_message.no_recipients'));
+          } else {
+            AppSnackBar.error(
+              '${tr('bus_message.failed_body')}${_firstError(result)}',
+              title: tr('bus_message.failed_title'),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  /// First Meta error reason across the batch (e.g. "(#131030) Recipient phone
+  /// number not in allowed list"), prefixed with a newline — or empty if none.
+  /// Surfaces the exact cause in the snackbar instead of a generic failure.
+  String _firstError(WaSendResult result) {
+    for (final r in result.results) {
+      if (!r.ok && (r.error ?? '').isNotEmpty) return '\n${r.error}';
+    }
+    return '';
   }
 
   _BusInfo _resolveBusInfo(Tour tour) {
@@ -507,6 +739,10 @@ class _TopBar extends StatelessWidget {
   final VoidCallback? onReset;
   final bool showReset;
 
+  /// Shown as a leading back button when Notify is a pushed, tour-scoped
+  /// screen. Null in the legacy tab mode (no back affordance).
+  final VoidCallback? onBack;
+
   const _TopBar({
     required this.c,
     required this.searchActive,
@@ -514,6 +750,7 @@ class _TopBar extends StatelessWidget {
     required this.showSearch,
     required this.onReset,
     required this.showReset,
+    this.onBack,
   });
 
   @override
@@ -527,24 +764,22 @@ class _TopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
+          if (onBack != null) ...[
+            _CircleBtn(icon: Icons.arrow_back_rounded, c: c, onTap: onBack!),
+            const SizedBox(width: UgamSpacing.sm),
+          ],
           Expanded(
             child: Text(
-              'Notify',
+              tr('notify.title'),
               style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
             ),
           ),
           if (showReset)
-            _CircleBtn(
-              icon: Icons.refresh_rounded,
-              c: c,
-              onTap: onReset!,
-            ),
+            _CircleBtn(icon: Icons.refresh_rounded, c: c, onTap: onReset!),
           if (showReset && showSearch) const SizedBox(width: UgamSpacing.sm),
           if (showSearch)
             _CircleBtn(
-              icon: searchActive
-                  ? Icons.close_rounded
-                  : Icons.search_rounded,
+              icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
               c: c,
               onTap: onToggleSearch,
               active: searchActive,
@@ -629,8 +864,10 @@ class _SearchField extends StatelessWidget {
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
                   hintText: tr('notify.search_hint'),
-                  hintStyle:
-                      UgamText.body.copyWith(color: c.ink3, fontSize: 14),
+                  hintStyle: UgamText.body.copyWith(
+                    color: c.ink3,
+                    fontSize: 14,
+                  ),
                 ),
               ),
             ),
@@ -716,8 +953,18 @@ class _HeroSummaryCard extends StatelessWidget {
 
   String _formatDate(DateTime d) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     String s = '${d.day} ${months[d.month - 1]}';
     return s;
@@ -750,10 +997,8 @@ class _HeroSummaryCard extends StatelessWidget {
                 ),
               ),
               UgamStatusDot(
-                label: isLocked ? 'LOCKED' : tour.status.displayName,
-                tone: isLocked
-                    ? UgamStatusTone.good
-                    : UgamStatusTone.accent,
+                label: isLocked ? tr('notify.status_locked') : tour.status.displayName,
+                tone: isLocked ? UgamStatusTone.good : UgamStatusTone.accent,
               ),
             ],
           ),
@@ -769,7 +1014,7 @@ class _HeroSummaryCard extends StatelessWidget {
                 child: _InfoCell(
                   c: c,
                   icon: Icons.event_rounded,
-                  label: 'Departure',
+                  label: tr('notify.info_departure'),
                   value:
                       '${_formatDate(tour.departureDate)} · ${_formatTime(tour.departureDate)}',
                 ),
@@ -779,7 +1024,7 @@ class _HeroSummaryCard extends StatelessWidget {
                 child: _InfoCell(
                   c: c,
                   icon: Icons.directions_bus_rounded,
-                  label: 'Bus',
+                  label: tr('notify.info_bus'),
                   value: busInfo.busNo,
                 ),
               ),
@@ -792,7 +1037,7 @@ class _HeroSummaryCard extends StatelessWidget {
                 child: _InfoCell(
                   c: c,
                   icon: Icons.badge_outlined,
-                  label: 'Driver',
+                  label: tr('notify.info_driver'),
                   value: busInfo.driverName,
                 ),
               ),
@@ -801,7 +1046,7 @@ class _HeroSummaryCard extends StatelessWidget {
                 child: _InfoCell(
                   c: c,
                   icon: Icons.person_pin_rounded,
-                  label: 'Handler',
+                  label: tr('notify.info_handler'),
                   value: handler?.displayName ?? tr('notify.not_assigned'),
                 ),
               ),
@@ -891,7 +1136,9 @@ class _ProgressCard extends StatelessWidget {
           Row(
             children: [
               Text(
-                done ? 'ALL NOTIFIED' : 'NOTIFICATION PROGRESS',
+                done
+                    ? tr('notify.progress_all_notified')
+                    : tr('notify.progress_label'),
                 style: UgamText.micro.copyWith(color: color, fontSize: 10),
               ),
               const Spacer(),
@@ -906,8 +1153,11 @@ class _ProgressCard extends StatelessWidget {
           const SizedBox(height: UgamSpacing.sm + 2),
           Text(
             done
-                ? 'Every passenger has been notified.'
-                : '$sent of $total passengers notified',
+                ? tr('notify.progress_done_body')
+                : tr(
+                    'notify.progress_count_body',
+                    namedArgs: {'sent': '$sent', 'total': '$total'},
+                  ),
             style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
           ),
           const SizedBox(height: UgamSpacing.md),
@@ -983,33 +1233,38 @@ class _NotifyRow extends StatelessWidget {
                     Expanded(
                       child: Text(
                         passenger.displayName,
-                        style: UgamText.bodyStrong
-                            .copyWith(color: c.ink, fontSize: 13.5),
+                        style: UgamText.bodyStrong.copyWith(
+                          color: c.ink,
+                          fontSize: 13.5,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(width: 6),
                     UgamStatusDot(
-                      label: isSent ? 'SENT' : 'PENDING',
-                      tone: isSent
-                          ? UgamStatusTone.good
-                          : UgamStatusTone.warm,
+                      label: isSent
+                          ? tr('notify.row_sent')
+                          : tr('notify.row_pending'),
+                      tone: isSent ? UgamStatusTone.good : UgamStatusTone.warm,
                     ),
                   ],
                 ),
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(Icons.event_seat_rounded,
-                        size: 11, color: c.ink3),
+                    Icon(Icons.event_seat_rounded, size: 11, color: c.ink3),
                     const SizedBox(width: 4),
                     Flexible(
                       child: Text(
-                        seats.isEmpty ? '—' : 'Seat $seats',
+                        seats.isEmpty
+                            ? '—'
+                            : tr('notify.seat_label', namedArgs: {'seats': seats}),
                         style: UgamText.tabular(
-                          UgamText.caption
-                              .copyWith(color: c.ink2, fontSize: 11.5),
+                          UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontSize: 11.5,
+                          ),
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1066,11 +1321,11 @@ class _LockStickyCTA extends StatelessWidget {
 
     String? reason;
     if (!hasPassengers) {
-      reason = 'Add at least one passenger first';
+      reason = tr('notify.lock_reason_no_passengers');
     } else if (!allAssigned) {
-      reason = 'Some seats are still unassigned';
+      reason = tr('notify.lock_reason_unassigned');
     } else if (!hasHandler) {
-      reason = 'Pick a handler before locking';
+      reason = tr('notify.lock_reason_no_handler');
     }
 
     return UgamStickyCTA(
@@ -1103,11 +1358,7 @@ class _Check extends StatelessWidget {
   final String label;
   final UgamColorSet c;
 
-  const _Check({
-    required this.done,
-    required this.label,
-    required this.c,
-  });
+  const _Check({required this.done, required this.label, required this.c});
 
   @override
   Widget build(BuildContext context) {
@@ -1138,6 +1389,288 @@ class _Check extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── Message-this-bus card + composer (F4 admin path) ──────────────────
+
+/// A tappable card in the post-lock tracker that opens the per-bus
+/// announcement composer. The agent can fire a quick free-text WhatsApp to
+/// everyone on one bus (e.g. "Boarding moved to Gate 3").
+class _BusMessageCard extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _BusMessageCard({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: UgamCard.plain(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.campaign_rounded, size: 19, color: c.accent),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('bus_message.card_title'),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    tr('bus_message.card_subtitle'),
+                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The per-bus announcement composer sheet: a bus selector (hidden when the
+/// tour has a single bus — that bus is auto-selected) and a multi-line text
+/// field. On Send it routes the typed text to every seated passenger on the
+/// chosen bus via [onSend] (WhatsAppOutbound.sendBusMessage) and pops.
+class _BusMessageComposer extends StatefulWidget {
+  final List<Bus> buses;
+  final int Function(String busId) recipientCountFor;
+  final Future<void> Function(String busId, String text) onSend;
+
+  const _BusMessageComposer({
+    required this.buses,
+    required this.recipientCountFor,
+    required this.onSend,
+  });
+
+  @override
+  State<_BusMessageComposer> createState() => _BusMessageComposerState();
+}
+
+class _BusMessageComposerState extends State<_BusMessageComposer> {
+  late String _busId;
+  final TextEditingController _textCtrl = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _busId = widget.buses.first.id;
+  }
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  String _busLabel(Bus b) => b.busNumber.isNotEmpty ? b.busNumber : b.name;
+
+  Future<void> _send() async {
+    if (_sending) return;
+    final text = _textCtrl.text.trim();
+    if (text.isEmpty) {
+      AppSnackBar.error(tr('bus_message.empty_text'));
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      await widget.onSend(_busId, text);
+      if (mounted) Navigator.of(context).pop();
+    } catch (e) {
+      if (mounted) setState(() => _sending = false);
+      AppSnackBar.error('${tr('bus_message.failed_body')}\n$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final multiBus = widget.buses.length > 1;
+    final count = widget.recipientCountFor(_busId);
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('bus_message.composer_intro'),
+            style: UgamText.body.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          if (multiBus) ...[
+            Text(
+              tr('bus_message.pick_bus').toUpperCase(),
+              style: UgamText.micro.copyWith(color: c.ink2),
+            ),
+            const SizedBox(height: UgamSpacing.sm),
+            Wrap(
+              spacing: UgamSpacing.sm,
+              runSpacing: UgamSpacing.sm,
+              children: [
+                for (final b in widget.buses)
+                  GestureDetector(
+                    onTap: () => setState(() => _busId = b.id),
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: UgamSpacing.lg,
+                        vertical: UgamSpacing.sm + 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _busId == b.id ? c.accentFill : c.cardElev,
+                        borderRadius: BorderRadius.circular(UgamRadius.chip),
+                        border: Border.all(
+                          color: _busId == b.id ? c.accent : c.border,
+                        ),
+                      ),
+                      child: Text(
+                        _busLabel(b),
+                        style: UgamText.caption.copyWith(
+                          color: _busId == b.id ? c.accent : c.ink2,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: UgamSpacing.lg),
+          ],
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              horizontal: UgamSpacing.md,
+              vertical: UgamSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              color: c.accentFill,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.group_rounded, size: 15, color: c.accent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    tr(
+                      'bus_message.recipient_count',
+                      namedArgs: {'count': '$count'},
+                    ),
+                    style: UgamText.caption.copyWith(color: c.accent),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('bus_message.field_message'),
+            controller: _textCtrl,
+            hint: tr('bus_message.field_message_hint'),
+            maxLines: 5,
+            minLines: 3,
+            autofocus: true,
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamCTA(
+            label: _sending
+                ? tr('bus_message.sending')
+                : tr('bus_message.send_btn'),
+            leadingIcon: Icons.send_rounded,
+            onPressed: (_sending || count == 0) ? null : _send,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Non-dismissible progress dialog shown while seat-allotment messages are
+/// being prepared + sent. Tracks the chart build/upload phase (the slow part)
+/// via [progress]; once it reaches [total] it shows an indeterminate spinner
+/// while the batched Cloud API send finishes.
+class _SendProgressDialog extends StatelessWidget {
+  const _SendProgressDialog({required this.progress, required this.total});
+
+  final ValueNotifier<int> progress;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return PopScope(
+      canPop: false,
+      child: Dialog(
+        backgroundColor: c.cardElev,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UgamRadius.sheet),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+          child: ValueListenableBuilder<int>(
+            valueListenable: progress,
+            builder: (_, done, _) {
+              final ready = done >= total;
+              final pct = total == 0 ? 0.0 : done / total;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    height: 52,
+                    width: 52,
+                    child: CircularProgressIndicator(
+                      value: ready ? null : pct,
+                      color: c.accent,
+                      backgroundColor: c.border,
+                      strokeWidth: 4,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    ready
+                        ? tr('notify.alloc_sending_now')
+                        : tr('notify.alloc_preparing', namedArgs: {
+                            'done': '$done',
+                            'total': '$total',
+                          }),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: c.ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/bus_details.dart';
 import '../models/collection.dart';
+import '../models/expense.dart';
 import '../models/handler_manifest.dart';
 import '../models/seat_assignment.dart';
 import '../models/trip_type.dart';
@@ -60,6 +61,15 @@ class CustomerRequestEntry {
   bool get canEdit => status == 'pending' && !hasSeatsAssigned;
   bool get wasEdited => customerEditedAt != null;
 
+  /// True once the tour's departure date has passed — the trip is over, so
+  /// the ticket is history, not an active booking. "My Tickets" hides these
+  /// (a completed/past tour shouldn't read as a live ticket).
+  bool get isPast {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return tourDepartureDate.isBefore(today);
+  }
+
   CustomerRequestEntry copyWith({
     String? customerName,
     int? partySize,
@@ -96,28 +106,28 @@ class CustomerRequestEntry {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'tour_id': tourId,
-        'tour_title': tourTitle,
-        'tour_from_city': tourFromCity,
-        'tour_to_city': tourToCity,
-        'tour_departure_date': tourDepartureDate.toIso8601String(),
-        'tour_price_per_seat': tourPricePerSeat,
-        'customer_name': customerName,
-        'customer_phone': customerPhone,
-        'party_size': partySize,
-        'double_sofa': doubleSofa,
-        'single_sofa': singleSofa,
-        if (note != null) 'note': note,
-        'trip_type': tripType.storageKey,
-        'status': status,
-        'assigned_seats': assignedSeats.map((a) => a.toMap()).toList(),
-        if (customerEditedAt != null)
-          'customer_edited_at': customerEditedAt!.toIso8601String(),
-        'created_at': createdAt.toIso8601String(),
-        if (lastRefreshedAt != null)
-          'last_refreshed_at': lastRefreshedAt!.toIso8601String(),
-      };
+    'id': id,
+    'tour_id': tourId,
+    'tour_title': tourTitle,
+    'tour_from_city': tourFromCity,
+    'tour_to_city': tourToCity,
+    'tour_departure_date': tourDepartureDate.toIso8601String(),
+    'tour_price_per_seat': tourPricePerSeat,
+    'customer_name': customerName,
+    'customer_phone': customerPhone,
+    'party_size': partySize,
+    'double_sofa': doubleSofa,
+    'single_sofa': singleSofa,
+    if (note != null) 'note': note,
+    'trip_type': tripType.storageKey,
+    'status': status,
+    'assigned_seats': assignedSeats.map((a) => a.toMap()).toList(),
+    if (customerEditedAt != null)
+      'customer_edited_at': customerEditedAt!.toIso8601String(),
+    'created_at': createdAt.toIso8601String(),
+    if (lastRefreshedAt != null)
+      'last_refreshed_at': lastRefreshedAt!.toIso8601String(),
+  };
 
   factory CustomerRequestEntry.fromJson(Map<String, dynamic> m) {
     return CustomerRequestEntry(
@@ -184,8 +194,11 @@ class CustomerRequestsStore {
     try {
       final decoded = jsonDecode(raw) as List;
       return decoded
-          .map((e) => CustomerRequestEntry.fromJson(
-              Map<String, dynamic>.from(e as Map)))
+          .map(
+            (e) => CustomerRequestEntry.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
           .toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     } catch (_) {
@@ -232,19 +245,31 @@ class CustomerRequestsStore {
     final existing = await get(id);
     if (existing == null) return null;
     final client = Supabase.instance.client;
-    final result =
-        await client.rpc('booking_request_status_lookup', params: {'p_id': id});
+    final result = await client.rpc(
+      'booking_request_status_lookup',
+      params: {'p_id': id},
+    );
     if (result == null) return existing;
     final rows = result as List;
     if (rows.isEmpty) {
-      // Row vanished server-side. Keep the local copy but flag it.
-      return existing;
+      // The booking_request → tours JOIN returned nothing: the organiser
+      // deleted the tour (or the request). Flag the local ticket as
+      // cancelled so it drops out of the active Pending/Confirmed tabs and
+      // surfaces under "Cancelled" instead of lingering as if still live.
+      if (existing.status == 'rejected') return existing;
+      final cancelled = existing.copyWith(
+        status: 'rejected',
+        lastRefreshedAt: DateTime.now(),
+      );
+      await upsert(cancelled);
+      return cancelled;
     }
     final row = Map<String, dynamic>.from(rows.first as Map);
     final updated = existing.copyWith(
       status: (row['status'] as String?) ?? existing.status,
       assignedSeats: CustomerRequestEntry._parseAssignedSeats(
-          row['assigned_seats']),
+        row['assigned_seats'],
+      ),
       tripType: row['trip_type'] != null
           ? TripType.fromString(row['trip_type'] as String?)
           : existing.tripType,
@@ -326,13 +351,43 @@ class CustomerRequestsStore {
   /// the caller isn't the tour's handler. Lets exceptions propagate so the UI
   /// can surface a real failure.
   Future<Collection?> handlerUpsertCollection(
-      String requestId, Collection c) async {
+    String requestId,
+    Collection c,
+  ) async {
     final client = Supabase.instance.client;
-    final result = await client.rpc('handler_upsert_collection', params: {
-      'p_request_id': requestId,
-      'p_collection': c.toMap(),
-    });
+    final result = await client.rpc(
+      'handler_upsert_collection',
+      params: {'p_request_id': requestId, 'p_collection': c.toMap()},
+    );
     if (result is! Map) return null;
     return Collection.fromMap(Map<String, dynamic>.from(result));
+  }
+
+  /// Inserts or updates a bus [Expense] for the handler's tour via a SECURITY
+  /// DEFINER RPC (customers are anonymous). The expense is sent as a jsonb
+  /// payload; the server resolves the tour from the request and verifies the
+  /// bus belongs to it. Returns the upserted row, or null when the caller isn't
+  /// the tour's handler (or the bus isn't on their tour). Lets exceptions
+  /// propagate so the UI can surface a real failure.
+  Future<Expense?> handlerUpsertExpense(String requestId, Expense e) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_upsert_expense',
+      params: {'p_request_id': requestId, 'p_expense': e.toMap()},
+    );
+    if (result is! Map) return null;
+    return Expense.fromMap(Map<String, dynamic>.from(result));
+  }
+
+  /// Deletes one expense the handler logged on their own tour via a SECURITY
+  /// DEFINER RPC. Returns true when a row was removed (false when the caller
+  /// isn't the handler or the expense isn't on their tour).
+  Future<bool> handlerDeleteExpense(String requestId, String expenseId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_delete_expense',
+      params: {'p_request_id': requestId, 'p_expense_id': expenseId},
+    );
+    return result as bool? ?? false;
   }
 }

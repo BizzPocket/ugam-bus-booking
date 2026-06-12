@@ -1,5 +1,6 @@
 import 'bus_details.dart';
 import 'collection.dart';
+import 'expense.dart';
 import 'passenger.dart';
 import 'seat_assignment.dart';
 
@@ -7,17 +8,23 @@ import 'seat_assignment.dart';
 /// passenger, so the handler can render an occupancy-aware seat grid.
 ///
 /// Produced by the `handler_tour_manifest` RPC, which returns a single json
-/// object `{buses: [...], passengers: [...]}`. Only the tour handler is
-/// authorized to receive it (see [CustomerRequestsStore.isRequestHandler]).
+/// object `{buses: [...], passengers: [...], collections: [...],
+/// expenses: [...]}`. Only the tour handler is authorized to receive it (see
+/// [CustomerRequestsStore.isRequestHandler]).
 class HandlerManifest {
   final List<Bus> buses;
   final List<Passenger> passengers;
   final List<Collection> collections;
 
+  /// Every expense logged against any bus on this tour. Surfaced so the handler
+  /// can review the bus's running costs and reconcile cash on the ground.
+  final List<Expense> expenses;
+
   const HandlerManifest({
     this.buses = const [],
     this.passengers = const [],
     this.collections = const [],
+    this.expenses = const [],
   });
 
   factory HandlerManifest.fromJson(Map<String, dynamic> json) {
@@ -25,6 +32,7 @@ class HandlerManifest {
       buses: _parseBuses(json['buses']),
       passengers: _parsePassengers(json['passengers']),
       collections: _parseCollections(json['collections']),
+      expenses: _parseExpenses(json['expenses']),
     );
   }
 
@@ -49,6 +57,14 @@ class HandlerManifest {
     return value
         .whereType<Map>()
         .map((m) => Collection.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  static List<Expense> _parseExpenses(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((m) => Expense.fromMap(Map<String, dynamic>.from(m)))
         .toList();
   }
 

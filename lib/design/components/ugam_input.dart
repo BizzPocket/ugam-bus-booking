@@ -23,6 +23,8 @@ class UgamInput extends StatelessWidget {
   final Widget? suffix;
   final bool readOnly;
   final bool enabled;
+  final int maxLines;
+  final int? minLines;
 
   const UgamInput({
     super.key,
@@ -41,6 +43,8 @@ class UgamInput extends StatelessWidget {
     this.suffix,
     this.readOnly = false,
     this.enabled = true,
+    this.maxLines = 1,
+    this.minLines,
   });
 
   @override
@@ -62,6 +66,8 @@ class UgamInput extends StatelessWidget {
           obscureText: obscure,
           autofocus: autofocus,
           maxLength: maxLength,
+          maxLines: obscure ? 1 : maxLines,
+          minLines: minLines,
           onChanged: onChanged,
           onSubmitted: onSubmitted,
           readOnly: readOnly,

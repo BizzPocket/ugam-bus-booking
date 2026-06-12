@@ -1,21 +1,25 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../components/combined_seat_grid.dart';
+import '../components/seat_chart_tile.dart';
 import '../controllers/tour_controller.dart';
+import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
-import '../models/seat_type.dart';
+import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/tour_group_colors.dart';
+import '../widgets/chart_expand_button.dart';
 import 'add_bus_screen.dart';
 import 'bus_money_screen.dart';
-import 'tour_seat_assignment_screen.dart';
+import 'fullscreen_chart_screen.dart';
+import 'seats_screen.dart';
 
 /// Read-only seat layout for a single bus on a tour. Renders each seat
 /// in the layout grid with the assigned passenger's name+phone overlaid
@@ -32,11 +36,7 @@ class BusStatusScreen extends StatefulWidget {
   final String tourId;
   final String busId;
 
-  const BusStatusScreen({
-    super.key,
-    required this.tourId,
-    required this.busId,
-  });
+  const BusStatusScreen({super.key, required this.tourId, required this.busId});
 
   @override
   State<BusStatusScreen> createState() => _BusStatusScreenState();
@@ -88,8 +88,10 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
           }
 
           final totalSeats = layout.totalSeats;
-          final assignedCount = assignments.values
-              .fold<int>(0, (sum, list) => sum + list.length);
+          final assignedCount = assignments.values.fold<int>(
+            0,
+            (sum, list) => sum + list.length,
+          );
 
           return Column(
             children: [
@@ -110,21 +112,39 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                   UgamSpacing.gutter,
                   UgamSpacing.sm,
                 ),
-                child: _Tally(
-                  assigned: assignedCount,
-                  total: totalSeats,
-                ),
+                child: _Tally(assigned: assignedCount, total: totalSeats),
               ),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: UgamSpacing.gutter,
                   ),
-                  child: _SeatChartCard(
-                    layout: layout,
-                    assignments: assignments,
-                    onSeatTap: (passenger) =>
-                        _showPassengerSheet(context, passenger, bus, tour.id),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      _SeatChartCard(
+                        layout: layout,
+                        assignments: assignments,
+                        groupColors: tourGroupColors(tour),
+                        onSeatTap: (passenger) => _showPassengerSheet(
+                          context,
+                          passenger,
+                          bus,
+                          tour.id,
+                        ),
+                      ),
+                      if (layout.totalCells > 0)
+                        ChartExpandButton(
+                          onTap: () => FullscreenChartScreen.open(
+                            context,
+                            layout: layout,
+                            occupantsBySeat: assignments,
+                            groupColors: tourGroupColors(tour),
+                            title: bus.name,
+                            driverLabel: tr('bus_status.driver_label'),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
@@ -155,98 +175,69 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
         .where((a) => a.busId == bus.id)
         .map((a) => a.seatId)
         .join(', ');
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: c.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(UgamRadius.sheet),
-        ),
-      ),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.fromLTRB(
-          UgamSpacing.gutter,
-          UgamSpacing.sm + 4,
-          UgamSpacing.gutter,
-          UgamSpacing.lg,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: UgamSpacing.md),
-                decoration: BoxDecoration(
-                  color: c.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        passenger.displayName,
-                        style: UgamText.titleM.copyWith(color: c.ink),
-                      ),
-                      if (passenger.phone.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          passenger.phone,
-                          style: UgamText.tabular(
-                            UgamText.caption.copyWith(color: c.ink2),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                // Quick-call CTA — handler taps to dial the passenger
-                // directly when something's wrong with their booking.
-                if (passenger.phone.isNotEmpty) ...[
-                  const SizedBox(width: UgamSpacing.sm),
-                  GestureDetector(
-                    onTap: () => PhoneDialer.call(passenger.phone),
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: c.accentFill,
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.phone_rounded,
-                        size: 18,
-                        color: c.accent,
-                      ),
+    UgamSheet.show<void>(
+      context,
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      passenger.displayName,
+                      style: UgamText.titleM.copyWith(color: c.ink),
                     ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: UgamSpacing.md),
-            _SheetRow(label: tr('bus_status.sheet_bus'), value: bus.name),
-            _SheetRow(
-              label: tr('bus_status.sheet_seats_on_bus'),
-              value: seatsOnBus,
-            ),
-            if (tour != null && tour.handlerId == passenger.id)
-              const Padding(
-                padding: EdgeInsets.only(top: 10),
-                child: _HandlerBadge(),
+                    if (passenger.phone.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        passenger.phone,
+                        style: UgamText.tabular(
+                          UgamText.caption.copyWith(color: c.ink2),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-          ],
-        ),
+              // Quick-call CTA — handler taps to dial the passenger
+              // directly when something's wrong with their booking.
+              if (passenger.phone.isNotEmpty) ...[
+                const SizedBox(width: UgamSpacing.sm),
+                GestureDetector(
+                  onTap: () => PhoneDialer.call(passenger.phone),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.phone_rounded, size: 18, color: c.accent),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          _SheetRow(label: tr('bus_status.sheet_bus'), value: bus.name),
+          _SheetRow(
+            label: tr('bus_status.sheet_seats_on_bus'),
+            value: seatsOnBus,
+          ),
+          if (tour != null && tour.handlerId == passenger.id)
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: _HandlerBadge(),
+            ),
+        ],
       ),
     );
   }
@@ -270,19 +261,10 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
-          GestureDetector(
+          UgamIconButton(
+            icon: Icons.arrow_back_rounded,
+            size: 42,
             onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -290,8 +272,7 @@ class _Header extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(bus.name,
-                    style: UgamText.titleL.copyWith(color: c.ink)),
+                Text(bus.name, style: UgamText.titleL.copyWith(color: c.ink)),
                 Text(
                   '$tourTitle'
                   '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
@@ -381,19 +362,20 @@ class _Tally extends StatelessWidget {
   }
 }
 
-/// The rounded card containing the bus chart. Mirrors
-/// `_SeatChartCard` from seat_assignment_screen — same `UgamCard.plain`
-/// wrapper, same `LayoutBuilder` width math, same `_frontLabel` row at
-/// the top and `REAR` label at the bottom — but renders read-only
-/// tiles via `_SeatTile`.
+/// The rounded card containing the bus chart. Renders the CANONICAL
+/// [SeatChartTile] (read-only) so the status chart reads identically to the
+/// auto-fill / assign / handler charts — same tile look, same group/priority
+/// rings, same one-way leg colours — just without the drag/drop wiring.
 class _SeatChartCard extends StatelessWidget {
   final BusLayout layout;
   final Map<String, List<Passenger>> assignments;
+  final GroupColorResolver groupColors;
   final ValueChanged<Passenger> onSeatTap;
 
   const _SeatChartCard({
     required this.layout,
     required this.assignments,
+    required this.groupColors,
     required this.onSeatTap,
   });
 
@@ -411,9 +393,6 @@ class _SeatChartCard extends StatelessWidget {
       );
     }
 
-    const double tileW = 62;
-    const double tileH = 78;
-
     return UgamCard.plain(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
@@ -425,9 +404,9 @@ class _SeatChartCard extends StatelessWidget {
         ),
         child: CombinedSeatGrid(
           layout: layout,
-          cellWidth: tileW,
-          cellHeight: tileH,
-          colGap: 4,
+          cellWidth: kSeatTileW,
+          cellHeight: kSeatTileH,
+          colGap: 6,
           rowGap: 6,
           driverLabel: tr('bus_status.driver_label'),
           tileBuilder: (ctx, cell) {
@@ -435,12 +414,15 @@ class _SeatChartCard extends StatelessWidget {
                 ? (assignments[cell.seatId] ?? const <Passenger>[])
                 : const <Passenger>[];
             return RepaintBoundary(
-              child: _SeatTile(
-                width: tileW,
-                height: tileH,
+              child: SeatChartTile(
                 cell: cell,
-                passengers: occupants,
-                onTap: onSeatTap,
+                occupants: occupants,
+                groupColors: groupColors,
+                // Read-only: a booked seat surfaces the passenger sheet; a free
+                // seat is inert here (re-seating lives in the unified grid).
+                onTapBooked: occupants.isEmpty
+                    ? null
+                    : () => onSeatTap(occupants.first),
               ),
             );
           },
@@ -450,213 +432,9 @@ class _SeatChartCard extends StatelessWidget {
   }
 }
 
-/// Read-only tile. Mirrors `_SeatTile` from seat_assignment_screen —
-/// same booked/free color rules — but skips DragTarget /
-/// LongPressDraggable. Tapping a booked tile fires `onTap(passenger)`;
-/// tapping a free tile is a no-op.
-class _SeatTile extends StatelessWidget {
-  final double width;
-  final double height;
-  final SeatCell cell;
-
-  /// Occupants of this seat. `length == 0` → free, `length == 1` →
-  /// owned, `length == 2` → shared doubleSofa. Shared shows the first
-  /// passenger's name only on a single tile background (no split
-  /// halves); the handler can long-tap to see both occupants by
-  /// reopening the sheet for each one if needed.
-  final List<Passenger> passengers;
-
-  final ValueChanged<Passenger> onTap;
-
-  const _SeatTile({
-    required this.width,
-    required this.height,
-    required this.cell,
-    required this.passengers,
-    required this.onTap,
-  });
-
-  String get seatId => cell.seatId!;
-  SeatType? get seatType => cell.seatType;
-
-  bool get _isBooked => passengers.isNotEmpty;
-  bool get _isDouble => seatType == SeatType.doubleSofa;
-  bool get _isSleeper =>
-      seatType == SeatType.singleSofa || seatType == SeatType.doubleSofa;
-
-  IconData get _icon {
-    switch (seatType) {
-      case SeatType.singleSofa:
-        return Icons.single_bed_rounded;
-      case SeatType.doubleSofa:
-        return Icons.king_bed_rounded;
-      case SeatType.seater:
-        return Icons.event_seat_rounded;
-      case null:
-        return Icons.crop_square_rounded;
-    }
-  }
-
-  /// Drop +91 / 91 prefix + any non-digits, return the local 10-digit
-  /// number. Falls back to whatever's there. Mirrors the same helper
-  /// in seat_assignment_screen.
-  String? _phoneDisplay(String? phone) {
-    if (phone == null || phone.isEmpty) return null;
-    final digits = phone.replaceAll(RegExp(r'\D'), '');
-    if (digits.isEmpty) return null;
-    if (digits.length > 10 && digits.startsWith('91')) {
-      return digits.substring(digits.length - 10);
-    }
-    return digits;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-
-    final Color bg;
-    final Color fg;
-    final Color border;
-    final double borderWidth;
-
-    if (_isBooked) {
-      bg = c.accent;
-      fg = c.onAccent;
-      border = c.accent;
-      borderWidth = 0;
-    } else if (_isDouble) {
-      bg = c.accentFill;
-      fg = c.ink;
-      border = c.accent.withValues(alpha: 0.45);
-      borderWidth = 1.2;
-    } else if (seatType == SeatType.singleSofa) {
-      bg = c.goodFill;
-      fg = c.ink;
-      border = c.good.withValues(alpha: 0.55);
-      borderWidth = 1.2;
-    } else {
-      bg = c.cardElev;
-      fg = c.ink;
-      border = c.border;
-      borderWidth = 1.2;
-    }
-
-    final tile = Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(UgamRadius.seat + 2),
-        border: Border.all(color: border, width: borderWidth),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: _isBooked ? _bookedBody(fg) : _freeBody(fg),
-    );
-
-    // Free tile → swallow taps silently. Booked tile → first passenger
-    // opens the sheet. (Shared doubles only expose one passenger via
-    // tap; the agent must open the other half from the seat
-    // assignment screen to act on the second occupant.)
-    return GestureDetector(
-      onTap: _isBooked ? () => onTap(passengers.first) : null,
-      behavior: HitTestBehavior.opaque,
-      child: tile,
-    );
-  }
-
-  Widget _bookedBody(Color fg) {
-    final passenger = passengers.first;
-    final phoneText = _phoneDisplay(passenger.phone);
-    // FittedBox(scaleDown) keeps long names + 10-digit phones readable
-    // on the smallest tile size the LayoutBuilder may produce.
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              seatId,
-              style: UgamText.micro.copyWith(
-                color: fg.withValues(alpha: 0.75),
-                fontSize: 8.5,
-              ),
-            ),
-            Icon(_icon, size: 11, color: fg.withValues(alpha: 0.75)),
-          ],
-        ),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            passenger.displayName,
-            maxLines: 1,
-            textAlign: TextAlign.center,
-            style: UgamText.bodyStrong.copyWith(
-              color: fg,
-              fontSize: 11,
-              height: 1.1,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-        if (phoneText != null)
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              phoneText,
-              maxLines: 1,
-              style: UgamText.tabular(
-                UgamText.caption.copyWith(
-                  color: fg.withValues(alpha: 0.85),
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _freeBody(Color fg) {
-    if (_isSleeper) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          Icon(_icon, size: 18, color: fg.withValues(alpha: 0.8)),
-          Text(
-            seatId,
-            style: UgamText.bodyStrong.copyWith(
-              color: fg,
-              fontSize: 12,
-              height: 1,
-            ),
-          ),
-        ],
-      );
-    }
-    return Stack(
-      children: [
-        Positioned(
-          top: 2,
-          left: 4,
-          child: Icon(_icon, size: 10, color: fg.withValues(alpha: 0.7)),
-        ),
-        Center(
-          child: Text(
-            seatId,
-            style: UgamText.bodyStrong.copyWith(color: fg, fontSize: 11),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Bottom-of-screen legend — 4 dots mapping the chart's bg colors to
-/// their meanings. Pulled straight from the Ugam token set so the
-/// dots match `_SeatTile`'s bg exactly.
+/// Bottom-of-screen legend — the SHARED seat-chart legend (Free / Booked /
+/// Priority-forward / One-way / Held) so the status screen reads exactly like
+/// the rest of the app's charts.
 class _Legend extends StatelessWidget {
   const _Legend();
 
@@ -670,25 +448,30 @@ class _Legend extends StatelessWidget {
         runSpacing: 6,
         alignment: WrapAlignment.center,
         children: [
-          _LegendDot(
-            fill: c.accent,
-            border: c.accent,
-            label: tr('bus_status.legend_booked'),
+          _LegendItem(
+            swatch: _LegendSwatch.dashed,
+            label: tr('seat_detail.legend.free'),
+            c: c,
           ),
-          _LegendDot(
-            fill: c.accentFill,
-            border: c.accent.withValues(alpha: 0.45),
-            label: tr('bus_status.legend_double'),
+          _LegendItem(
+            swatch: _LegendSwatch.filled,
+            label: tr('app.label.booked'),
+            c: c,
           ),
-          _LegendDot(
-            fill: c.goodFill,
-            border: c.good.withValues(alpha: 0.55),
-            label: tr('bus_status.legend_single'),
+          _LegendItem(
+            swatch: _LegendSwatch.warmRing,
+            label: tr('seat_detail.legend.priority_forward'),
+            c: c,
           ),
-          _LegendDot(
-            fill: c.cardElev,
-            border: c.border,
-            label: tr('bus_status.legend_seater'),
+          _LegendItem(
+            swatch: _LegendSwatch.oneWay,
+            label: tr('seat_detail.legend.one_way'),
+            c: c,
+          ),
+          _LegendItem(
+            swatch: _LegendSwatch.held,
+            label: tr('seat_detail.legend.held'),
+            c: c,
           ),
         ],
       ),
@@ -696,32 +479,78 @@ class _Legend extends StatelessWidget {
   }
 }
 
-class _LegendDot extends StatelessWidget {
-  final Color fill;
-  final Color border;
-  final String label;
+enum _LegendSwatch { dashed, filled, warmRing, oneWay, held }
 
-  const _LegendDot({
-    required this.fill,
-    required this.border,
+class _LegendItem extends StatelessWidget {
+  final _LegendSwatch swatch;
+  final String label;
+  final UgamColorSet c;
+
+  const _LegendItem({
+    required this.swatch,
     required this.label,
+    required this.c,
   });
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
+    Widget dot;
+    switch (swatch) {
+      case _LegendSwatch.dashed:
+        dot = CustomPaint(
+          painter: SeatDashedBorderPainter(
+            color: c.ink3.withValues(alpha: 0.7),
+            radius: 3,
+          ),
+          child: const SizedBox(width: 12, height: 12),
+        );
+      case _LegendSwatch.filled:
+        dot = Container(
           width: 12,
           height: 12,
           decoration: BoxDecoration(
-            color: fill,
+            color: c.cardElev,
             borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: border, width: 1.2),
+            border: Border.all(color: c.border),
           ),
-        ),
+        );
+      case _LegendSwatch.warmRing:
+        dot = Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: c.cardElev,
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: c.warm, width: 2),
+          ),
+        );
+      case _LegendSwatch.oneWay:
+        dot = Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: kOneWayTint.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: kOneWayTint, width: 1.5),
+          ),
+        );
+      case _LegendSwatch.held:
+        dot = Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: c.cardElev.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: c.border),
+          ),
+          alignment: Alignment.center,
+          child: Icon(Icons.lock_outline_rounded, size: 8, color: c.ink3),
+        );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dot,
         const SizedBox(width: 6),
         Text(label, style: UgamText.micro.copyWith(color: c.ink2)),
       ],
@@ -744,10 +573,7 @@ class _SheetRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 130,
-            child: Text(
-              label,
-              style: UgamText.caption.copyWith(color: c.ink2),
-            ),
+            child: Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
           ),
           Expanded(
             child: Text(
@@ -772,19 +598,19 @@ class _DriverHeroCard extends StatelessWidget {
   Future<void> _openWhatsApp(String phone) async {
     final cleaned = phone.replaceAll(RegExp(r'[^\d+]'), '');
     if (cleaned.isEmpty) return;
-    // Normalize to international form (default +91 for 10-digit local).
-    var wa = cleaned.startsWith('+') ? cleaned.substring(1) : cleaned;
-    if (!cleaned.startsWith('+') && wa.length == 10) wa = '91$wa';
-    final uri = Uri.parse('https://wa.me/$wa');
     try {
-      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      final ok = await WhatsAppService().openChat(phone: phone, message: '');
       if (!ok) {
-        AppSnackBar.error('Could not open WhatsApp for $phone.',
-            title: 'WhatsApp failed');
+        AppSnackBar.error(
+          tr('bus_status.wa_open_failed', namedArgs: {'phone': phone}),
+          title: tr('bus_status.wa_failed_title'),
+        );
       }
     } catch (e) {
-      AppSnackBar.error('Could not open WhatsApp. $e',
-          title: 'WhatsApp failed');
+      AppSnackBar.error(
+        tr('bus_status.wa_open_error', namedArgs: {'error': '$e'}),
+        title: tr('bus_status.wa_failed_title'),
+      );
     }
   }
 
@@ -823,9 +649,13 @@ class _DriverHeroCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  bus.driverName.isEmpty ? 'Driver pending' : bus.driverName,
-                  style: UgamText.bodyStrong
-                      .copyWith(color: c.ink2, fontSize: 13),
+                  bus.driverName.isEmpty
+                      ? tr('bus_status.driver_pending')
+                      : bus.driverName,
+                  style: UgamText.bodyStrong.copyWith(
+                    color: c.ink2,
+                    fontSize: 13,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -892,11 +722,7 @@ class _CircleAction extends StatelessWidget {
           shape: BoxShape.circle,
         ),
         alignment: Alignment.center,
-        child: Icon(
-          icon,
-          size: 18,
-          color: enabled ? tint : c.ink3,
-        ),
+        child: Icon(icon, size: 18, color: enabled ? tint : c.ink3),
       ),
     );
   }
@@ -924,7 +750,7 @@ class _BottomActions extends StatelessWidget {
                 child: _OutlinedPill(
                   c: c,
                   icon: Icons.edit_rounded,
-                  label: 'Edit bus details',
+                  label: tr('bus_status.action.edit_bus'),
                   onTap: () => Get.to(
                     () => AddBusScreen(tourId: tourId, existing: bus),
                     transition: Transition.cupertino,
@@ -936,9 +762,13 @@ class _BottomActions extends StatelessWidget {
                 child: _OutlinedPill(
                   c: c,
                   icon: Icons.grid_view_rounded,
-                  label: 'Open seat assignment',
+                  label: tr('bus_status.action.open_seat_assignment'),
                   onTap: () => Get.to(
-                    () => TourSeatAssignmentScreen(tourId: tourId),
+                    () => SeatsScreen(
+                      tourId: tourId,
+                      initialMode: SeatsMode.grid,
+                      initialBusId: bus.id,
+                    ),
                     transition: Transition.cupertino,
                   ),
                 ),
@@ -949,11 +779,11 @@ class _BottomActions extends StatelessWidget {
           _OutlinedPill(
             c: c,
             icon: Icons.payments_rounded,
-            label: 'Collection & money',
+            label: tr('bus_status.action.collection_money'),
             onTap: () {
               final tour = Get.find<TourController>().getTour(tourId);
               if (tour == null) {
-                AppSnackBar.error('Tour not found. Pull to refresh.');
+                AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
                 return;
               }
               Get.to(
@@ -1004,8 +834,10 @@ class _OutlinedPill extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                style:
-                    UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12.5),
+                style: UgamText.bodyStrong.copyWith(
+                  color: c.ink,
+                  fontSize: 12.5,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),

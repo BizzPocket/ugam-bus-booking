@@ -1,16 +1,20 @@
 import 'dart:async';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/supabase_config.dart';
 import '../models/admin.dart';
 import '../models/profile.dart';
 import '../services/admin_auth_service.dart';
+import '../services/push_service.dart';
 import '../utils/app_snackbar.dart';
 import 'tour_controller.dart';
 import 'user_controller.dart';
+import 'customer_memory_controller.dart';
 
 /// Phone+password admin auth backed by Supabase Auth (synthetic-email mapping).
 /// Non-admin phones drop straight into a passenger session (no auth) so
@@ -42,25 +46,49 @@ class AuthController extends GetxController {
   bool get isAdmin => userRole.value == UserRole.admin;
   bool get isPassenger => userRole.value == UserRole.passenger;
 
+  /// Completes once [_restoreSession] has finished (success, early-return, or
+  /// error). The splash awaits this before deciding admin-home vs customer-home
+  /// — previously it raced a hard-coded 500 ms timer against an async
+  /// SharedPreferences/Supabase read, so on a slow cold start a logged-in admin
+  /// could be routed to the customer home ("the app opens on a random screen").
+  final Completer<void> _restored = Completer<void>();
+  Future<void> get whenRestored => _restored.future;
+
   @override
   void onInit() {
     super.onInit();
-    _restoreSession();
+    _restore();
+  }
+
+  Future<void> _restore() async {
+    try {
+      await _restoreSession();
+    } finally {
+      if (!_restored.isCompleted) _restored.complete();
+    }
   }
 
   Future<void> _restoreSession() async {
     final prefs = await SharedPreferences.getInstance();
     final phone = prefs.getString(_keyPhone);
-    if (phone == null || phone.isEmpty) return;
-
     final roleName = prefs.getString(_keyRole) ?? 'passenger';
 
-    // Admin-only access: only an admin session is ever restored. Any stale
-    // non-admin (passenger) session is cleared so the user lands on login.
-    if (roleName != UserRole.admin.name) {
+    // We only ever restore an ADMIN session. For everyone else — a fresh
+    // customer, a logged-out user, or stale prefs — make sure NO Supabase
+    // auth session lingers. Otherwise the customer browse runs as the old
+    // admin (`authenticated`) and RLS hides every other admin's PUBLIC
+    // tours, so the customer sees "no tours". Such a session can survive a
+    // failed/offline sign-out, or (on Android) an Auto-Backup restore after
+    // an uninstall/reinstall — both reported in the field.
+    final isPersistedAdmin = phone != null &&
+        phone.isNotEmpty &&
+        roleName == UserRole.admin.name;
+
+    if (!isPersistedAdmin) {
       await prefs.remove(_keyPhone);
       await prefs.remove(_keyRole);
       await prefs.remove(_keyName);
+      await _purgeStaleAuthSession();
       return;
     }
 
@@ -80,14 +108,42 @@ class AuthController extends GetxController {
         final admin = await _adminAuth.findByPhone(phone);
         if (admin != null) {
           currentAdmin.value = admin;
+          // Re-arm push on cold start for an already-logged-in admin.
+          if (admin.pushEnabled) {
+            // ignore: unawaited_futures
+            PushService.instance.register();
+          }
           if (Get.isRegistered<UserController>()) {
             // ignore: unawaited_futures
             Get.find<UserController>().ensureLoadedForCurrentAdmin();
           }
+          if (Get.isRegistered<CustomerMemoryController>()) {
+            // ignore: unawaited_futures
+            Get.find<CustomerMemoryController>().load();
+          }
+          // COLD START: TourController.onInit already fired _loadTours() before
+          // the persisted session was restored, so that first fetch ran with no
+          // admin context (and often before the Supabase token was ready) and
+          // could error — leaving the agent on the "Retry" screen. Now that the
+          // admin session is confirmed, re-fetch with the right owner scope.
+          // This is exactly what tapping Retry did, just automatic.
+          _reloadTours();
         }
       } catch (_) {
         // Offline or transient — admin will hydrate on next online action.
       }
+    }
+  }
+
+  /// Best-effort local sign-out so a non-admin device browses as `anon`.
+  /// `SignOutScope.local` clears the persisted session without a network
+  /// round-trip, so it still works offline.
+  Future<void> _purgeStaleAuthSession() async {
+    if (_client.auth.currentSession == null) return;
+    try {
+      await _client.auth.signOut(scope: SignOutScope.local);
+    } catch (_) {
+      // Best-effort — worst case the next online action re-scopes.
     }
   }
 
@@ -131,7 +187,7 @@ class AuthController extends GetxController {
   Future<void> submitPhone() async {
     final phone = phoneController.text.trim();
     if (phone.length < 10) {
-      AppSnackBar.error('Please enter a valid 10-digit phone number');
+      AppSnackBar.error(tr('errors.phone_invalid'));
       return;
     }
 
@@ -146,14 +202,14 @@ class AuthController extends GetxController {
         // Admin-only access: a number that isn't in the `admins` table cannot
         // log in. No password-less passenger session is created.
         AppSnackBar.error(
-          'This number is not registered. Contact the owner for access.',
-          title: 'Access denied',
+          tr('errors.number_not_registered'),
+          title: tr('errors.access_denied'),
         );
       }
     } catch (e) {
       AppSnackBar.error(
-        'Could not verify the phone number with Supabase.\n$e',
-        title: 'Connection error',
+        tr('errors.verify_phone', namedArgs: {'e': '$e'}),
+        title: tr('errors.connection_error'),
       );
     } finally {
       isLoading.value = false;
@@ -171,7 +227,7 @@ class AuthController extends GetxController {
     }
     final password = passwordController.text;
     if (password.isEmpty) {
-      AppSnackBar.error('Enter your admin password to continue');
+      AppSnackBar.error(tr('errors.enter_admin_password'));
       return;
     }
 
@@ -183,9 +239,18 @@ class AuthController extends GetxController {
       );
       await _loginAsAdmin(admin);
     } on AuthException catch (e) {
-      AppSnackBar.error(e.message, title: 'Sign in failed');
+      // TEMP DIAGNOSTIC — shows the exact synthetic email being attempted so we
+      // can tell "email not found" from "wrong password". Remove after debugging.
+      AppSnackBar.error(
+        '${e.message}\n[debug] trying: '
+        '${SupabaseConfig.phoneToSyntheticEmail(pending.phone)}',
+        title: tr('errors.sign_in_failed'),
+      );
     } catch (e) {
-      AppSnackBar.error('Could not sign in.\n$e', title: 'Connection error');
+      AppSnackBar.error(
+        tr('errors.sign_in', namedArgs: {'e': '$e'}),
+        title: tr('errors.connection_error'),
+      );
     } finally {
       isLoading.value = false;
     }
@@ -221,6 +286,12 @@ class AuthController extends GetxController {
       Get.find<UserController>().ensureLoadedForCurrentAdmin();
     }
     _reloadTours();
+    // Register this device for push if the admin has it enabled. Fire-and-forget
+    // (requests OS permission + stores the FCM token); never blocks navigation.
+    if (admin.pushEnabled) {
+      // ignore: unawaited_futures
+      PushService.instance.register();
+    }
     Get.offAllNamed('/');
   }
 
@@ -229,7 +300,22 @@ class AuthController extends GetxController {
     await _persistSession();
   }
 
+  /// Persists edited admin settings (from the Settings sub-screens) to the
+  /// `admins` table, then mirrors the result into in-memory state so every
+  /// `Obx` that reads `currentAdmin` / `userName` updates immediately.
+  /// Throws on failure so the caller can surface an error and keep the
+  /// unsaved edits on screen.
+  Future<void> saveAdmin(Admin updated) async {
+    final saved = await _adminAuth.updateAdmin(updated);
+    currentAdmin.value = saved;
+    userName.value = saved.name;
+    await _persistSession();
+  }
+
   Future<void> logout() async {
+    // Drop this device's push token BEFORE signing out — the unregister RPC is
+    // scoped by auth.uid(), so it needs the live Supabase session.
+    await PushService.instance.unregister();
     await _adminAuth.signOut();
     await _clearSessionLocally();
     Get.offAllNamed('/splash');

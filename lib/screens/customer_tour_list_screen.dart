@@ -9,6 +9,7 @@ import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../routes/app_routes.dart';
 import '../services/customer_requests_store.dart';
+import 'customer_booking_request_screen.dart';
 import 'customer_more_screen.dart';
 import 'customer_my_requests_screen.dart';
 import 'customer_tour_detail_screen.dart';
@@ -71,10 +72,7 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
 
   void _openMore() {
     HapticFeedback.selectionClick();
-    Get.to(
-      () => const CustomerMoreScreen(),
-      transition: Transition.cupertino,
-    );
+    Get.to(() => const CustomerMoreScreen(), transition: Transition.cupertino);
   }
 
   void _toggleSearch() {
@@ -124,14 +122,18 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                   return _LoadingShimmer();
                 }
                 if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-                  return UgamEmpty(
-                    icon: Icons.cloud_off_rounded,
-                    title: tr('customer_tour_list.error_title'),
-                    body: tourCtrl.errorMessage.value,
-                    cta: UgamCTA(
-                      label: tr('app.action.retry'),
-                      leadingIcon: Icons.refresh_rounded,
-                      onPressed: tourCtrl.refreshTours,
+                  return _refreshable(
+                    c,
+                    tourCtrl,
+                    UgamEmpty(
+                      icon: Icons.cloud_off_rounded,
+                      title: tr('customer_tour_list.error_title'),
+                      body: tourCtrl.errorMessage.value,
+                      cta: UgamCTA(
+                        label: tr('app.action.retry'),
+                        leadingIcon: Icons.refresh_rounded,
+                        onPressed: tourCtrl.refreshTours,
+                      ),
                     ),
                   );
                 }
@@ -139,10 +141,14 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                 final visible = _visibleTours(tourCtrl.tours);
 
                 if (visible.isEmpty) {
-                  return UgamEmpty(
-                    icon: Icons.event_busy_rounded,
-                    title: tr('customer_tour_list.empty_title'),
-                    body: tr('customer_tour_list.pull_to_refresh'),
+                  return _refreshable(
+                    c,
+                    tourCtrl,
+                    UgamEmpty(
+                      icon: Icons.event_busy_rounded,
+                      title: tr('customer_tour_list.empty_title'),
+                      body: tr('customer_tour_list.pull_to_refresh'),
+                    ),
                   );
                 }
 
@@ -150,11 +156,17 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                 final hasMatches = groups.any((g) => g.tours.isNotEmpty);
 
                 if (_query.isNotEmpty && !hasMatches) {
-                  return UgamEmpty(
-                    icon: Icons.search_off_rounded,
-                    title: tr('customer_tour_list.no_matches_title'),
-                    body: tr('customer_tour_list.no_matches_body',
-                        namedArgs: {'q': _query}),
+                  return _refreshable(
+                    c,
+                    tourCtrl,
+                    UgamEmpty(
+                      icon: Icons.search_off_rounded,
+                      title: tr('customer_tour_list.no_matches_title'),
+                      body: tr(
+                        'customer_tour_list.no_matches_body',
+                        namedArgs: {'q': _query},
+                      ),
+                    ),
                   );
                 }
 
@@ -195,9 +207,22 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                                 c: c,
                                 onTap: () => Get.to(
                                   () => CustomerTourDetailScreen(
-                                      tour: g.tours[j]),
+                                    tour: g.tours[j],
+                                  ),
                                   transition: Transition.cupertino,
                                 ),
+                                // One-tap "Book": jump straight to the booking
+                                // form, collapsing list → detail → form to a
+                                // single nav. Row tap still opens detail.
+                                onBook: () {
+                                  HapticFeedback.selectionClick();
+                                  Get.to(
+                                    () => CustomerBookingRequestScreen(
+                                      tour: g.tours[j],
+                                    ),
+                                    transition: Transition.cupertino,
+                                  );
+                                },
                               ),
                               if (j != g.tours.length - 1)
                                 const SizedBox(height: UgamSpacing.sm + 2),
@@ -216,15 +241,38 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
     );
   }
 
+  /// Wraps a centered empty/error state in a pull-to-refresh scrollable so
+  /// the customer can always retry the fetch — even when the list is empty
+  /// and there's otherwise nothing to pull on.
+  Widget _refreshable(UgamColorSet c, TourController tourCtrl, Widget child) {
+    return RefreshIndicator(
+      color: c.accent,
+      onRefresh: tourCtrl.refreshTours,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: BouncingScrollPhysics(),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Public + non-completed, future-dated only.
   List<Tour> _visibleTours(List<Tour> all) {
     final today = DateTime.now();
     final cutoff = DateTime(today.year, today.month, today.day);
     return all
-        .where((t) =>
-            t.isPublic &&
-            t.status != TourStatus.completed &&
-            !t.departureDate.isBefore(cutoff))
+        .where(
+          (t) =>
+              t.isPublic &&
+              t.status != TourStatus.completed &&
+              !t.departureDate.isBefore(cutoff),
+        )
         .toList();
   }
 
@@ -236,11 +284,13 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
     final filtered = _query.isEmpty
         ? all
         : all
-            .where((t) =>
-                t.title.toLowerCase().contains(_query.toLowerCase()) ||
-                t.fromCity.toLowerCase().contains(_query.toLowerCase()) ||
-                t.toCity.toLowerCase().contains(_query.toLowerCase()))
-            .toList();
+              .where(
+                (t) =>
+                    t.title.toLowerCase().contains(_query.toLowerCase()) ||
+                    t.fromCity.toLowerCase().contains(_query.toLowerCase()) ||
+                    t.toCity.toLowerCase().contains(_query.toLowerCase()),
+              )
+              .toList();
 
     final upcoming = <Tour>[];
     final later = <Tour>[];
@@ -326,8 +376,7 @@ class _TopBar extends StatelessWidget {
           ),
           const SizedBox(width: UgamSpacing.sm),
           _IconCircle(
-            icon:
-                searchActive ? Icons.close_rounded : Icons.search_rounded,
+            icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
             c: c,
             onTap: onToggleSearch,
             active: searchActive,
@@ -335,11 +384,7 @@ class _TopBar extends StatelessWidget {
           const SizedBox(width: UgamSpacing.sm),
           Tooltip(
             message: tr('customer_more.title'),
-            child: _IconCircle(
-              icon: Icons.menu_rounded,
-              c: c,
-              onTap: onMore,
-            ),
+            child: _IconCircle(icon: Icons.menu_rounded, c: c, onTap: onMore),
           ),
         ],
       ),
@@ -400,7 +445,7 @@ class _IconCircle extends StatelessWidget {
                   badgeCount > 9 ? '9+' : '$badgeCount',
                   style: UgamText.tabular(
                     UgamText.micro.copyWith(
-                      color: Colors.white,
+                      color: c.onAccent,
                       fontSize: 9.5,
                       fontWeight: FontWeight.w700,
                       height: 1,
@@ -458,8 +503,10 @@ class _SearchField extends StatelessWidget {
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
                   hintText: tr('customer_tour_list.search_hint'),
-                  hintStyle:
-                      UgamText.body.copyWith(color: c.ink3, fontSize: 14),
+                  hintStyle: UgamText.body.copyWith(
+                    color: c.ink3,
+                    fontSize: 14,
+                  ),
                 ),
               ),
             ),
@@ -485,8 +532,10 @@ class _GroupHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(label,
-            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16)),
+        Text(
+          label,
+          style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
+        ),
         const SizedBox(width: UgamSpacing.sm),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -510,11 +559,13 @@ class _TourRow extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
   final VoidCallback onTap;
+  final VoidCallback onBook;
 
   const _TourRow({
     required this.tour,
     required this.c,
     required this.onTap,
+    required this.onBook,
   });
 
   @override
@@ -584,22 +635,29 @@ class _TourRow extends StatelessWidget {
                     children: [
                       Text(
                         tour.title,
-                        style: UgamText.titleS
-                            .copyWith(color: c.ink, fontSize: 15),
+                        style: UgamText.titleS.copyWith(
+                          color: c.ink,
+                          fontSize: 15,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 3),
                       Row(
                         children: [
-                          Icon(Icons.south_east_rounded,
-                              size: 12, color: c.ink2),
+                          Icon(
+                            Icons.south_east_rounded,
+                            size: 12,
+                            color: c.ink2,
+                          ),
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(
                               '${tour.fromCity} → ${tour.toCity}',
-                              style: UgamText.caption
-                                  .copyWith(color: c.ink2, fontSize: 12),
+                              style: UgamText.caption.copyWith(
+                                color: c.ink2,
+                                fontSize: 12,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -613,8 +671,10 @@ class _TourRow extends StatelessWidget {
                             UgamReqChip(
                               label: seatsLeft <= 0
                                   ? tr('customer_tour_list.chip_full')
-                                  : tr('customer_tour_list.chip_left',
-                                      namedArgs: {'n': seatsLeft.toString()}),
+                                  : tr(
+                                      'customer_tour_list.chip_left',
+                                      namedArgs: {'n': seatsLeft.toString()},
+                                    ),
                               variant: seatsLeft <= 0
                                   ? UgamChipVariant.warm
                                   : UgamChipVariant.good,
@@ -625,16 +685,14 @@ class _TourRow extends StatelessWidget {
                               variant: UgamChipVariant.neutral,
                             ),
                           const Spacer(),
-                          Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: c.accentFill,
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(Icons.arrow_forward_rounded,
-                                size: 14, color: c.accent),
+                          // One-tap Book pill — jumps straight to the booking
+                          // form (skips the detail screen). Has its own gesture
+                          // so it doesn't bubble up to the row's tap-to-detail.
+                          // Reads as a non-actionable arrow when the bus is full.
+                          _BookPill(
+                            c: c,
+                            full: hasCapacity && seatsLeft <= 0,
+                            onTap: onBook,
                           ),
                         ],
                       ),
@@ -651,12 +709,74 @@ class _TourRow extends StatelessWidget {
 
   static String _formatDate(DateTime d) {
     const keys = [
-      'app.month.short.jan','app.month.short.feb','app.month.short.mar',
-      'app.month.short.apr','app.month.short.may','app.month.short.jun',
-      'app.month.short.jul','app.month.short.aug','app.month.short.sep',
-      'app.month.short.oct','app.month.short.nov','app.month.short.dec',
+      'app.month.short.jan',
+      'app.month.short.feb',
+      'app.month.short.mar',
+      'app.month.short.apr',
+      'app.month.short.may',
+      'app.month.short.jun',
+      'app.month.short.jul',
+      'app.month.short.aug',
+      'app.month.short.sep',
+      'app.month.short.oct',
+      'app.month.short.nov',
+      'app.month.short.dec',
     ];
     return '${d.day.toString().padLeft(2, '0')} ${tr(keys[d.month - 1]).toUpperCase()}';
+  }
+}
+
+/// Trailing "Book" pill on a tour row. Its own gesture (so it doesn't bubble up
+/// to the row's tap-to-detail) takes the customer straight to the booking form.
+/// When the bus is full it renders as a muted, non-actionable arrow chip — the
+/// row still opens detail, but there's no tappable "Book" affordance.
+class _BookPill extends StatelessWidget {
+  final UgamColorSet c;
+  final bool full;
+  final VoidCallback onTap;
+
+  const _BookPill({required this.c, required this.full, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    if (full) {
+      // Non-actionable arrow — booking a full bus isn't offered from the row.
+      return Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
+        alignment: Alignment.center,
+        child: Icon(Icons.arrow_forward_rounded, size: 14, color: c.ink3),
+      );
+    }
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: 7,
+        ),
+        decoration: BoxDecoration(
+          color: c.accent,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              tr('customer_tour_list.book_button'),
+              style: UgamText.bodyStrong.copyWith(
+                color: c.onAccent,
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_forward_rounded, size: 13, color: c.onAccent),
+          ],
+        ),
+      ),
+    );
   }
 }
 

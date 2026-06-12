@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import 'ugam_chrome.dart';
 
 /// Full-width sticky pill CTA. Sits in the `Scaffold.bottomNavigationBar`
 /// slot (or above the dock nav for primary workflow buttons) and ends
@@ -33,8 +34,7 @@ class UgamCTA extends StatefulWidget {
   State<UgamCTA> createState() => _UgamCTAState();
 }
 
-class _UgamCTAState extends State<UgamCTA>
-    with SingleTickerProviderStateMixin {
+class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl = AnimationController(
     vsync: this,
     duration: UgamMotion.tapOut,
@@ -42,9 +42,10 @@ class _UgamCTAState extends State<UgamCTA>
     value: 1,
   );
 
-  late final Animation<double> _scale = Tween<double>(begin: 0.96, end: 1)
-      .chain(CurveTween(curve: UgamMotion.easeOut))
-      .animate(_ctrl);
+  late final Animation<double> _scale = Tween<double>(
+    begin: 0.96,
+    end: 1,
+  ).chain(CurveTween(curve: UgamMotion.easeOut)).animate(_ctrl);
 
   @override
   void dispose() {
@@ -150,24 +151,26 @@ class UgamStickyCTA extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return SafeArea(
-      top: false,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(
-          UgamSpacing.gutter,
-          UgamSpacing.xxl,
-          UgamSpacing.gutter,
-          UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [c.bg.withValues(alpha: 0), c.bg],
-            stops: const [0, 0.45],
+    return ChromeMeasure(
+      child: SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(
+            UgamSpacing.gutter,
+            UgamSpacing.xxl,
+            UgamSpacing.gutter,
+            UgamSpacing.md,
           ),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [c.bg.withValues(alpha: 0), c.bg],
+              stops: const [0, 0.45],
+            ),
+          ),
+          child: child,
         ),
-        child: child,
       ),
     );
   }

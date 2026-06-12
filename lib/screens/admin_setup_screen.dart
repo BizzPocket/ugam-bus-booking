@@ -24,14 +24,20 @@ class AdminSetupScreen extends StatelessWidget {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!ok) {
         AppSnackBar.error(
-          'Could not open your mail app. Please email $_supportEmail.',
-          title: 'Mail unavailable',
+          tr(
+            'admin_setup.mail_unavailable_body',
+            namedArgs: {'email': _supportEmail},
+          ),
+          title: tr('admin_setup.mail_unavailable_title'),
         );
       }
     } catch (_) {
       AppSnackBar.error(
-        'Could not open your mail app. Please email $_supportEmail.',
-        title: 'Mail unavailable',
+        tr(
+          'admin_setup.mail_unavailable_body',
+          namedArgs: {'email': _supportEmail},
+        ),
+        title: tr('admin_setup.mail_unavailable_title'),
       );
     }
   }
@@ -65,8 +71,11 @@ class AdminSetupScreen extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
-                      child: Icon(Icons.arrow_back_rounded,
-                          size: 19, color: c.ink),
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        size: 19,
+                        color: c.ink,
+                      ),
                     ),
                   ),
                   const SizedBox(width: UgamSpacing.md),
@@ -93,8 +102,7 @@ class AdminSetupScreen extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ClipRRect(
-                        borderRadius:
-                            BorderRadius.circular(UgamRadius.photo),
+                        borderRadius: BorderRadius.circular(UgamRadius.photo),
                         child: const SizedBox(
                           height: 120,
                           width: double.infinity,
@@ -128,7 +136,7 @@ class AdminSetupScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: UgamSpacing.md),
                             Text(
-                              'Admin accounts are managed by the Ugam team',
+                              tr('admin_setup.support_heading'),
                               style: UgamText.titleL.copyWith(
                                 color: c.ink,
                                 fontSize: 20,
@@ -136,8 +144,7 @@ class AdminSetupScreen extends StatelessWidget {
                             ),
                             const SizedBox(height: UgamSpacing.sm),
                             Text(
-                              "Contact our support team to add or modify admin access. "
-                              "You'll be added to the system within 24 hours.",
+                              tr('admin_setup.support_body'),
                               style: UgamText.body.copyWith(
                                 color: c.ink2,
                                 fontSize: 14,
@@ -153,12 +160,16 @@ class AdminSetupScreen extends StatelessWidget {
                               decoration: BoxDecoration(
                                 color: c.cardElev,
                                 borderRadius: BorderRadius.circular(
-                                    UgamRadius.input),
+                                  UgamRadius.input,
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.mail_outline_rounded,
-                                      size: 16, color: c.ink2),
+                                  Icon(
+                                    Icons.mail_outline_rounded,
+                                    size: 16,
+                                    color: c.ink2,
+                                  ),
                                   const SizedBox(width: 8),
                                   Flexible(
                                     child: Text(
@@ -183,7 +194,7 @@ class AdminSetupScreen extends StatelessWidget {
             ),
             UgamStickyCTA(
               child: UgamCTA(
-                label: 'Contact support',
+                label: tr('admin_setup.btn_contact_support'),
                 leadingIcon: Icons.mail_outline_rounded,
                 onPressed: _contactSupport,
               ),

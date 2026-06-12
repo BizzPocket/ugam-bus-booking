@@ -1,3 +1,5 @@
+import 'package:easy_localization/easy_localization.dart';
+
 /// Age group for passengers — used at handler-pick time and for any
 /// future pricing tiers.
 enum AgeGroup {
@@ -8,11 +10,11 @@ enum AgeGroup {
   String get displayName {
     switch (this) {
       case AgeGroup.child:
-        return 'Child';
+        return tr('enums.age_group.child');
       case AgeGroup.adult:
-        return 'Adult';
+        return tr('enums.age_group.adult');
       case AgeGroup.senior:
-        return 'Senior';
+        return tr('enums.age_group.senior');
     }
   }
 

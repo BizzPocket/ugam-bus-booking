@@ -1,3 +1,5 @@
+import 'package:easy_localization/easy_localization.dart';
+
 /// Whether a passenger has an approved need for a priority (front / sofa) seat.
 ///
 /// Priority is REQUESTED by the customer (an optional note) and APPROVED by the
@@ -15,13 +17,13 @@ enum PriorityStatus {
   String get displayName {
     switch (this) {
       case PriorityStatus.none:
-        return 'None';
+        return tr('enums.priority.none');
       case PriorityStatus.requested:
-        return 'Priority requested';
+        return tr('enums.priority.requested');
       case PriorityStatus.approved:
-        return 'Priority approved';
+        return tr('enums.priority.approved');
       case PriorityStatus.declined:
-        return 'Priority declined';
+        return tr('enums.priority.declined');
     }
   }
 

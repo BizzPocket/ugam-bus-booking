@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
@@ -8,6 +9,7 @@ import '../models/bus_details.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
 import 'bus_money_screen.dart';
+import 'collection_screen.dart';
 
 String _money(num v) {
   final neg = v < 0;
@@ -54,6 +56,16 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
     );
   }
 
+  /// Shortcut into the existing per-bus [CollectionScreen] — the same
+  /// destination [BusMoneyScreen]'s "Collect from passengers" CTA reaches,
+  /// but jumped to in one tap from the board (no detour through BusMoney).
+  void _collectForBus(Tour tour, Bus bus) {
+    Get.to(
+      () => CollectionScreen(tour: tour, bus: bus),
+      transition: Transition.cupertino,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -73,7 +85,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                 if (tour == null) {
                   return Center(
                     child: Text(
-                      'Tour not found.',
+                      tr('tour_money_board.tour_not_found'),
                       style: UgamText.body.copyWith(color: c.ink2),
                     ),
                   );
@@ -98,7 +110,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                   physics: const BouncingScrollPhysics(),
                   children: [
                     Text(
-                      'PER BUS',
+                      tr('tour_money_board.per_bus'),
                       style: UgamText.micro.copyWith(color: c.ink3),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
@@ -111,6 +123,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                           summary: summaries[i],
                           state: _money.stateForBusSummary(summaries[i]),
                           onTap: () => _openBus(tour, buses[i]),
+                          onCollect: () => _collectForBus(tour, buses[i]),
                           c: c,
                         ),
                       ),
@@ -173,12 +186,12 @@ class _Header extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'MONEY BOARD',
+                  tr('tour_money_board.money_board'),
                   style: UgamText.micro.copyWith(color: c.ink3),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  title.isEmpty ? 'Tour money' : title,
+                  title.isEmpty ? tr('tour_money_board.tour_money') : title,
                   style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -199,6 +212,7 @@ class _BusMoneyRow extends StatelessWidget {
   final BusMoneySummary summary;
   final BusMoneyState state;
   final VoidCallback onTap;
+  final VoidCallback onCollect;
   final UgamColorSet c;
 
   const _BusMoneyRow({
@@ -206,6 +220,7 @@ class _BusMoneyRow extends StatelessWidget {
     required this.summary,
     required this.state,
     required this.onTap,
+    required this.onCollect,
     required this.c,
   });
 
@@ -219,11 +234,19 @@ class _BusMoneyRow extends StatelessWidget {
           c.warm,
           UgamStatusTone.warm,
           summary.outstandingHandover > 0.005
-              ? 'Handover ${_money(summary.outstandingHandover)} due'
-              : 'To collect ${_money(summary.toCollectTotal)}',
+              ? tr(
+                  'tour_money_board.handover_due',
+                  namedArgs: {'n': _money(summary.outstandingHandover)},
+                )
+              : tr(
+                  'tour_money_board.to_collect_amount',
+                  namedArgs: {'n': _money(summary.toCollectTotal)},
+                ),
         ),
-      BusMoneyState.settled => (c.good, UgamStatusTone.good, 'Settled'),
-      BusMoneyState.neutral => (null, UgamStatusTone.neutral, 'No activity'),
+      BusMoneyState.settled =>
+        (c.good, UgamStatusTone.good, tr('tour_money_board.settled')),
+      BusMoneyState.neutral =>
+        (null, UgamStatusTone.neutral, tr('tour_money_board.no_activity')),
     };
 
     return Container(
@@ -289,7 +312,7 @@ class _BusMoneyRow extends StatelessWidget {
               children: [
                 Expanded(
                   child: _Metric(
-                    label: 'COLLECTED',
+                    label: tr('tour_money_board.collected'),
                     value: _money(summary.collected),
                     valueColor: c.ink,
                     c: c,
@@ -297,7 +320,7 @@ class _BusMoneyRow extends StatelessWidget {
                 ),
                 Expanded(
                   child: _Metric(
-                    label: 'HANDOVER',
+                    label: tr('tour_money_board.handover'),
                     value: _money(summary.handedOver),
                     valueColor: c.ink,
                     c: c,
@@ -311,7 +334,7 @@ class _BusMoneyRow extends StatelessWidget {
               children: [
                 Expanded(
                   child: _Metric(
-                    label: 'TO COLLECT',
+                    label: tr('tour_money_board.to_collect'),
                     value: _money(summary.toCollectTotal),
                     valueColor:
                         summary.toCollectTotal > 0.005 ? c.danger : c.ink2,
@@ -320,7 +343,7 @@ class _BusMoneyRow extends StatelessWidget {
                 ),
                 Expanded(
                   child: _Metric(
-                    label: 'TO RETURN',
+                    label: tr('tour_money_board.to_return'),
                     value: _money(summary.toReturnTotal),
                     valueColor:
                         summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
@@ -329,7 +352,7 @@ class _BusMoneyRow extends StatelessWidget {
                 ),
                 Expanded(
                   child: _Metric(
-                    label: 'EXPENSES',
+                    label: tr('tour_money_board.expenses'),
                     value: _money(summary.expensesTotal),
                     valueColor: c.ink2,
                     c: c,
@@ -345,7 +368,10 @@ class _BusMoneyRow extends StatelessWidget {
               children: [
                 UgamStatusDot(label: statusLabel, tone: tone),
                 Text(
-                  'Outstanding ${_money(summary.outstandingHandover)}',
+                  tr(
+                    'tour_money_board.outstanding_amount',
+                    namedArgs: {'n': _money(summary.outstandingHandover)},
+                  ),
                   style: UgamText.tabular(
                     UgamText.caption.copyWith(
                       color: summary.outstandingHandover > 0.005
@@ -356,6 +382,50 @@ class _BusMoneyRow extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: UgamSpacing.md),
+            // One-tap shortcut straight into this bus's CollectionScreen —
+            // no detour through BusMoneyScreen. The row itself still opens
+            // the full per-bus detail view.
+            _CollectButton(onTap: onCollect, c: c),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A prominent per-row "Collect" quick action. Its own opaque tap handler
+/// swallows the gesture so it never also triggers the row's open-detail tap.
+class _CollectButton extends StatelessWidget {
+  final VoidCallback onTap;
+  final UgamColorSet c;
+
+  const _CollectButton({required this.onTap, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm + 2),
+        decoration: BoxDecoration(
+          color: c.accentFill,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.groups_rounded, size: 17, color: c.accent),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              tr('tour_money_board.collect'),
+              style: UgamText.caption.copyWith(
+                color: c.accent,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
@@ -421,11 +491,13 @@ class _TotalsCapsule extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'TOUR TOTALS',
+                  tr('tour_money_board.tour_totals'),
                   style: UgamText.micro.copyWith(color: c.ink3),
                 ),
                 UgamStatusDot(
-                  label: settled ? 'All settled' : 'Open',
+                  label: settled
+                      ? tr('tour_money_board.all_settled')
+                      : tr('tour_money_board.open'),
                   tone: settled
                       ? UgamStatusTone.good
                       : UgamStatusTone.warm,
@@ -437,7 +509,7 @@ class _TotalsCapsule extends StatelessWidget {
               children: [
                 Expanded(
                   child: _TotalCol(
-                    label: 'COLLECTED',
+                    label: tr('tour_money_board.collected'),
                     value: _money(summary.totalCollected),
                     color: c.ink,
                     c: c,
@@ -445,7 +517,7 @@ class _TotalsCapsule extends StatelessWidget {
                 ),
                 Expanded(
                   child: _TotalCol(
-                    label: 'EXPENSES',
+                    label: tr('tour_money_board.expenses'),
                     value: _money(summary.totalExpenses),
                     color: c.ink2,
                     c: c,
@@ -453,7 +525,7 @@ class _TotalsCapsule extends StatelessWidget {
                 ),
                 Expanded(
                   child: _TotalCol(
-                    label: 'NET',
+                    label: tr('tour_money_board.net'),
                     value: _money(summary.totalNet),
                     color: c.ink,
                     c: c,
@@ -468,7 +540,7 @@ class _TotalsCapsule extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Outstanding handover',
+                  tr('tour_money_board.outstanding_handover'),
                   style: UgamText.body.copyWith(color: c.ink2),
                 ),
                 Text(
@@ -539,7 +611,7 @@ class _Empty extends StatelessWidget {
                 size: 40, color: c.ink3),
             const SizedBox(height: UgamSpacing.md),
             Text(
-              'No buses on this tour yet.',
+              tr('tour_money_board.no_buses'),
               style: UgamText.body.copyWith(color: c.ink2),
               textAlign: TextAlign.center,
             ),

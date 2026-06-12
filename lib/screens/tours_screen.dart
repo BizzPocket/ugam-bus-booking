@@ -7,6 +7,9 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../routes/app_routes.dart';
+import 'manage_buses_screen.dart';
+import 'notify_screen.dart';
 import 'tour_detail_screen.dart';
 
 /// Tours tab — chronologically grouped instead of filter-pill-driven.
@@ -33,7 +36,6 @@ class _ToursScreenState extends State<ToursScreen> {
   final _searchCtrl = TextEditingController();
   bool _searchVisible = false;
   String _query = '';
-  bool _pastExpanded = false;
 
   @override
   void dispose() {
@@ -115,14 +117,16 @@ class _ToursScreenState extends State<ToursScreen> {
                 }
 
                 final groups = _group(tourCtrl.tours);
-                final hasMatches = groups.any(
-                    (g) => g.tours.isNotEmpty || g.bucket == _Bucket.past);
+                final hasMatches = groups.any((g) => g.tours.isNotEmpty);
 
                 if (_query.isNotEmpty && !hasMatches) {
                   return UgamEmpty(
                     icon: Icons.search_off_rounded,
-                    title: 'No matches',
-                    body: 'No tours match "$_query".',
+                    title: tr('tours.no_matches_title'),
+                    body: tr(
+                      'tours.no_matches_body',
+                      namedArgs: {'query': _query},
+                    ),
                   );
                 }
 
@@ -142,11 +146,8 @@ class _ToursScreenState extends State<ToursScreen> {
                     itemCount: groups.length,
                     itemBuilder: (_, i) {
                       final g = groups[i];
-                      if (g.tours.isEmpty && g.bucket != _Bucket.past) {
-                        return const SizedBox.shrink();
-                      }
+                      if (g.tours.isEmpty) return const SizedBox.shrink();
                       final isPast = g.bucket == _Bucket.past;
-                      final showItems = !isPast || _pastExpanded;
                       return Padding(
                         padding: EdgeInsets.only(
                           bottom: i == groups.length - 1 ? 0 : UgamSpacing.lg,
@@ -159,29 +160,20 @@ class _ToursScreenState extends State<ToursScreen> {
                               label: g.label,
                               count: g.tours.length,
                               c: c,
-                              expandable: isPast,
-                              expanded: _pastExpanded,
-                              onToggle: isPast
-                                  ? () => setState(
-                                      () => _pastExpanded = !_pastExpanded)
-                                  : null,
                             ),
                             const SizedBox(height: UgamSpacing.md),
-                            if (showItems) ...[
-                              for (var j = 0; j < g.tours.length; j++) ...[
-                                _TourRow(
-                                  tour: g.tours[j],
-                                  c: c,
-                                  dim: isPast,
-                                  onTap: () => Get.to(
-                                    () => TourDetailScreen(
-                                        tourId: g.tours[j].id),
-                                    transition: Transition.cupertino,
-                                  ),
+                            for (var j = 0; j < g.tours.length; j++) ...[
+                              _TourRow(
+                                tour: g.tours[j],
+                                c: c,
+                                dim: isPast,
+                                onTap: () => Get.to(
+                                  () => TourDetailScreen(tourId: g.tours[j].id),
+                                  transition: Transition.cupertino,
                                 ),
-                                if (j != g.tours.length - 1)
-                                  const SizedBox(height: UgamSpacing.sm + 2),
-                              ],
+                              ),
+                              if (j != g.tours.length - 1)
+                                const SizedBox(height: UgamSpacing.sm + 2),
                             ],
                           ],
                         ),
@@ -208,11 +200,13 @@ class _ToursScreenState extends State<ToursScreen> {
     final filtered = _query.isEmpty
         ? all
         : all
-            .where((t) =>
-                t.title.toLowerCase().contains(_query.toLowerCase()) ||
-                t.fromCity.toLowerCase().contains(_query.toLowerCase()) ||
-                t.toCity.toLowerCase().contains(_query.toLowerCase()))
-            .toList();
+              .where(
+                (t) =>
+                    t.title.toLowerCase().contains(_query.toLowerCase()) ||
+                    t.fromCity.toLowerCase().contains(_query.toLowerCase()) ||
+                    t.toCity.toLowerCase().contains(_query.toLowerCase()),
+              )
+              .toList();
 
     final thisWeek = <Tour>[];
     final next30 = <Tour>[];
@@ -220,7 +214,11 @@ class _ToursScreenState extends State<ToursScreen> {
     final past = <Tour>[];
 
     for (final t in filtered) {
-      if (t.departureDate.isBefore(today)) {
+      // A tour is "past" once its end day (return date if any, else departure)
+      // is before today — multi-day trips stay active until they actually end.
+      final end = t.returnDate ?? t.departureDate;
+      final endDay = DateTime(end.year, end.month, end.day);
+      if (endDay.isBefore(today)) {
         past.add(t);
       } else if (!t.departureDate.isAfter(endOfWeek)) {
         thisWeek.add(t);
@@ -241,10 +239,13 @@ class _ToursScreenState extends State<ToursScreen> {
     past.sort(byDateDesc);
 
     return [
-      _Group(_Bucket.thisWeek, 'This week', thisWeek),
-      _Group(_Bucket.next30, 'Next 30 days', next30),
-      _Group(_Bucket.later, 'Later', later),
-      _Group(_Bucket.past, 'Past', past),
+      _Group(_Bucket.thisWeek, tr('tours.group.this_week'), thisWeek),
+      _Group(_Bucket.next30, tr('tours.group.next_30_days'), next30),
+      _Group(_Bucket.later, tr('tours.group.later'), later),
+      // Past/closed tours are kept out of the default browse view so the list
+      // stays focused on upcoming work; they still surface when searching.
+      if (_query.isNotEmpty)
+        _Group(_Bucket.past, tr('tours.group.past'), past),
     ];
   }
 }
@@ -290,27 +291,47 @@ class _TopBar extends StatelessWidget {
               style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
             ),
           ),
-          _IconCircle(
-            icon: searchActive
-                ? Icons.close_rounded
-                : Icons.search_rounded,
-            c: c,
-            onTap: onToggleSearch,
-            active: searchActive,
+          Semantics(
+            button: true,
+            label: tr('tours.search'),
+            child: Tooltip(
+              message: tr('tours.search'),
+              child: _IconCircle(
+                icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
+                c: c,
+                onTap: onToggleSearch,
+                active: searchActive,
+              ),
+            ),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          GestureDetector(
-            onTap: onCreate,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.accent,
-                shape: BoxShape.circle,
+          // Labelled pill rather than a bare "+" circle: the primary
+          // action on this screen reads as a verb, not a glyph.
+          Semantics(
+            button: true,
+            label: tr('tours.create'),
+            child: GestureDetector(
+              onTap: onCreate,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                height: 44,
+                padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
+                decoration: BoxDecoration(
+                  color: c.accent,
+                  borderRadius: BorderRadius.circular(UgamRadius.chip),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add_rounded, size: 20, color: c.onAccent),
+                    const SizedBox(width: UgamSpacing.xs),
+                    Text(
+                      tr('tours.create'),
+                      style: UgamText.bodyStrong.copyWith(color: c.onAccent),
+                    ),
+                  ],
+                ),
               ),
-              alignment: Alignment.center,
-              child: Icon(Icons.add_rounded, size: 22, color: c.onAccent),
             ),
           ),
         ],
@@ -392,9 +413,11 @@ class _SearchField extends StatelessWidget {
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  hintText: 'Search tours, cities…',
-                  hintStyle: UgamText.body
-                      .copyWith(color: c.ink3, fontSize: 14),
+                  hintText: tr('tours.search_hint'),
+                  hintStyle: UgamText.body.copyWith(
+                    color: c.ink3,
+                    fontSize: 14,
+                  ),
                 ),
               ),
             ),
@@ -409,25 +432,21 @@ class _GroupHeader extends StatelessWidget {
   final String label;
   final int count;
   final UgamColorSet c;
-  final bool expandable;
-  final bool expanded;
-  final VoidCallback? onToggle;
 
   const _GroupHeader({
     required this.label,
     required this.count,
     required this.c,
-    this.expandable = false,
-    this.expanded = false,
-    this.onToggle,
   });
 
   @override
   Widget build(BuildContext context) {
-    final header = Row(
+    return Row(
       children: [
-        Text(label,
-            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16)),
+        Text(
+          label,
+          style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
+        ),
         const SizedBox(width: UgamSpacing.sm),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -442,26 +461,7 @@ class _GroupHeader extends StatelessWidget {
             ),
           ),
         ),
-        if (expandable) ...[
-          const Spacer(),
-          Icon(
-            expanded
-                ? Icons.keyboard_arrow_up_rounded
-                : Icons.keyboard_arrow_down_rounded,
-            size: 18,
-            color: c.ink2,
-          ),
-        ],
       ],
-    );
-    if (!expandable) return header;
-    return GestureDetector(
-      onTap: onToggle,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: header,
-      ),
     );
   }
 }
@@ -483,9 +483,7 @@ class _TourRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final assigned = tour.totalSeatsAssigned;
     final capacity = tour.totalBusSeats;
-    final pct = capacity > 0
-        ? (assigned / capacity).clamp(0.0, 1.0)
-        : 0.0;
+    final pct = capacity > 0 ? (assigned / capacity).clamp(0.0, 1.0) : 0.0;
     final action = _actionFor(tour);
     final dimAlpha = dim ? 0.55 : 1.0;
 
@@ -550,16 +548,20 @@ class _TourRow extends StatelessWidget {
                       children: [
                         Text(
                           tour.title,
-                          style: UgamText.titleS
-                              .copyWith(color: c.ink, fontSize: 15),
+                          style: UgamText.titleS.copyWith(
+                            color: c.ink,
+                            fontSize: 15,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           '${tour.fromCity} → ${tour.toCity}',
-                          style: UgamText.caption
-                              .copyWith(color: c.ink2, fontSize: 12),
+                          style: UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontSize: 12,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -583,7 +585,10 @@ class _TourRow extends StatelessWidget {
                               )
                             else
                               Text(
-                                '${tour.passengerCount} pax',
+                                tr(
+                                  'tours.pax',
+                                  namedArgs: {'count': '${tour.passengerCount}'},
+                                ),
                                 style: UgamText.tabular(
                                   UgamText.caption.copyWith(color: c.ink2),
                                 ),
@@ -609,24 +614,30 @@ class _TourRow extends StatelessWidget {
               ],
               if (action != null) ...[
                 const SizedBox(height: UgamSpacing.md),
-                Container(
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: c.accent,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                  ),
-                  alignment: Alignment.center,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(action.icon, size: 14, color: c.onAccent),
-                      const SizedBox(width: 6),
-                      Text(
-                        action.label,
-                        style: UgamText.bodyStrong
-                            .copyWith(color: c.onAccent, fontSize: 12),
-                      ),
-                    ],
+                GestureDetector(
+                  onTap: () => _runRowAction(action.kind, tour),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: c.accent,
+                      borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    ),
+                    alignment: Alignment.center,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(action.icon, size: 14, color: c.onAccent),
+                        const SizedBox(width: 6),
+                        Text(
+                          action.label,
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.onAccent,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -639,20 +650,30 @@ class _TourRow extends StatelessWidget {
 
   static String _formatDate(DateTime d) {
     const months = [
-      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
     ];
     return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
   }
 
   UgamStatusTone _toneFor(TourStatus s) => switch (s) {
-        TourStatus.planning => UgamStatusTone.accent,
-        TourStatus.collecting => UgamStatusTone.warm,
-        TourStatus.busBooked => UgamStatusTone.accent,
-        TourStatus.assigning => UgamStatusTone.accent,
-        TourStatus.locked => UgamStatusTone.good,
-        TourStatus.completed => UgamStatusTone.neutral,
-      };
+    TourStatus.planning => UgamStatusTone.accent,
+    TourStatus.collecting => UgamStatusTone.warm,
+    TourStatus.busBooked => UgamStatusTone.accent,
+    TourStatus.assigning => UgamStatusTone.accent,
+    TourStatus.locked => UgamStatusTone.good,
+    TourStatus.completed => UgamStatusTone.neutral,
+  };
 
   _RowAction? _actionFor(Tour t) {
     if (t.status == TourStatus.completed || t.status == TourStatus.locked) {
@@ -660,30 +681,71 @@ class _TourRow extends StatelessWidget {
     }
     if (t.passengers.isNotEmpty && t.buses.isEmpty) {
       return _RowAction(
-          label: 'Add bus', icon: Icons.directions_bus_rounded);
+        label: tr('tours.action.add_bus'),
+        icon: Icons.directions_bus_rounded,
+        kind: _RowActionKind.addBus,
+      );
     }
     if (t.buses.isNotEmpty && t.totalSeatsAssigned < t.totalSeatsRequested) {
-      final remaining =
-          t.totalSeatsRequested - t.totalSeatsAssigned;
+      // Standardized seating entry: single "Seats" label that opens the
+      // SeatsScreen SUMMARY — never the banned "Assign N" synonym/grid.
       return _RowAction(
-        label: 'Assign $remaining',
-        icon: Icons.grid_view_rounded,
+        label: tr('seats.title'),
+        icon: Icons.event_seat_rounded,
+        kind: _RowActionKind.seats,
       );
     }
     if (t.allSeatsAssigned && t.handlerId == null) {
-      return _RowAction(label: 'Pick handler', icon: Icons.person_pin_rounded);
+      return _RowAction(
+        label: tr('tours.action.pick_handler'),
+        icon: Icons.person_pin_rounded,
+        kind: _RowActionKind.pickHandler,
+      );
     }
     if (t.allSeatsAssigned && t.handlerId != null) {
-      return _RowAction(label: 'Lock & notify', icon: Icons.lock_rounded);
+      return _RowAction(
+        label: tr('tours.action.lock_notify'),
+        icon: Icons.lock_rounded,
+        kind: _RowActionKind.lockNotify,
+      );
     }
     return null;
   }
+
+  /// Runs the row's labelled action so the accent CTA does what it says.
+  /// Routing follows the shared convention:
+  ///   • seats      -> SeatsScreen SUMMARY (tourOverview), the single "Seats"
+  ///                   destination — never the bare grid.
+  ///   • addBus /
+  ///     pickHandler -> ManageBusesScreen, the per-bus home where buses are
+  ///                   added and the handler is picked (NOT the seat screen).
+  ///   • lockNotify -> NotifyScreen focused on this tour (the one lock+send
+  ///                   path).
+  void _runRowAction(_RowActionKind kind, Tour t) {
+    switch (kind) {
+      case _RowActionKind.seats:
+        Get.toNamed(AppRoutes.tourOverview, arguments: {'tourId': t.id});
+        break;
+      case _RowActionKind.addBus:
+      case _RowActionKind.pickHandler:
+        Get.to(() => ManageBusesScreen(tourId: t.id),
+            transition: Transition.cupertino);
+        break;
+      case _RowActionKind.lockNotify:
+        Get.to(() => NotifyScreen(tourId: t.id),
+            transition: Transition.cupertino);
+        break;
+    }
+  }
 }
+
+enum _RowActionKind { seats, addBus, pickHandler, lockNotify }
 
 class _RowAction {
   final String label;
   final IconData icon;
-  _RowAction({required this.label, required this.icon});
+  final _RowActionKind kind;
+  _RowAction({required this.label, required this.icon, required this.kind});
 }
 
 class _LoadingShimmer extends StatelessWidget {

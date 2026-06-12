@@ -1,19 +1,23 @@
 import 'package:flutter/services.dart';
+import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../controllers/auth_controller.dart';
 import '../models/tour.dart';
 import '../models/passenger.dart';
 import '../models/trip_type.dart';
 
-/// Free WhatsApp messaging — two approaches:
+/// Free WhatsApp messaging — three approaches:
 ///
-/// 1. INDIVIDUAL: Opens WhatsApp with pre-filled message per passenger.
-///    User taps send. Best for 1-50 people.
+/// 1. INDIVIDUAL: Opens WhatsApp with a pre-filled deep-link message per
+///    passenger. User taps send.
 ///
-/// 2. BROADCAST HELPER: Copies message to clipboard, user pastes into
-///    WhatsApp Business broadcast list. Best for 200-700 people.
-///    (3 broadcast lists of ~233 each for 700 passengers)
+/// 2. FREE BROADCAST: Opens WhatsApp's own contact/broadcast picker with
+///    the tour message pre-filled, so the agent picks their broadcast list.
 ///
-/// Both are 100% free, 100% safe, zero ban risk.
+/// 3. CLIPBOARD: Copies the tour announcement so the agent can paste it
+///    into any chat, group or broadcast list.
+///
+/// All are 100% free, 100% safe, zero ban risk.
 class WhatsAppService {
   static final WhatsAppService _instance = WhatsAppService._internal();
   factory WhatsAppService() => _instance;
@@ -29,7 +33,6 @@ class WhatsAppService {
     String? busNumber,
     String? driverName,
     String? driverPhone,
-    String? handlerName,
     String? handlerPhone,
   }) async {
     final msg = buildTicketMessage(
@@ -38,60 +41,12 @@ class WhatsAppService {
       busNumber: busNumber,
       driverName: driverName,
       driverPhone: driverPhone,
-      handlerName: handlerName,
       handlerPhone: handlerPhone,
     );
     return _openWhatsApp(passenger.phone, msg);
-  }
-
-  /// Opens WhatsApp to share a tour announcement with one contact.
-  Future<bool> sendAnnouncement({
-    required String phone,
-    required Tour tour,
-  }) async {
-    final msg = buildAnnouncementMessage(tour: tour);
-    return _openWhatsApp(phone, msg);
   }
 
   // ── Broadcast Helper: Copy for broadcast lists ────────────
-
-  /// Copies the ticket message to clipboard.
-  /// User then pastes into WhatsApp Business broadcast list.
-  Future<void> copyTicketToClipboard({
-    required Passenger passenger,
-    required Tour tour,
-    String? busNumber,
-    String? driverName,
-    String? driverPhone,
-  }) async {
-    final msg = buildTicketMessage(
-      passenger: passenger,
-      tour: tour,
-      busNumber: busNumber,
-      driverName: driverName,
-      driverPhone: driverPhone,
-    );
-    await Clipboard.setData(ClipboardData(text: msg));
-  }
-
-  /// Copies a generic broadcast message (same for all passengers).
-  /// Ideal for WhatsApp Business broadcast list (up to 256/list).
-  Future<void> copyBroadcastToClipboard({
-    required Tour tour,
-    String? busNumber,
-    String? driverName,
-    String? driverPhone,
-    String? handlerPhone,
-  }) async {
-    final msg = buildBroadcastMessage(
-      tour: tour,
-      busNumber: busNumber,
-      driverName: driverName,
-      driverPhone: driverPhone,
-      handlerPhone: handlerPhone,
-    );
-    await Clipboard.setData(ClipboardData(text: msg));
-  }
 
   /// Copies tour announcement to clipboard for broadcast.
   Future<void> copyAnnouncementToClipboard({required Tour tour}) async {
@@ -99,37 +54,43 @@ class WhatsAppService {
     await Clipboard.setData(ClipboardData(text: msg));
   }
 
-  // ── Send next in queue (for sequential sending) ───────────
+  /// Free tour broadcast — no Cloud API, no server, no Meta approval.
+  ///
+  /// Copies the broadcast message to the clipboard (backup) and opens
+  /// WhatsApp's own contact/broadcast picker with the message pre-filled and
+  /// NO recipient, so the agent taps their saved Broadcast List or a group to
+  /// send. Uses [buildTourBroadcastMessage]. Returns true if WhatsApp opened;
+  /// false means it isn't installed (the message is still on the clipboard).
+  Future<bool> broadcastTour({required Tour tour}) async {
+    final msg = buildTourBroadcastMessage(tour: tour);
+    await Clipboard.setData(ClipboardData(text: msg));
 
-  /// For sending tickets one by one. Call this in a loop with a button.
-  /// Returns the passenger that was messaged, or null if done.
-  Future<Passenger?> sendNextTicket({
-    required Tour tour,
-    required List<Passenger> remaining,
-    String? busNumber,
-    String? driverName,
-    String? driverPhone,
-    String? handlerPhone,
-  }) async {
-    if (remaining.isEmpty) return null;
-    final passenger = remaining.first;
-
-    await sendToPassenger(
-      passenger: passenger,
-      tour: tour,
-      busNumber: busNumber,
-      driverName: driverName,
-      driverPhone: driverPhone,
-      handlerPhone: handlerPhone,
-    );
-
-    return passenger;
+    final encoded = Uri.encodeComponent(msg);
+    // whatsapp:// opens the picker straight inside WhatsApp; wa.me is the
+    // universal fallback (also routed to WhatsApp via the manifest query).
+    for (final raw in [
+      'whatsapp://send?text=$encoded',
+      'https://wa.me/?text=$encoded',
+    ]) {
+      final url = Uri.parse(raw);
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+        return true;
+      }
+    }
+    return false;
   }
 
   // ── Request acknowledgment (Phase 3) ──────────────────────
 
-  /// Builds a short ack message the agent sends back to a passenger
-  /// after seeing their request, before bus/seat details exist.
+  /// Builds the message the agent sends back to a passenger: a
+  /// request-received ack before any seats exist, or a booking-confirmed
+  /// message once seats have been assigned (but before the tour is locked).
+  ///
+  /// The confirmed message deliberately OMITS the exact seat numbers and bus —
+  /// at assign-but-not-locked those are still provisional and can change before
+  /// lock. The final seat numbers + bus + full chart go out at lock (phase 8,
+  /// the `seat_allocation` Cloud template).
   String buildAckMessage({
     required Passenger passenger,
     required Tour tour,
@@ -137,18 +98,49 @@ class WhatsAppService {
     final seatParts = passenger.requestLines
         .map((l) => '${l.qty} ${l.label.replaceAll(' ×', '')}')
         .join(' + ');
+    final dateLine = '📅 ${_formatDate(tour.departureDate)}'
+        '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}';
+
+    if (passenger.assignedSeats.isNotEmpty) {
+      // Describe the booking by what was requested ("2 Double Sofa") rather
+      // than the provisional seat ids; fall back to a plain count when an
+      // agent-added passenger has no request lines.
+      final seatsLine = seatParts.isNotEmpty
+          ? seatParts
+          : '${passenger.assignedSeats.length} '
+              '${passenger.assignedSeats.length == 1 ? 'seat' : 'seats'}';
+
+      final lines = <String>[
+        '✅ *Seat Confirmed — Ugam Booking*',
+        '',
+        '🙏 Jay Gurudev',
+        '',
+        'Hi ${passenger.name}, your booking is confirmed! 🎉',
+        '',
+        '🗺 *${tour.title}*',
+        '📍 ${tour.fromCity} → ${tour.toCity}',
+        dateLine,
+        '💺 *Seats confirmed:* $seatsLine',
+        '',
+        'Your exact seat numbers and bus details will be',
+        'shared once the trip is finalised. 🚌',
+        '',
+        '🙏 Thank you!',
+      ];
+
+      return lines.join('\n');
+    }
 
     final lines = <String>[
       '✅ *Request Received — Ugam Booking*',
       '',
-      '🙏 Jai Gurudev',
+      '🙏 Jay Gurudev',
       '',
       'Hi ${passenger.name}, we got your booking request.',
       '',
       '🗺 *${tour.title}*',
       '📍 ${tour.fromCity} → ${tour.toCity}',
-      '📅 ${_formatDate(tour.departureDate)}'
-          '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      dateLine,
       if (seatParts.isNotEmpty) '💺 *Seats requested:* $seatParts',
       '',
       'We will share final seat numbers and bus details',
@@ -160,8 +152,10 @@ class WhatsAppService {
     return lines.join('\n');
   }
 
-  /// Opens WhatsApp on the agent's device addressed to [passenger]
-  /// with the ack message pre-filled. Agent taps send.
+  /// Opens WhatsApp on the agent's device addressed to [passenger] with
+  /// [buildAckMessage] pre-filled — a request-received ack before seats
+  /// exist, a seat-confirmed message once seats are assigned. Agent taps
+  /// send.
   Future<bool> sendAck({
     required Passenger passenger,
     required Tour tour,
@@ -217,7 +211,7 @@ class WhatsAppService {
       else
         '🪷 *Booking Request — Ugam Booking*',
       '',
-      '🙏 Jai Gurudev',
+      '🙏 Jay Gurudev',
       '',
       if (isUpdate) ...[
         'I updated my earlier request — please use these new details:',
@@ -236,11 +230,6 @@ class WhatsAppService {
     if (note != null && note.trim().isNotEmpty) {
       lines.addAll(['', '📝 ${note.trim()}']);
     }
-
-    lines.addAll([
-      '',
-      '[Tour ID: ${tourCode(tour.id)}]',
-    ]);
 
     return lines.join('\n');
   }
@@ -285,7 +274,6 @@ class WhatsAppService {
     String? busNumber,
     String? driverName,
     String? driverPhone,
-    String? handlerName,
     String? handlerPhone,
   }) {
     final seats = passenger.assignedSeats.isNotEmpty
@@ -295,7 +283,7 @@ class WhatsAppService {
     final lines = <String>[
       '🎫 *Ticket Confirmed!*',
       '',
-      '🙏 Jai Shree Ram',
+      '🙏 Jay Gurudev',
       '',
       '👤 *${passenger.name}*',
       '🗺 *${tour.title}*',
@@ -315,42 +303,11 @@ class WhatsAppService {
     return lines.join('\n');
   }
 
-  String buildBroadcastMessage({
-    required Tour tour,
-    String? busNumber,
-    String? driverName,
-    String? driverPhone,
-    String? handlerPhone,
-  }) {
-    final lines = <String>[
-      '🚌 *${tour.title}*',
-      '',
-      '🙏 Jai Shree Ram',
-      '',
-      '📍 *Route:* ${tour.fromCity} → ${tour.toCity}',
-      '📅 *Date:* ${_formatDate(tour.departureDate)}${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
-    ];
-
-    if (busNumber != null) lines.add('🚌 *Bus:* $busNumber');
-    if (driverName != null) lines.add('🧑‍✈️ *Driver:* $driverName${driverPhone != null ? ' ($driverPhone)' : ''}');
-    if (handlerPhone != null) lines.add('📞 *Handler Contact:* $handlerPhone');
-
-    lines.addAll([
-      '',
-      'Your seat details have been shared individually.',
-      'Please save this number to receive updates.',
-      '',
-      '🙏 Have a wonderful journey!',
-    ]);
-
-    return lines.join('\n');
-  }
-
   String buildAnnouncementMessage({required Tour tour}) {
     final lines = <String>[
       '🚌 *New Tour Announcement!*',
       '',
-      '🙏 Jai Shree Ram',
+      '🙏 Jay Gurudev',
       '',
       '🗺 *${tour.title}*',
       '📍 ${tour.fromCity} → ${tour.toCity}',
@@ -371,7 +328,39 @@ class WhatsAppService {
       '🙏 Limited seats available!',
     ]);
 
+    final signature = adminSignature();
+    if (signature != null) {
+      lines.addAll(['', signature]);
+    }
+
     return lines.join('\n');
+  }
+
+  /// The free-broadcast text for a tour. Prefers the agent's own composed
+  /// broadcast (the "Broadcast" field on Create Tour, stored as
+  /// [Tour.broadcastMessage]) used verbatim; when that is blank it falls back
+  /// to the generated [buildAnnouncementMessage]. The admin's WhatsApp
+  /// signature is appended to the composed message (the generated announcement
+  /// already includes it).
+  String buildTourBroadcastMessage({required Tour tour}) {
+    final typed = (tour.broadcastMessage ?? '').trim();
+    if (typed.isEmpty) return buildAnnouncementMessage(tour: tour);
+
+    final lines = <String>[typed];
+    final signature = adminSignature();
+    if (signature != null) lines.addAll(['', signature]);
+    return lines.join('\n');
+  }
+
+  /// The admin's editable WhatsApp signature (Settings → WhatsApp), appended
+  /// to outgoing announcements. Read lazily from the logged-in admin so call
+  /// sites don't have to thread it through. Returns null when unset or when
+  /// no admin session is active (e.g. customer app).
+  String? adminSignature() {
+    if (!Get.isRegistered<AuthController>()) return null;
+    final sig = Get.find<AuthController>().currentAdmin.value?.waHandoffTemplate;
+    if (sig == null || sig.trim().isEmpty) return null;
+    return sig.trim();
   }
 
   // ── Internals ─────────────────────────────────────────────

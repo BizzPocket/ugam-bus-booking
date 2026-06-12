@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- APNs environment. "development" works for debug builds on a registered
+	     device. For an App Store / TestFlight archive, flip this to
+	     "production" (or add the Push Notifications capability in Xcode, which
+	     manages this automatically per build configuration). -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

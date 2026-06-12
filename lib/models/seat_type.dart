@@ -1,3 +1,5 @@
+import 'package:easy_localization/easy_localization.dart';
+
 /// The three physical seat types found in Gujarat sleeper/seater buses.
 ///
 /// Position (Upper / Lower) is stored separately — see [SeatPosition].
@@ -10,11 +12,11 @@ enum SeatType {
   String get displayName {
     switch (this) {
       case SeatType.singleSofa:
-        return 'Single Sofa';
+        return tr('enums.seat_type.single_sofa');
       case SeatType.doubleSofa:
-        return 'Double Sofa';
+        return tr('enums.seat_type.double_sofa');
       case SeatType.seater:
-        return 'Seater';
+        return tr('enums.seat_type.seater');
     }
   }
 
@@ -46,9 +48,9 @@ enum SeatPosition {
   String get displayName {
     switch (this) {
       case SeatPosition.upper:
-        return 'Upper';
+        return tr('enums.seat_position.upper');
       case SeatPosition.lower:
-        return 'Lower';
+        return tr('enums.seat_position.lower');
     }
   }
 

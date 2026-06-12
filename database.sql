@@ -21,7 +21,9 @@ drop trigger if exists on_auth_user_created on auth.users;
 drop table if exists public.bus_handovers     cascade;
 drop table if exists public.expenses          cascade;
 drop table if exists public.collections       cascade;
+drop table if exists public.device_tokens     cascade;
 drop table if exists public.booking_requests  cascade;
+drop table if exists public.customer_memory   cascade;
 drop table if exists public.admin_contacts    cascade;
 drop table if exists public.passengers        cascade;
 drop table if exists public.bus_details       cascade;  -- legacy name from 001_initial_schema
@@ -65,6 +67,18 @@ create table public.admins (
   phone           text unique,
   name            text,
   whatsapp_number text,
+  -- Admin self-service settings (migration 008).
+  business_name              text,
+  business_email             text,
+  upi_id                     text,
+  payee_name                 text,
+  default_advance            numeric(12, 2),
+  receipt_note               text,
+  wa_handoff_template        text,
+  notify_booking_requests    boolean not null default true,
+  notify_payment_reminders   boolean not null default true,
+  notify_departure_reminders boolean not null default true,
+  push_enabled               boolean not null default true,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -130,19 +144,34 @@ create table public.tours (
   from_city       text not null,
   to_city         text not null,
   departure_date  date not null,
+  -- Local departure time-of-day on departure_date. Null until the agent
+  -- sets it; kept separate from the date so an unset time is distinct from
+  -- midnight and the date column/indexes keep their date semantics.
+  departure_time  time,
   return_date     date,
+  -- Local return time-of-day on return_date. Null when unset.
+  return_time     time,
   price_per_seat  numeric(10, 2) not null default 0,
   description     text,
   status          text not null default 'planning',
   handler_id      uuid,
   created_by      text,
   is_public       boolean not null default true,
+  -- Phase-2 WhatsApp broadcast composed at create time (announcement text +
+  -- optional hero image in Supabase Storage). Sent via the whatsapp-send Edge
+  -- Function. Null until the agent fills the broadcast composer.
+  broadcast_message    text,
+  broadcast_image_url  text,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
 
 create index tours_owner_status_idx on public.tours(owner_id, status);
 create index tours_departure_idx    on public.tours(departure_date);
+
+-- Migration (safe on existing DBs): departure/return time-of-day columns.
+alter table public.tours add column if not exists departure_time time;
+alter table public.tours add column if not exists return_time    time;
 
 create trigger tours_set_updated_at before update on public.tours
   for each row execute function public.set_updated_at();
@@ -175,6 +204,17 @@ create table public.buses (
   bus_type        text not null default 'Semi-Sleeper',
   total_seats     int  not null default 0,
   price_per_seat  numeric(10, 2) not null default 0,
+  -- Full rent paid to the bus owner for this bus. Auto-counted as a `busOwner`
+  -- expense in the app's money summaries (single source of truth — never a
+  -- separate expenses row), so the handler can't double-count it.
+  bus_price       numeric(10, 2) not null default 0,
+  -- Per-bus departure place / venue; overrides the tour-level boarding place
+  -- wherever boarding is shown (esp. the PDF footer).
+  boarding_point  text not null default '',
+  -- Per-bus departure time, canonical 'HH:mm' (mirrors tours.departure_time);
+  -- overrides the tour-level / chart-footer time wherever boarding is shown.
+  -- Nullable; null means no per-bus time set.
+  departure_time  text,
   -- Optional rear-zone pricing: the last `rear_rows` rows are charged at
   -- `rear_price` per person instead of price_per_seat. rear_rows = 0 means
   -- no rear zone; rear_price null means rear rows fall back to the base price.
@@ -193,6 +233,12 @@ create table public.buses (
   single_sofa_price numeric(10, 2),
   double_sofa_price numeric(10, 2),
   seater_price      numeric(10, 2),
+  -- Per-bus handler: the passenger who runs THIS bus on the ground. Replaces the
+  -- legacy tour-wide handler (tours.handler_id, kept in sync as a "tour has a
+  -- handler" pointer). A per-bus handler's manifest is scoped to only their
+  -- bus(es). FK to passengers(id) is added AFTER the passengers table exists
+  -- (see below) because buses is created before passengers in this script.
+  handler_passenger_id uuid,
   notes           text,
   layout          jsonb,
   created_at      timestamptz not null default now(),
@@ -257,6 +303,12 @@ create table public.passengers (
   payment_status  text not null default 'notPaid',
   is_handler      boolean not null default false,
   is_waitlisted   boolean not null default false,
+  is_confirmed    boolean not null default false,
+  -- Half-trip completion: when the agent finishes the outbound (GO) leg, every
+  -- GO-only passenger has their seats freed and this flag set, so the return
+  -- leg's chart shows those seats empty while the record is kept for money/
+  -- history. The Dart Passenger model already serialises this column.
+  journey_done    boolean not null default false,
   note            text,
   group_id        uuid references public.passenger_groups(id) on delete set null,
   priority_status text not null default 'none',
@@ -292,12 +344,25 @@ create policy "passengers_anon_insert" on public.passengers
   with check (exists (select 1 from public.tours t
                       where t.id = passengers.tour_id and t.is_public = true));
 
--- Anonymous customers can read back their own row by phone (used by the
--- customer mode "my requests" lookup if you add it later).
-create policy "passengers_anon_select" on public.passengers
-  for select to anon
-  using (exists (select 1 from public.tours t
-                 where t.id = passengers.tour_id and t.is_public = true));
+-- SECURITY: there is intentionally NO anon SELECT policy on passengers.
+-- A blanket "anon can read every passenger on any public tour" policy would
+-- leak full PII (name, phone, payment, seat) of all passengers to any
+-- unauthenticated caller who knows/guesses a tour_id. The customer "my
+-- requests" lookup must instead go through a SECURITY DEFINER RPC that
+-- returns ONLY the caller's own row (scoped by their verified phone), e.g.
+-- get_booking_status / cancel_my_booking. Drop the old policy if present.
+drop policy if exists "passengers_anon_select" on public.passengers;
+
+-- Per-bus handler FK — added here because buses is created before passengers.
+-- `on delete set null`: removing a passenger un-assigns them as a bus handler
+-- rather than blocking the delete.
+alter table public.buses
+  add constraint buses_handler_passenger_fk
+  foreign key (handler_passenger_id)
+  references public.passengers(id) on delete set null;
+
+create index buses_handler_passenger_idx
+  on public.buses(handler_passenger_id);
 
 
 -- ============================================================
@@ -324,6 +389,44 @@ create trigger admin_contacts_set_updated_at before update on public.admin_conta
 
 alter table public.admin_contacts enable row level security;
 create policy "admin_contacts_owner_all" on public.admin_contacts
+  for all to authenticated
+  using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+
+-- ============================================================
+-- 6b. customer_memory  (per-admin, phone-keyed repeat-customer memory)
+--    ~80% of customers repeat across tours, but priority + group
+--    membership live ONLY inside per-tour `passengers` rows, which
+--    cascade-delete with the tour. Before a tour is deleted, the app
+--    snapshots each passenger's agent-set priority and their travel
+--    companions (the other phones in their group) into this table, so a
+--    returning phone can have its priority auto-restored and its usual
+--    group recreated in one tap.
+--    Mirrors CustomerMemory.toMap() in lib/models/customer_memory.dart
+-- ============================================================
+
+create table public.customer_memory (
+  id              uuid primary key default gen_random_uuid(),
+  owner_id        uuid not null references auth.users(id) on delete cascade,
+  phone           text not null,            -- 10-digit normalised key
+  name            text not null default '',
+  priority_status text not null default 'none',
+  priority_reason text,
+  companions      jsonb not null default '[]'::jsonb,  -- array of companion phones
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+-- One memory row per (admin, phone). Upserts target this constraint.
+create unique index customer_memory_owner_phone_unique
+  on public.customer_memory(owner_id, phone);
+create index customer_memory_phone_idx on public.customer_memory(phone);
+
+create trigger customer_memory_set_updated_at before update on public.customer_memory
+  for each row execute function public.set_updated_at();
+
+alter table public.customer_memory enable row level security;
+create policy "customer_memory_owner_all" on public.customer_memory
   for all to authenticated
   using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
@@ -617,17 +720,62 @@ create policy "collections_owner_all" on public.collections
                       where t.id = collections.tour_id and t.owner_id = auth.uid()));
 
 
--- READ: full tour manifest (all buses + all passengers + collections) for a
--- handler, money-aware. Same gating/ordering/coalesce as the original; the
--- buses payload also carries price_per_seat + the three per-seat-type prices +
--- the rear-zone fields (rear_rows / rear_price) + the flexible price_bands so
--- the handler app resolves the
--- same per-row fares as the admin, each passenger carries trip_type +
--- request_lines, and a top-level
--- "collections" array carries the whole tour's money rows — the figures the
--- handler app needs to compute what each passenger owes. NULL for non-handler
--- (or unknown) requests; empty arrays come back as []. Defined here (after the
--- collections table) because the SQL body references public.collections.
+-- ============================================================
+-- 7.1b expenses  (per-bus line items: fuel, tolls, food, …)
+--     Defined here — before handler_tour_manifest — because that function is
+--     language-sql and resolves public.expenses at creation time.
+-- ============================================================
+
+create table public.expenses (
+  id          uuid primary key default gen_random_uuid(),
+  tour_id     uuid not null references public.tours(id) on delete cascade,
+  bus_id      uuid not null references public.buses(id) on delete cascade,
+  category    text not null default 'other',
+  label       text not null,
+  amount      numeric(10, 2) not null default 0,
+  paid_by     text,
+  note        text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index expenses_tour_idx on public.expenses(tour_id);
+create index expenses_bus_idx  on public.expenses(bus_id);
+
+create trigger expenses_set_updated_at before update on public.expenses
+  for each row execute function public.set_updated_at();
+
+alter table public.expenses enable row level security;
+create policy "expenses_owner_all" on public.expenses
+  for all to authenticated
+  using (exists (select 1 from public.tours t
+                 where t.id = expenses.tour_id and t.owner_id = auth.uid()))
+  with check (exists (select 1 from public.tours t
+                      where t.id = expenses.tour_id and t.owner_id = auth.uid()));
+
+
+-- READ: per-bus handler manifest (the handler's OWN bus(es) + the passengers
+-- seated on them + their collections/expenses), money-aware. Handlers are now
+-- per-bus (buses.handler_passenger_id) rather than tour-wide, so the manifest is
+-- SCOPED to only the bus(es) this handler owns:
+--   * resolve the handler passenger (request's tour_id + customer_phone,
+--     is_handler = true — same predicate as is_request_handler);
+--   * 'buses'      -> only buses with handler_passenger_id = that passenger id;
+--   * 'passengers' -> only passengers seated on one of those buses (their
+--                     assigned_seats jsonb contains a busId in that set), PLUS
+--                     the handler themselves so the chart can flag them;
+--   * 'collections'/'expenses' -> only rows whose bus_id is in that set.
+-- If the handler owns no bus, every array comes back empty.
+--
+-- The buses payload carries price_per_seat + the three per-seat-type prices +
+-- the rear-zone fields (rear_rows / rear_price) + the flexible price_bands +
+-- the bus owner rent (bus_price) + the per-bus boarding_point so the handler
+-- app resolves the same per-row fares as the admin; each passenger carries
+-- trip_type + request_lines + group_id / priority_status / priority_reason (so
+-- the handler chart can draw group rings + priority stars).
+-- NULL for non-handler (or unknown) requests; empty arrays come back as [].
+-- Defined here (after the collections + expenses tables) because the SQL body
+-- references public.collections and public.expenses.
 create or replace function public.handler_tour_manifest(p_request_id uuid)
 returns jsonb
 language sql security definer set search_path = public
@@ -636,6 +784,22 @@ as $$
     select br.tour_id, br.customer_phone
       from public.booking_requests br
      where br.id = p_request_id
+  ),
+  -- The handler passenger behind this request (same match as is_request_handler).
+  handler_p as (
+    select p.id
+      from public.passengers p
+      join req on req.tour_id = p.tour_id
+     where p.phone = req.customer_phone
+       and p.is_handler = true
+     limit 1
+  ),
+  -- Only the bus(es) this handler owns. Empty when they own none.
+  my_buses as (
+    select b.id
+      from public.buses b
+      join req on req.tour_id = b.tour_id
+     where b.handler_passenger_id in (select id from handler_p)
   )
   select case
     when not public.is_request_handler(p_request_id) then null
@@ -652,17 +816,21 @@ as $$
                      'total_seats',       b.total_seats,
                      'layout',            b.layout,
                      'price_per_seat',    b.price_per_seat,
+                     'bus_price',         b.bus_price,
+                     'boarding_point',    b.boarding_point,
+                     'departure_time',    b.departure_time,
                      'single_sofa_price', b.single_sofa_price,
                      'double_sofa_price', b.double_sofa_price,
                      'seater_price',      b.seater_price,
                      'rear_rows',         b.rear_rows,
                      'rear_price',        b.rear_price,
-                     'price_bands',       b.price_bands
+                     'price_bands',       b.price_bands,
+                     'handler_passenger_id', b.handler_passenger_id
                    )
                    order by b.name
                  )
             from public.buses b
-            join req on req.tour_id = b.tour_id
+           where b.id in (select id from my_buses)
         ),
         '[]'::jsonb
       ),
@@ -670,20 +838,34 @@ as $$
         (
           select jsonb_agg(
                    jsonb_build_object(
-                     'id',             p.id,
-                     'tour_id',        p.tour_id,
-                     'name',           p.name,
-                     'phone',          p.phone,
-                     'age_group',      p.age_group,
-                     'assigned_seats', p.assigned_seats,
-                     'is_handler',     p.is_handler,
-                     'trip_type',      p.trip_type,
-                     'request_lines',  p.request_lines
+                     'id',              p.id,
+                     'tour_id',         p.tour_id,
+                     'name',            p.name,
+                     'phone',           p.phone,
+                     'age_group',       p.age_group,
+                     'assigned_seats',  p.assigned_seats,
+                     'is_handler',      p.is_handler,
+                     'trip_type',       p.trip_type,
+                     'request_lines',   p.request_lines,
+                     'group_id',        p.group_id,
+                     'priority_status', p.priority_status,
+                     'priority_reason', p.priority_reason
                    )
                    order by p.name
                  )
             from public.passengers p
             join req on req.tour_id = p.tour_id
+           where
+             -- always include the handler themselves
+             p.id in (select id from handler_p)
+             -- plus anyone seated on one of this handler's buses
+             or exists (
+               select 1
+                 from jsonb_array_elements(p.assigned_seats) seat
+                where (seat->>'busId') in (
+                        select id::text from my_buses
+                      )
+             )
         ),
         '[]'::jsonb
       ),
@@ -707,7 +889,29 @@ as $$
                    order by col.created_at
                  )
             from public.collections col
-            join req on req.tour_id = col.tour_id
+           where col.bus_id in (select id from my_buses)
+        ),
+        '[]'::jsonb
+      ),
+      'expenses', coalesce(
+        (
+          select jsonb_agg(
+                   jsonb_build_object(
+                     'id',         ex.id,
+                     'tour_id',    ex.tour_id,
+                     'bus_id',     ex.bus_id,
+                     'category',   ex.category,
+                     'label',      ex.label,
+                     'amount',     ex.amount,
+                     'paid_by',    ex.paid_by,
+                     'note',       ex.note,
+                     'created_at', ex.created_at,
+                     'updated_at', ex.updated_at
+                   )
+                   order by ex.created_at
+                 )
+            from public.expenses ex
+           where ex.bus_id in (select id from my_buses)
         ),
         '[]'::jsonb
       )
@@ -797,36 +1001,9 @@ grant execute on function public.handler_upsert_collection(uuid, jsonb)
   to anon, authenticated;
 
 
--- ============================================================
--- 7.2 expenses  (per-bus line items: fuel, tolls, food, …)
--- ============================================================
-
-create table public.expenses (
-  id          uuid primary key default gen_random_uuid(),
-  tour_id     uuid not null references public.tours(id) on delete cascade,
-  bus_id      uuid not null references public.buses(id) on delete cascade,
-  category    text not null default 'other',
-  label       text not null,
-  amount      numeric(10, 2) not null default 0,
-  paid_by     text,
-  note        text,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
-);
-
-create index expenses_tour_idx on public.expenses(tour_id);
-create index expenses_bus_idx  on public.expenses(bus_id);
-
-create trigger expenses_set_updated_at before update on public.expenses
-  for each row execute function public.set_updated_at();
-
-alter table public.expenses enable row level security;
-create policy "expenses_owner_all" on public.expenses
-  for all to authenticated
-  using (exists (select 1 from public.tours t
-                 where t.id = expenses.tour_id and t.owner_id = auth.uid()))
-  with check (exists (select 1 from public.tours t
-                      where t.id = expenses.tour_id and t.owner_id = auth.uid()));
+-- 7.2 expenses — the table is defined ABOVE (just after collections, before
+-- handler_tour_manifest) because the language-sql manifest references it at
+-- creation time. See the "7.1b expenses" block above.
 
 
 -- ============================================================
@@ -858,12 +1035,104 @@ create policy "bus_handovers_owner_all" on public.bus_handovers
                       where t.id = bus_handovers.tour_id and t.owner_id = auth.uid()));
 
 
--- Handler-side money for now is collections-only (see handler_upsert_collection
--- above + the tour manifest's embedded "collections" array). Per-bus expenses
--- and handover settlement are recorded admin-side (RLS-scoped to the tour
--- owner). If the handler flow later needs to record expenses / handovers
--- directly, add them here as jsonb-payload RPCs gated on is_request_handler,
--- matching handler_upsert_collection.
+-- WRITE: a handler logs (or edits) one expense for a bus on their own tour.
+-- Takes the expense as a jsonb payload; the server always uses its own resolved
+-- tour_id (p_expense->>'tour_id' is ignored) and verifies the target bus
+-- belongs to the handler's own tour. Conflict target is the primary key (id).
+-- Returns the upserted row as jsonb, or NULL when the caller is not a handler /
+-- the bus is out of tour. Handover settlement stays admin-side.
+create or replace function public.handler_upsert_expense(
+  p_request_id uuid,
+  p_expense jsonb
+)
+returns jsonb
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_tour_id uuid;
+  v_bus_id  uuid;
+  v_id      uuid;
+  v_row     public.expenses;
+begin
+  if not public.is_request_handler(p_request_id) then
+    return null;
+  end if;
+
+  select br.tour_id into v_tour_id
+    from public.booking_requests br
+   where br.id = p_request_id;
+
+  v_bus_id := (p_expense->>'bus_id')::uuid;
+  v_id     := coalesce(nullif(p_expense->>'id', '')::uuid, gen_random_uuid());
+
+  if not exists (
+    select 1 from public.buses b
+     where b.id = v_bus_id and b.tour_id = v_tour_id
+  ) then
+    return null;
+  end if;
+
+  insert into public.expenses (
+    id, tour_id, bus_id, category, label, amount, paid_by, note
+  )
+  values (
+    v_id, v_tour_id, v_bus_id,
+    coalesce(nullif(p_expense->>'category', ''), 'other'),
+    coalesce(p_expense->>'label', ''),
+    coalesce((p_expense->>'amount')::numeric, 0),
+    nullif(p_expense->>'paid_by', ''),
+    nullif(p_expense->>'note', '')
+  )
+  on conflict (id) do update set
+    category   = excluded.category,
+    label      = excluded.label,
+    amount     = excluded.amount,
+    paid_by    = excluded.paid_by,
+    note       = excluded.note,
+    updated_at = now()
+  returning * into v_row;
+
+  return to_jsonb(v_row);
+end;
+$$;
+
+revoke all on function public.handler_upsert_expense(uuid, jsonb) from public;
+grant execute on function public.handler_upsert_expense(uuid, jsonb)
+  to anon, authenticated;
+
+-- DELETE: a handler removes one expense from their own tour. Returns true when
+-- a row was deleted, gated on is_request_handler AND the expense's tour being
+-- the handler's resolved tour.
+create or replace function public.handler_delete_expense(
+  p_request_id uuid,
+  p_expense_id uuid
+)
+returns boolean
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_tour_id uuid;
+  v_deleted int;
+begin
+  if not public.is_request_handler(p_request_id) then
+    return false;
+  end if;
+
+  select br.tour_id into v_tour_id
+    from public.booking_requests br
+   where br.id = p_request_id;
+
+  delete from public.expenses ex
+   where ex.id = p_expense_id and ex.tour_id = v_tour_id;
+
+  get diagnostics v_deleted = row_count;
+  return v_deleted > 0;
+end;
+$$;
+
+revoke all on function public.handler_delete_expense(uuid, uuid) from public;
+grant execute on function public.handler_delete_expense(uuid, uuid)
+  to anon, authenticated;
 
 
 -- ============================================================
@@ -905,6 +1174,148 @@ alter publication supabase_realtime add table public.booking_requests;
 alter publication supabase_realtime add table public.collections;
 alter publication supabase_realtime add table public.expenses;
 alter publication supabase_realtime add table public.bus_handovers;
+
+
+-- ============================================================
+-- 9b. Push notifications — device tokens + FCM dispatch
+--
+-- The admin app registers its FCM token here on login (and on token refresh)
+-- and removes it on logout. When a customer inserts a booking_request, an
+-- AFTER INSERT trigger fires the `send-push` Edge Function (via pg_net). That
+-- function resolves the tour's owning admin, honours their notification prefs
+-- (push_enabled && notify_booking_requests), and delivers an FCM push to every
+-- registered device. Section 9 already streams booking_requests over Realtime
+-- for the FOREGROUNDED app; FCM is what reaches a backgrounded/killed phone.
+--
+-- One-time setup (secrets — NEVER commit these):
+--   1. Pick a random shared secret. Store it for the DB trigger:
+--        select vault.create_secret('<RANDOM>', 'push_trigger_secret');
+--      and hand the SAME value to the Edge Function:
+--        supabase secrets set PUSH_TRIGGER_SECRET=<RANDOM>
+--   2. Give the function the Firebase service-account JSON (one line):
+--        supabase secrets set FCM_SERVICE_ACCOUNT="$(cat service-account.json)"
+--   3. Deploy:  supabase functions deploy send-push --no-verify-jwt
+-- Until step 1's vault secret exists, the trigger is a quiet no-op, so the
+-- booking flow keeps working before push is switched on.
+-- ============================================================
+
+create extension if not exists pg_net;
+
+create table public.device_tokens (
+  id         uuid primary key default gen_random_uuid(),
+  admin_id   uuid not null references public.admins(id) on delete cascade,
+  token      text not null unique,
+  platform   text not null check (platform in ('ios', 'android')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index device_tokens_admin_idx on public.device_tokens(admin_id);
+
+create trigger device_tokens_set_updated_at before update on public.device_tokens
+  for each row execute function public.set_updated_at();
+
+alter table public.device_tokens enable row level security;
+
+-- An admin reads/deletes only their own tokens (debug + explicit unregister).
+-- Inserts/upserts go through register_device_token() so a device that switches
+-- accounts re-points its row cleanly (the unique key is the token itself, which
+-- a plain RLS upsert can't re-own across admins).
+create policy "device_tokens_owner_select" on public.device_tokens
+  for select to authenticated using (admin_id = auth.uid());
+create policy "device_tokens_owner_delete" on public.device_tokens
+  for delete to authenticated using (admin_id = auth.uid());
+
+-- REGISTER: upsert the calling admin's token. on conflict(token) re-points an
+-- existing row to whoever just logged in on that device.
+create or replace function public.register_device_token(p_token text, p_platform text)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if p_token is null or length(p_token) = 0 then
+    return;
+  end if;
+  insert into public.device_tokens (admin_id, token, platform)
+  values (auth.uid(), p_token, coalesce(nullif(p_platform, ''), 'android'))
+  on conflict (token) do update
+     set admin_id   = excluded.admin_id,
+         platform   = excluded.platform,
+         updated_at = now();
+end;
+$$;
+revoke all on function public.register_device_token(text, text) from public;
+grant execute on function public.register_device_token(text, text) to authenticated;
+
+-- UNREGISTER: drop this device's token on logout. Scoped to the caller.
+create or replace function public.unregister_device_token(p_token text)
+returns void
+language sql security definer set search_path = public
+as $$
+  delete from public.device_tokens
+   where token = p_token and admin_id = auth.uid();
+$$;
+revoke all on function public.unregister_device_token(text) from public;
+grant execute on function public.unregister_device_token(text) to authenticated;
+
+-- AFTER INSERT on booking_requests → fire send-push. Best-effort: any failure
+-- here must NOT roll back the customer's booking, so the whole call is wrapped
+-- in an exception-swallowing block.
+create or replace function public.notify_booking_request()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_secret text;
+  v_event  text;
+  -- Deterministic Edge Function endpoint for THIS project (see SupabaseConfig).
+  v_url text := 'https://rhyqjzulpvaeslbaymex.supabase.co/functions/v1/send-push';
+begin
+  -- Decide which event (if any) warrants a push.
+  if tg_op = 'INSERT' then
+    v_event := 'created';
+  else
+    -- UPDATE: only a CUSTOMER edit notifies. The customer edit RPC
+    -- (booking_request_customer_update) advances customer_edited_at; admin
+    -- status changes bump updated_at but never customer_edited_at, so they
+    -- stay silent and don't spam the organiser.
+    if new.customer_edited_at is distinct from old.customer_edited_at
+       and new.customer_edited_at is not null then
+      v_event := 'updated';
+    else
+      return new;
+    end if;
+  end if;
+
+  begin
+    select decrypted_secret into v_secret
+      from vault.decrypted_secrets
+     where name = 'push_trigger_secret'
+     limit 1;
+    -- Push not configured yet → skip quietly so bookings still work.
+    if v_secret is null then
+      return new;
+    end if;
+    perform net.http_post(
+      url     := v_url,
+      headers := jsonb_build_object(
+                   'Content-Type', 'application/json',
+                   'x-push-secret', v_secret),
+      body    := jsonb_build_object('request_id', new.id, 'event', v_event)
+    );
+  exception when others then
+    raise warning 'notify_booking_request push dispatch failed: %', sqlerrm;
+  end;
+  return new;
+end;
+$$;
+
+create trigger booking_requests_notify_push
+  after insert or update on public.booking_requests
+  for each row execute function public.notify_booking_request();
 
 
 -- ============================================================

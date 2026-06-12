@@ -1,20 +1,26 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../components/combined_seat_grid.dart';
+import '../components/seat_chart_tile.dart';
 import '../design/group_color.dart';
+import '../design/price_band_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
+import '../models/expense.dart';
 import '../models/handler_manifest.dart';
 import '../models/passenger.dart';
-import '../models/seat_layout.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
+import '../services/whatsapp_cloud_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/time_format.dart';
+import 'fullscreen_chart_screen.dart';
 
 String _money(num v) => '₹${v.toStringAsFixed(0)}';
 
@@ -79,6 +85,36 @@ _SeatOccupants _occupantsForSeat(
   return _SeatOccupants(go: go, ret: ret);
 }
 
+/// Resolves the leg-aware occupants for EVERY seat on [busId] in a single
+/// O(passengers × assignedSeats) pass, keyed by seatId.
+///
+/// The grid and roster previously called [_occupantsForSeat] once per seat
+/// cell — O(cells × passengers) — so a 50-seat / 50-passenger bus did ~2,500
+/// passenger scans on every rebuild (bus switch, scroll, post-save setState),
+/// all on the UI thread. This builds the lookup once per build and the hot
+/// paths do an O(1) map read instead. "First passenger wins per leg" ordering
+/// is preserved via [Map.putIfAbsent] over the same passenger iteration order
+/// as [_occupantsForSeat].
+Map<String, _SeatOccupants> _occupantsBySeatForBus(
+  HandlerManifest manifest,
+  String busId,
+) {
+  final go = <String, Passenger>{};
+  final ret = <String, Passenger>{};
+  for (final p in manifest.passengers) {
+    for (final a in p.assignedSeats) {
+      if (a.busId != busId) continue;
+      if (p.tripType.usesOutbound) go.putIfAbsent(a.seatId, () => p);
+      if (p.tripType.usesReturn) ret.putIfAbsent(a.seatId, () => p);
+    }
+  }
+  final out = <String, _SeatOccupants>{};
+  for (final seatId in {...go.keys, ...ret.keys}) {
+    out[seatId] = _SeatOccupants(go: go[seatId], ret: ret[seatId]);
+  }
+  return out;
+}
+
 /// The two ways the handler reads the chart: the visual seat [grid] or the
 /// call-first [list] (a roster of full name + mobile per seat).
 enum _ViewMode { grid, list }
@@ -121,8 +157,20 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   /// the chart recolors and the summary refreshes without a full reload.
   final Map<String, Collection> _collections = {};
 
+  /// Local, mutable expense cache keyed by expense id. Seeded from the manifest
+  /// and updated in-place after each add / delete so the per-bus expense ledger
+  /// and the "spent / in hand" summary refresh without a full reload.
+  final Map<String, Expense> _expenses = {};
+
   String _collectionKey(String passengerId, String busId, String seatId) =>
       '$passengerId|$busId|$seatId';
+
+  /// Expenses logged against [busId], oldest first.
+  List<Expense> _expensesForBus(String busId) {
+    final list = _expenses.values.where((e) => e.busId == busId).toList();
+    list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return list;
+  }
 
   /// Reads the local cache first, falling back to the manifest. Returns null
   /// when no money has been collected for that passenger on that bus.
@@ -138,6 +186,10 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     double collected = 0;
     double toReturn = 0;
     double toCollect = 0;
+    double spent = 0;
+    for (final e in _expensesForBus(bus.id)) {
+      spent += e.amount;
+    }
     for (final p in manifest.passengers) {
       // Distinct seats only: a whole double-sofa = TWO entries on one seatId,
       // already full-priced by amountDueForSeat — iterate per distinct seatId
@@ -163,6 +215,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
       collected: collected,
       toReturn: toReturn,
       toCollect: toCollect,
+      spent: spent,
     );
   }
 
@@ -188,6 +241,13 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
               ),
             ),
           );
+        _expenses
+          ..clear()
+          ..addEntries(
+            (manifest?.expenses ?? const <Expense>[]).map(
+              (e) => MapEntry(e.id, e),
+            ),
+          );
         _selectedBusId = manifest?.buses.isNotEmpty == true
             ? manifest!.buses.first.id
             : null;
@@ -196,7 +256,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _error = 'We couldn\'t load the bus chart. Please try again.';
+        _error = tr('handler_chart.error_load');
         _loading = false;
       });
     }
@@ -237,7 +297,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   ) {
     return UgamSheet.show<void>(
       context,
-      title: 'Seat $seatId · shared',
+      title: tr('handler_chart.seat_shared_title', namedArgs: {'seat': seatId}),
       builder: (sheetCtx) => _LegSharedChooserSheet(
         seatId: seatId,
         go: occ.go,
@@ -261,7 +321,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
 
     return UgamSheet.show<void>(
       context,
-      title: 'Collect',
+      title: tr('handler_chart.collect_title'),
       builder: (sheetCtx) => _CollectSheet(
         passenger: passenger,
         seatId: seatId,
@@ -307,16 +367,182 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     );
   }
 
+  /// Opens the add/edit expense sheet for [bus]. Pass [existing] to edit a
+  /// logged expense. On save the server-returned row is cached so the ledger
+  /// and the "spent / in hand" summary refresh without a reload.
+  Future<void> _showExpenseSheet(Bus bus, {Expense? existing}) {
+    final tourId = bus.tourId?.isNotEmpty == true ? bus.tourId! : '';
+    return UgamSheet.show<void>(
+      context,
+      title: existing == null
+          ? tr('handler_chart.add_expense')
+          : tr('handler_chart.edit_expense'),
+      builder: (sheetCtx) => _ExpenseSheet(
+        existing: existing,
+        onSave: (category, label, amount, paidBy) async {
+          final base =
+              existing ?? Expense(tourId: tourId, busId: bus.id, label: label);
+          final updated = base.copyWith(
+            busId: bus.id,
+            category: category,
+            label: label,
+            amount: amount,
+            paidBy: paidBy.isEmpty ? null : paidBy,
+          );
+          final saved = await _store.handlerUpsertExpense(
+            widget.requestId,
+            updated,
+          );
+          if (saved == null) {
+            throw StateError('Handler expense save was rejected.');
+          }
+          if (!mounted) return;
+          setState(() => _expenses[saved.id] = saved);
+        },
+      ),
+    );
+  }
+
+  /// Confirms then removes a logged expense, both on the server and in the
+  /// local cache.
+  Future<void> _deleteExpense(Expense expense) async {
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('handler_chart.delete_expense_title'),
+      message: expense.label.isEmpty
+          ? tr(
+              'handler_chart.delete_expense_msg_category',
+              namedArgs: {
+                'category': expense.category.displayName.toLowerCase(),
+                'amount': _money(expense.amount),
+              },
+            )
+          : tr(
+              'handler_chart.delete_expense_msg_label',
+              namedArgs: {
+                'label': expense.label,
+                'amount': _money(expense.amount),
+              },
+            ),
+      confirmLabel: tr('app.action.delete'),
+      destructive: true,
+    );
+    if (ok != true) return;
+    try {
+      final removed = await _store.handlerDeleteExpense(
+        widget.requestId,
+        expense.id,
+      );
+      if (!removed) {
+        AppSnackBar.error(tr('handler_chart.error_delete_expense'));
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _expenses.remove(expense.id));
+    } catch (_) {
+      AppSnackBar.error(tr('handler_chart.error_delete_expense'));
+    }
+  }
+
+  /// HANDLER per-bus announcement (F4). Opens a composer for the CURRENTLY
+  /// selected bus and sends the typed free-text to every seated passenger on
+  /// that bus via the `bus-message` Edge Function (which re-verifies the caller
+  /// is this bus's handler). The handler only ever sees their own bus(es), so
+  /// the composer is always scoped to [bus] — no bus picker.
+  Future<void> _openBusMessageComposer(Bus bus) async {
+    await UgamSheet.show<void>(
+      context,
+      title: tr('bus_message.composer_title'),
+      builder: (sheetCtx) => _HandlerBusMessageSheet(
+        busLabel: bus.name,
+        onSend: (text) async {
+          final result = await WhatsAppCloudService().sendBusMessageAsHandler(
+            requestId: widget.requestId,
+            busId: bus.id,
+            message: text,
+          );
+          if (!mounted) return;
+          if (result.allSent) {
+            AppSnackBar.success(
+              tr('bus_message.sent_body', namedArgs: {'count': '${result.sent}'}),
+              title: tr('bus_message.sent_title'),
+            );
+          } else if (result.anySent) {
+            AppSnackBar.warning(
+              tr('bus_message.partial_body', namedArgs: {
+                'sent': '${result.sent}',
+                'failed': '${result.failed}',
+              }),
+              title: tr('bus_message.partial_title'),
+            );
+          } else {
+            AppSnackBar.error(tr('bus_message.failed_body'));
+          }
+        },
+      ),
+    );
+  }
+
+  /// Opens the shared full-screen chart for the currently-shown bus. Reuses the
+  /// exact per-seat occupant data the grid's tileBuilder builds (the leg-aware
+  /// `_SeatOccupants` map flattened to the `List<Passenger>` shape the
+  /// full-screen view expects: a leg-shared seat → both occupants, otherwise the
+  /// sole occupant, else empty). Only wired up in grid view with a real chart on
+  /// screen (see [build]).
+  void _openFullscreenChart(Bus bus) {
+    final layout = bus.layout;
+    if (layout == null || layout.totalCells == 0) return;
+    final occupantsBySeat = _occupantsBySeatForBus(_manifest!, bus.id);
+    final occupantsForFullscreen = <String, List<Passenger>>{};
+    for (final entry in occupantsBySeat.entries) {
+      final occ = entry.value;
+      occupantsForFullscreen[entry.key] = occ.isLegShared
+          ? <Passenger>[occ.go!, occ.ret!]
+          : (occ.sole != null ? <Passenger>[occ.sole!] : const <Passenger>[]);
+    }
+    FullscreenChartScreen.open(
+      context,
+      layout: layout,
+      occupantsBySeat: occupantsForFullscreen,
+      title: bus.name,
+      driverLabel: tr('handler_chart.driver'),
+      bandColorFor: (cell) {
+        final idx = bus.bandIndexForRow(cell.row);
+        return idx == null ? null : priceBandWash(idx);
+      },
+      emphasizeOneWay: true,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    // Show the expand affordance only when a real chart is on screen: grid view,
+    // a current bus, and a non-empty layout. Otherwise the top bar omits it.
+    final manifest = _manifest;
+    final bus = manifest != null ? _selectedBus(manifest) : null;
+    final canExpand =
+        !_loading &&
+        _error == null &&
+        _viewMode == _ViewMode.grid &&
+        bus != null &&
+        (bus.layout?.totalCells ?? 0) > 0;
+    // The handler can broadcast a free-text message to their bus as soon as a
+    // bus is loaded (regardless of grid/list view).
+    final canMessage = !_loading && _error == null && bus != null;
     return Scaffold(
       backgroundColor: c.bg,
       body: SafeArea(
         bottom: false,
         child: Column(
           children: [
-            _TopBar(title: 'Bus chart', c: c),
+            _TopBar(
+              title: tr('handler_chart.bus_chart'),
+              c: c,
+              onExpand: canExpand ? () => _openFullscreenChart(bus) : null,
+              onMessage:
+                  canMessage ? () => _openBusMessageComposer(bus) : null,
+            ),
             Expanded(child: _body(c)),
           ],
         ),
@@ -334,7 +560,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           padding: const EdgeInsets.all(UgamSpacing.huge),
           child: UgamEmpty(
             icon: Icons.cloud_off_rounded,
-            title: 'Couldn\'t load chart',
+            title: tr('handler_chart.error_load_title'),
             body: _error!,
           ),
         ),
@@ -347,10 +573,8 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           padding: const EdgeInsets.all(UgamSpacing.huge),
           child: UgamEmpty(
             icon: Icons.event_seat_outlined,
-            title: 'No bus chart yet',
-            body:
-                'The seat chart will appear here once the agent has set up '
-                'the buses for this tour.',
+            title: tr('handler_chart.no_bus_chart_title'),
+            body: tr('handler_chart.no_bus_chart_body'),
           ),
         ),
       );
@@ -359,6 +583,9 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     final bus = _selectedBus(manifest)!;
     final multiBus = manifest.buses.length > 1;
     final summary = _summaryForBus(manifest, bus);
+
+    // Resolve occupants for the whole bus once, not per seat cell.
+    final occupantsBySeat = _occupantsBySeatForBus(manifest, bus.id);
 
     final grid = _viewMode == _ViewMode.grid;
 
@@ -396,16 +623,19 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             physics: const BouncingScrollPhysics(),
             child: Column(
               children: [
+                _BusDeparture(bus: bus, c: c),
                 _SummaryHeader(
                   collected: summary.collected,
                   toReturn: summary.toReturn,
                   toCollect: summary.toCollect,
+                  spent: summary.spent,
+                  inHand: summary.inHand,
                 ),
                 const SizedBox(height: UgamSpacing.lg),
                 if (grid) ...[
                   _SeatGrid(
                     bus: bus,
-                    manifest: manifest,
+                    occupantsBySeat: occupantsBySeat,
                     collectionFor: (pId, seatId) =>
                         _collectionFor(pId, bus.id, seatId),
                     onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
@@ -415,11 +645,20 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                 ] else
                   _SeatRoster(
                     bus: bus,
-                    manifest: manifest,
+                    occupantsBySeat: occupantsBySeat,
                     collectionFor: (pId, seatId) =>
                         _collectionFor(pId, bus.id, seatId),
                     onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
                   ),
+                _PriceBandKey(bus: bus),
+                const SizedBox(height: UgamSpacing.xl),
+                _ExpensesSection(
+                  busName: bus.name,
+                  expenses: _expensesForBus(bus.id),
+                  onAdd: () => _showExpenseSheet(bus),
+                  onEdit: (e) => _showExpenseSheet(bus, existing: e),
+                  onDelete: (e) => _deleteExpense(e),
+                ),
               ],
             ),
           ),
@@ -438,7 +677,22 @@ class _TopBar extends StatelessWidget {
   final String title;
   final UgamColorSet c;
 
-  const _TopBar({required this.title, required this.c});
+  /// When non-null, shows an "expand to full screen chart" button that opens the
+  /// shared [FullscreenChartScreen]. Null hides it (e.g. list view, or no real
+  /// chart on screen).
+  final VoidCallback? onExpand;
+
+  /// When non-null, shows a "Message this bus" button that opens the per-bus
+  /// announcement composer (F4 handler path). Null hides it (e.g. still loading
+  /// or no bus resolved).
+  final VoidCallback? onMessage;
+
+  const _TopBar({
+    required this.title,
+    required this.c,
+    this.onExpand,
+    this.onMessage,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -474,6 +728,56 @@ class _TopBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (onMessage != null) ...[
+            Semantics(
+              button: true,
+              label: tr('bus_message.message_bus'),
+              child: GestureDetector(
+                onTap: onMessage,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: c.accentFill,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.campaign_rounded,
+                    size: 19,
+                    color: c.accent,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+          ],
+          if (onExpand != null) ...[
+            Semantics(
+              button: true,
+              label: tr('handler_chart.expand_chart'),
+              child: GestureDetector(
+                onTap: onExpand,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: c.cardElev,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    Icons.open_in_full_rounded,
+                    size: 19,
+                    color: c.ink,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+          ],
           Container(
             width: 44,
             height: 44,
@@ -584,13 +888,13 @@ extension _MoneyStateView on _MoneyState {
 
 class _SeatGrid extends StatelessWidget {
   final Bus bus;
-  final HandlerManifest manifest;
+  final Map<String, _SeatOccupants> occupantsBySeat;
   final Collection? Function(String passengerId, String seatId) collectionFor;
   final void Function(String seatId, Passenger passenger) onTapOccupant;
 
   const _SeatGrid({
     required this.bus,
-    required this.manifest,
+    required this.occupantsBySeat,
     required this.collectionFor,
     required this.onTapOccupant,
   });
@@ -618,381 +922,68 @@ class _SeatGrid extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
         alignment: Alignment.center,
         child: Text(
-          'This bus has no seat layout yet.',
+          tr('handler_chart.no_seat_layout'),
           textAlign: TextAlign.center,
           style: UgamText.caption.copyWith(color: c.ink2),
         ),
       );
     }
 
-    // A touch larger than the legacy tile so initials read cleanly, matching
-    // the agent seat-detail tile size. The grid FittedBox scales to fit width.
-    const double tileW = 58;
-    const double tileH = 58;
-
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.md),
       child: CombinedSeatGrid(
         layout: layout,
-        cellWidth: tileW,
-        cellHeight: tileH,
+        cellWidth: kSeatTileW,
+        cellHeight: kSeatTileH,
         colGap: 8,
         rowGap: 8,
-        driverLabel: 'Driver',
+        driverLabel: tr('handler_chart.driver'),
         tileBuilder: (ctx, cell) {
           // Leg-aware: a seat may hold a GO occupant and a DIFFERENT RETURN
           // occupant (an outbound-only + a return-only sharing the seat on
-          // disjoint legs). Resolve both so the tile can split + badge them.
+          // disjoint legs). Resolve both so the shared tile can split + badge
+          // them. The canonical tile detects the GO/RET split itself by trip
+          // type, so we just hand it the occupant list.
           final occ = cell.seatId == null
               ? const _SeatOccupants()
-              : _occupantsForSeat(manifest, bus.id, cell.seatId!);
+              : (occupantsBySeat[cell.seatId!] ?? const _SeatOccupants());
+          final List<Passenger> occList = occ.isLegShared
+              ? <Passenger>[occ.go!, occ.ret!]
+              : (occ.sole != null
+                  ? <Passenger>[occ.sole!]
+                  : const <Passenger>[]);
           // The money dot follows the GO occupant first (then RETURN) — the
           // primary person whose due/collection drives the at-a-glance state.
           final primary = occ.go ?? occ.ret;
           final money = primary == null
               ? _MoneyState.uncollected
               : _moneyState(primary, cell.seatId!);
+          // Price-band wash for this seat's row, so the rows read as price
+          // stripes (booked AND free seats). Null when the row is unbanded.
+          final bandIdx = bus.bandIndexForRow(cell.row);
+          final bandColor = bandIdx == null ? null : priceBandWash(bandIdx);
           return SizedBox(
-            width: tileW,
-            height: tileH,
+            width: kSeatTileW,
+            height: kSeatTileH,
             child: RepaintBoundary(
-              child: _SeatTile(
+              child: SeatChartTile(
                 cell: cell,
-                occupants: occ,
-                money: money,
-                onTap: primary == null
+                occupants: occList,
+                // Handler is customer-side with no PassengerGroup colour index;
+                // the empty resolver falls back to stable id-hash colours.
+                groupColors: const GroupColorResolver({}),
+                bandColor: bandColor,
+                // Handler view: RET reads violet (distinct from GO cyan) and
+                // one-way pills show "½" — the cue that this seat pays half fare.
+                emphasizeOneWay: true,
+                moneyDotColor: primary == null ? null : money.color(UgamColors.of(ctx)),
+                onTapBooked: primary == null
                     ? null
                     : () => onTapOccupant(cell.seatId!, primary),
               ),
             ),
           );
         },
-      ),
-    );
-  }
-}
-
-/// A single read-only handler tile, styled to MATCH the agent seat-detail
-/// tile — occupant initials on a card fill, a group-colour ring when grouped,
-/// a warm ring + star when priority/forward, a dashed look when free, and a
-/// "Held" look when reserved. The handler-only addition is a small corner
-/// money dot (paid / owing / return-due) so the handler reads collection state
-/// at a glance. Tapping an occupied tile opens the collect / call sheet; free
-/// and held tiles are inert (the handler never edits seats).
-class _SeatTile extends StatelessWidget {
-  final SeatCell cell;
-  final _SeatOccupants occupants;
-  final _MoneyState money;
-  final VoidCallback? onTap;
-
-  const _SeatTile({
-    required this.cell,
-    required this.occupants,
-    required this.money,
-    required this.onTap,
-  });
-
-  bool get _occupied => !occupants.isEmpty;
-
-  static String initials(String displayName) {
-    final n = displayName.trim();
-    if (n.isEmpty) return '?';
-    final parts = n.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return parts.first[0].toUpperCase();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-
-    final Widget tile;
-    if (occupants.isLegShared) {
-      tile = _legSharedTile(c, occupants.go!, occupants.ret!);
-    } else if (_occupied) {
-      tile = _bookedTile(c, occupants.sole!);
-    } else if (cell.reserved) {
-      tile = _heldTile(c);
-    } else {
-      tile = _freeTile(c);
-    }
-
-    if (onTap == null) return tile;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: tile,
-    );
-  }
-
-  // FREE — dashed ink3 hairline, transparent fill, faint glyph + seat id.
-  Widget _freeTile(UgamColorSet c) {
-    return CustomPaint(
-      painter: _DashedBorderPainter(
-        color: c.ink3.withValues(alpha: 0.55),
-        radius: UgamRadius.seat,
-      ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.event_seat_outlined, size: 16, color: c.ink3),
-            const SizedBox(height: 3),
-            Text(
-              cell.seatId ?? '',
-              style: UgamText.tabular(
-                UgamText.micro.copyWith(color: c.ink3, fontSize: 9.5),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // RESERVED — dimmed fill, struck lock glyph, "Held" label.
-  Widget _heldTile(UgamColorSet c) {
-    return Container(
-      decoration: BoxDecoration(
-        color: c.cardElev.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.lock_outline_rounded, size: 16, color: c.ink3),
-          const SizedBox(height: 3),
-          Text(
-            'Held',
-            style: UgamText.micro.copyWith(
-              color: c.ink3,
-              decoration: TextDecoration.lineThrough,
-              decorationColor: c.ink3,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // BOOKED — initials on card fill; group ring + warm priority ring/badge,
-  // a one-way GO/RET corner badge + cyan tint for a single-leg occupant, plus a
-  // handler-only money dot in the bottom-left corner.
-  Widget _bookedTile(UgamColorSet c, Passenger p) {
-    final priority = p.isPriorityApproved || cell.forward;
-    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    // INFINITE COLORS: shared golden-angle generator (never collides with the
-    // warm priority ring or the one-way cyan tint).
-    final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
-    final oneWay = p.tripType.isOneWay;
-
-    // The outer ring colour signals belonging. Priority (warm) is attention so
-    // it always wins; then a one-way leg shows the cyan tint; then a group ring.
-    final Color ringColor;
-    final double ringWidth;
-    if (priority) {
-      ringColor = c.warm;
-      ringWidth = 2;
-    } else if (oneWay) {
-      ringColor = kOneWayTint;
-      ringWidth = 2;
-    } else if (groupColor != null) {
-      ringColor = groupColor;
-      ringWidth = 2;
-    } else {
-      ringColor = c.border;
-      ringWidth = 1;
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(color: ringColor, width: ringWidth),
-      ),
-      child: Stack(
-        children: [
-          Center(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                initials(p.displayName),
-                style: UgamText.bodyStrong.copyWith(
-                  color: c.ink,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ),
-          // Seat id, top-left.
-          Positioned(
-            top: 4,
-            left: 5,
-            child: Text(
-              cell.seatId ?? '',
-              style: UgamText.tabular(
-                UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
-              ),
-            ),
-          ),
-          // Priority warm badge, top-right (priority outranks the leg badge).
-          if (priority)
-            Positioned(
-              top: 3,
-              right: 3,
-              child: Icon(Icons.star_rounded, size: 12, color: c.warm),
-            )
-          // One-way GO/RET corner badge, top-right, when not priority.
-          else if (oneWay)
-            Positioned(
-              top: 2,
-              right: 2,
-              child: _LegBadge(tripType: p.tripType),
-            ),
-          // Group dot badge (only when the group colour isn't already the ring,
-          // i.e. a priority or one-way booking that ALSO belongs to a group).
-          if ((priority || oneWay) && groupColor != null)
-            Positioned(
-              bottom: 4,
-              right: 4,
-              child: _Dot(color: groupColor, size: 8),
-            ),
-          // Handler-only money dot, bottom-left, so collection state never
-          // collides with the group/priority signals on the right.
-          Positioned(
-            bottom: 4,
-            left: 5,
-            child: _Dot(color: money.color(c), size: 8),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // LEG-SHARED — a GO occupant and a DIFFERENT RETURN occupant on disjoint
-  // legs. Split left (GO) / right (RET), each half showing initials, a GO/RET
-  // badge and a group dot; the cyan one-way tint frames the whole tile.
-  Widget _legSharedTile(UgamColorSet c, Passenger go, Passenger ret) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(color: kOneWayTint, width: 2),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          Row(
-            children: [
-              Expanded(child: _legHalf(c, go, TripType.outboundOnly)),
-              Container(width: 1, color: c.border),
-              Expanded(child: _legHalf(c, ret, TripType.returnOnly)),
-            ],
-          ),
-          // Seat id, centred top.
-          Positioned(
-            top: 3,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Text(
-                cell.seatId ?? '',
-                style: UgamText.tabular(
-                  UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
-                ),
-              ),
-            ),
-          ),
-          // Handler-only money dot (follows the GO occupant), bottom-left.
-          Positioned(
-            bottom: 3,
-            left: 4,
-            child: _Dot(color: money.color(c), size: 7),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _legHalf(UgamColorSet c, Passenger p, TripType leg) {
-    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
-    return Container(
-      color: c.cardElev,
-      alignment: Alignment.center,
-      child: Stack(
-        children: [
-          Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    initials(p.displayName),
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                if (groupColor != null) ...[
-                  const SizedBox(height: 2),
-                  _Dot(color: groupColor, size: 6),
-                ],
-              ],
-            ),
-          ),
-          Positioned(
-            bottom: 1,
-            right: 1,
-            child: _LegBadge(tripType: leg, compact: true),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A tiny GO / RET corner pill marking a one-way leg on a seat tile, tinted
-/// with [kOneWayTint]. [compact] shrinks it for the split leg-shared halves.
-class _LegBadge extends StatelessWidget {
-  final TripType tripType;
-  final bool compact;
-
-  const _LegBadge({required this.tripType, this.compact = false});
-
-  String get _label => tripType.usesReturn && !tripType.usesOutbound
-      ? 'RET'
-      : 'GO';
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return Container(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 3 : 4,
-        vertical: compact ? 1 : 2,
-      ),
-      decoration: BoxDecoration(
-        color: kOneWayTint,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      // Dark ground reads as crisp ink on the bright cyan tint (no hardcoded
-      // hex — kOneWayTint is the only fixed colour, supplied by the util).
-      child: Text(
-        _label,
-        style: UgamText.micro.copyWith(
-          color: c.bg,
-          fontSize: compact ? 7 : 8,
-          height: 1,
-          letterSpacing: 0.3,
-          fontWeight: FontWeight.w900,
-        ),
       ),
     );
   }
@@ -1067,23 +1058,67 @@ class _Legend extends StatelessWidget {
       runSpacing: 6,
       alignment: WrapAlignment.center,
       children: [
-        _LegendItem(swatch: _LegendSwatch.dashed, label: 'Free', c: c),
-        _LegendItem(swatch: _LegendSwatch.filled, label: 'Booked', c: c),
         _LegendItem(
-          swatch: _LegendSwatch.warmRing,
-          label: 'Priority / forward',
+          swatch: _LegendSwatch.dashed,
+          label: tr('handler_chart.legend_free'),
           c: c,
         ),
-        _LegendItem(swatch: _LegendSwatch.held, label: 'Held', c: c),
-        _LegendItem(swatch: _LegendSwatch.oneWay, label: 'One-way (GO/RET)', c: c),
-        _LegendItem(swatch: _LegendSwatch.paidDot, label: 'Paid', c: c),
-        _LegendItem(swatch: _LegendSwatch.owingDot, label: 'Owing', c: c),
+        _LegendItem(
+          swatch: _LegendSwatch.filled,
+          label: tr('handler_chart.legend_booked'),
+          c: c,
+        ),
+        _LegendItem(
+          swatch: _LegendSwatch.warmRing,
+          label: tr('handler_chart.legend_priority'),
+          c: c,
+        ),
+        _LegendItem(
+          swatch: _LegendSwatch.held,
+          label: tr('handler_chart.legend_held'),
+          c: c,
+        ),
+        _LegendItem(
+          swatch: _LegendSwatch.go,
+          label: tr('handler_chart.legend_go'),
+          c: c,
+        ),
+        _LegendItem(
+          swatch: _LegendSwatch.ret,
+          label: tr('handler_chart.legend_ret'),
+          c: c,
+        ),
+        _LegendItem(
+          swatch: _LegendSwatch.halfFare,
+          label: tr('handler_chart.legend_half'),
+          c: c,
+        ),
+        _LegendItem(
+          swatch: _LegendSwatch.paidDot,
+          label: tr('handler_chart.legend_paid'),
+          c: c,
+        ),
+        _LegendItem(
+          swatch: _LegendSwatch.owingDot,
+          label: tr('handler_chart.legend_owing'),
+          c: c,
+        ),
       ],
     );
   }
 }
 
-enum _LegendSwatch { dashed, filled, warmRing, held, oneWay, paidDot, owingDot }
+enum _LegendSwatch {
+  dashed,
+  filled,
+  warmRing,
+  held,
+  go,
+  ret,
+  halfFare,
+  paidDot,
+  owingDot,
+}
 
 class _LegendItem extends StatelessWidget {
   final _LegendSwatch swatch;
@@ -1140,14 +1175,43 @@ class _LegendItem extends StatelessWidget {
           alignment: Alignment.center,
           child: Icon(Icons.lock_outline_rounded, size: 8, color: c.ink3),
         );
-      case _LegendSwatch.oneWay:
+      case _LegendSwatch.go:
         dot = Container(
           width: 12,
           height: 12,
           decoration: BoxDecoration(
-            color: c.cardElev,
+            color: kOneWayTint.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: kOneWayTint, width: 2),
+            border: Border.all(color: kOneWayTint, width: 1.6),
+          ),
+        );
+      case _LegendSwatch.ret:
+        dot = Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: kReturnTint.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: kReturnTint, width: 1.6),
+          ),
+        );
+      case _LegendSwatch.halfFare:
+        dot = Container(
+          width: 16,
+          height: 12,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: c.ink3.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: c.ink3.withValues(alpha: 0.6), width: 0.8),
+          ),
+          child: Text(
+            '½',
+            style: UgamText.micro.copyWith(
+              color: c.ink2,
+              fontSize: 8,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         );
       case _LegendSwatch.paidDot:
@@ -1161,6 +1225,121 @@ class _LegendItem extends StatelessWidget {
         dot,
         const SizedBox(width: 6),
         Text(label, style: UgamText.micro.copyWith(color: c.ink2)),
+      ],
+    );
+  }
+}
+
+// ─── Price-band key ────────────────────────────────────────────────────
+
+/// The price-band legend: one row per effective band (precedence order) showing
+/// the band's colour swatch — the SAME colour the grid washes that band's rows
+/// with — its label, its row range, and its per-person price. Hidden entirely
+/// when the bus has no bands configured. Each band's colour is keyed on its
+/// index so the swatch and the row wash always agree (see `priceBandColor`).
+class _PriceBandKey extends StatelessWidget {
+  final Bus bus;
+
+  const _PriceBandKey({required this.bus});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final bands = bus.effectiveBands;
+    if (bands.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: UgamSpacing.lg),
+      child: UgamCard.plain(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.sell_outlined, size: 16, color: c.ink2),
+                const SizedBox(width: 6),
+                Text(
+                  tr('handler_chart.price_bands'),
+                  style: UgamText.titleS.copyWith(color: c.ink),
+                ),
+              ],
+            ),
+            const SizedBox(height: UgamSpacing.sm),
+            for (var i = 0; i < bands.length; i++) ...[
+              if (i > 0) const SizedBox(height: UgamSpacing.sm),
+              _PriceBandRow(band: bands[i], color: priceBandColor(i), c: c),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One band line in the price-band key: colour swatch, label + row range, price.
+class _PriceBandRow extends StatelessWidget {
+  final PriceBand band;
+  final Color color;
+  final UgamColorSet c;
+
+  const _PriceBandRow({
+    required this.band,
+    required this.color,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Normalise a band entered "backwards" and show 1-based, human row numbers.
+    final lo = (band.fromRow <= band.toRow ? band.fromRow : band.toRow) + 1;
+    final hi = (band.fromRow <= band.toRow ? band.toRow : band.fromRow) + 1;
+    final raw = band.label.trim();
+    // The legacy rear-zone band is synthesized with the hard-coded English
+    // sentinel 'Rear' (see Bus.effectiveBands); localize it at render so the key
+    // reads in the active language. Empty user labels fall back to band_unnamed.
+    final label = raw.isEmpty
+        ? tr('handler_chart.band_unnamed')
+        : (raw == 'Rear' ? tr('handler_chart.band_rear') : raw);
+    return Row(
+      children: [
+        Container(
+          width: 16,
+          height: 16,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: color),
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: UgamText.bodyStrong.copyWith(color: c.ink),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                lo == hi
+                    ? tr('handler_chart.band_row', namedArgs: {'row': '$lo'})
+                    : tr(
+                        'handler_chart.band_rows',
+                        namedArgs: {'from': '$lo', 'to': '$hi'},
+                      ),
+                style: UgamText.micro.copyWith(color: c.ink2),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.sm),
+        Text(
+          tr('handler_chart.band_per_person', namedArgs: {'amount': _money(band.price)}),
+          style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
+        ),
       ],
     );
   }
@@ -1194,13 +1373,13 @@ class _ViewToggle extends StatelessWidget {
         children: [
           _segment(
             icon: Icons.grid_view_rounded,
-            label: 'Grid',
+            label: tr('handler_chart.view_grid'),
             selected: mode == _ViewMode.grid,
             onTap: () => onChanged(_ViewMode.grid),
           ),
           _segment(
             icon: Icons.format_list_bulleted_rounded,
-            label: 'List',
+            label: tr('handler_chart.view_list'),
             selected: mode == _ViewMode.list,
             onTap: () => onChanged(_ViewMode.list),
           ),
@@ -1265,13 +1444,13 @@ class _ViewToggle extends StatelessWidget {
 /// collect sheet the grid uses.
 class _SeatRoster extends StatelessWidget {
   final Bus bus;
-  final HandlerManifest manifest;
+  final Map<String, _SeatOccupants> occupantsBySeat;
   final Collection? Function(String passengerId, String seatId) collectionFor;
   final void Function(String seatId, Passenger passenger) onTapOccupant;
 
   const _SeatRoster({
     required this.bus,
-    required this.manifest,
+    required this.occupantsBySeat,
     required this.collectionFor,
     required this.onTapOccupant,
   });
@@ -1297,7 +1476,7 @@ class _SeatRoster extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
         alignment: Alignment.center,
         child: Text(
-          'This bus has no seat layout yet.',
+          tr('handler_chart.no_seat_layout'),
           textAlign: TextAlign.center,
           style: UgamText.caption.copyWith(color: c.ink2),
         ),
@@ -1310,7 +1489,7 @@ class _SeatRoster extends StatelessWidget {
     for (final cell in layout.grid) {
       final seatId = cell.seatId;
       if (seatId == null) continue;
-      final occ = _occupantsForSeat(manifest, bus.id, seatId);
+      final occ = occupantsBySeat[seatId] ?? const _SeatOccupants();
       if (occ.isEmpty) continue;
       for (final p in occ.all) {
         rows.add(
@@ -1330,7 +1509,7 @@ class _SeatRoster extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
         alignment: Alignment.center,
         child: Text(
-          'No passengers seated on ${bus.name} yet.',
+          tr('handler_chart.no_passengers_on_bus', namedArgs: {'bus': bus.name}),
           textAlign: TextAlign.center,
           style: UgamText.caption.copyWith(color: c.ink2),
         ),
@@ -1364,13 +1543,13 @@ class _RosterRow extends StatelessWidget {
   String get _moneyLabel {
     switch (money) {
       case _MoneyState.paid:
-        return 'Paid';
+        return tr('handler_chart.money_paid');
       case _MoneyState.owing:
-        return 'Owing';
+        return tr('handler_chart.money_owing');
       case _MoneyState.returnDue:
-        return 'Return due';
+        return tr('handler_chart.money_return_due');
       case _MoneyState.uncollected:
-        return 'Not collected';
+        return tr('handler_chart.money_not_collected');
     }
   }
 
@@ -1438,7 +1617,7 @@ class _RosterRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    hasPhone ? p.phone : 'No mobile',
+                    hasPhone ? p.phone : tr('handler_chart.no_mobile'),
                     style: UgamText.tabular(
                       UgamText.micro.copyWith(
                         color: hasPhone ? c.ink2 : c.ink3,
@@ -1464,7 +1643,7 @@ class _RosterRow extends StatelessWidget {
               const SizedBox(width: UgamSpacing.sm),
               Semantics(
                 button: true,
-                label: 'Call ${p.phone}',
+                label: tr('handler_chart.call_semantic', namedArgs: {'phone': p.phone}),
                 child: GestureDetector(
                   onTap: () => PhoneDialer.call(p.phone),
                   behavior: HitTestBehavior.opaque,
@@ -1488,9 +1667,10 @@ class _RosterRow extends StatelessWidget {
   }
 }
 
-/// A small trip-type pill. Round-trip is muted (the common case); a one-way
-/// leg uses the reserved [kOneWayTint] with a GO / RET label so it matches the
-/// grid's leg badge.
+/// A small trip-type pill. Round-trip is muted (the common case); a one-way leg
+/// uses its leg tint — GO cyan [kOneWayTint], RET violet [kReturnTint] — with a
+/// "½" half-fare marker so the roster matches the grid's leg badge and the
+/// handler sees who pays a different amount.
 class _TripBadge extends StatelessWidget {
   final TripType tripType;
   final UgamColorSet c;
@@ -1500,20 +1680,23 @@ class _TripBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final oneWay = tripType.isOneWay;
-    final label = !oneWay
-        ? 'RT'
-        : (tripType.usesReturn && !tripType.usesOutbound ? 'RET' : 'GO');
+    final isRet = tripType.usesReturn && !tripType.usesOutbound;
+    final tint = isRet ? kReturnTint : kOneWayTint;
+    final base = !oneWay
+        ? tr('handler_chart.badge_round_trip')
+        : (isRet ? tr('handler_chart.badge_ret') : tr('handler_chart.badge_go'));
+    final label = oneWay ? '$base ½' : base;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: oneWay ? kOneWayTint : c.cardElev,
+        color: oneWay ? tint : c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.chip),
         border: oneWay ? null : Border.all(color: c.border),
       ),
       child: Text(
         label,
         style: UgamText.micro.copyWith(
-          // Dark ground on the bright cyan; muted ink on the neutral pill.
+          // Dark ground on the bright leg tint; muted ink on the neutral pill.
           color: oneWay ? c.bg : c.ink2,
           fontSize: 8,
           letterSpacing: 0.3,
@@ -1550,8 +1733,7 @@ class _LegSharedChooserSheet extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Two passengers share this seat across legs. Pick one to view or '
-          'collect.',
+          tr('handler_chart.leg_shared_intro'),
           style: UgamText.body.copyWith(color: c.ink2),
         ),
         const SizedBox(height: UgamSpacing.md),
@@ -1618,7 +1800,7 @@ class _LegSharedTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    hasPhone ? p.phone : 'No mobile',
+                    hasPhone ? p.phone : tr('handler_chart.no_mobile'),
                     style: UgamText.tabular(
                       UgamText.micro.copyWith(
                         color: hasPhone ? c.ink2 : c.ink3,
@@ -1632,7 +1814,7 @@ class _LegSharedTile extends StatelessWidget {
               const SizedBox(width: UgamSpacing.sm),
               Semantics(
                 button: true,
-                label: 'Call ${p.phone}',
+                label: tr('handler_chart.call_semantic', namedArgs: {'phone': p.phone}),
                 child: GestureDetector(
                   onTap: () => PhoneDialer.call(p.phone),
                   behavior: HitTestBehavior.opaque,
@@ -1658,6 +1840,63 @@ class _LegSharedTile extends StatelessWidget {
   }
 }
 
+// ─── Bus departure header ──────────────────────────────────────────────
+
+/// The selected bus's name plus its OWN departure: place + time, rendered as
+/// `<boardingPoint> · <formatHhMm(departureTime)>` per the surfacing rule —
+/// either half is omitted when empty/null, and the departure line is hidden
+/// entirely when both are empty (the per-bus values override the tour-level /
+/// chart-footer departure). Sits above the money summary so the handler reads
+/// where and when THIS bus leaves at a glance.
+class _BusDeparture extends StatelessWidget {
+  final Bus bus;
+  final UgamColorSet c;
+
+  const _BusDeparture({required this.bus, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final place = bus.boardingPoint.trim();
+    final time = formatHhMm(bus.departureTime);
+    final parts = <String>[
+      if (place.isNotEmpty) place,
+      if (time != null && time.isNotEmpty) time,
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: UgamSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            bus.name,
+            style: UgamText.titleS.copyWith(color: c.ink),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (parts.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Row(
+              children: [
+                Icon(Icons.place_outlined, size: 14, color: c.ink2),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    parts.join(' · '),
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Summary header ────────────────────────────────────────────────────
 
 /// Aggregated collection figures for the selected bus.
@@ -1666,53 +1905,91 @@ class _BusSummary {
   final double toReturn;
   final double toCollect;
 
+  /// Total of every expense logged against this bus.
+  final double spent;
+
   const _BusSummary({
     required this.collected,
     required this.toReturn,
     required this.toCollect,
+    required this.spent,
   });
+
+  /// Net cash the handler should be holding for this bus — what was collected
+  /// less what was spent. This is what they hand over to the admin.
+  double get inHand => collected - spent;
 }
 
 class _SummaryHeader extends StatelessWidget {
   final double collected;
   final double toReturn;
   final double toCollect;
+  final double spent;
+  final double inHand;
 
   const _SummaryHeader({
     required this.collected,
     required this.toReturn,
     required this.toCollect,
+    required this.spent,
+    required this.inHand,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: UgamStatTile(
-            icon: Icons.payments_rounded,
-            value: _money(collected),
-            label: 'Collected',
-            variant: UgamStatVariant.good,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.payments_rounded,
+                value: _money(collected),
+                label: tr('handler_chart.stat_collected'),
+                variant: UgamStatVariant.good,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.undo_rounded,
+                value: _money(toReturn),
+                label: tr('handler_chart.stat_to_return'),
+                variant: UgamStatVariant.warm,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.account_balance_wallet_rounded,
+                value: _money(toCollect),
+                label: tr('handler_chart.stat_to_collect'),
+                variant: UgamStatVariant.accent,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: UgamSpacing.md),
-        Expanded(
-          child: UgamStatTile(
-            icon: Icons.undo_rounded,
-            value: _money(toReturn),
-            label: 'To return',
-            variant: UgamStatVariant.warm,
-          ),
-        ),
-        const SizedBox(width: UgamSpacing.md),
-        Expanded(
-          child: UgamStatTile(
-            icon: Icons.account_balance_wallet_rounded,
-            value: _money(toCollect),
-            label: 'To collect',
-            variant: UgamStatVariant.accent,
-          ),
+        const SizedBox(height: UgamSpacing.md),
+        Row(
+          children: [
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.receipt_long_rounded,
+                value: _money(spent),
+                label: tr('handler_chart.stat_spent'),
+                variant: UgamStatVariant.warm,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.account_balance_rounded,
+                value: _money(inHand),
+                label: tr('handler_chart.stat_in_hand'),
+                variant: UgamStatVariant.neutral,
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1800,7 +2077,7 @@ class _CollectSheetState extends State<_CollectSheet> {
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) setState(() => _saving = false);
-      AppSnackBar.error('Couldn\'t save the collection. Please try again.');
+      AppSnackBar.error(tr('handler_chart.error_save_collection'));
     }
   }
 
@@ -1846,7 +2123,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                           child: Text(
                             passenger.name.trim().isNotEmpty
                                 ? passenger.name
-                                : 'Passenger',
+                                : tr('handler_chart.passenger_fallback'),
                             style: UgamText.titleL.copyWith(color: c.ink),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1863,7 +2140,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              'HANDLER',
+                              tr('handler_chart.handler_badge'),
                               style: UgamText.micro.copyWith(
                                 color: c.warm,
                                 fontSize: 9,
@@ -1900,7 +2177,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                 const SizedBox(width: UgamSpacing.sm),
                 Expanded(
                   child: Text(
-                    hasPhone ? passenger.phone : 'No phone number',
+                    hasPhone ? passenger.phone : tr('handler_chart.no_phone'),
                     style: UgamText.body.copyWith(
                       color: hasPhone ? c.ink : c.ink3,
                     ),
@@ -1925,7 +2202,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                           Icon(Icons.call_rounded, size: 15, color: c.onAccent),
                           const SizedBox(width: 6),
                           Text(
-                            'Call',
+                            tr('handler_chart.call'),
                             style: UgamText.caption.copyWith(
                               color: c.onAccent,
                               fontWeight: FontWeight.w700,
@@ -1940,12 +2217,43 @@ class _CollectSheetState extends State<_CollectSheet> {
           ),
           const SizedBox(height: UgamSpacing.lg),
           // ── Collect form ──
-          _ReadOnlyLine(label: 'Seat', value: widget.seatId),
+          _ReadOnlyLine(label: tr('handler_chart.seat'), value: widget.seatId),
           const SizedBox(height: UgamSpacing.sm),
-          _ReadOnlyLine(label: 'Amount due', value: _money(due)),
+          _ReadOnlyLine(
+            label: tr('handler_chart.amount_due'),
+            value: _money(due),
+          ),
+          // One-way leg → the due above is already HALVED. Spell that out so the
+          // handler knows the amount differs from a full round-trip seat.
+          if (passenger.tripType.isOneWay) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Builder(
+              builder: (_) {
+                final isRet = passenger.tripType.usesReturn &&
+                    !passenger.tripType.usesOutbound;
+                final tint = isRet ? kReturnTint : kOneWayTint;
+                return Row(
+                  children: [
+                    SeatLegPill(
+                      label: isRet ? 'RET' : 'GO',
+                      tint: tint,
+                      half: true,
+                    ),
+                    const SizedBox(width: UgamSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        tr('handler_chart.half_fare_note'),
+                        style: UgamText.micro.copyWith(color: c.ink2),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
           const SizedBox(height: UgamSpacing.lg),
           UgamInput(
-            label: 'Received',
+            label: tr('handler_chart.field_received'),
             controller: _receivedCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [
@@ -1955,7 +2263,7 @@ class _CollectSheetState extends State<_CollectSheet> {
           ),
           const SizedBox(height: UgamSpacing.md),
           UgamInput(
-            label: 'Returned to customer',
+            label: tr('handler_chart.field_returned'),
             controller: _returnedCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [
@@ -1964,9 +2272,15 @@ class _CollectSheetState extends State<_CollectSheet> {
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: UgamSpacing.md),
-          UgamInput(label: 'Collected by', controller: _collectedByCtrl),
+          UgamInput(
+            label: tr('handler_chart.field_collected_by'),
+            controller: _collectedByCtrl,
+          ),
           const SizedBox(height: UgamSpacing.md),
-          UgamInput(label: 'Note', controller: _noteCtrl),
+          UgamInput(
+            label: tr('handler_chart.field_note'),
+            controller: _noteCtrl,
+          ),
           const SizedBox(height: UgamSpacing.lg),
           // ── Live balance pill ──
           Builder(
@@ -1974,10 +2288,22 @@ class _CollectSheetState extends State<_CollectSheet> {
               final balance =
                   _parse(_receivedCtrl) - _parse(_returnedCtrl) - due;
               final (String balLabel, Color balColor) = balance > 0
-                  ? ('Change to return: ${_money(balance)}', c.warm)
+                  ? (
+                      tr(
+                        'handler_chart.balance_change',
+                        namedArgs: {'amount': _money(balance)},
+                      ),
+                      c.warm,
+                    )
                   : balance < 0
-                  ? ('Still to collect: ${_money(-balance)}', c.danger)
-                  : ('Settled', c.good);
+                  ? (
+                      tr(
+                        'handler_chart.balance_still_to_collect',
+                        namedArgs: {'amount': _money(-balance)},
+                      ),
+                      c.danger,
+                    )
+                  : (tr('handler_chart.balance_settled'), c.good);
               return Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
@@ -1997,7 +2323,9 @@ class _CollectSheetState extends State<_CollectSheet> {
           ),
           const SizedBox(height: UgamSpacing.lg),
           UgamCTA(
-            label: _saving ? 'Saving…' : 'Save',
+            label: _saving
+                ? tr('handler_chart.saving')
+                : tr('app.action.save'),
             onPressed: _saving ? null : _save,
           ),
         ],
@@ -2024,6 +2352,464 @@ class _ReadOnlyLine extends StatelessWidget {
           style: UgamText.tabular(UgamText.titleS.copyWith(color: c.ink)),
         ),
       ],
+    );
+  }
+}
+
+// ─── Expenses section ──────────────────────────────────────────────────
+
+/// The handler's per-bus expense ledger: a header with the running total + an
+/// Add action, then one tappable row per logged expense (tap to edit, trash to
+/// delete). Mirrors the agent's BusMoneyScreen expense list, scoped to the bus
+/// the handler is currently viewing so they can log fuel / tolls / food on the
+/// ground and keep the bus's cash reconciled.
+class _ExpensesSection extends StatelessWidget {
+  final String busName;
+  final List<Expense> expenses;
+  final VoidCallback onAdd;
+  final ValueChanged<Expense> onEdit;
+  final ValueChanged<Expense> onDelete;
+
+  const _ExpensesSection({
+    required this.busName,
+    required this.expenses,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final total = expenses.fold<double>(0, (sum, e) => sum + e.amount);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('handler_chart.bus_expenses'),
+                    style: UgamText.titleM.copyWith(color: c.ink),
+                  ),
+                  if (expenses.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      tr(
+                        'handler_chart.bus_expenses_total',
+                        namedArgs: {
+                          'bus': busName,
+                          'amount': _money(total),
+                        },
+                      ),
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Semantics(
+              button: true,
+              label: tr('handler_chart.add_expense'),
+              child: GestureDetector(
+                onTap: onAdd,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.md,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: c.accentFill,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add_rounded, size: 15, color: c.accent),
+                      const SizedBox(width: 4),
+                      Text(
+                        tr('app.action.add'),
+                        style: UgamText.caption.copyWith(
+                          color: c.accent,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        if (expenses.isEmpty)
+          UgamCard.plain(
+            padding: const EdgeInsets.symmetric(
+              vertical: UgamSpacing.lg,
+              horizontal: UgamSpacing.md,
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.receipt_long_outlined, size: 18, color: c.ink3),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(
+                  child: Text(
+                    tr('handler_chart.no_expenses'),
+                    style: UgamText.caption.copyWith(color: c.ink3),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          UgamCard.plain(
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+            child: Column(
+              children: [
+                for (final e in expenses)
+                  _HandlerExpenseRow(
+                    expense: e,
+                    onTap: () => onEdit(e),
+                    onDelete: () => onDelete(e),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One expense line: category chip, label (+ "paid by"), amount, and a delete
+/// affordance. The whole row taps through to edit.
+class _HandlerExpenseRow extends StatelessWidget {
+  final Expense expense;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _HandlerExpenseRow({
+    required this.expense,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final paidBy = (expense.paidBy ?? '').trim();
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.sm + 2,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
+              child: Text(
+                expense.category.displayName,
+                style: UgamText.micro.copyWith(color: c.ink2),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    expense.label.isEmpty
+                        ? expense.category.displayName
+                        : expense.label,
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (paidBy.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      tr('handler_chart.paid_by', namedArgs: {'name': paidBy}),
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              _money(expense.amount),
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(color: c.ink),
+              ),
+            ),
+            const SizedBox(width: 2),
+            Semantics(
+              button: true,
+              label: tr('handler_chart.delete_expense'),
+              child: GestureDetector(
+                onTap: onDelete,
+                behavior: HitTestBehavior.opaque,
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: _DeleteGlyph(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DeleteGlyph extends StatelessWidget {
+  const _DeleteGlyph();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Icon(Icons.delete_outline_rounded, size: 18, color: c.ink3);
+  }
+}
+
+// ─── Expense sheet ─────────────────────────────────────────────────────
+
+/// Add / edit one bus expense. Category chips + label + amount + "paid by",
+/// mirroring the agent's BusMoneyScreen expense form. [onSave] persists via the
+/// handler RPC and updates the ledger; this widget owns the controllers and
+/// pops on success.
+class _ExpenseSheet extends StatefulWidget {
+  final Expense? existing;
+  final Future<void> Function(
+    ExpenseCategory category,
+    String label,
+    double amount,
+    String paidBy,
+  )
+  onSave;
+
+  const _ExpenseSheet({required this.existing, required this.onSave});
+
+  @override
+  State<_ExpenseSheet> createState() => _ExpenseSheetState();
+}
+
+class _ExpenseSheetState extends State<_ExpenseSheet> {
+  late ExpenseCategory _category;
+  late final TextEditingController _labelCtrl;
+  late final TextEditingController _amountCtrl;
+  late final TextEditingController _paidByCtrl;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.existing;
+    _category = e?.category ?? ExpenseCategory.fuel;
+    _labelCtrl = TextEditingController(text: e?.label ?? '');
+    _amountCtrl = TextEditingController(
+      text: (e?.amount ?? 0) == 0 ? '' : e!.amount.toStringAsFixed(0),
+    );
+    _paidByCtrl = TextEditingController(text: e?.paidBy ?? '');
+  }
+
+  @override
+  void dispose() {
+    _labelCtrl.dispose();
+    _amountCtrl.dispose();
+    _paidByCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+    if (amount <= 0) {
+      AppSnackBar.error(tr('handler_chart.error_amount_zero'));
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onSave(
+        _category,
+        _labelCtrl.text.trim(),
+        amount,
+        _paidByCtrl.text.trim(),
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+      AppSnackBar.error(tr('handler_chart.error_save_expense'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('handler_chart.category'),
+            style: UgamText.micro.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          Wrap(
+            spacing: UgamSpacing.sm,
+            runSpacing: UgamSpacing.sm,
+            // busOwner is excluded: the bus rent is the single source
+            // of truth (Bus.busPrice) and must never be added manually,
+            // or it would be double-counted.
+            children: ExpenseCategory.values
+                .where((cat) => cat != ExpenseCategory.busOwner)
+                .map((cat) {
+              final active = cat == _category;
+              return GestureDetector(
+                onTap: () => setState(() => _category = cat),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.lg,
+                    vertical: UgamSpacing.sm + 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: active ? c.accentFill : c.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    border: Border.all(color: active ? c.accent : c.border),
+                  ),
+                  child: Text(
+                    cat.displayName,
+                    style: UgamText.caption.copyWith(
+                      color: active ? c.accent : c.ink2,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('handler_chart.field_what_for'),
+            controller: _labelCtrl,
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          UgamInput(
+            label: tr('handler_chart.field_amount'),
+            controller: _amountCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          UgamInput(
+            label: tr('handler_chart.field_paid_by'),
+            controller: _paidByCtrl,
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamCTA(
+            label: _saving
+                ? tr('handler_chart.saving')
+                : tr('handler_chart.save_expense'),
+            onPressed: _saving ? null : _save,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Handler bus-message sheet (F4 handler path) ────────────────────────
+
+/// The handler's per-bus announcement composer: a single free-text field
+/// scoped to the handler's own [busLabel] (no bus picker — a handler only
+/// owns/sees their own bus). On Send it routes the text to every seated
+/// passenger on that bus via [onSend] (WhatsAppCloudService.sendBusMessageAsHandler)
+/// and pops on success.
+class _HandlerBusMessageSheet extends StatefulWidget {
+  final String busLabel;
+  final Future<void> Function(String text) onSend;
+
+  const _HandlerBusMessageSheet({required this.busLabel, required this.onSend});
+
+  @override
+  State<_HandlerBusMessageSheet> createState() =>
+      _HandlerBusMessageSheetState();
+}
+
+class _HandlerBusMessageSheetState extends State<_HandlerBusMessageSheet> {
+  final TextEditingController _textCtrl = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    if (_sending) return;
+    final text = _textCtrl.text.trim();
+    if (text.isEmpty) {
+      AppSnackBar.error(tr('bus_message.empty_text'));
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      await widget.onSend(text);
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) setState(() => _sending = false);
+      AppSnackBar.error(tr('bus_message.failed_body'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('bus_message.handler_intro', namedArgs: {'bus': widget.busLabel}),
+            style: UgamText.body.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('bus_message.field_message'),
+            controller: _textCtrl,
+            hint: tr('bus_message.field_message_hint'),
+            maxLines: 5,
+            minLines: 3,
+            autofocus: true,
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamCTA(
+            label: _sending
+                ? tr('bus_message.sending')
+                : tr('bus_message.send_btn'),
+            leadingIcon: Icons.send_rounded,
+            onPressed: _sending ? null : _send,
+          ),
+        ],
+      ),
     );
   }
 }

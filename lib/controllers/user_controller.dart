@@ -121,6 +121,36 @@ class UserController extends GetxController {
     }
   }
 
+  /// Saves a customer the admin entered by hand (e.g. someone NOT in their
+  /// phone contacts, typed into the "Add request" form) into their directory,
+  /// so the name autocompletes next time. No-op on a passenger session, when
+  /// not logged in, or when the phone is already known. Best-effort: never
+  /// throws into the caller.
+  Future<void> rememberContact({
+    required String name,
+    required String phone,
+  }) async {
+    final adminId = _currentAdminId;
+    if (adminId == null || !_auth.isAdmin) return;
+    final last10 = normalisePhone(phone);
+    if (last10.length != 10) return;
+    if (_byPhone.containsKey(last10)) return; // already saved
+    try {
+      final created = await _userService.createIfMissing(
+        adminId: adminId,
+        phone: last10,
+        name: name.trim(),
+        source: UserSource.manual,
+      );
+      if (created != null) {
+        users.add(created);
+        _byPhone[created.phone] = created.name;
+      }
+    } catch (e) {
+      debugPrint('UserController: rememberContact failed — $e');
+    }
+  }
+
   /// Inserts a `users` row scoped to the admin who created [tourCreatorPhone]'s
   /// tour. Called from the customer booking flow after a Passenger write.
   /// No-op if the row already exists or if we can't resolve the admin.

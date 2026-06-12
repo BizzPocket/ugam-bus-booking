@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:uuid/uuid.dart';
 
 /// Category of a tour/bus expense.
@@ -6,20 +7,23 @@ enum ExpenseCategory {
   fuel,
   food,
   toll,
+  busOwner,
   other;
 
   String get displayName {
     switch (this) {
       case ExpenseCategory.driver:
-        return 'Driver';
+        return tr('enums.expense_category.driver');
       case ExpenseCategory.fuel:
-        return 'Fuel';
+        return tr('enums.expense_category.fuel');
       case ExpenseCategory.food:
-        return 'Food';
+        return tr('enums.expense_category.food');
       case ExpenseCategory.toll:
-        return 'Toll/Parking';
+        return tr('enums.expense_category.toll');
+      case ExpenseCategory.busOwner:
+        return tr('enums.expense_category.busOwner');
       case ExpenseCategory.other:
-        return 'Other';
+        return tr('enums.expense_category.other');
     }
   }
 

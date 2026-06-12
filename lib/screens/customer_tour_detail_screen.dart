@@ -8,6 +8,7 @@ import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/time_format.dart';
 import 'customer_booking_request_screen.dart';
 
 /// Public-facing tour detail — image-5 fidelity.
@@ -134,10 +135,7 @@ class _HeroSection extends StatelessWidget {
             top: topInset + UgamSpacing.sm,
             child: Row(
               children: [
-                _ChromeCircle(
-                  icon: Icons.arrow_back_rounded,
-                  onTap: onBack,
-                ),
+                _ChromeCircle(icon: Icons.arrow_back_rounded, onTap: onBack),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -150,15 +148,14 @@ class _HeroSection extends StatelessWidget {
                   ),
                   child: Text(
                     tour.status.displayName.toUpperCase(),
-                    style: UgamText.micro
-                        .copyWith(color: Colors.white, fontSize: 10),
+                    style: UgamText.micro.copyWith(
+                      color: Colors.white,
+                      fontSize: 10,
+                    ),
                   ),
                 ),
                 const Spacer(),
-                _ChromeCircle(
-                  icon: Icons.ios_share_rounded,
-                  onTap: onShare,
-                ),
+                _ChromeCircle(icon: Icons.ios_share_rounded, onTap: onShare),
               ],
             ),
           ),
@@ -194,8 +191,10 @@ class _HeroSection extends StatelessWidget {
                       Expanded(
                         child: Text(
                           tour.title,
-                          style: UgamText.titleM
-                              .copyWith(color: c.ink, fontSize: 18),
+                          style: UgamText.titleM.copyWith(
+                            color: c.ink,
+                            fontSize: 18,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -210,22 +209,30 @@ class _HeroSection extends StatelessWidget {
                       Flexible(
                         child: Text(
                           '${tour.fromCity} → ${tour.toCity}',
-                          style: UgamText.caption
-                              .copyWith(color: c.ink2, fontSize: 12),
+                          style: UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontSize: 12,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       const SizedBox(width: UgamSpacing.sm),
-                      Text('·',
-                          style: UgamText.caption
-                              .copyWith(color: c.ink3, fontSize: 11)),
+                      Text(
+                        '·',
+                        style: UgamText.caption.copyWith(
+                          color: c.ink3,
+                          fontSize: 11,
+                        ),
+                      ),
                       const SizedBox(width: UgamSpacing.sm),
                       Text(
                         _formatDate(tour.departureDate),
                         style: UgamText.tabular(
-                          UgamText.caption
-                              .copyWith(color: c.ink2, fontSize: 11),
+                          UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontSize: 11,
+                          ),
                         ),
                       ),
                     ],
@@ -236,22 +243,20 @@ class _HeroSection extends StatelessWidget {
                       if (capacity > 0)
                         UgamReqChip(
                           label: seatsLeft <= 0
-                              ? 'TOUR FULL'
-                              : '$seatsLeft SEATS LEFT',
+                              ? tr('customer_tour_detail.chip_tour_full')
+                              : tr(
+                                  'customer_tour_detail.chip_seats_left',
+                                  namedArgs: {'n': '$seatsLeft'},
+                                ),
                           variant: seatsLeft <= 0
                               ? UgamChipVariant.warm
                               : UgamChipVariant.good,
                         )
                       else
-                        const UgamReqChip(
-                          label: 'OPEN FOR REQUESTS',
+                        UgamReqChip(
+                          label: tr('customer_tour_detail.chip_open_requests'),
                           variant: UgamChipVariant.accent,
                         ),
-                      const SizedBox(width: 5),
-                      UgamReqChip(
-                        label: WhatsAppService.tourCode(tour.id).toUpperCase(),
-                        variant: UgamChipVariant.neutral,
-                      ),
                     ],
                   ),
                 ],
@@ -271,10 +276,18 @@ class _HeroSection extends StatelessWidget {
 /// Shared localized 3-letter month abbreviation used across customer screens.
 String _monthShort(int month) {
   const keys = [
-    'app.month.short.jan','app.month.short.feb','app.month.short.mar',
-    'app.month.short.apr','app.month.short.may','app.month.short.jun',
-    'app.month.short.jul','app.month.short.aug','app.month.short.sep',
-    'app.month.short.oct','app.month.short.nov','app.month.short.dec',
+    'app.month.short.jan',
+    'app.month.short.feb',
+    'app.month.short.mar',
+    'app.month.short.apr',
+    'app.month.short.may',
+    'app.month.short.jun',
+    'app.month.short.jul',
+    'app.month.short.aug',
+    'app.month.short.sep',
+    'app.month.short.oct',
+    'app.month.short.nov',
+    'app.month.short.dec',
   ];
   return tr(keys[month - 1]);
 }
@@ -338,21 +351,35 @@ class _AboutTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        _SectionEyebrow(label: tr('customer_tour_detail.section_trip_summary'), c: c),
+        _SectionEyebrow(
+          label: tr('customer_tour_detail.section_trip_summary'),
+          c: c,
+        ),
         const SizedBox(height: UgamSpacing.md),
         _InfoCard(
           c: c,
           rows: [
-            (tr('customer_tour_detail.label_route'), '${tour.fromCity} → ${tour.toCity}'),
-            (tr('customer_tour_detail.label_departure'), _formatLongDate(tour.departureDate)),
+            (
+              tr('customer_tour_detail.label_route'),
+              '${tour.fromCity} → ${tour.toCity}',
+            ),
+            (
+              tr('customer_tour_detail.label_departure'),
+              _dateWithTime(tour.departureDate, tour.departureTime),
+            ),
             if (tour.returnDate != null)
-              (tr('customer_tour_detail.label_return'), _formatLongDate(tour.returnDate!)),
-            (tr('customer_tour_detail.label_tour_id'), WhatsAppService.tourCode(tour.id)),
+              (
+                tr('customer_tour_detail.label_return'),
+                _dateWithTime(tour.returnDate!, tour.returnTime),
+              ),
           ],
         ),
         if (tour.description != null && tour.description!.isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.xl),
-          _SectionEyebrow(label: tr('customer_tour_detail.section_about_tour'), c: c),
+          _SectionEyebrow(
+            label: tr('customer_tour_detail.section_about_tour'),
+            c: c,
+          ),
           const SizedBox(height: UgamSpacing.md),
           Container(
             padding: const EdgeInsets.all(UgamSpacing.lg),
@@ -362,8 +389,11 @@ class _AboutTab extends StatelessWidget {
             ),
             child: Text(
               tour.description!,
-              style: UgamText.body
-                  .copyWith(color: c.ink, fontSize: 14, height: 1.55),
+              style: UgamText.body.copyWith(
+                color: c.ink,
+                fontSize: 14,
+                height: 1.55,
+              ),
             ),
           ),
         ],
@@ -376,7 +406,9 @@ class _AboutTab extends StatelessWidget {
         if (tour.createdBy != null && tour.createdBy!.trim().isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.xl),
           _SectionEyebrow(
-              label: tr('customer_tour_detail.section_contact'), c: c),
+            label: tr('customer_tour_detail.section_contact'),
+            c: c,
+          ),
           const SizedBox(height: UgamSpacing.md),
           _ContactOrganiserButton(tour: tour, c: c),
         ],
@@ -386,6 +418,14 @@ class _AboutTab extends StatelessWidget {
 
   static String _formatLongDate(DateTime d) {
     return '${d.day} ${_monthShort(d.month)} ${d.year}';
+  }
+
+  /// Long date with the optional time-of-day appended ("14 Jun 2026 · 9:00 PM").
+  /// Falls back to date-only when no time is set.
+  static String _dateWithTime(DateTime d, String? hhmm) {
+    final time = formatHhMm(hhmm);
+    final date = _formatLongDate(d);
+    return time != null ? '$date · $time' : date;
   }
 }
 
@@ -404,10 +444,13 @@ class _ContactOrganiserButton extends StatelessWidget {
     if (phone.isEmpty) return;
     final ok = await WhatsAppService().openChat(
       phone: phone,
-      message: tr('customer_tour_detail.contact_greeting', namedArgs: {
-        'tour': tour.title,
-        'code': WhatsAppService.tourCode(tour.id),
-      }),
+      message: tr(
+        'customer_tour_detail.contact_greeting',
+        namedArgs: {
+          'tour': tour.title,
+          'code': WhatsAppService.tourCode(tour.id),
+        },
+      ),
     );
     if (!ok) {
       AppSnackBar.error(
@@ -440,8 +483,11 @@ class _ContactOrganiserButton extends StatelessWidget {
                   color: c.accentFill,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(Icons.chat_bubble_outline_rounded,
-                    size: 20, color: c.accent),
+                child: Icon(
+                  Icons.chat_bubble_outline_rounded,
+                  size: 20,
+                  color: c.accent,
+                ),
               ),
               const SizedBox(width: UgamSpacing.md),
               Expanded(
@@ -451,14 +497,18 @@ class _ContactOrganiserButton extends StatelessWidget {
                   children: [
                     Text(
                       tr('customer_tour_detail.contact_organiser'),
-                      style: UgamText.bodyStrong
-                          .copyWith(color: c.ink, fontSize: 14),
+                      style: UgamText.bodyStrong.copyWith(
+                        color: c.ink,
+                        fontSize: 14,
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       tr('customer_tour_detail.contact_organiser_subtitle'),
-                      style:
-                          UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                      style: UgamText.caption.copyWith(
+                        color: c.ink2,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -480,6 +530,7 @@ class _BusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bus = tour.buses.first;
+    final departure = _busDeparture(bus.boardingPoint, bus.departureTime);
     return Container(
       padding: const EdgeInsets.all(UgamSpacing.sm),
       decoration: BoxDecoration(
@@ -513,6 +564,30 @@ class _BusCard extends StatelessWidget {
                   bus.busType,
                   style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
                 ),
+                if (departure != null) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.place_outlined,
+                        size: 12,
+                        color: c.ink3,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          departure,
+                          style: UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontSize: 12,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: UgamSpacing.sm),
                 Row(
                   children: [
@@ -521,8 +596,10 @@ class _BusCard extends StatelessWidget {
                       const SizedBox(width: 5),
                     ],
                     UgamReqChip(
-                      label: tr('customer_tour_detail.chip_seats',
-                        namedArgs: {'count': bus.totalSeats.toString()}),
+                      label: tr(
+                        'customer_tour_detail.chip_seats',
+                        namedArgs: {'count': bus.totalSeats.toString()},
+                      ),
                       variant: UgamChipVariant.neutral,
                     ),
                   ],
@@ -533,6 +610,20 @@ class _BusCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Per-bus boarding place + departure time, joined as `<place> · <time>` per
+  /// the surfacing rule. Either part is omitted when empty/null; returns null
+  /// when both are empty so the caller can hide the line entirely. Per-bus
+  /// values override tour-level / chart-footer values.
+  static String? _busDeparture(String boardingPoint, String? departureTime) {
+    final place = boardingPoint.trim();
+    final time = formatHhMm(departureTime);
+    final parts = [
+      if (place.isNotEmpty) place,
+      ?time,
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 }
 
@@ -548,7 +639,10 @@ class _ScheduleTab extends StatelessWidget {
     final events = _events();
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        _SectionEyebrow(label: tr('customer_tour_detail.section_timeline'), c: c),
+        _SectionEyebrow(
+          label: tr('customer_tour_detail.section_timeline'),
+          c: c,
+        ),
         const SizedBox(height: UgamSpacing.md),
         for (var i = 0; i < events.length; i++)
           _TimelineRow(
@@ -565,24 +659,34 @@ class _ScheduleTab extends StatelessWidget {
     final out = <_ScheduleEvent>[
       _ScheduleEvent(
         icon: Icons.directions_bus_rounded,
-        title: tr('customer_tour_detail.schedule_departure_from',
-          namedArgs: {'city': tour.fromCity}),
+        title: tr(
+          'customer_tour_detail.schedule_departure_from',
+          namedArgs: {'city': tour.fromCity},
+        ),
         time: tour.departureDate,
+        timeLabel: formatHhMm(tour.departureTime),
       ),
       _ScheduleEvent(
         icon: Icons.location_on_rounded,
-        title: tr('customer_tour_detail.schedule_arrive_in',
-          namedArgs: {'city': tour.toCity}),
+        title: tr(
+          'customer_tour_detail.schedule_arrive_in',
+          namedArgs: {'city': tour.toCity},
+        ),
         time: tour.departureDate,
       ),
     ];
     if (tour.returnDate != null) {
-      out.add(_ScheduleEvent(
-        icon: Icons.flag_rounded,
-        title: tr('customer_tour_detail.schedule_return_to',
-          namedArgs: {'city': tour.fromCity}),
-        time: tour.returnDate!,
-      ));
+      out.add(
+        _ScheduleEvent(
+          icon: Icons.flag_rounded,
+          title: tr(
+            'customer_tour_detail.schedule_return_to',
+            namedArgs: {'city': tour.fromCity},
+          ),
+          time: tour.returnDate!,
+          timeLabel: formatHhMm(tour.returnTime),
+        ),
+      );
     }
     return out;
   }
@@ -592,10 +696,15 @@ class _ScheduleEvent {
   final IconData icon;
   final String title;
   final DateTime time;
+
+  /// Optional time-of-day label ('9:00 PM') appended after the date. Null for
+  /// events with no set time (e.g. arrival, or a tour created without times).
+  final String? timeLabel;
   const _ScheduleEvent({
     required this.icon,
     required this.title,
     required this.time,
+    this.timeLabel,
   });
 }
 
@@ -625,9 +734,7 @@ class _TimelineRow extends StatelessWidget {
                 if (isFirst)
                   const SizedBox(height: 8)
                 else
-                  Expanded(
-                    child: Container(width: 2, color: c.border),
-                  ),
+                  Expanded(child: Container(width: 2, color: c.border)),
                 Container(
                   width: 28,
                   height: 28,
@@ -642,9 +749,7 @@ class _TimelineRow extends StatelessWidget {
                 if (isLast)
                   const SizedBox(height: 8)
                 else
-                  Expanded(
-                    child: Container(width: 2, color: c.border),
-                  ),
+                  Expanded(child: Container(width: 2, color: c.border)),
               ],
             ),
           ),
@@ -664,17 +769,20 @@ class _TimelineRow extends StatelessWidget {
                   children: [
                     Text(
                       event.title,
-                      style: UgamText.bodyStrong
-                          .copyWith(color: c.ink, fontSize: 13),
+                      style: UgamText.bodyStrong.copyWith(
+                        color: c.ink,
+                        fontSize: 13,
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _formatDate(event.time),
+                      event.timeLabel != null
+                          ? '${_formatDate(event.time)} · ${event.timeLabel}'
+                          : _formatDate(event.time),
                       style: UgamText.tabular(
-                        UgamText.caption
-                            .copyWith(color: c.ink3, fontSize: 11),
+                        UgamText.caption.copyWith(color: c.ink3, fontSize: 11),
                       ),
                     ),
                   ],
@@ -760,8 +868,8 @@ class _StickyBookCta extends StatelessWidget {
     final capacity = tour.totalBusSeats;
     final seatsLeft = capacity - tour.totalSeatsAssigned;
     final full = capacity > 0 && seatsLeft <= 0;
-    final locked = tour.status == TourStatus.locked ||
-        tour.status == TourStatus.completed;
+    final locked =
+        tour.status == TourStatus.locked || tour.status == TourStatus.completed;
 
     final String label;
     final IconData icon;
@@ -775,24 +883,20 @@ class _StickyBookCta extends StatelessWidget {
       label = tr('customer_tour_detail.cta_join_waitlist');
       icon = Icons.hourglass_top_rounded;
       onTap = () => Get.to(
-            () => CustomerBookingRequestScreen(tour: tour),
-            transition: Transition.cupertino,
-          );
+        () => CustomerBookingRequestScreen(tour: tour),
+        transition: Transition.cupertino,
+      );
     } else {
       label = tr('customer_tour_detail.cta_request_to_book');
       icon = Icons.send_rounded;
       onTap = () => Get.to(
-            () => CustomerBookingRequestScreen(tour: tour),
-            transition: Transition.cupertino,
-          );
+        () => CustomerBookingRequestScreen(tour: tour),
+        transition: Transition.cupertino,
+      );
     }
 
     return UgamStickyCTA(
-      child: UgamCTA(
-        label: label,
-        leadingIcon: icon,
-        onPressed: onTap,
-      ),
+      child: UgamCTA(label: label, leadingIcon: icon, onPressed: onTap),
     );
   }
 }

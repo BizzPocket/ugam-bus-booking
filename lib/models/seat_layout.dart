@@ -47,9 +47,10 @@ class SeatCell {
   final bool reserved;
 
   /// True when the agent has marked this seat as part of the "forward / premium"
-  /// zone — the seats elderly/sick priority passengers fill first (and which
-  /// carry the premium price). The seating engine seats approved-priority
-  /// passengers into forward seats before anything else. Not part of identity.
+  /// zone — these carry the premium price. This flag drives PRICING only; it no
+  /// longer affects automatic seat assignment. The seating engine seats
+  /// approved-priority (elderly/sick) passengers onto LOWER berths first (see
+  /// [SeatPosition.lower]), independent of this flag. Not part of identity.
   final bool forward;
 
   const SeatCell({
@@ -164,10 +165,11 @@ class BusLayout {
   ///     (1-person berth). The remaining sleeper berths become Double Sofa
   ///     (2-person shared berth). Defaults to 0 so legacy callers get the
   ///     previous all-double-sofa behaviour.
-  ///   - [hasBalcony]       — when true, appends a back row whose aisle column
-  ///     carries an upper + lower Single Sofa pair (the "balcony"). These 2
-  ///     berths are added on top of the requested sleeper berths. Ignored for
-  ///     pure seater buses.
+  ///   - [hasBalcony]       — when true, fills the aisle column of the LAST seat
+  ///     row with an upper + lower Single Sofa pair (the "balcony" / back bench),
+  ///     so it renders as a full-width back row rather than a separate line.
+  ///     These 2 berths are added on top of the requested sleeper berths.
+  ///     Ignored for pure seater buses.
   factory BusLayout.generate({
     required BusType busType,
     required int totalSeats,
@@ -252,16 +254,19 @@ class BusLayout {
       if (c.row > maxRow) maxRow = c.row;
     }
 
-    // Balcony aisle (last row, col 2). The orphan single rides the lower slot;
-    // the explicit balcony toggle adds an upper berth (and a lower too when
-    // there's no orphan to occupy it). Either way the back row's aisle fills in.
+    // Back bench (full-width last row). The leftover berths — an unpaired single
+    // and/or the explicit balcony pair — ride the aisle column of the LAST seat
+    // row rather than spawning their own near-empty row. The renderer draws any
+    // row carrying aisle seats as a flat, full-width bench (no centre gap, full
+    // size), so the remainder reads as a real back bench instead of a tiny
+    // half-height middle sofa stranded on its own line.
     final wantsPair = hasBalcony && busType != BusType.seater;
     final hasBalconyResult = orphanSingle || wantsPair;
     if (hasBalconyResult) {
-      final balconyRow = maxRow + 1;
+      final benchRow = maxRow < 0 ? 0 : maxRow;
       // Lower slot — the relocated orphan, or a toggle-added berth.
       grid.add(SeatCell(
-        row: balconyRow,
+        row: benchRow,
         col: SeatGridCols.aisle,
         seatType: SeatType.singleSofa,
         position: SeatPosition.lower,
@@ -269,13 +274,13 @@ class BusLayout {
       // Upper slot — only the explicit toggle adds this.
       if (wantsPair) {
         grid.add(SeatCell(
-          row: balconyRow,
+          row: benchRow,
           col: SeatGridCols.aisle,
           seatType: SeatType.singleSofa,
           position: SeatPosition.upper,
         ));
       }
-      maxRow = balconyRow;
+      maxRow = benchRow;
     }
 
     return BusLayout(

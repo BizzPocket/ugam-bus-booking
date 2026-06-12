@@ -7,13 +7,17 @@ export 'text_styles.dart';
 export 'theme.dart';
 export 'tokens.dart';
 
+export 'components/ugam_app_bar.dart';
 export 'components/ugam_bus_backdrop.dart';
 export 'components/ugam_card.dart';
+export 'components/ugam_chrome.dart';
 export 'components/ugam_cta.dart';
 export 'components/ugam_date_pill.dart';
+export 'components/ugam_dialog.dart';
 export 'components/ugam_dock_nav.dart';
 export 'components/ugam_glass_container.dart';
 export 'components/ugam_empty.dart';
+export 'components/ugam_icon_button.dart';
 export 'components/ugam_input.dart';
 export 'components/ugam_request_row.dart';
 export 'components/ugam_route_header.dart';

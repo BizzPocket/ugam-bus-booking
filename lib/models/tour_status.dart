@@ -1,3 +1,5 @@
+import 'package:easy_localization/easy_localization.dart';
+
 /// Tour lifecycle status — gates which screens/actions are available.
 ///
 /// ```
@@ -23,34 +25,34 @@ enum TourStatus {
   String get displayName {
     switch (this) {
       case TourStatus.planning:
-        return 'Planning';
+        return tr('enums.tour_status.planning');
       case TourStatus.collecting:
-        return 'Collecting';
+        return tr('enums.tour_status.collecting');
       case TourStatus.busBooked:
-        return 'Bus Booked';
+        return tr('enums.tour_status.bus_booked');
       case TourStatus.assigning:
-        return 'Assigning';
+        return tr('enums.tour_status.assigning');
       case TourStatus.locked:
-        return 'Locked';
+        return tr('enums.tour_status.locked');
       case TourStatus.completed:
-        return 'Completed';
+        return tr('enums.tour_status.completed');
     }
   }
 
   String get description {
     switch (this) {
       case TourStatus.planning:
-        return 'Set up tour details and get ready to broadcast';
+        return tr('enums.tour_status.planning_desc');
       case TourStatus.collecting:
-        return 'Collecting seat requests from passengers';
+        return tr('enums.tour_status.collecting_desc');
       case TourStatus.busBooked:
-        return 'Bus booked — add bus details from the owner';
+        return tr('enums.tour_status.bus_booked_desc');
       case TourStatus.assigning:
-        return 'Assign seats to each passenger';
+        return tr('enums.tour_status.assigning_desc');
       case TourStatus.locked:
-        return 'Seats locked — passengers have been notified';
+        return tr('enums.tour_status.locked_desc');
       case TourStatus.completed:
-        return 'Trip completed';
+        return tr('enums.tour_status.completed_desc');
     }
   }
 

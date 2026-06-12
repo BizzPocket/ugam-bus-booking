@@ -45,7 +45,10 @@ class CustomerMoreScreen extends StatelessWidget {
                   const SizedBox(height: UgamSpacing.xl),
 
                   // ── Preferences ──
-                  _SectionLabel(c: c, label: tr('customer_more.section_preferences')),
+                  _SectionLabel(
+                    c: c,
+                    label: tr('customer_more.section_preferences'),
+                  ),
                   UgamCard.plain(
                     padding: EdgeInsets.zero,
                     child: _MoreRow(
@@ -60,7 +63,10 @@ class CustomerMoreScreen extends StatelessWidget {
                   const SizedBox(height: UgamSpacing.lg),
 
                   // ── About & legal ──
-                  _SectionLabel(c: c, label: tr('customer_more.section_about_legal')),
+                  _SectionLabel(
+                    c: c,
+                    label: tr('customer_more.section_about_legal'),
+                  ),
                   UgamCard.plain(
                     padding: EdgeInsets.zero,
                     child: Column(
@@ -114,7 +120,6 @@ class CustomerMoreScreen extends StatelessWidget {
       transition: Transition.cupertino,
     );
   }
-
 }
 
 // ─── pieces ─────────────────────────────────────────────────────────────
@@ -140,7 +145,10 @@ class _TopBar extends StatelessWidget {
             child: Container(
               width: 44,
               height: 44,
-              decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                shape: BoxShape.circle,
+              ),
               alignment: Alignment.center,
               child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
             ),
@@ -176,7 +184,10 @@ class _BrandHero extends StatelessWidget {
             ),
             alignment: Alignment.center,
             padding: const EdgeInsets.all(10),
-            child: Image.asset('assets/icon/ugam_logo.png', fit: BoxFit.contain),
+            child: Image.asset(
+              'assets/icon/ugam_logo.png',
+              fit: BoxFit.contain,
+            ),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -184,8 +195,10 @@ class _BrandHero extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Ugam Foj',
-                    style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17)),
+                Text(
+                  'Ugam Foj',
+                  style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17),
+                ),
                 const SizedBox(height: 2),
                 Text(
                   tr('customer_tour_list.brand_tagline'),
@@ -256,39 +269,52 @@ class _MoreRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(UgamRadius.card),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.md + 2,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.lg,
+            vertical: UgamSpacing.md + 2,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 20, color: iconFg),
               ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 18, color: iconFg),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(title,
-                      style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15)),
-                  const SizedBox(height: 1),
-                  Text(subtitle,
-                      style: UgamText.caption.copyWith(color: c.ink3, fontSize: 12)),
-                ],
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: UgamText.titleS.copyWith(
+                        color: c.ink,
+                        fontSize: 15,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      subtitle,
+                      style: UgamText.caption.copyWith(
+                        color: c.ink3,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-          ],
+              Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+            ],
+          ),
         ),
       ),
     );

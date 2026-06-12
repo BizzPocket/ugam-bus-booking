@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:uuid/uuid.dart';
 import 'tour_status.dart';
 import 'bus_details.dart';
@@ -14,7 +16,16 @@ class Tour {
   final String fromCity;
   final String toCity;
   final DateTime departureDate;
+
+  /// Local departure time-of-day on [departureDate] in 'HH:mm' 24h form.
+  /// Null when the agent hasn't set a time — kept separate from the date so
+  /// an unset time stays distinguishable from midnight.
+  final String? departureTime;
   final DateTime? returnDate;
+
+  /// Local return time-of-day on [returnDate] in 'HH:mm' 24h form. Null when
+  /// unset (no return date, or date set without a time).
+  final String? returnTime;
   final double pricePerSeat;
   final String? description;
   final TourStatus status;
@@ -23,6 +34,13 @@ class Tour {
   final String? handlerId;
   final String? createdBy;
   final bool isPublic;
+
+  /// Phase-2 broadcast composed at create time: the announcement text sent to
+  /// the agent's audience via WhatsApp, plus an optional hero image URL
+  /// (Supabase Storage). Both null until the agent fills the broadcast composer.
+  final String? broadcastMessage;
+  final String? broadcastImageUrl;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -37,7 +55,9 @@ class Tour {
     required this.fromCity,
     required this.toCity,
     required this.departureDate,
+    this.departureTime,
     this.returnDate,
+    this.returnTime,
     required this.pricePerSeat,
     this.description,
     this.status = TourStatus.planning,
@@ -46,6 +66,8 @@ class Tour {
     this.handlerId,
     this.createdBy,
     this.isPublic = true,
+    this.broadcastMessage,
+    this.broadcastImageUrl,
     this.buses = const [],
     this.passengers = const [],
     this.groups = const [],
@@ -66,6 +88,19 @@ class Tour {
 
   int get totalBusSeats => buses.fold(0, (sum, b) => sum + b.totalSeats);
 
+  /// Seat capacity of the single LARGEST bus on this tour, in berths. A
+  /// cross-booking group must ride ONE bus, so this is the largest group that
+  /// can possibly be seated together. Zero when the tour has no buses yet (in
+  /// which case group sizing can't be enforced).
+  int get biggestBusSeats =>
+      buses.isEmpty ? 0 : buses.map((b) => b.totalSeats).reduce(math.max);
+
+  /// Total seat berths needed by every member of [groupId] — the group's size
+  /// measured against [biggestBusSeats].
+  int groupSeatBerths(String groupId) => passengers
+      .where((p) => p.groupId == groupId)
+      .fold(0, (sum, p) => sum + p.seatBerths);
+
   int get paidCount =>
       passengers.where((p) => p.paymentStatus.name == 'paid').length;
 
@@ -76,8 +111,12 @@ class Tour {
           )
       : null;
 
-  bool get allSeatsAssigned =>
-      passengers.isNotEmpty && passengers.every((p) => p.isFullyAssigned);
+  bool get allSeatsAssigned {
+    // Passengers whose leg is finished (journeyDone) are intentionally seatless
+    // — ignore them so a completed GO leg never blocks the lock gate.
+    final active = passengers.where((p) => !p.journeyDone);
+    return active.isNotEmpty && active.every((p) => p.isFullyAssigned);
+  }
 
   /// Backward compat for screens still using single-bus access. Returns
   /// the first bus or null. Prefer `tour.buses` directly.
@@ -91,13 +130,17 @@ class Tour {
         'from_city': fromCity,
         'to_city': toCity,
         'departure_date': departureDate.toIso8601String().split('T').first,
+        'departure_time': departureTime,
         'return_date': returnDate?.toIso8601String().split('T').first,
+        'return_time': returnTime,
         'price_per_seat': pricePerSeat,
         if (description != null) 'description': description,
         'status': status.name,
         if (handlerId != null) 'handler_id': handlerId,
         if (createdBy != null) 'created_by': createdBy,
         'is_public': isPublic,
+        if (broadcastMessage != null) 'broadcast_message': broadcastMessage,
+        if (broadcastImageUrl != null) 'broadcast_image_url': broadcastImageUrl,
       };
 
   factory Tour.fromMap(Map<String, dynamic> map) {
@@ -134,9 +177,11 @@ class Tour {
       departureDate: map['departure_date'] != null
           ? _parseDate(map['departure_date'])
           : DateTime.now(),
+      departureTime: _parseTime(map['departure_time']),
       returnDate: map['return_date'] != null
           ? _parseDate(map['return_date'])
           : null,
+      returnTime: _parseTime(map['return_time']),
       pricePerSeat: (map['price_per_seat'] as num?)?.toDouble() ?? 0.0,
       description: map['description']?.toString(),
       status: TourStatus.values.firstWhere(
@@ -147,6 +192,8 @@ class Tour {
       handlerId: map['handler_id']?.toString(),
       createdBy: map['created_by']?.toString(),
       isPublic: map['is_public'] is bool ? map['is_public'] as bool : true,
+      broadcastMessage: map['broadcast_message']?.toString(),
+      broadcastImageUrl: map['broadcast_image_url']?.toString(),
       buses: buses,
       passengers: passengers,
       groups: groups,
@@ -161,12 +208,28 @@ class Tour {
     return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
+  /// Normalises a stored time to 'HH:mm'. Accepts Postgres `time` values
+  /// ('HH:mm:ss') and bare 'HH:mm'; returns null for empty/invalid input.
+  static String? _parseTime(dynamic v) {
+    if (v == null) return null;
+    final s = v.toString().trim();
+    if (s.isEmpty) return null;
+    final parts = s.split(':');
+    if (parts.length < 2) return null;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return null;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }
+
   Tour copyWith({
     String? title,
     String? fromCity,
     String? toCity,
     DateTime? departureDate,
+    String? departureTime,
     DateTime? returnDate,
+    String? returnTime,
     double? pricePerSeat,
     String? description,
     TourStatus? status,
@@ -175,6 +238,8 @@ class Tour {
     String? handlerId,
     String? createdBy,
     bool? isPublic,
+    String? broadcastMessage,
+    String? broadcastImageUrl,
     List<Bus>? buses,
     List<Passenger>? passengers,
     List<PassengerGroup>? groups,
@@ -186,7 +251,9 @@ class Tour {
       fromCity: fromCity ?? this.fromCity,
       toCity: toCity ?? this.toCity,
       departureDate: departureDate ?? this.departureDate,
+      departureTime: departureTime ?? this.departureTime,
       returnDate: returnDate ?? this.returnDate,
+      returnTime: returnTime ?? this.returnTime,
       pricePerSeat: pricePerSeat ?? this.pricePerSeat,
       description: description ?? this.description,
       status: status ?? this.status,
@@ -195,6 +262,8 @@ class Tour {
       handlerId: handlerId ?? this.handlerId,
       createdBy: createdBy ?? this.createdBy,
       isPublic: isPublic ?? this.isPublic,
+      broadcastMessage: broadcastMessage ?? this.broadcastMessage,
+      broadcastImageUrl: broadcastImageUrl ?? this.broadcastImageUrl,
       buses: buses ?? this.buses,
       passengers: passengers ?? this.passengers,
       groups: groups ?? this.groups,

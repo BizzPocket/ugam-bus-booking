@@ -34,6 +34,7 @@ class BusMoneySummary {
     required List<Collection> collections,
     required List<Expense> expenses,
     required List<BusHandover> handovers,
+    double busRent = 0,
   }) {
     final busCollections = collections.where((c) => c.busId == busId);
     final busExpenses = expenses.where((e) => e.busId == busId);
@@ -42,7 +43,10 @@ class BusMoneySummary {
     return BusMoneySummary(
       busId: busId,
       collected: busCollections.fold(0.0, (sum, c) => sum + c.netCollected),
-      expensesTotal: busExpenses.fold(0.0, (sum, e) => sum + e.amount),
+      // The bus owner's rent is the single source of truth (not a DB expense
+      // row), so it is added to the expense rows here rather than counted twice.
+      expensesTotal:
+          busExpenses.fold(0.0, (sum, e) => sum + e.amount) + busRent,
       handedOver: busHandovers.fold(0.0, (sum, h) => sum + h.handedOverAmount),
       toReturnTotal:
           busCollections.fold(0.0, (sum, c) => sum + c.changeToReturn),
@@ -78,11 +82,15 @@ class TourMoneySummary {
     required List<Collection> collections,
     required List<Expense> expenses,
     required List<BusHandover> handovers,
+    double busRentsTotal = 0,
   }) {
     return TourMoneySummary(
       totalCollected:
           collections.fold(0.0, (sum, c) => sum + c.netCollected),
-      totalExpenses: expenses.fold(0.0, (sum, e) => sum + e.amount),
+      // Bus owner rents are the single source of truth (not DB expense rows),
+      // so they are folded into the expense total here rather than double-counted.
+      totalExpenses:
+          expenses.fold(0.0, (sum, e) => sum + e.amount) + busRentsTotal,
       totalHandedOver:
           handovers.fold(0.0, (sum, h) => sum + h.handedOverAmount),
       totalToReturn:

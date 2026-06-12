@@ -4,11 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../design/ugam.dart';
+import 'charts_screen.dart';
 import 'dashboard_screen.dart';
-import 'tours_screen.dart';
 import 'requests_screen.dart';
-import 'seat_assignment_screen.dart';
-import 'notify_screen.dart';
+import 'tours_screen.dart';
+import 'settings_screen.dart';
 
 class ShellController extends GetxController {
   final currentIndex = 0.obs;
@@ -29,12 +29,16 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
+  // Tour-first navigation: the shell holds only the cross-tour surfaces
+  // (Home, the tour list, Settings). Everything tour-specific — requests,
+  // seat fill/assign, buses, money, notify — now lives inside a tour's
+  // workspace (Tour Detail) and is reached by opening that tour.
   static const _adminPages = <Widget>[
     DashboardScreen(),
     ToursScreen(),
+    ChartsScreen(),
     RequestsScreen(),
-    SeatAssignmentScreen(),
-    NotifyScreen(),
+    SettingsScreen(),
   ];
 
   /// Indices of tabs that have ever been visited. We lazy-mount the
@@ -112,16 +116,16 @@ class _MainShellState extends State<MainShell> {
                   tooltip: tr('main_shell.tab_tour'),
                 ),
                 UgamDockItem(
+                  icon: Icons.table_chart_rounded,
+                  tooltip: tr('main_shell.tab_charts'),
+                ),
+                UgamDockItem(
                   icon: Icons.chat_bubble_rounded,
                   tooltip: tr('main_shell.tab_requests'),
                 ),
                 UgamDockItem(
-                  icon: Icons.grid_view_rounded,
-                  tooltip: tr('main_shell.tab_assign'),
-                ),
-                UgamDockItem(
-                  icon: Icons.notifications_rounded,
-                  tooltip: tr('main_shell.tab_notify'),
+                  icon: Icons.settings_rounded,
+                  tooltip: tr('main_shell.tab_settings'),
                 ),
               ],
             ),

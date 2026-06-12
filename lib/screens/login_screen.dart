@@ -45,8 +45,11 @@ class LoginScreen extends GetView<AuthController> {
               const SizedBox(height: UgamSpacing.sm),
               Text(
                 tr('login.tagline'),
-                style: UgamText.body
-                    .copyWith(color: c.ink2, fontSize: 15, height: 1.45),
+                style: UgamText.body.copyWith(
+                  color: c.ink2,
+                  fontSize: 15,
+                  height: 1.45,
+                ),
               ),
               const SizedBox(height: UgamSpacing.huge),
               UgamPhoneInput(
@@ -74,8 +77,10 @@ class LoginScreen extends GetView<AuthController> {
                     if (adminName.isNotEmpty) ...[
                       const SizedBox(height: UgamSpacing.sm),
                       Text(
-                        tr('login.signing_in_as',
-                            namedArgs: {'name': adminName}),
+                        tr(
+                          'login.signing_in_as',
+                          namedArgs: {'name': adminName},
+                        ),
                         style: UgamText.caption.copyWith(color: c.ink2),
                       ),
                     ],
@@ -84,8 +89,7 @@ class LoginScreen extends GetView<AuthController> {
                 );
               }),
               Obx(() {
-                final showPasswordStep =
-                    controller.awaitingAdminPassword.value;
+                final showPasswordStep = controller.awaitingAdminPassword.value;
                 final loading = controller.isLoading.value;
                 return UgamCTA(
                   label: showPasswordStep
@@ -131,8 +135,7 @@ class LoginScreen extends GetView<AuthController> {
                 child: Text(
                   tr('login.terms'),
                   textAlign: TextAlign.center,
-                  style: UgamText.caption
-                      .copyWith(color: c.ink3, height: 1.5),
+                  style: UgamText.caption.copyWith(color: c.ink3, height: 1.5),
                 ),
               ),
               const SizedBox(height: UgamSpacing.huge),
@@ -144,20 +147,54 @@ class LoginScreen extends GetView<AuthController> {
   }
 
   Future<void> _sendPing(BuildContext context) async {
+    final c = UgamColors.of(context);
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (_) => Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.xl,
+            vertical: UgamSpacing.lg,
+          ),
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(UgamRadius.card),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  valueColor: AlwaysStoppedAnimation(c.accent),
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Text(
+                tr('login.ping_loading'),
+                style: UgamText.bodyStrong.copyWith(color: c.ink),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
     try {
       final result = await SupabaseService.instance.ping();
       if (!context.mounted) return;
       Navigator.of(context).pop();
       AppSnackBar.success(
-        tr('login.ping_success_msg', namedArgs: {
-          'result':
-              result.length > 100 ? '${result.substring(0, 100)}...' : result,
-        }),
+        tr(
+          'login.ping_success_msg',
+          namedArgs: {
+            'result': result.length > 100
+                ? '${result.substring(0, 100)}...'
+                : result,
+          },
+        ),
         title: tr('login.ping_success_title'),
       );
     } catch (e) {

@@ -120,3 +120,12 @@ app.*.symbols
 
 # Superpowers brainstorm/visual-companion scratch
 .superpowers/
+
+# Built release artifacts (never commit binaries — bloats history)
+dist/
+*.apk
+*.aab
+*.ipa
+
+# Editor/Xcode backups
+*.bak

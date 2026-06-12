@@ -96,11 +96,25 @@ class SwapCandidateFinder {
   /// [passengers] is the full passenger set (any tour). Only those currently
   /// holding a seat on [destinationBus] are considered as occupants; the mover
   /// itself is never listed as a candidate or blocked occupant.
+  ///
+  /// [sourceBusId] is the bus the mover currently sits on. When provided this is
+  /// a deliberate MANUAL move by the agent, so protection relaxes:
+  ///   * approved-priority occupants become displaceable (manual change is
+  ///     always allowed — the priority lock only guards the AUTO engine);
+  ///   * grouped occupants become displaceable when the move is SAME-bus
+  ///     (`sourceBusId == destinationBus.id`) — everyone stays on this bus so the
+  ///     group is never split. A CROSS-bus move still blocks grouped occupants
+  ///     (the whole group must move together via the cascade path).
+  /// When [sourceBusId] is null the legacy rule holds: grouped AND approved-
+  /// priority occupants are both blocked.
   static SwapAssist find({
     required Passenger mover,
     required Bus destinationBus,
     required List<Passenger> passengers,
+    String? sourceBusId,
   }) {
+    final sameBus = sourceBusId != null && sourceBusId == destinationBus.id;
+    final manual = sourceBusId != null;
     final layout = destinationBus.layout;
     if (layout == null) {
       return const SwapAssist(freeSeatIds: [], movable: [], blocked: []);
@@ -182,9 +196,13 @@ class SwapCandidateFinder {
 
     for (final row in occupantRows) {
       final p = row.passenger;
-      // Blocked: grouped or approved-priority occupants cannot be displaced.
+      // Blocked: a grouped occupant can't be split off cross-bus (the whole
+      // group must move together); a SAME-bus manual rearrangement leaves the
+      // group whole, so it's allowed. An approved-priority occupant is blocked
+      // only for the AUTO engine (sourceBusId == null) — a deliberate manual
+      // move always allows displacing them.
       final groupId = p.groupId;
-      if (groupId != null && groupId.isNotEmpty) {
+      if (groupId != null && groupId.isNotEmpty && !sameBus) {
         if (blockedSeen.add(p.id)) {
           blocked.add(BlockedOccupant(
             passengerId: p.id,
@@ -194,7 +212,7 @@ class SwapCandidateFinder {
         }
         continue;
       }
-      if (p.isPriorityApproved) {
+      if (p.isPriorityApproved && !manual) {
         if (blockedSeen.add(p.id)) {
           blocked.add(BlockedOccupant(
             passengerId: p.id,

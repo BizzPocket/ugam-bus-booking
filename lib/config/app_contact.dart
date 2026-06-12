@@ -14,13 +14,20 @@ class AppContact {
   /// TODO(ops): set this to the organiser's public WhatsApp number.
   static const String supportWhatsApp = '';
 
-  /// Support email — the address published in the Privacy Policy.
-  static const String supportEmail = 'zeel.shiyani68@gmail.com';
+  /// Support email — the address published in the Privacy Policy. Use a
+  /// brand/ops mailbox, never a personal address (it ships in every binary).
+  /// Kept in sync with the address shown on the admin setup screen.
+  static const String supportEmail = 'support@ugambooking.com';
+
+  /// True once the public WhatsApp channel has been configured. Surfaced so
+  /// the "Contact" row can fall back to email cleanly instead of opening an
+  /// empty WhatsApp link.
+  static bool get hasWhatsApp => supportWhatsApp.trim().isNotEmpty;
 
   /// Brand site.
   static const String website = 'https://devam.org';
 
   /// Pre-filled greeting used when the Contact row opens WhatsApp.
   static const String whatsAppGreeting =
-      '🙏 Jai Gurudev — I have a question about Ugam Foj bus booking.';
+      '🙏 Jay Gurudev — I have a question about Ugam Foj bus booking.';
 }

@@ -532,13 +532,14 @@ void main() {
   });
 
   group('approved priority', () {
-    test('approved priority is seated in a FRONT row sofa', () {
-      // Front row (0) has a single sofa; back rows (1,2) have sofas too.
+    test('approved priority is seated on a LOWER berth', () {
+      // One row carries an upper + a lower single sofa; a back row has another
+      // upper. The VIP (no position preference) must take the LOWER berth.
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU_front'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU_upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL_lower'),
           _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'SU_back'),
-          _seat(2, 0, SeatType.singleSofa, SeatPosition.upper, 'SU_backer'),
         ]),
       ];
       final vip = _p('vip',
@@ -547,15 +548,16 @@ void main() {
       final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
 
       expect(plan.exceptions, isEmpty);
-      expect(plan.forPassenger('vip').single.seatId, 'SU_front',
-          reason: 'approved priority should take the front-row sofa');
+      expect(plan.forPassenger('vip').single.seatId, 'SL_lower',
+          reason: 'approved priority should take the lower berth');
     });
 
-    test('priority seated but no front sofa → priorityNoFrontSeat exception', () {
-      // The only sofa is on a back row (row 2 ≥ frontRowCount=2).
+    test('priority seated but no lower berth → priorityNoLowerBerth exception',
+        () {
+      // The only sofa is an UPPER berth.
       final buses = [
         _bus('b1', [
-          _seat(2, 0, SeatType.singleSofa, SeatPosition.upper, 'SU_back'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU_upper'),
         ]),
       ];
       final vip = _p('vip',
@@ -563,25 +565,25 @@ void main() {
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
 
-      // They DID get a seat (no overflow), but it isn't a front sofa.
-      expect(plan.forPassenger('vip').single.seatId, 'SU_back');
+      // They DID get a seat (no overflow), but it isn't a lower berth.
+      expect(plan.forPassenger('vip').single.seatId, 'SU_upper');
       expect(
           plan.exceptions.any(
-              (e) => e.type == SeatingExceptionType.priorityNoFrontSeat),
+              (e) => e.type == SeatingExceptionType.priorityNoLowerBerth),
           isTrue);
     });
 
     test('priority is spread across buses, not stacked on one', () {
-      // Two buses, each with exactly one front sofa. Two approved-priority
-      // passengers must land on different buses.
+      // Two buses, each with exactly one LOWER berth. Two approved-priority
+      // passengers must land on different buses (each on the lower berth).
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_front'),
-          _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_back'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'b1_lower'),
         ]),
         _bus('b2', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b2_front'),
-          _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'b2_back'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b2_upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'b2_lower'),
         ]),
       ];
       final v1 = _p('v1',
@@ -597,24 +599,22 @@ void main() {
       final b2 = plan.forPassenger('v2').single;
       expect(b1.busId, isNot(b2.busId),
           reason: 'priority passengers should spread across buses');
-      // And each got the FRONT seat of its bus.
-      expect(b1.seatId.endsWith('front'), isTrue);
-      expect(b2.seatId.endsWith('front'), isTrue);
+      // And each got the LOWER berth of its bus.
+      expect(b1.seatId.endsWith('lower'), isTrue);
+      expect(b2.seatId.endsWith('lower'), isTrue);
     });
   });
 
-  group('forward-flagged priority zone', () {
-    test('a forward seat in a NON-front row wins over an unflagged front seat',
+  group('lower-berth priority preference', () {
+    test('a lower berth on a back row wins over an upper berth on the front row',
         () {
-      // Row 0 is the historical "front" but is UNflagged; row 3 carries the
-      // agent-marked forward seat. Approved priority must take the row-3
-      // forward seat, not the row-0 one.
+      // Row 0 carries only an UPPER berth; the LOWER berth sits on row 3.
+      // Approved priority ignores the row index entirely and takes the lower
+      // berth — proving the rule is "lower berth", not "forward row".
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'row0'),
-          _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'row1'),
-          _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'row3_fwd',
-              forward: true),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'row0_upper'),
+          _seat(3, 1, SeatType.singleSofa, SeatPosition.lower, 'row3_lower'),
         ]),
       ];
       final vip = _p('vip',
@@ -623,22 +623,21 @@ void main() {
       final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
 
       expect(plan.exceptions, isEmpty);
-      expect(plan.forPassenger('vip').single.seatId, 'row3_fwd',
-          reason: 'agent-marked forward seat overrides the lowest-row heuristic');
-      // The placement reason names it the forward seat.
-      final r = plan.reasons.singleWhere((r) => r.seatId == 'row3_fwd');
-      expect(r.reason.contains('forward seat'), isTrue);
+      expect(plan.forPassenger('vip').single.seatId, 'row3_lower',
+          reason: 'priority follows the lower berth, not the row index');
+      // The placement reason names it the lower berth.
+      final r = plan.reasons.singleWhere((r) => r.seatId == 'row3_lower');
+      expect(r.reason.contains('lower berth'), isTrue);
     });
 
-    test('with a forward flag set, a non-priority passenger is kept off the '
-        'forward seat for the priority one', () {
-      // Only seat marked forward is row3_fwd. A normal passenger sorts first
-      // but must yield the forward seat to the approved VIP.
+    test('a non-priority passenger is kept off the lower berth for the '
+        'priority one', () {
+      // One lower, one upper. A normal passenger sorts first but must yield the
+      // lower berth to the approved VIP and take the upper.
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'plain'),
-          _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'row3_fwd',
-              forward: true),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'lower'),
         ]),
       ];
       final normal =
@@ -650,17 +649,19 @@ void main() {
           SeatingEngine.propose(buses: buses, passengers: [normal, vip]);
 
       expect(plan.exceptions, isEmpty);
-      expect(plan.forPassenger('vip').single.seatId, 'row3_fwd');
-      expect(plan.forPassenger('normal').single.seatId, 'plain');
+      expect(plan.forPassenger('vip').single.seatId, 'lower');
+      expect(plan.forPassenger('normal').single.seatId, 'upper');
     });
 
-    test('no forward flag anywhere → fallback to lowest rows (unchanged)', () {
-      // No seat is flagged forward; the lowest-frontRowCount-rows heuristic
-      // still drives priority placement.
+    test('priority with only an UPPER berth free still raises '
+        'priorityNoLowerBerth', () {
+      // A lower berth exists but is RESERVED, so the only seat the VIP can take
+      // is an upper berth → priorityNoLowerBerth.
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'front'),
-          _seat(2, 0, SeatType.singleSofa, SeatPosition.upper, 'back'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'lower_reserved',
+              reserved: true),
         ]),
       ];
       final vip = _p('vip',
@@ -668,79 +669,23 @@ void main() {
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
 
-      expect(plan.exceptions, isEmpty);
-      expect(plan.forPassenger('vip').single.seatId, 'front',
-          reason: 'fallback to lowest rows when nothing is flagged forward');
-    });
-
-    test('forward flags on one bus do not leak into another bus\' fallback',
-        () {
-      // b1 has a flagged forward seat in row 3. b2 has NO flag, so b2 still
-      // uses the lowest-row fallback. Two VIPs spread across buses; each gets
-      // its own bus\' forward zone.
-      final buses = [
-        _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_row0'),
-          _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_fwd',
-              forward: true),
-        ]),
-        _bus('b2', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b2_front'),
-          _seat(2, 0, SeatType.singleSofa, SeatPosition.upper, 'b2_back'),
-        ]),
-      ];
-      final v1 = _p('v1',
-          priority: PriorityStatus.approved,
-          lines: [_line(SeatType.singleSofa, null, 1)]);
-      final v2 = _p('v2',
-          priority: PriorityStatus.approved,
-          lines: [_line(SeatType.singleSofa, null, 1)]);
-      final plan = SeatingEngine.propose(buses: buses, passengers: [v1, v2]);
-
-      expect(plan.exceptions, isEmpty);
-      final placed = {
-        plan.forPassenger('v1').single.seatId,
-        plan.forPassenger('v2').single.seatId,
-      };
-      // Each VIP lands on the forward zone of a DIFFERENT bus: b1's flagged seat
-      // and b2's lowest-row fallback. Never on b1_row0 (forward flag present, so
-      // row0 is no longer forward) and never b2_back.
-      expect(placed, {'b1_fwd', 'b2_front'});
-    });
-
-    test('priority with only NON-forward sofas still raises priorityNoFrontSeat',
-        () {
-      // A forward flag exists in the bus (row 3) but it is RESERVED, so the
-      // only seat the VIP can take is a non-forward one → priorityNoFrontSeat.
-      final buses = [
-        _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'plain'),
-          _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'fwd_reserved',
-              forward: true, reserved: true),
-        ]),
-      ];
-      final vip = _p('vip',
-          priority: PriorityStatus.approved,
-          lines: [_line(SeatType.singleSofa, null, 1)]);
-      final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
-
-      // The VIP gets the only free seat (the non-forward 'plain' one)...
-      expect(plan.forPassenger('vip').single.seatId, 'plain');
-      // ...but a forward seat was never available → exception fires.
+      // The VIP gets the only free seat (the upper one)...
+      expect(plan.forPassenger('vip').single.seatId, 'upper');
+      // ...but a lower berth was never available → exception fires.
       expect(
           plan.exceptions
-              .any((e) => e.type == SeatingExceptionType.priorityNoFrontSeat),
+              .any((e) => e.type == SeatingExceptionType.priorityNoLowerBerth),
           isTrue);
     });
 
-    test('a reserved + forward seat is never filled (reserved wins)', () {
-      // The forward seat is also reserved; it must stay empty, and the VIP
-      // takes the only other (non-forward) seat instead.
+    test('a reserved lower berth is never filled (reserved wins)', () {
+      // The lower berth is reserved; it must stay empty, and the VIP takes the
+      // only other (upper) seat instead.
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'open'),
-          _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'fwd_reserved',
-              forward: true, reserved: true),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'open_upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'lower_reserved',
+              reserved: true),
         ]),
       ];
       final vip = _p('vip',
@@ -748,22 +693,22 @@ void main() {
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
 
-      // The reserved+forward seat is never auto-filled by anyone.
-      expect(plan.allAssignments.any((a) => a.seatId == 'fwd_reserved'), isFalse);
-      expect(plan.forPassenger('vip').single.seatId, 'open');
+      // The reserved lower berth is never auto-filled by anyone.
+      expect(plan.allAssignments.any((a) => a.seatId == 'lower_reserved'),
+          isFalse);
+      expect(plan.forPassenger('vip').single.seatId, 'open_upper');
     });
 
-    test('priority single line takes a forward DOUBLE over a non-forward single '
-        '(forward preference spans the type-substitution fallback)', () {
-      // b1 has a NON-forward single sofa 'plain' (row 0) and a FORWARD double
-      // sofa 'fwdD' (row 3). A single approved-priority individual requests one
-      // singleSofa. The VIP must land on a berth of the forward double, NOT on
-      // the non-forward single — and no priorityNoFrontSeat may fire.
+    test('priority single line takes a LOWER double over an UPPER single '
+        '(lower preference spans the type-substitution fallback)', () {
+      // b1 has an UPPER single sofa 'upperS' and a LOWER double sofa 'lowerD'. A
+      // single approved-priority individual requests one singleSofa. The VIP must
+      // land on a berth of the lower double, NOT on the upper single — and no
+      // priorityNoLowerBerth may fire.
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'plain'),
-          _seat(3, 3, SeatType.doubleSofa, SeatPosition.upper, 'fwdD',
-              forward: true),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'upperS'),
+          _seat(1, 4, SeatType.doubleSofa, SeatPosition.lower, 'lowerD'),
         ]),
       ];
       final vip = _p('vip',
@@ -771,29 +716,27 @@ void main() {
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
 
-      expect(plan.forPassenger('vip').single.seatId, 'fwdD',
-          reason: 'forward preference must reach the half-double substitute');
+      expect(plan.forPassenger('vip').single.seatId, 'lowerD',
+          reason: 'lower preference must reach the half-double substitute');
       expect(
           plan.exceptions
-              .any((e) => e.type == SeatingExceptionType.priorityNoFrontSeat),
+              .any((e) => e.type == SeatingExceptionType.priorityNoLowerBerth),
           isFalse,
-          reason: 'a forward seat WAS available via type substitution');
-      // 'plain' must be left free.
-      expect(plan.allAssignments.any((a) => a.seatId == 'plain'), isFalse);
+          reason: 'a lower berth WAS available via type substitution');
+      // 'upperS' must be left free.
+      expect(plan.allAssignments.any((a) => a.seatId == 'upperS'), isFalse);
     });
 
-    test('priority double line cross-fills two forward SINGLES over a '
-        'non-forward whole double', () {
-      // b1 has a NON-forward whole double 'plainD' (row 0) and TWO forward
-      // singles 'fwdS1'/'fwdS2' (row 3). VIP requests one doubleSofa. The VIP
-      // must cross-fill the two forward singles, NOT grab the plain double.
+    test('priority double line cross-fills two LOWER singles over an UPPER '
+        'whole double', () {
+      // b1 has an UPPER whole double 'upperD' and TWO LOWER singles
+      // 'lowerS1'/'lowerS2'. VIP requests one doubleSofa. The VIP must cross-fill
+      // the two lower singles, NOT grab the upper double.
       final buses = [
         _bus('b1', [
-          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'plainD'),
-          _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'fwdS1',
-              forward: true),
-          _seat(3, 1, SeatType.singleSofa, SeatPosition.lower, 'fwdS2',
-              forward: true),
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'upperD'),
+          _seat(1, 0, SeatType.singleSofa, SeatPosition.lower, 'lowerS1'),
+          _seat(1, 1, SeatType.singleSofa, SeatPosition.lower, 'lowerS2'),
         ]),
       ];
       final vip = _p('vip',
@@ -801,29 +744,26 @@ void main() {
           lines: [_line(SeatType.doubleSofa, null, 1)]);
       final plan = SeatingEngine.propose(buses: buses, passengers: [vip]);
 
-      expect(_seatIds(plan, 'vip'), ['fwdS1', 'fwdS2'],
-          reason: 'forward cross-fill singles win over a non-forward double');
+      expect(_seatIds(plan, 'vip'), ['lowerS1', 'lowerS2'],
+          reason: 'lower cross-fill singles win over an upper double');
       expect(
           plan.exceptions
-              .any((e) => e.type == SeatingExceptionType.priorityNoFrontSeat),
+              .any((e) => e.type == SeatingExceptionType.priorityNoLowerBerth),
           isFalse);
-      // 'plainD' must be left wholly free.
-      expect(plan.allAssignments.any((a) => a.seatId == 'plainD'), isFalse);
+      // 'upperD' must be left wholly free.
+      expect(plan.allAssignments.any((a) => a.seatId == 'upperD'), isFalse);
     });
 
-    test('determinism: identical input with forward flags is reproducible', () {
+    test('determinism: identical input with lower berths is reproducible', () {
       List<Bus> mkBuses() => [
             _bus('b1', [
-              _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_a'),
-              _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_fwd',
-                  forward: true),
-              _seat(3, 1, SeatType.singleSofa, SeatPosition.lower, 'b1_fwd2',
-                  forward: true),
+              _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_u'),
+              _seat(1, 0, SeatType.singleSofa, SeatPosition.lower, 'b1_l1'),
+              _seat(1, 1, SeatType.singleSofa, SeatPosition.lower, 'b1_l2'),
             ]),
             _bus('b2', [
-              _seat(2, 3, SeatType.doubleSofa, SeatPosition.upper, 'b2_fwd',
-                  forward: true),
-              _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b2_plain'),
+              _seat(2, 4, SeatType.doubleSofa, SeatPosition.lower, 'b2_l'),
+              _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b2_u'),
             ]),
           ];
       List<Passenger> mkPax() => [
@@ -1030,11 +970,11 @@ void main() {
 
     test('unknown age group is treated as a normal adult (no priority boost)', () {
       // Default AgeGroup is adult; an un-approved-priority passenger never
-      // gets front-seat preference over an approved one.
+      // gets the lower berth over an approved one.
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'front'),
-          _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'back'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'lower'),
         ]),
       ];
       final normal = _p('normal',
@@ -1046,16 +986,17 @@ void main() {
           SeatingEngine.propose(buses: buses, passengers: [normal, vip]);
 
       expect(plan.exceptions, isEmpty);
-      // VIP (approved) must get the front seat even though 'normal' sorts first.
-      expect(plan.forPassenger('vip').single.seatId, 'front');
-      expect(plan.forPassenger('normal').single.seatId, 'back');
+      // VIP (approved) must get the lower berth even though 'normal' sorts first.
+      expect(plan.forPassenger('vip').single.seatId, 'lower');
+      expect(plan.forPassenger('normal').single.seatId, 'upper');
     });
 
-    test('requested-but-not-approved priority gets NO front preference', () {
+    test('requested-but-not-approved priority gets NO lower-berth preference',
+        () {
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'front'),
-          _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'back'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'upper'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'lower'),
         ]),
       ];
       // 'a' merely REQUESTED priority (not approved); 'b' is approved.
@@ -1067,8 +1008,8 @@ void main() {
           lines: [_line(SeatType.singleSofa, null, 1)]);
       final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
 
-      expect(plan.forPassenger('b').single.seatId, 'front');
-      expect(plan.forPassenger('a').single.seatId, 'back');
+      expect(plan.forPassenger('b').single.seatId, 'lower');
+      expect(plan.forPassenger('a').single.seatId, 'upper');
     });
   });
 
@@ -1321,18 +1262,21 @@ void main() {
     });
   });
 
-  group('regression: goal order — priority over group front (finding 5)', () {
-    test('an approved-priority individual gets the front seat over a '
+  group('regression: goal order — priority over group lower berth (finding 5)',
+      () {
+    test('an approved-priority individual gets a lower berth over a '
         'non-priority group', () {
-      // Front rows 0,1; back rows 2,3. All single-upper sofas. A non-priority
-      // group {g_a,g_b} and one approved-priority VIP. The VIP must get a
-      // front seat; the group yields one front seat to a back row.
+      // Two LOWER berths (scanned first) + two UPPER berths. A non-priority
+      // group {g_a,g_b} is placed BEFORE the priority VIP, and left ungated the
+      // group's greedy fill would grab both lowers. The lower-berth reserve must
+      // hold one lower back so the VIP still lands on a lower berth; the group
+      // yields one lower to an upper.
       final buses = [
         _bus('b1', [
-          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'front_a'),
-          _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'front_b'),
-          _seat(2, 0, SeatType.singleSofa, SeatPosition.upper, 'back_a'),
-          _seat(3, 0, SeatType.singleSofa, SeatPosition.upper, 'back_b'),
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.lower, 'lower_a'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'lower_b'),
+          _seat(1, 0, SeatType.singleSofa, SeatPosition.upper, 'upper_a'),
+          _seat(1, 1, SeatType.singleSofa, SeatPosition.upper, 'upper_b'),
         ]),
       ];
       final gA = _p('g_a',
@@ -1348,12 +1292,12 @@ void main() {
           SeatingEngine.propose(buses: buses, passengers: [gA, gB, vip]);
 
       final vipSeat = plan.forPassenger('vip').single.seatId;
-      expect(['front_a', 'front_b'].contains(vipSeat), isTrue,
+      expect(['lower_a', 'lower_b'].contains(vipSeat), isTrue,
           reason: 'approved priority (goal 1) outranks group adjacency (goal 2)');
       expect(plan.exceptions
-          .any((e) => e.type == SeatingExceptionType.priorityNoFrontSeat),
+          .any((e) => e.type == SeatingExceptionType.priorityNoLowerBerth),
           isFalse,
-          reason: 'VIP actually got a front seat');
+          reason: 'VIP actually got a lower berth');
       // Group still together on the one bus.
       final groupBuses = {
         ...plan.forPassenger('g_a').map((a) => a.busId),

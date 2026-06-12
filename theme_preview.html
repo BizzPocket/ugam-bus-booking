@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ugam Foj — Theme Preview</title>
+<style>
+  /* ---- Premium, simple. Flat surfaces. No gradients. One accent each. ---- */
+  :root {
+    --good-d:#10B981; --warm-d:#F59E0B; --danger-d:#EF4444;
+    --good-l:#059669; --warm-l:#D97706; --danger-l:#DC2626;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  /* THEME 1 — Graphite + Refined Indigo (Linear) */
+  .t-indigo {
+    --bg:#0A0A0B; --card:#141416; --cardElev:#1E1E21; --border:#2A2A2E;
+    --ink:#FAFAFA; --ink2:#A1A1AA; --ink3:#71717A;
+    --accent:#6E79E0; --onAccent:#FFFFFF; --accentFill:rgba(110,121,224,.16);
+    --good:var(--good-d); --warm:var(--warm-d); --danger:var(--danger-d);
+  }
+  body.light .t-indigo {
+    --bg:#FAFAFA; --card:#FFFFFF; --cardElev:#F4F4F5; --border:#E4E4E7;
+    --ink:#18181B; --ink2:#52525B; --ink3:#A1A1AA;
+    --accent:#5159C9; --onAccent:#FFFFFF; --accentFill:#ECEDFB;
+    --good:var(--good-l); --warm:var(--warm-l); --danger:var(--danger-l);
+  }
+
+  /* THEME 2 — Monochrome (Vercel / Apple) */
+  .t-mono {
+    --bg:#000000; --card:#0F0F0F; --cardElev:#1A1A1A; --border:#262626;
+    --ink:#FFFFFF; --ink2:#A3A3A3; --ink3:#737373;
+    --accent:#FFFFFF; --onAccent:#000000; --accentFill:rgba(255,255,255,.10);
+    --good:var(--good-d); --warm:var(--warm-d); --danger:var(--danger-d);
+  }
+  body.light .t-mono {
+    --bg:#FFFFFF; --card:#FFFFFF; --cardElev:#FAFAFA; --border:#E5E5E5;
+    --ink:#0A0A0A; --ink2:#525252; --ink3:#A3A3A3;
+    --accent:#0A0A0A; --onAccent:#FFFFFF; --accentFill:rgba(0,0,0,.06);
+    --good:var(--good-l); --warm:var(--warm-l); --danger:var(--danger-l);
+  }
+
+  /* THEME 3 — Graphite + Champagne (luxury) */
+  .t-champ {
+    --bg:#0B0B0C; --card:#161618; --cardElev:#1F1F22; --border:#2C2C30;
+    --ink:#FAF9F7; --ink2:#A8A29E; --ink3:#78716C;
+    --accent:#C9A86A; --onAccent:#1A1408; --accentFill:rgba(201,168,106,.16);
+    --good:var(--good-d); --warm:var(--warm-d); --danger:var(--danger-d);
+  }
+  body.light .t-champ {
+    --bg:#FAFAF8; --card:#FFFFFF; --cardElev:#F5F4F0; --border:#E7E5DF;
+    --ink:#1C1A17; --ink2:#57534E; --ink3:#A8A29E;
+    --accent:#A8854A; --onAccent:#FFFFFF; --accentFill:#F3ECDD;
+    --good:var(--good-l); --warm:var(--warm-l); --danger:var(--danger-l);
+  }
+
+  * { box-sizing: border-box; margin:0; padding:0; }
+  html,body { font-family: var(--font); }
+  body {
+    background:#18181b; color:#e4e4e7; padding:32px 24px 64px;
+    transition: background .2s;
+  }
+  body.light { background:#f4f4f5; color:#27272a; }
+
+  .topbar {
+    display:flex; align-items:center; justify-content:space-between;
+    max-width:1180px; margin:0 auto 28px; gap:16px; flex-wrap:wrap;
+  }
+  .topbar h1 { font-size:18px; font-weight:600; letter-spacing:-.01em; }
+  .topbar p { font-size:13px; opacity:.6; margin-top:2px; }
+  .toggle {
+    border:1px solid #3f3f46; background:transparent; color:inherit;
+    padding:9px 16px; border-radius:999px; font-size:13px; font-weight:600;
+    cursor:pointer; font-family:inherit;
+  }
+  body.light .toggle { border-color:#d4d4d8; }
+
+  .stage {
+    display:flex; gap:28px; justify-content:center; align-items:flex-start;
+    max-width:1180px; margin:0 auto; flex-wrap:wrap;
+  }
+  .col { width:340px; }
+  .col-label {
+    text-align:center; font-size:12.5px; font-weight:600; letter-spacing:.02em;
+    margin-bottom:14px; opacity:.7;
+  }
+  .col-label small { display:block; font-weight:400; opacity:.7; margin-top:3px; font-size:11px; }
+
+  /* phone frame */
+  .phone {
+    background:var(--bg); border-radius:34px; padding:14px 0 0;
+    border:1px solid var(--border);
+    box-shadow:0 24px 60px rgba(0,0,0,.45);
+    overflow:hidden; color:var(--ink);
+  }
+  .notch { width:120px; height:5px; border-radius:999px; background:var(--ink3); opacity:.4; margin:0 auto 16px; }
+
+  .screen { padding:0 16px 0; }
+
+  /* header row */
+  .hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .hdr .back { width:36px; height:36px; border-radius:999px; border:1px solid var(--border);
+    display:grid; place-items:center; color:var(--ink2); font-size:16px; }
+  .hdr .title { font-size:15px; font-weight:600; letter-spacing:-.01em; }
+  .hdr .av { width:36px; height:36px; border-radius:999px; background:var(--accentFill);
+    color:var(--accent); display:grid; place-items:center; font-size:13px; font-weight:700; }
+
+  /* tour card */
+  .card { background:var(--card); border:1px solid var(--border); border-radius:22px; padding:18px; }
+  .route { font-size:20px; font-weight:700; letter-spacing:-.02em; line-height:1.15; }
+  .route .arr { color:var(--accent); margin:0 6px; }
+  .meta { font-size:12.5px; color:var(--ink2); margin-top:6px; }
+
+  .chips { display:flex; gap:7px; margin-top:14px; flex-wrap:wrap; }
+  .chip { font-size:11px; font-weight:600; padding:5px 11px; border-radius:999px; letter-spacing:.01em; }
+  .chip.ok { background:color-mix(in srgb, var(--good) 16%, transparent); color:var(--good); }
+  .chip.pend { background:color-mix(in srgb, var(--warm) 18%, transparent); color:var(--warm); }
+  .chip.lad { background:var(--accentFill); color:var(--accent); }
+
+  /* stats row */
+  .stats { display:flex; gap:10px; margin-top:14px; }
+  .stat { flex:1; background:var(--cardElev); border:1px solid var(--border); border-radius:18px; padding:13px 12px; }
+  .stat .k { font-size:11px; color:var(--ink3); font-weight:600; letter-spacing:.02em; }
+  .stat .v { font-size:17px; font-weight:700; margin-top:5px; letter-spacing:-.02em; }
+  .stat .v.good { color:var(--good); }
+  .stat .v.warm { color:var(--warm); }
+
+  /* CTA */
+  .cta { width:100%; margin-top:16px; background:var(--accent); color:var(--onAccent);
+    border:none; padding:15px; border-radius:16px; font-size:14.5px; font-weight:700;
+    letter-spacing:.01em; cursor:pointer; font-family:inherit; }
+  .cta.ghost { background:transparent; color:var(--ink); border:1px solid var(--border); margin-top:9px; }
+
+  /* seat grid section */
+  .sectlbl { font-size:12px; font-weight:600; color:var(--ink3); letter-spacing:.04em;
+    text-transform:uppercase; margin:22px 2px 11px; }
+  .grid { display:grid; grid-template-columns:repeat(8, 1fr); gap:6px; }
+  .seat { aspect-ratio:1; border-radius:8px; border:1px solid var(--border);
+    background:var(--cardElev); display:grid; place-items:center; font-size:9px; color:var(--ink3); font-weight:600; }
+  .seat.sel { background:var(--accent); color:var(--onAccent); border-color:var(--accent); }
+  .seat.g1 { background:color-mix(in srgb, #60A5FA 26%, transparent); border-color:transparent; color:var(--ink); }
+  .seat.g2 { background:color-mix(in srgb, #34D399 26%, transparent); border-color:transparent; color:var(--ink); }
+  .seat.g3 { background:color-mix(in srgb, #F472B6 26%, transparent); border-color:transparent; color:var(--ink); }
+
+  /* dock nav */
+  .dock { display:flex; justify-content:space-around; align-items:center;
+    margin:22px 10px 16px; padding:11px 8px; background:var(--cardElev);
+    border:1px solid var(--border); border-radius:22px; }
+  .nav { display:flex; flex-direction:column; align-items:center; gap:4px; font-size:10px; color:var(--ink3); font-weight:600; }
+  .nav .dot { width:20px; height:20px; border-radius:7px; background:var(--ink3); opacity:.35; }
+  .nav.active { color:var(--accent); }
+  .nav.active .dot { background:var(--accent); opacity:1; }
+
+  .pickrow { text-align:center; margin-top:14px; }
+  .pick { border:1px solid var(--border); background:var(--card); color:var(--ink);
+    padding:8px 18px; border-radius:999px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <h1>Ugam Foj — theme preview</h1>
+      <p>Same screen, three premium directions. Flat surfaces · one accent each · no gradients.</p>
+    </div>
+    <button class="toggle" onclick="document.body.classList.toggle('light')">Toggle dark / light</button>
+  </div>
+
+  <div class="stage">
+    <!-- ============ THEME 1 ============ -->
+    <div class="col">
+      <div class="col-label">GRAPHITE + REFINED INDIGO<small>Linear-style · clear interactive accent</small></div>
+      <div class="phone t-indigo">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="hdr">
+            <div class="back">‹</div>
+            <div class="title">Tour overview</div>
+            <div class="av">UF</div>
+          </div>
+          <div class="card">
+            <div class="route">Surat <span class="arr">→</span> Ambaji</div>
+            <div class="meta">12 Jul – 14 Jul · 3 buses · Handler: Mahesh</div>
+            <div class="chips">
+              <span class="chip ok">Confirmed</span>
+              <span class="chip pend">5 pending</span>
+              <span class="chip lad">Ladies coach</span>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="k">SEATS</div><div class="v">38/45</div></div>
+              <div class="stat"><div class="k">COLLECTED</div><div class="v good">₹1.24L</div></div>
+              <div class="stat"><div class="k">PENDING</div><div class="v warm">₹18k</div></div>
+            </div>
+            <button class="cta">Collect money</button>
+            <button class="cta ghost">Assign seats</button>
+          </div>
+          <div class="sectlbl">Bus 1 · seat map</div>
+          <div class="grid">
+            <div class="seat g1">1</div><div class="seat g1">2</div><div class="seat sel">3</div><div class="seat">4</div>
+            <div class="seat g2">5</div><div class="seat g2">6</div><div class="seat g3">7</div><div class="seat">8</div>
+            <div class="seat">9</div><div class="seat g1">10</div><div class="seat">11</div><div class="seat sel">12</div>
+            <div class="seat g3">13</div><div class="seat">14</div><div class="seat g2">15</div><div class="seat">16</div>
+          </div>
+          <div class="dock">
+            <div class="nav active"><div class="dot"></div>Home</div>
+            <div class="nav"><div class="dot"></div>Tours</div>
+            <div class="nav"><div class="dot"></div>Settings</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ THEME 2 ============ -->
+    <div class="col">
+      <div class="col-label">MONOCHROME<small>Vercel / Apple · color only in states</small></div>
+      <div class="phone t-mono">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="hdr">
+            <div class="back">‹</div>
+            <div class="title">Tour overview</div>
+            <div class="av">UF</div>
+          </div>
+          <div class="card">
+            <div class="route">Surat <span class="arr">→</span> Ambaji</div>
+            <div class="meta">12 Jul – 14 Jul · 3 buses · Handler: Mahesh</div>
+            <div class="chips">
+              <span class="chip ok">Confirmed</span>
+              <span class="chip pend">5 pending</span>
+              <span class="chip lad">Ladies coach</span>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="k">SEATS</div><div class="v">38/45</div></div>
+              <div class="stat"><div class="k">COLLECTED</div><div class="v good">₹1.24L</div></div>
+              <div class="stat"><div class="k">PENDING</div><div class="v warm">₹18k</div></div>
+            </div>
+            <button class="cta">Collect money</button>
+            <button class="cta ghost">Assign seats</button>
+          </div>
+          <div class="sectlbl">Bus 1 · seat map</div>
+          <div class="grid">
+            <div class="seat g1">1</div><div class="seat g1">2</div><div class="seat sel">3</div><div class="seat">4</div>
+            <div class="seat g2">5</div><div class="seat g2">6</div><div class="seat g3">7</div><div class="seat">8</div>
+            <div class="seat">9</div><div class="seat g1">10</div><div class="seat">11</div><div class="seat sel">12</div>
+            <div class="seat g3">13</div><div class="seat">14</div><div class="seat g2">15</div><div class="seat">16</div>
+          </div>
+          <div class="dock">
+            <div class="nav active"><div class="dot"></div>Home</div>
+            <div class="nav"><div class="dot"></div>Tours</div>
+            <div class="nav"><div class="dot"></div>Settings</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ THEME 3 ============ -->
+    <div class="col">
+      <div class="col-label">GRAPHITE + CHAMPAGNE<small>Luxury · refined warm accent (not clay)</small></div>
+      <div class="phone t-champ">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="hdr">
+            <div class="back">‹</div>
+            <div class="title">Tour overview</div>
+            <div class="av">UF</div>
+          </div>
+          <div class="card">
+            <div class="route">Surat <span class="arr">→</span> Ambaji</div>
+            <div class="meta">12 Jul – 14 Jul · 3 buses · Handler: Mahesh</div>
+            <div class="chips">
+              <span class="chip ok">Confirmed</span>
+              <span class="chip pend">5 pending</span>
+              <span class="chip lad">Ladies coach</span>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="k">SEATS</div><div class="v">38/45</div></div>
+              <div class="stat"><div class="k">COLLECTED</div><div class="v good">₹1.24L</div></div>
+              <div class="stat"><div class="k">PENDING</div><div class="v warm">₹18k</div></div>
+            </div>
+            <button class="cta">Collect money</button>
+            <button class="cta ghost">Assign seats</button>
+          </div>
+          <div class="sectlbl">Bus 1 · seat map</div>
+          <div class="grid">
+            <div class="seat g1">1</div><div class="seat g1">2</div><div class="seat sel">3</div><div class="seat">4</div>
+            <div class="seat g2">5</div><div class="seat g2">6</div><div class="seat g3">7</div><div class="seat">8</div>
+            <div class="seat">9</div><div class="seat g1">10</div><div class="seat">11</div><div class="seat sel">12</div>
+            <div class="seat g3">13</div><div class="seat">14</div><div class="seat g2">15</div><div class="seat">16</div>
+          </div>
+          <div class="dock">
+            <div class="nav active"><div class="dot"></div>Home</div>
+            <div class="nav"><div class="dot"></div>Tours</div>
+            <div class="nav"><div class="dot"></div>Settings</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -30,6 +30,24 @@ class AppSnackBar {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
 
+    // Sit just above whatever bottom chrome the active screen actually
+    // has — dock nav, sticky CTA, or nothing — instead of a fixed guess.
+    // [UgamChrome.bottomInset] is fed by the chrome widgets + the nav
+    // observer; on a plain screen it's 0 and we fall back to the safe
+    // area so the toast still clears the home indicator.
+    final mq = MediaQuery.maybeOf(context);
+    final chrome = UgamChrome.bottomInset.value;
+    final safe = mq?.padding.bottom ?? 0;
+    // Safety clamp: the tab shell keeps every visited screen mounted in one
+    // IndexedStack (one route), so a TALL bottom dock from another still-
+    // mounted tab can report a stale, oversized chrome height. Unclamped, that
+    // lifts this floating toast into the MIDDLE of the screen. Cap the lift to
+    // the lower fifth of the viewport so a toast always reads as a bottom toast,
+    // whatever the registry reports.
+    final maxLift = (mq?.size.height ?? 800) * 0.20;
+    final lift = (chrome > 0 ? chrome : safe).clamp(0.0, maxLift);
+    final bottomMargin = lift + UgamSpacing.md;
+
     messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -41,7 +59,7 @@ class AppSnackBar {
           margin: EdgeInsets.only(
             left: UgamSpacing.gutter,
             right: UgamSpacing.gutter,
-            bottom: 90,
+            bottom: bottomMargin,
           ),
           duration: duration,
           dismissDirection: DismissDirection.horizontal,
@@ -50,26 +68,20 @@ class AppSnackBar {
       );
   }
 
-  static void success(String message, {String? title}) => _show(
-        title: title,
-        message: message,
-        tone: UgamSnackTone.success,
-      );
+  static void success(String message, {String? title}) =>
+      _show(title: title, message: message, tone: UgamSnackTone.success);
 
   static void error(String message, {String? title}) => _show(
-        title: title,
-        message: message,
-        tone: UgamSnackTone.error,
-        duration: const Duration(seconds: 4),
-      );
+    title: title,
+    message: message,
+    tone: UgamSnackTone.error,
+    duration: const Duration(seconds: 4),
+  );
 
   /// Aliased to error — same visual treatment in the new design system.
   static void warning(String message, {String? title}) =>
       error(message, title: title);
 
-  static void info(String message, {String? title}) => _show(
-        title: title,
-        message: message,
-        tone: UgamSnackTone.info,
-      );
+  static void info(String message, {String? title}) =>
+      _show(title: title, message: message, tone: UgamSnackTone.info);
 }

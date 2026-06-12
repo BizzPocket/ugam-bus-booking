@@ -50,7 +50,7 @@ class PlacementReason {
   final String passengerId;
 
   /// One-line human-readable rationale, e.g. "group Patel — same bus",
-  /// "approved priority — front sofa", "type match: Double Sofa Lower",
+  /// "approved priority — lower berth", "type match: Double Sofa Lower",
   /// "cross-fill: single berth toward a Double Sofa line", or "locked".
   final String reason;
 
@@ -69,10 +69,10 @@ class PlacementReason {
 /// The kind of problem a [SeatingException] describes. Each maps to a card the
 /// agent resolves by hand; the engine never guesses past a hard rule.
 enum SeatingExceptionType {
-  /// An approved-priority passenger was seated, but no FRONT sofa seat was
-  /// available within any bus's front-seat budget — they got a seat further
-  /// back (or a non-front sofa).
-  priorityNoFrontSeat,
+  /// An approved-priority passenger was seated, but no LOWER berth was
+  /// available within any bus's lower-berth budget — they got an upper berth
+  /// (or were placed without a lower-berth claim).
+  priorityNoLowerBerth,
 
   /// A group could not be placed entirely on a single bus (no bus has enough
   /// matching free berths for the whole group).
@@ -220,13 +220,6 @@ class SeatLegOccupancy {
 class SeatingEngine {
   const SeatingEngine._();
 
-  /// Fallback size of the "forward" zone when a bus has NO agent-marked forward
-  /// seat: its lowest [frontRowCount] rows count as forward. Front rows are the
-  /// LOW row indices (see [BusLayout]). When the agent HAS flagged forward sofa
-  /// seats on a bus, those flagged cells are the forward zone instead and this
-  /// constant is ignored for that bus (see [_BusState.isFront]).
-  static const int frontRowCount = 2;
-
   /// Produce a full seating plan for [buses] + [passengers].
   ///
   /// Honors every hard rule and the ordered goals from the design spec.
@@ -241,7 +234,15 @@ class SeatingEngine {
     // ── Stable ordering of passengers ─────────────────────────────────────
     // Sort by id so every downstream "largest first" / "in order" step is
     // reproducible regardless of the caller's list order.
-    final sorted = [...passengers]..sort((a, b) => a.id.compareTo(b.id));
+    //
+    // Waitlisted passengers are intentionally HELD by the agent — the engine
+    // must never seat them and never raise an exception for them (no phantom
+    // overflowWaitlist for someone the agent already chose to defer). They
+    // re-enter placement only once the agent takes them off the waitlist.
+    final sorted = [
+      for (final p in passengers)
+        if (!p.isWaitlisted) p,
+    ]..sort((a, b) => a.id.compareTo(b.id));
 
     // ── 0. Seed reserved + locked ─────────────────────────────────────────
     // Reserved seats are marked occupied so nothing auto-fills them.
@@ -281,13 +282,13 @@ class SeatingEngine {
       }
     }
 
-    // Reserve front-sofa budget for approved-priority INDIVIDUALS (placed in
-    // step 2) so a NON-priority group in step 1 cannot grab the front rows
-    // first. This makes goal 1 (priority → front) dominate goal 2 (group
+    // Reserve lower-sofa budget for approved-priority INDIVIDUALS (placed in
+    // step 2) so a NON-priority group in step 1 cannot grab the lower berths
+    // first. This makes goal 1 (priority → lower berth) dominate goal 2 (group
     // adjacency) deterministically. Each priority individual decrements the
-    // reserve once placed. Priority GROUP members claim the front inside their
-    // own group placement (requireFront pass) so they are not counted here.
-    state.frontSofaReserve = individuals
+    // reserve once placed. Priority GROUP members claim a lower berth inside
+    // their own group placement (requireLower pass) so they are not counted here.
+    state.lowerSofaReserve = individuals
         .where((p) => p.isPriorityApproved)
         .fold(0, (s, p) => s + _sofaBerths(pendingByPassenger[p.id]!));
 
@@ -311,16 +312,16 @@ class SeatingEngine {
       );
     }
 
-    // ── 2. Approved-priority individuals → front sofa, spread across buses ─
+    // ── 2. Approved-priority individuals → lower berth, spread across buses ─
     final priorityIndividuals = individuals
         .where((p) => p.isPriorityApproved)
         .toList(); // already id-sorted from `sorted`
     for (final p in priorityIndividuals) {
-      // This priority individual is being placed now, so release the front
+      // This priority individual is being placed now, so release the lower-berth
       // budget we were holding for them before they claim it.
       final remaining =
-          state.frontSofaReserve - _sofaBerths(pendingByPassenger[p.id]!);
-      state.frontSofaReserve = remaining < 0 ? 0 : remaining;
+          state.lowerSofaReserve - _sofaBerths(pendingByPassenger[p.id]!);
+      state.lowerSofaReserve = remaining < 0 ? 0 : remaining;
       _placeIndividual(
         passenger: p,
         pending: pendingByPassenger[p.id]!,
@@ -332,7 +333,7 @@ class SeatingEngine {
     }
     // No priority individuals remain to protect; drop any residual reserve so
     // step 3 fills freely.
-    state.frontSofaReserve = 0;
+    state.lowerSofaReserve = 0;
 
     // ── 3. Remaining individuals by best-fit type match ───────────────────
     final normalIndividuals =
@@ -395,10 +396,10 @@ class SeatingEngine {
     final needsBerths = _groupBerths(members, pendingByPassenger);
     if (needsBerths == 0) return; // fully satisfied by locked seats already.
 
-    final wantsFront = members.any((m) => m.isPriorityApproved);
+    final wantsLower = members.any((m) => m.isPriorityApproved);
 
     // Candidate buses, deterministically ordered: prefer one that can hold the
-    // group AND (if priority) has front budget; among those, prefer the bus
+    // group AND (if priority) has lower-berth budget; among those, prefer the bus
     // with the FEWEST free berths that still fits (tight pack → balance), then
     // by bus id. We trial-place onto a snapshot to know whether the whole group
     // actually fits under the cross-fill rules, not just by berth count.
@@ -414,13 +415,13 @@ class SeatingEngine {
         return a.id.compareTo(b.id);
       });
 
-    // First pass honoring the front preference, then a fallback ignoring it.
-    for (final requireFront in wantsFront ? [true, false] : [false]) {
+    // First pass honoring the lower-berth preference, then a fallback ignoring it.
+    for (final requireLower in wantsLower ? [true, false] : [false]) {
       for (final bus in ordered) {
         final trial = state.fork();
         final trialReasons = <PlacementReason>[];
         var ok = true;
-        // Place priority members first so they claim the front budget.
+        // Place priority members first so they claim the lower-berth budget.
         final orderedMembers = [...members]
           ..sort((a, b) {
             final pa = a.isPriorityApproved ? 0 : 1;
@@ -437,7 +438,7 @@ class SeatingEngine {
             state: trial,
             reasons: trialReasons,
             priority: m.isPriorityApproved,
-            requireFront: requireFront && m.isPriorityApproved,
+            requireLower: requireLower && m.isPriorityApproved,
             groupLabel: groupId,
           );
           if (!placed) {
@@ -453,18 +454,18 @@ class SeatingEngine {
             // Group members are now fully placed: clear their pending.
             pendingByPassenger[m.id] = const [];
           }
-          // If the group wanted front but we only fit ignoring front budget,
-          // flag the priority members that didn't get a front sofa.
-          if (wantsFront && !requireFront) {
+          // If the group wanted a lower berth but we only fit ignoring the
+          // lower-berth budget, flag the priority members who got an upper berth.
+          if (wantsLower && !requireLower) {
             for (final m in members.where((m) => m.isPriorityApproved)) {
-              if (!state.hasFrontSofa(m.id)) {
+              if (!state.hasLowerSofa(m.id)) {
                 exceptions.add(SeatingException(
-                  type: SeatingExceptionType.priorityNoFrontSeat,
+                  type: SeatingExceptionType.priorityNoLowerBerth,
                   passengerId: m.id,
                   groupId: groupId,
                   message:
                       'Approved-priority ${_name(m)} is in group $groupId but '
-                      'no front sofa seat was free on the group\'s bus.',
+                      'no lower berth was free on the group\'s bus.',
                 ));
               }
             }
@@ -507,7 +508,7 @@ class SeatingEngine {
           state: relaxed,
           reasons: discard,
           priority: m.isPriorityApproved,
-          requireFront: false,
+          requireLower: false,
           groupLabel: groupId,
           allowStrangerShare: true,
         );
@@ -534,7 +535,7 @@ class SeatingEngine {
           state: strict,
           reasons: strictDiscard,
           priority: m.isPriorityApproved,
-          requireFront: false,
+          requireLower: false,
           groupLabel: groupId,
         );
         // Lines that remain unplaced under the strict rule, blocked precisely
@@ -594,10 +595,11 @@ class SeatingEngine {
     // Bus order: PACK, don't balance. Fill the fullest bus that still has room
     // before opening the next one — the agent's flow: "pick one bus, seat the
     // unassigned people, and only move to the next bus once this one is full."
-    // Buses with no room sort last. A priority passenger still takes a FRONT
-    // seat *within* the chosen bus via the requireFront pass below (and, all
-    // else equal, we prefer a bus that still has free front budget so priority
-    // people aren't pushed to the rear while a front seat sits open elsewhere).
+    // Buses with no room sort last. A priority passenger still takes a LOWER
+    // berth *within* the chosen bus via the requireLower pass below (and, all
+    // else equal, we prefer a bus that still has free lower-berth budget so
+    // priority people aren't pushed onto an upper berth while a lower one sits
+    // open on another bus).
     final ordered = [...state.buses]
       ..sort((a, b) {
         final ea = state.freeBerths(a.id);
@@ -606,26 +608,27 @@ class SeatingEngine {
         final bRoom = eb > 0;
         if (aRoom != bRoom) return aRoom ? -1 : 1; // buses with room first
         if (priority) {
-          // Priority still seeks a FRONT seat — prefer the bus with the most
-          // free front budget (spreads priority only as far as needed to seat
-          // elders up front). The non-priority bulk skips this and packs below.
-          final fa = state.freeFrontSofa(a.id);
-          final fb = state.freeFrontSofa(b.id);
-          if (fa != fb) return fb.compareTo(fa); // most front budget first
+          // Priority still seeks a LOWER berth — prefer the bus with the most
+          // free lower-berth budget (spreads priority only as far as needed to
+          // seat elders on a lower berth). The non-priority bulk skips this and
+          // packs below.
+          final fa = state.freeLowerSofa(a.id);
+          final fb = state.freeLowerSofa(b.id);
+          if (fa != fb) return fb.compareTo(fa); // most lower-berth budget first
         }
         if (ea != eb) return ea.compareTo(eb); // fewest free first = PACK
         return a.id.compareTo(b.id);
       });
 
     // Priority individuals get the SAME two-phase placement groups already use:
-    // a HARD forward-only pass across all buses first, then a relaxed pass for
-    // whatever remains. requireFront=true sets frontOnly on both takeFreeCell
-    // and takeHalfDouble, so the forward preference spans the exact-type →
-    // substitute fallback chain (a forward double satisfies a single line, two
-    // forward singles satisfy a double line) before any non-forward seat is
-    // touched. The soft preferFront still acts as a tie-breaker in the relaxed
-    // pass. Non-priority passengers run the single relaxed pass only.
-    for (final requireFront in priority ? [true, false] : [false]) {
+    // a HARD lower-only pass across all buses first, then a relaxed pass for
+    // whatever remains. requireLower=true sets lowerOnly on both takeFreeCell
+    // and takeHalfDouble, so the lower-berth preference spans the exact-type →
+    // substitute fallback chain (a lower double satisfies a single line, two
+    // lower singles satisfy a double line) before any upper berth is touched.
+    // The soft preferLower still acts as a tie-breaker in the relaxed pass.
+    // Non-priority passengers run the single relaxed pass only.
+    for (final requireLower in priority ? [true, false] : [false]) {
       for (final bus in ordered) {
         if (_remaining(pending) == 0) break;
         _placeOnBus(
@@ -635,14 +638,14 @@ class SeatingEngine {
           state: state,
           reasons: reasons,
           priority: priority,
-          requireFront: requireFront,
+          requireLower: requireLower,
           groupLabel: null,
         );
       }
     }
 
     // ── FILL, NO EMPTY SEATS ──────────────────────────────────────────────
-    // The balance/front-ordered passes above may stop short while a compatible
+    // The balance/lower-ordered passes above may stop short while a compatible
     // berth-leg is still free on SOME bus (the early-break heuristics optimize
     // for balance, not exhaustion). Before we ever waitlist this passenger,
     // sweep EVERY bus once more with all preference gating dropped — plain
@@ -667,8 +670,8 @@ class SeatingEngine {
 
   /// Exhaustive last-resort fill for one passenger's still-[pending] lines.
   ///
-  /// Iterates buses in stable id order and keeps re-attempting plain (no front
-  /// gating, no front-reserve guard) placement until a full sweep across all
+  /// Iterates buses in stable id order and keeps re-attempting plain (no
+  /// lower-berth gating, no lower-reserve guard) placement until a full sweep across all
   /// buses places nothing more. This guarantees Change 2's contract: a
   /// passenger is never waitlisted while ANY compatible free berth-leg remains
   /// anywhere — including cross-fill and the leg-reuse GO/RETURN slots. Hard
@@ -695,7 +698,7 @@ class SeatingEngine {
           state: state,
           reasons: reasons,
           priority: false,
-          requireFront: false,
+          requireLower: false,
           groupLabel: null,
         );
         if (_remaining(pending) < before) progressed = true;
@@ -708,9 +711,9 @@ class SeatingEngine {
   /// [state]. Returns true when EVERY pending line for this passenger is fully
   /// satisfied after this call (used by group all-or-nothing logic).
   ///
-  /// When [requireFront] is set, sofa berths are only taken from front rows
-  /// (rows < [frontRowCount]); used while a priority member is claiming the
-  /// front budget on a chosen bus.
+  /// When [requireLower] is set, sofa berths are only taken from lower-position
+  /// cells; used while a priority member is claiming the lower-berth budget on a
+  /// chosen bus.
   static bool _placeOnBus({
     required Passenger passenger,
     required List<_PendingLine> pending,
@@ -718,7 +721,7 @@ class SeatingEngine {
     required _PlanState state,
     required List<PlacementReason> reasons,
     required bool priority,
-    required bool requireFront,
+    required bool requireLower,
     required String? groupLabel,
     bool allowStrangerShare = false,
   }) {
@@ -745,7 +748,7 @@ class SeatingEngine {
           state: state,
           reasons: reasons,
           priority: priority,
-          requireFront: requireFront,
+          requireLower: requireLower,
           groupLabel: groupLabel,
           allowStrangerShare: allowStrangerShare,
         );
@@ -772,7 +775,7 @@ class SeatingEngine {
     required _PlanState state,
     required List<PlacementReason> reasons,
     required bool priority,
-    required bool requireFront,
+    required bool requireLower,
     required String? groupLabel,
     bool allowStrangerShare = false,
   }) {
@@ -780,10 +783,10 @@ class SeatingEngine {
     // The requester's group drives the stranger-share rule on doubles: a member
     // may auto-share only with another member of the SAME non-null group.
     final reqGroup = passenger.groupId;
-    // A priority placement that is not ALREADY pinned to the forward zone should
-    // still prefer forward-zone sofas over ordinary ones (the agent-marked
-    // forward seats may sit on higher rows than ordinary seats).
-    final preferFront = priority && !requireFront;
+    // A priority placement that is not ALREADY pinned to lower-only should still
+    // prefer lower-berth sofas over upper ones, so an approved-priority passenger
+    // lands on a lower berth whenever one is free.
+    final preferLower = priority && !requireLower;
     // Leg-aware capacity: this passenger only consumes the leg(s) their
     // tripType travels (outbound-only = GO, return-only = RETURN, round-trip =
     // BOTH). A berth is takeable only when free on EVERY leg in [legs], so a
@@ -796,7 +799,7 @@ class SeatingEngine {
           busId,
           type: SeatType.seater,
           position: null,
-          frontOnly: false,
+          lowerOnly: false,
           legs: legs,
         );
         if (cell == null) return null;
@@ -812,17 +815,17 @@ class SeatingEngine {
       case SeatType.singleSofa:
         // Prefer an actual single-sofa cell; if none, take HALF of a free
         // double (a single may sit on one berth of a double sofa).
-        // Non-priority placements honor the front-sofa reserve so approved
-        // priority passengers keep first claim on the front rows (goal 1 over
+        // Non-priority placements honor the lower-sofa reserve so approved
+        // priority passengers keep first claim on the lower berths (goal 1 over
         // goal 2).
         final single = state.takeFreeCell(
           busId,
           type: SeatType.singleSofa,
           position: line.position,
-          frontOnly: requireFront,
+          lowerOnly: requireLower,
           legs: legs,
-          guardFrontReserve: !priority,
-          preferFront: preferFront,
+          guardLowerReserve: !priority,
+          preferLower: preferLower,
         );
         if (single != null) {
           state.assign(passenger.id, busId, single.seatId!);
@@ -833,7 +836,7 @@ class SeatingEngine {
             reason: _sofaReason(
               reasonTag,
               priority: priority,
-              forward: state.isForwardSofa(busId, single.seatId!),
+              lower: state.isLowerSofa(busId, single.seatId!),
               detail:
                   'type match: ${seatTypeLabel(SeatType.singleSofa, single.position)}',
             ),
@@ -843,11 +846,11 @@ class SeatingEngine {
         final halfDouble = state.takeHalfDouble(
           busId,
           position: line.position,
-          frontOnly: requireFront,
+          lowerOnly: requireLower,
           legs: legs,
           requesterGroupId: reqGroup,
-          guardFrontReserve: !priority,
-          preferFront: preferFront,
+          guardLowerReserve: !priority,
+          preferLower: preferLower,
           allowStrangerShare: allowStrangerShare,
         );
         if (halfDouble != null) {
@@ -860,7 +863,7 @@ class SeatingEngine {
             reason: _sofaReason(
               reasonTag,
               priority: priority,
-              forward: state.isForwardSofa(busId, halfDouble.seatId!),
+              lower: state.isLowerSofa(busId, halfDouble.seatId!),
               detail: 'single on half of a Double Sofa',
             ),
           ));
@@ -874,10 +877,10 @@ class SeatingEngine {
           busId,
           type: SeatType.doubleSofa,
           position: line.position,
-          frontOnly: requireFront,
+          lowerOnly: requireLower,
           legs: legs,
-          guardFrontReserve: !priority,
-          preferFront: preferFront,
+          guardLowerReserve: !priority,
+          preferLower: preferLower,
         );
         if (whole != null) {
           // A doubleSofa cell = two berths held by one passenger. One reason
@@ -885,7 +888,7 @@ class SeatingEngine {
           final wholeReason = _sofaReason(
             reasonTag,
             priority: priority,
-            forward: state.isForwardSofa(busId, whole.seatId!),
+            lower: state.isLowerSofa(busId, whole.seatId!),
             detail:
                 'type match: ${seatTypeLabel(SeatType.doubleSofa, whole.position)} (whole)',
           );
@@ -916,36 +919,36 @@ class SeatingEngine {
               busId,
               type: SeatType.singleSofa,
               position: null,
-              frontOnly: requireFront,
+              lowerOnly: requireLower,
               legs: legs,
-              guardFrontReserve: !priority,
-              preferFront: preferFront,
+              guardLowerReserve: !priority,
+              preferLower: preferLower,
             ) ??
             state.takeHalfDouble(busId,
                 position: null,
-                frontOnly: requireFront,
+                lowerOnly: requireLower,
                 legs: legs,
                 requesterGroupId: reqGroup,
-                guardFrontReserve: !priority,
-                preferFront: preferFront,
+                guardLowerReserve: !priority,
+                preferLower: preferLower,
                 allowStrangerShare: allowStrangerShare);
         if (first == null) return null;
         final second = state.takeFreeCell(
               busId,
               type: SeatType.singleSofa,
               position: null,
-              frontOnly: requireFront,
+              lowerOnly: requireLower,
               legs: legs,
-              guardFrontReserve: !priority,
-              preferFront: preferFront,
+              guardLowerReserve: !priority,
+              preferLower: preferLower,
             ) ??
             state.takeHalfDouble(busId,
                 position: null,
-                frontOnly: requireFront,
+                lowerOnly: requireLower,
                 legs: legs,
                 requesterGroupId: reqGroup,
-                guardFrontReserve: !priority,
-                preferFront: preferFront,
+                guardLowerReserve: !priority,
+                preferLower: preferLower,
                 allowStrangerShare: allowStrangerShare);
         if (second == null) {
           // Only one single available — can't satisfy a double line by
@@ -964,7 +967,7 @@ class SeatingEngine {
           reason: _sofaReason(
             reasonTag,
             priority: priority,
-            forward: state.isForwardSofa(busId, first.seatId!),
+            lower: state.isLowerSofa(busId, first.seatId!),
             detail: 'cross-fill: 2 singles satisfy a Double Sofa line',
           ),
         ));
@@ -975,7 +978,7 @@ class SeatingEngine {
           reason: _sofaReason(
             reasonTag,
             priority: priority,
-            forward: state.isForwardSofa(busId, second.seatId!),
+            lower: state.isLowerSofa(busId, second.seatId!),
             detail: 'cross-fill: 2 singles satisfy a Double Sofa line',
           ),
         ));
@@ -1049,16 +1052,16 @@ class SeatingEngine {
       }
     }
 
-    // A priority passenger who got seated but not in a front sofa.
+    // A priority passenger who got seated but not on a lower berth.
     if (priority &&
         _remaining(pending) == 0 &&
-        !state.hasFrontSofa(passenger.id)) {
+        !state.hasLowerSofa(passenger.id)) {
       exceptions.add(SeatingException(
-        type: SeatingExceptionType.priorityNoFrontSeat,
+        type: SeatingExceptionType.priorityNoLowerBerth,
         passengerId: passenger.id,
         message:
-            'Approved-priority ${_name(passenger)} was seated, but no front '
-            'sofa seat was available.',
+            'Approved-priority ${_name(passenger)} was seated, but no lower '
+            'berth was available.',
       ));
     }
   }
@@ -1189,7 +1192,7 @@ class SeatingEngine {
 
   /// Count the SOFA berths a passenger's pending lines still need (doubleSofa
   /// = 2 berths, singleSofa = 1; seaters excluded). Used to size the
-  /// front-sofa reserve for approved-priority demand.
+  /// lower-sofa reserve for approved-priority demand.
   static int _sofaBerths(List<_PendingLine> pending) {
     var n = 0;
     for (final l in pending) {
@@ -1238,15 +1241,15 @@ class SeatingEngine {
   }
 
   /// Build a sofa placement reason. When an approved-priority passenger lands
-  /// in a forward (premium) sofa seat, the rationale reads
-  /// "`prefix` forward seat"; otherwise it keeps the type-match [detail].
+  /// on a lower berth, the rationale reads "`prefix` lower berth"; otherwise it
+  /// keeps the type-match [detail].
   static String _sofaReason(
     String reasonTag, {
     required bool priority,
-    required bool forward,
+    required bool lower,
     required String detail,
   }) {
-    if (priority && forward) return '$reasonTag forward seat';
+    if (priority && lower) return '$reasonTag lower berth';
     return '$reasonTag $detail';
   }
 
@@ -1330,17 +1333,11 @@ class _BusState {
   /// the same cell without ever sitting together, so they never trigger review.
   final Map<String, List<_Occupant>> occupantGroupsBySeat;
 
-  /// True when this bus has at least one agent-marked forward sofa seat. When
-  /// set, the FORWARD zone is exactly those flagged sofa cells; when false, the
-  /// engine falls back to the lowest [SeatingEngine.frontRowCount] rows.
-  final bool _hasForwardFlag;
-
   _BusState(this.bus)
       : cells = {},
         freeGoBySeat = {},
         freeReturnBySeat = {},
-        occupantGroupsBySeat = {},
-        _hasForwardFlag = _detectForwardFlag(bus) {
+        occupantGroupsBySeat = {} {
     final layout = bus.layout;
     if (layout == null) return;
     for (final c in layout.grid) {
@@ -1353,15 +1350,15 @@ class _BusState {
   }
 
   _BusState._clone(this.bus, this.cells, Map<String, int> go,
-      Map<String, int> ret, Map<String, List<_Occupant>> occ, this._hasForwardFlag)
+      Map<String, int> ret, Map<String, List<_Occupant>> occ)
       : freeGoBySeat = Map<String, int>.from(go),
         freeReturnBySeat = Map<String, int>.from(ret),
         occupantGroupsBySeat = {
           for (final e in occ.entries) e.key: List<_Occupant>.from(e.value),
         };
 
-  _BusState fork() => _BusState._clone(bus, cells, freeGoBySeat,
-      freeReturnBySeat, occupantGroupsBySeat, _hasForwardFlag);
+  _BusState fork() => _BusState._clone(
+      bus, cells, freeGoBySeat, freeReturnBySeat, occupantGroupsBySeat);
 
   /// The free-berth map for one [leg].
   Map<String, int> _legMap(TripLeg leg) =>
@@ -1441,30 +1438,15 @@ class _BusState {
 
   int get rows => bus.layout?.rows ?? 0;
 
-  /// True when this bus has any agent-marked forward sofa cell. A forward flag
-  /// on a seater is ignored — the forward/premium zone is a sofa concept.
-  static bool _detectForwardFlag(Bus bus) {
-    final layout = bus.layout;
-    if (layout == null) return false;
-    for (final c in layout.grid) {
-      if (c.hasSeat &&
-          c.forward &&
-          (c.seatType == SeatType.singleSofa ||
-              c.seatType == SeatType.doubleSofa)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Whether [c] is in the bus's FORWARD (priority-preferred / premium) zone.
+  /// Whether [c] is a LOWER berth — the priority-preferred zone.
   ///
-  /// If the agent flagged any forward sofa seat on this bus, the forward zone is
-  /// exactly the flagged sofa cells. Otherwise it falls back to the historical
-  /// heuristic: any cell in the lowest [SeatingEngine.frontRowCount] rows.
-  bool isFront(SeatCell c) => _hasForwardFlag
-      ? c.forward && isSofa(c.seatType)
-      : c.row < SeatingEngine.frontRowCount;
+  /// Approved-priority (elderly / sick) passengers are seated on lower berths
+  /// first so they need not climb to an upper berth. The lower/upper split is a
+  /// sleeper-sofa concept: only sofa cells carry a [SeatPosition]; seaters have
+  /// `null` position and are never "lower berths" for this purpose. The agent's
+  /// `forward`/premium flag is unrelated to this rule (it drives pricing only).
+  bool isLowerBerth(SeatCell c) =>
+      isSofa(c.seatType) && c.position == SeatPosition.lower;
 
   bool isSofa(SeatType? t) =>
       t == SeatType.singleSofa || t == SeatType.doubleSofa;
@@ -1481,20 +1463,20 @@ class _BusState {
     return n;
   }
 
-  /// Free sofa berths in the front rows — the priority budget. Leg-aware as
+  /// Free LOWER-berth sofa berths — the priority budget. Leg-aware as
   /// [freeBerths]; [legs] omitted means berths free on both legs.
-  int freeFrontSofa([List<TripLeg>? legs]) {
+  int freeLowerSofa([List<TripLeg>? legs]) {
     final ls = legs ?? const [TripLeg.go, TripLeg.ret];
     var n = 0;
     for (final e in cells.entries) {
       final c = e.value;
-      if (!isSofa(c.seatType) || !isFront(c)) continue;
+      if (!isSofa(c.seatType) || !isLowerBerth(c)) continue;
       n += freeForLegs(e.key, ls);
     }
     return n;
   }
 
-  /// Seats ordered row-major (front first) then by seatId for stability.
+  /// Seats ordered row-major (low row first) then by seatId for stability.
   List<SeatCell> _orderedSeats() {
     final list = cells.values.toList()
       ..sort((a, b) {
@@ -1524,15 +1506,15 @@ class _PlanState {
   final Map<String, _BusState> _busStates;
   final Map<String, List<SeatAssignment>> assignmentsByPassenger;
 
-  /// passengerId -> set of "busId:seatId" cells where they sit on a FRONT sofa.
-  final Map<String, bool> _hasFrontSofa;
+  /// passengerId -> whether they hold at least one LOWER-berth sofa.
+  final Map<String, bool> _hasLowerSofa;
 
-  /// How many FRONT sofa berths (across all buses) must be kept free for
+  /// How many LOWER-berth sofa berths (across all buses) must be kept free for
   /// still-unplaced approved-priority demand. Non-priority placements may only
-  /// dip into front sofas once doing so would NOT drop global free front-sofa
-  /// capacity below this reserve. Goal 1 (priority front) thus dominates goal 2
-  /// (group adjacency) without any wall-clock/random input.
-  int frontSofaReserve = 0;
+  /// dip into lower berths once doing so would NOT drop global free lower-sofa
+  /// capacity below this reserve. Goal 1 (priority → lower berth) thus dominates
+  /// goal 2 (group adjacency) without any wall-clock/random input.
+  int lowerSofaReserve = 0;
 
   _PlanState(List<Bus> buses)
       : buses = (buses.toList()..sort((a, b) => a.id.compareTo(b.id))),
@@ -1540,13 +1522,13 @@ class _PlanState {
           for (final b in buses) b.id: _BusState(b),
         },
         assignmentsByPassenger = {},
-        _hasFrontSofa = {};
+        _hasLowerSofa = {};
 
   _PlanState._clone(
     this.buses,
     this._busStates,
     this.assignmentsByPassenger,
-    this._hasFrontSofa,
+    this._hasLowerSofa,
   );
 
   /// A deep-enough copy for trial group placement: bus berth counts and
@@ -1559,8 +1541,8 @@ class _PlanState {
         for (final e in assignmentsByPassenger.entries)
           e.key: List<SeatAssignment>.from(e.value)
       },
-      Map<String, bool>.from(_hasFrontSofa),
-    )..frontSofaReserve = frontSofaReserve;
+      Map<String, bool>.from(_hasLowerSofa),
+    )..lowerSofaReserve = lowerSofaReserve;
   }
 
   /// Copy a committed trial's state back into this one.
@@ -1571,10 +1553,10 @@ class _PlanState {
     assignmentsByPassenger
       ..clear()
       ..addAll(other.assignmentsByPassenger);
-    _hasFrontSofa
+    _hasLowerSofa
       ..clear()
-      ..addAll(other._hasFrontSofa);
-    frontSofaReserve = other.frontSofaReserve;
+      ..addAll(other._hasLowerSofa);
+    lowerSofaReserve = other.lowerSofaReserve;
   }
 
   void seedReserved() {
@@ -1604,8 +1586,8 @@ class _PlanState {
       // it (and disjoint-leg reuse still passes).
       bs.recordOccupant(a.seatId, groupId, legs);
     }
-    if (cell != null && bs.isSofa(cell.seatType) && bs.isFront(cell)) {
-      _hasFrontSofa[passengerId] = true;
+    if (cell != null && bs.isSofa(cell.seatType) && bs.isLowerBerth(cell)) {
+      _hasLowerSofa[passengerId] = true;
     }
   }
 
@@ -1617,71 +1599,72 @@ class _PlanState {
   int freeBerths(String busId, [List<TripLeg>? legs]) =>
       _busStates[busId]?.freeBerths(legs) ?? 0;
 
-  int freeFrontSofa(String busId, [List<TripLeg>? legs]) =>
-      _busStates[busId]?.freeFrontSofa(legs) ?? 0;
+  int freeLowerSofa(String busId, [List<TripLeg>? legs]) =>
+      _busStates[busId]?.freeLowerSofa(legs) ?? 0;
 
-  /// Free FRONT sofa berths across every bus for a passenger needing [legs]
-  /// (omit for the conservative both-legs view that sizes [frontSofaReserve]).
-  int totalFreeFrontSofa([List<TripLeg>? legs]) =>
-      _busStates.values.fold(0, (s, bs) => s + bs.freeFrontSofa(legs));
+  /// Free LOWER-berth sofa berths across every bus for a passenger needing
+  /// [legs] (omit for the conservative both-legs view that sizes
+  /// [lowerSofaReserve]).
+  int totalFreeLowerSofa([List<TripLeg>? legs]) =>
+      _busStates.values.fold(0, (s, bs) => s + bs.freeLowerSofa(legs));
 
-  /// True when consuming ONE more front-sofa berth (for a non-priority
+  /// True when consuming ONE more lower-berth sofa (for a non-priority
   /// placement needing [legs]) would NOT eat into the reserve held for
-  /// approved-priority demand. The check is LEG-AWARE: it measures front-sofa
+  /// approved-priority demand. The check is LEG-AWARE: it measures lower-sofa
   /// capacity on the leg(s) actually being taken, so a one-way passenger may
-  /// still claim the free leg of a front sofa whose OTHER leg is occupied — that
-  /// leg was never part of the priority reserve. A non-priority sofa take
-  /// consults this before claiming a front cell, so priority passengers keep
-  /// getting the front seats first on the legs that are genuinely contended.
-  bool _frontTakeAllowed(List<TripLeg> legs) =>
-      totalFreeFrontSofa(legs) - 1 >= frontSofaReserve;
+  /// still claim the free leg of a lower berth whose OTHER leg is occupied —
+  /// that leg was never part of the priority reserve. A non-priority sofa take
+  /// consults this before claiming a lower cell, so priority passengers keep
+  /// getting the lower berths first on the legs that are genuinely contended.
+  bool _lowerTakeAllowed(List<TripLeg> legs) =>
+      totalFreeLowerSofa(legs) - 1 >= lowerSofaReserve;
 
-  bool hasFrontSofa(String passengerId) =>
-      _hasFrontSofa[passengerId] ?? false;
+  bool hasLowerSofa(String passengerId) =>
+      _hasLowerSofa[passengerId] ?? false;
 
-  /// True when [seatId] on [busId] is a sofa cell inside the bus's FORWARD
-  /// (priority-preferred / premium) zone — used to phrase placement reasons.
-  bool isForwardSofa(String busId, String seatId) {
+  /// True when [seatId] on [busId] is a LOWER-berth sofa cell (the
+  /// priority-preferred zone) — used to phrase placement reasons.
+  bool isLowerSofa(String busId, String seatId) {
     final bs = _busStates[busId];
     final cell = bs?.cells[seatId];
     if (bs == null || cell == null) return false;
-    return bs.isSofa(cell.seatType) && bs.isFront(cell);
+    return bs.isSofa(cell.seatType) && bs.isLowerBerth(cell);
   }
 
   /// Take a free cell of an exact [type] (+[position] when given) on [busId].
-  /// When [frontOnly], only forward-zone cells qualify. Returns null if none.
+  /// When [lowerOnly], only LOWER-berth cells qualify. Returns null if none.
   /// For a doubleSofa, "free" means BOTH berths are still free (a whole double).
-  /// When [guardFrontReserve] is set (a NON-priority sofa placement), a FORWARD
-  /// sofa cell is skipped unless taking it would still leave enough free forward
-  /// sofas for outstanding approved-priority demand ([frontSofaReserve]).
-  /// When [preferFront] is set (a priority placement that is NOT already
-  /// [frontOnly]), forward-zone cells are tried first and only then the rest —
-  /// so an approved-priority passenger lands on an agent-marked forward seat
-  /// even when it sits on a higher row than an ordinary seat.
+  /// When [guardLowerReserve] is set (a NON-priority sofa placement), a LOWER
+  /// berth is skipped unless taking it would still leave enough free lower
+  /// berths for outstanding approved-priority demand ([lowerSofaReserve]).
+  /// When [preferLower] is set (a priority placement that is NOT already
+  /// [lowerOnly]), lower-berth cells are tried first and only then the rest —
+  /// so an approved-priority passenger lands on a lower berth whenever one is
+  /// free, falling back to an upper berth only if none is.
   SeatCell? takeFreeCell(
     String busId, {
     required SeatType type,
     required SeatPosition? position,
-    required bool frontOnly,
+    required bool lowerOnly,
     required List<TripLeg> legs,
-    bool guardFrontReserve = false,
-    bool preferFront = false,
+    bool guardLowerReserve = false,
+    bool preferLower = false,
   }) {
     final bs = _busStates[busId];
     if (bs == null) return null;
     final wholeNeeded = type == SeatType.doubleSofa ? 2 : 1;
-    // When preferring forward seats, sweep forward cells first, then the rest.
-    // Otherwise a single sweep with no forward gate.
-    for (final forwardPass in preferFront ? [true, false] : [false]) {
+    // When preferring lower berths, sweep lower cells first, then the rest.
+    // Otherwise a single sweep with no lower-berth gate.
+    for (final lowerPass in preferLower ? [true, false] : [false]) {
       for (final c in bs._orderedSeats()) {
         if (c.seatType != type) continue;
         if (position != null && c.position != position) continue;
-        if (frontOnly && !bs.isFront(c)) continue;
-        if (preferFront && forwardPass && !bs.isFront(c)) continue;
-        if (guardFrontReserve &&
+        if (lowerOnly && !bs.isLowerBerth(c)) continue;
+        if (preferLower && lowerPass && !bs.isLowerBerth(c)) continue;
+        if (guardLowerReserve &&
             bs.isSofa(c.seatType) &&
-            bs.isFront(c) &&
-            !_frontTakeAllowed(legs)) {
+            bs.isLowerBerth(c) &&
+            !_lowerTakeAllowed(legs)) {
           continue;
         }
         // Leg-aware: the cell is takeable only if every leg this passenger
@@ -1697,7 +1680,7 @@ class _PlanState {
 
   /// Take ONE berth of a doubleSofa cell (a half-double) on [busId], matching
   /// [position] when given. Used for single-on-double and cross-fill.
-  /// [preferFront] behaves as in [takeFreeCell]; [legs] gates leg-aware reuse.
+  /// [preferLower] behaves as in [takeFreeCell]; [legs] gates leg-aware reuse.
   ///
   /// STRANGER-SHARE RULE: a half-double berth is granted only when the cell is
   /// EMPTY or every existing holder shares [requesterGroupId] (a non-null group
@@ -1710,23 +1693,23 @@ class _PlanState {
   SeatCell? takeHalfDouble(
     String busId, {
     required SeatPosition? position,
-    required bool frontOnly,
+    required bool lowerOnly,
     required List<TripLeg> legs,
     String? requesterGroupId,
-    bool guardFrontReserve = false,
-    bool preferFront = false,
+    bool guardLowerReserve = false,
+    bool preferLower = false,
     bool allowStrangerShare = false,
     List<bool>? sawBlockedShare,
   }) {
     final bs = _busStates[busId];
     if (bs == null) return null;
-    for (final forwardPass in preferFront ? [true, false] : [false]) {
+    for (final lowerPass in preferLower ? [true, false] : [false]) {
       for (final c in bs._orderedSeats()) {
         if (c.seatType != SeatType.doubleSofa) continue;
         if (position != null && c.position != position) continue;
-        if (frontOnly && !bs.isFront(c)) continue;
-        if (preferFront && forwardPass && !bs.isFront(c)) continue;
-        if (guardFrontReserve && bs.isFront(c) && !_frontTakeAllowed(legs)) {
+        if (lowerOnly && !bs.isLowerBerth(c)) continue;
+        if (preferLower && lowerPass && !bs.isLowerBerth(c)) continue;
+        if (guardLowerReserve && bs.isLowerBerth(c) && !_lowerTakeAllowed(legs)) {
           continue;
         }
         if (bs.freeForLegs(c.seatId!, legs) >= 1) {
@@ -1749,7 +1732,7 @@ class _PlanState {
     return null;
   }
 
-  /// Record a placed berth for a passenger and update front-sofa tracking.
+  /// Record a placed berth for a passenger and update lower-sofa tracking.
   ///
   /// [groupId] is the placing passenger's group (null = ungrouped) and [legs]
   /// the legs they travel. For a doubleSofa cell both are recorded as the
@@ -1767,8 +1750,8 @@ class _PlanState {
       if (cell.seatType == SeatType.doubleSofa) {
         bs.recordOccupant(seatId, groupId, legs);
       }
-      if (bs.isSofa(cell.seatType) && bs.isFront(cell)) {
-        _hasFrontSofa[passengerId] = true;
+      if (bs.isSofa(cell.seatType) && bs.isLowerBerth(cell)) {
+        _hasLowerSofa[passengerId] = true;
       }
     }
   }

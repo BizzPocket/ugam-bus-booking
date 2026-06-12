@@ -41,9 +41,10 @@ void main() {
       expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 10);
     });
 
-    test('unpaired single rides the balcony aisle, not a dangling lane row', () {
+    test('unpaired single joins the last row as a full-width back bench', () {
       // 37 seats, 13 singles (odd) => 12 doubles. The 13th single can't pair in
-      // the lane, so it relocates to the balcony aisle (the SU6/SL6/SL7 case).
+      // the lane, so it rides the aisle column of the LAST seat row — merged into
+      // a full-width back bench, never an appended aisle-only line.
       final l = BusLayout.generate(
         busType: BusType.sleeper,
         totalSeats: 37,
@@ -55,12 +56,18 @@ void main() {
           c.seatType == SeatType.singleSofa && c.col == SeatGridCols.aisle);
       expect(laneSingles.length, 12, reason: 'lanes hold an even count');
       expect(aisleSingles.length, 1, reason: 'one orphan in the aisle');
-      // The orphan sits in the very last row (the balcony), lower slot.
+      // The orphan sits in the very last row (the back bench), lower slot.
       final orphan = aisleSingles.single;
       expect(orphan.row, l.rows - 1);
       expect(orphan.position, SeatPosition.lower);
       expect(orphan.seatId, 'SL7');
       expect(l.hasBalcony, isTrue);
+      // The bench is a real full-width row: the orphan shares its line with lane
+      // berths rather than dangling alone on an appended row.
+      final benchRowCells =
+          l.grid.where((c) => c.row == orphan.row && c.hasSeat);
+      expect(benchRowCells.any((c) => c.col != SeatGridCols.aisle), isTrue,
+          reason: 'back bench is a full row, not an aisle-only line');
       expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 13);
       expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 12);
       expect(l.totalSeats, 37);
@@ -108,6 +115,13 @@ void main() {
       expect(pair.lower.col, SeatGridCols.aisle);
       expect(pair.upper.position, SeatPosition.upper);
       expect(pair.lower.position, SeatPosition.lower);
+      // The pair shares the last row with lane berths — a full-width back bench,
+      // not a dedicated aisle-only line.
+      expect(
+        l.grid.any((c) =>
+            c.row == l.rows - 1 && c.hasSeat && c.col != SeatGridCols.aisle),
+        isTrue,
+      );
       // 20 lane berths + 2 balcony berths.
       expect(l.totalSeats, 22);
     });

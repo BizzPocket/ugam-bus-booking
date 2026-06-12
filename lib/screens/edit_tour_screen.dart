@@ -8,6 +8,7 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/time_format.dart';
 
 class EditTourScreen extends StatefulWidget {
   final String tourId;
@@ -24,10 +25,13 @@ class _EditTourScreenState extends State<EditTourScreen> {
   late final TextEditingController _priceCtrl;
   late final TextEditingController _descCtrl;
   DateTime? _departureDate;
+  TimeOfDay? _departureTime;
   DateTime? _returnDate;
+  TimeOfDay? _returnTime;
   final _formKey = GlobalKey<FormState>();
   bool _saving = false;
   Timer? _fieldDebounce;
+  String? _dateError;
 
   // Originals captured at initState — used to detect dirty state and
   // to power the "Cancel changes" action.
@@ -37,7 +41,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
   late final String _origPrice;
   late final String _origDesc;
   DateTime? _origDeparture;
+  TimeOfDay? _origDepartureTime;
   DateTime? _origReturn;
+  TimeOfDay? _origReturnTime;
 
   @override
   void initState() {
@@ -49,7 +55,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
     _origPrice = tour != null ? tour.pricePerSeat.toStringAsFixed(0) : '';
     _origDesc = tour?.description ?? '';
     _origDeparture = tour?.departureDate;
+    _origDepartureTime = timeOfDayFromHhmm(tour?.departureTime);
     _origReturn = tour?.returnDate;
+    _origReturnTime = timeOfDayFromHhmm(tour?.returnTime);
 
     _titleCtrl = TextEditingController(text: _origTitle);
     _fromCtrl = TextEditingController(text: _origFrom);
@@ -57,7 +65,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
     _priceCtrl = TextEditingController(text: _origPrice);
     _descCtrl = TextEditingController(text: _origDesc);
     _departureDate = _origDeparture;
+    _departureTime = _origDepartureTime;
     _returnDate = _origReturn;
+    _returnTime = _origReturnTime;
 
     _titleCtrl.addListener(_onFieldChanged);
     _fromCtrl.addListener(_onFieldChanged);
@@ -96,7 +106,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
     if (_priceCtrl.text != _origPrice) return true;
     if (_descCtrl.text != _origDesc) return true;
     if (_departureDate != _origDeparture) return true;
+    if (_departureTime != _origDepartureTime) return true;
     if (_returnDate != _origReturn) return true;
+    if (_returnTime != _origReturnTime) return true;
     return false;
   }
 
@@ -108,7 +120,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
       _priceCtrl.text = _origPrice;
       _descCtrl.text = _origDesc;
       _departureDate = _origDeparture;
+      _departureTime = _origDepartureTime;
       _returnDate = _origReturn;
+      _returnTime = _origReturnTime;
     });
   }
 
@@ -117,8 +131,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
         ? (_returnDate ?? _departureDate ?? DateTime.now())
         : (_departureDate ?? DateTime.now());
     final first = isReturn
-        ? (_departureDate ??
-            DateTime.now().subtract(const Duration(days: 365)))
+        ? (_departureDate ?? DateTime.now().subtract(const Duration(days: 365)))
         : DateTime.now().subtract(const Duration(days: 365));
 
     final picked = await showDatePicker(
@@ -133,9 +146,28 @@ class _EditTourScreenState extends State<EditTourScreen> {
           _returnDate = picked;
         } else {
           _departureDate = picked;
+          _dateError = null;
           if (_returnDate != null && _returnDate!.isBefore(picked)) {
             _returnDate = null;
+            _returnTime = null;
           }
+        }
+      });
+    }
+  }
+
+  Future<void> _pickTime(bool isReturn) async {
+    final current = isReturn ? _returnTime : _departureTime;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: current ?? const TimeOfDay(hour: 9, minute: 0),
+    );
+    if (picked != null) {
+      setState(() {
+        if (isReturn) {
+          _returnTime = picked;
+        } else {
+          _departureTime = picked;
         }
       });
     }
@@ -144,7 +176,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_departureDate == null) {
-      AppSnackBar.warning(tr('edit_tour.error_select_start_date'));
+      setState(() => _dateError = tr('edit_tour.error_select_start_date'));
       return;
     }
 
@@ -156,10 +188,17 @@ class _EditTourScreenState extends State<EditTourScreen> {
         fromCity: _fromCtrl.text.trim(),
         toCity: _toCtrl.text.trim(),
         departureDate: _departureDate!,
+        departureTime: _departureTime != null
+            ? hhmmFromTimeOfDay(_departureTime!)
+            : null,
         returnDate: _returnDate,
+        returnTime: (_returnDate != null && _returnTime != null)
+            ? hhmmFromTimeOfDay(_returnTime!)
+            : null,
         pricePerSeat: double.tryParse(_priceCtrl.text) ?? 0,
-        description:
-            _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+        description: _descCtrl.text.trim().isEmpty
+            ? null
+            : _descCtrl.text.trim(),
       );
       AppSnackBar.success(tr('edit_tour.snack_updated'));
       Get.back();
@@ -180,16 +219,13 @@ class _EditTourScreenState extends State<EditTourScreen> {
     if (tour == null) return;
     final buses = tour.buses;
     if (buses.length < 2) {
-      AppSnackBar.warning(
-        'Add at least two buses to copy a price sheet between them.',
-      );
+      AppSnackBar.warning(tr('edit_tour.price_sheet.need_two_buses'));
       return;
     }
 
-    final c = UgamColors.of(context);
     final source = await UgamSheet.show<Bus>(
       context,
-      title: 'Apply price sheet',
+      title: tr('edit_tour.price_sheet.sheet_title'),
       builder: (sheetCtx) {
         final sc = UgamColors.of(sheetCtx);
         return Column(
@@ -197,11 +233,12 @@ class _EditTourScreenState extends State<EditTourScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Pick the bus whose prices become the template. Its base price, '
-              'per-type overrides, rear zone, and price bands copy to every '
-              'other bus on this tour.',
-              style: UgamText.body
-                  .copyWith(color: sc.ink2, fontSize: 13, height: 1.5),
+              tr('edit_tour.price_sheet.sheet_body'),
+              style: UgamText.body.copyWith(
+                color: sc.ink2,
+                fontSize: 13,
+                height: 1.5,
+              ),
             ),
             const SizedBox(height: UgamSpacing.lg),
             for (final b in buses) ...[
@@ -224,14 +261,15 @@ class _EditTourScreenState extends State<EditTourScreen> {
                           children: [
                             Text(
                               b.name,
-                              style: UgamText.bodyStrong
-                                  .copyWith(color: sc.ink, fontSize: 14),
+                              style: UgamText.bodyStrong.copyWith(
+                                color: sc.ink,
+                                fontSize: 14,
+                              ),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               _priceSummary(b),
-                              style:
-                                  UgamText.caption.copyWith(color: sc.ink2),
+                              style: UgamText.caption.copyWith(color: sc.ink2),
                             ),
                           ],
                         ),
@@ -251,29 +289,18 @@ class _EditTourScreenState extends State<EditTourScreen> {
     if (source == null || !mounted) return;
 
     final targets = buses.where((b) => b.id != source.id).toList();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: c.card,
-        title: const Text('Copy price sheet?'),
-        content: Text(
-          'Copy ${source.name}\'s prices to ${targets.length} other '
-          'bus${targets.length == 1 ? '' : 'es'}? This overwrites their '
-          'current pricing.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Copy'),
-          ),
-        ],
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('edit_tour.price_sheet.confirm_title'),
+      message: tr(
+        targets.length == 1
+            ? 'edit_tour.price_sheet.confirm_body_one'
+            : 'edit_tour.price_sheet.confirm_body_other',
+        namedArgs: {'name': source.name, 'count': '${targets.length}'},
       ),
+      confirmLabel: tr('edit_tour.price_sheet.confirm_copy'),
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
     setState(() => _saving = true);
     try {
@@ -291,11 +318,15 @@ class _EditTourScreenState extends State<EditTourScreen> {
       }
       if (!mounted) return;
       AppSnackBar.success(
-        'Copied ${source.name}\'s price sheet to ${targets.length} '
-        'bus${targets.length == 1 ? '' : 'es'}.',
+        tr(
+          targets.length == 1
+              ? 'edit_tour.price_sheet.copied_one'
+              : 'edit_tour.price_sheet.copied_other',
+          namedArgs: {'name': source.name, 'count': '${targets.length}'},
+        ),
       );
     } catch (_) {
-      if (mounted) AppSnackBar.error('Could not copy the price sheet.');
+      if (mounted) AppSnackBar.error(tr('edit_tour.price_sheet.copy_failed'));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -303,9 +334,23 @@ class _EditTourScreenState extends State<EditTourScreen> {
 
   /// Short price summary for a bus row in the source picker.
   String _priceSummary(Bus b) {
-    final parts = <String>['₹${b.pricePerSeat.toStringAsFixed(0)}/seat'];
+    final parts = <String>[
+      tr(
+        'edit_tour.price_sheet.per_seat',
+        namedArgs: {'price': b.pricePerSeat.toStringAsFixed(0)},
+      ),
+    ];
     final bands = b.priceBands.length + (b.rearRows > 0 ? 1 : 0);
-    if (bands > 0) parts.add('$bands band${bands == 1 ? '' : 's'}');
+    if (bands > 0) {
+      parts.add(
+        tr(
+          bands == 1
+              ? 'edit_tour.price_sheet.band_count_one'
+              : 'edit_tour.price_sheet.band_count_other',
+          namedArgs: {'count': '$bands'},
+        ),
+      );
+    }
     return parts.join(' · ');
   }
 
@@ -317,42 +362,40 @@ class _EditTourScreenState extends State<EditTourScreen> {
     final bCount = tour.buses.length;
     final detailParts = <String>[
       '"${tour.title}"',
-      if (pCount > 0) '$pCount passenger${pCount == 1 ? '' : 's'}',
+      if (pCount > 0)
+        tr(
+          pCount == 1
+              ? 'edit_tour.delete.passengers_one'
+              : 'edit_tour.delete.passengers_other',
+          namedArgs: {'count': '$pCount'},
+        ),
       if (bCount > 0)
-        '$bCount bus${bCount == 1 ? '' : 'es'} will be unlinked',
+        tr(
+          bCount == 1
+              ? 'edit_tour.delete.buses_unlinked_one'
+              : 'edit_tour.delete.buses_unlinked_other',
+          namedArgs: {'count': '$bCount'},
+        ),
     ];
     final detail = detailParts.join(' · ');
 
-    final c = UgamColors.of(context);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: c.card,
-        title: const Text('Delete this tour?'),
-        content: Text(
-          'This will permanently delete $detail and every booking '
-          'request tied to it. This cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: TextButton.styleFrom(foregroundColor: c.danger),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('edit_tour.delete.title'),
+      message: tr('edit_tour.delete.message', namedArgs: {'detail': detail}),
+      confirmLabel: tr('app.action.delete'),
+      destructive: true,
+      confirmIcon: Icons.delete_outline_rounded,
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
     setState(() => _saving = true);
     try {
       await Get.find<TourController>().deleteTour(widget.tourId);
       if (!mounted) return;
-      AppSnackBar.success('Tour "${tour.title}" deleted.');
+      AppSnackBar.success(
+        tr('edit_tour.delete.deleted', namedArgs: {'title': tour.title}),
+      );
       Get.until((route) => route.isFirst);
     } catch (_) {
       if (mounted) setState(() => _saving = false);
@@ -389,8 +432,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
-                      child: Icon(Icons.arrow_back_rounded,
-                          size: 19, color: c.ink),
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        size: 19,
+                        color: c.ink,
+                      ),
                     ),
                   ),
                   const SizedBox(width: UgamSpacing.md),
@@ -411,8 +457,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
-                      child: Icon(Icons.delete_outline_rounded,
-                          size: 19, color: c.danger),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 19,
+                        color: c.danger,
+                      ),
                     ),
                   ),
                 ],
@@ -461,8 +510,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
                             shape: BoxShape.circle,
                           ),
                           alignment: Alignment.center,
-                          child: Icon(Icons.arrow_downward_rounded,
-                              size: 14, color: c.accent),
+                          child: Icon(
+                            Icons.arrow_downward_rounded,
+                            size: 14,
+                            color: c.accent,
+                          ),
                         ),
                       ),
                       const SizedBox(height: UgamSpacing.xs),
@@ -473,7 +525,8 @@ class _EditTourScreenState extends State<EditTourScreen> {
                           Expanded(child: UgamInput(controller: _fromCtrl)),
                           Container(
                             margin: const EdgeInsets.symmetric(
-                                horizontal: UgamSpacing.sm + 2),
+                              horizontal: UgamSpacing.sm + 2,
+                            ),
                             width: 30,
                             height: 30,
                             decoration: BoxDecoration(
@@ -481,8 +534,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
                               shape: BoxShape.circle,
                             ),
                             alignment: Alignment.center,
-                            child: Icon(Icons.arrow_forward_rounded,
-                                size: 14, color: c.accent),
+                            child: Icon(
+                              Icons.arrow_forward_rounded,
+                              size: 14,
+                              color: c.accent,
+                            ),
                           ),
                           Expanded(child: UgamInput(controller: _toCtrl)),
                         ],
@@ -494,41 +550,60 @@ class _EditTourScreenState extends State<EditTourScreen> {
                       style: UgamText.micro.copyWith(color: c.ink2),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
-                    if (MediaQuery.of(context).size.width < 400) ...[
-                      _DateField(
-                        c: c,
-                        hint: tr('create_tour.hint.start_date'),
-                        date: _departureDate,
-                        onTap: () => _pickDate(false),
-                      ),
-                      const SizedBox(height: UgamSpacing.sm),
-                      _DateField(
-                        c: c,
-                        hint: tr('create_tour.hint.end_date'),
-                        date: _returnDate,
-                        onTap: () => _pickDate(true),
-                      ),
-                    ] else ...[
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DateField(
-                              c: c,
-                              hint: tr('create_tour.hint.start_date'),
-                              date: _departureDate,
-                              onTap: () => _pickDate(false),
-                            ),
+                    // Departure date paired with its departure time.
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: _DateField(
+                            c: c,
+                            hint: tr('create_tour.hint.start_date'),
+                            date: _departureDate,
+                            onTap: () => _pickDate(false),
                           ),
-                          const SizedBox(width: UgamSpacing.md),
-                          Expanded(
-                            child: _DateField(
-                              c: c,
-                              hint: tr('create_tour.hint.end_date'),
-                              date: _returnDate,
-                              onTap: () => _pickDate(true),
-                            ),
+                        ),
+                        const SizedBox(width: UgamSpacing.sm),
+                        Expanded(
+                          flex: 2,
+                          child: _TimeField(
+                            c: c,
+                            hint: tr('create_tour.hint.departure_time'),
+                            time: _departureTime,
+                            onTap: () => _pickTime(false),
                           ),
-                        ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    // Return date paired with its return time (both optional).
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 3,
+                          child: _DateField(
+                            c: c,
+                            hint: tr('create_tour.hint.end_date'),
+                            date: _returnDate,
+                            onTap: () => _pickDate(true),
+                          ),
+                        ),
+                        const SizedBox(width: UgamSpacing.sm),
+                        Expanded(
+                          flex: 2,
+                          child: _TimeField(
+                            c: c,
+                            hint: tr('create_tour.hint.return_time'),
+                            time: _returnTime,
+                            onTap: () => _pickTime(true),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_dateError != null) ...[
+                      const SizedBox(height: UgamSpacing.xs),
+                      Text(
+                        _dateError!,
+                        style: UgamText.caption.copyWith(color: c.danger),
                       ),
                     ],
                     const SizedBox(height: UgamSpacing.lg),
@@ -571,7 +646,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
                   ],
                   Expanded(
                     child: UgamCTA(
-                      label: _saving ? 'Saving…' : tr('edit_tour.btn_save'),
+                      label: _saving
+                          ? tr('edit_tour.btn_saving')
+                          : tr('edit_tour.btn_save_changes'),
                       leadingIcon: Icons.save_rounded,
                       loading: _saving,
                       onPressed: _save,
@@ -617,7 +694,7 @@ class _CancelChangesPill extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              'Cancel changes',
+              tr('edit_tour.cancel_changes'),
               style: UgamText.titleS.copyWith(
                 color: enabled ? c.ink : c.ink3,
                 fontSize: 13,
@@ -661,8 +738,11 @@ class _ApplyPriceSheetCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(UgamRadius.stat),
               ),
               alignment: Alignment.center,
-              child: Icon(Icons.content_copy_rounded,
-                  size: 18, color: enabled ? c.accent : c.ink3),
+              child: Icon(
+                Icons.content_copy_rounded,
+                size: 18,
+                color: enabled ? c.accent : c.ink3,
+              ),
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -671,13 +751,15 @@ class _ApplyPriceSheetCard extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Apply price sheet to all buses',
-                    style: UgamText.bodyStrong
-                        .copyWith(color: c.ink, fontSize: 14),
+                    tr('edit_tour.price_sheet.card_title'),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 14,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Copy one bus\'s prices + bands to the rest',
+                    tr('edit_tour.price_sheet.card_subtitle'),
                     style: UgamText.caption.copyWith(color: c.ink2),
                   ),
                 ],
@@ -710,17 +792,21 @@ class _TourPreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shownTitle = title.isNotEmpty ? title : 'Untitled tour';
-    final from = fromCity.isNotEmpty ? fromCity : 'From city';
-    final to = toCity.isNotEmpty ? toCity : 'To city';
+    final shownTitle = title.isNotEmpty ? title : tr('edit_tour.preview.untitled');
+    final from = fromCity.isNotEmpty ? fromCity : tr('edit_tour.hint_from_city');
+    final to = toCity.isNotEmpty ? toCity : tr('edit_tour.hint_to_city');
     final route = '$from → $to';
     final dateText = departureDate != null
         ? DateFormat('MMM d, yyyy').format(departureDate!)
-        : 'Pick date';
+        : tr('edit_tour.preview.pick_date');
+    final setPriceLabel = tr('edit_tour.preview.set_price');
     final priceText = () {
       final n = double.tryParse(price);
-      if (n == null || n <= 0) return 'Set price';
-      return '₹${n.toStringAsFixed(0)}/seat';
+      if (n == null || n <= 0) return setPriceLabel;
+      return tr(
+        'edit_tour.preview.per_seat',
+        namedArgs: {'price': n.toStringAsFixed(0)},
+      );
     }();
 
     return UgamCard.plain(
@@ -733,9 +819,7 @@ class _TourPreviewCard extends StatelessWidget {
             child: SizedBox(
               width: 64,
               height: 64,
-              child: UgamBusBackdrop(
-                seed: 'preview-${fromCity}_$toCity',
-              ),
+              child: UgamBusBackdrop(seed: 'preview-${fromCity}_$toCity'),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
@@ -746,11 +830,11 @@ class _TourPreviewCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const UgamReqChip(label: 'PREVIEW'),
+                    UgamReqChip(label: tr('edit_tour.preview.eyebrow')),
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        'as customer sees it',
+                        tr('edit_tour.preview.as_customer'),
                         style: UgamText.caption.copyWith(color: c.ink3),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -793,7 +877,7 @@ class _TourPreviewCard extends StatelessWidget {
                       c: c,
                       icon: Icons.currency_rupee_rounded,
                       label: priceText,
-                      muted: priceText == 'Set price',
+                      muted: priceText == setPriceLabel,
                     ),
                   ],
                 ),
@@ -883,6 +967,54 @@ class _DateField extends StatelessWidget {
                 date != null ? DateFormat('MMM d, yyyy').format(date!) : hint,
                 style: UgamText.body.copyWith(
                   color: date != null ? c.ink : c.ink3,
+                  fontSize: 14,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tap target mirroring [_DateField] for a time-of-day. Shows a locale-aware
+/// time once picked, or the hint while unset.
+class _TimeField extends StatelessWidget {
+  final UgamColorSet c;
+  final String hint;
+  final TimeOfDay? time;
+  final VoidCallback onTap;
+
+  const _TimeField({
+    required this.c,
+    required this.hint,
+    required this.time,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        height: 54,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.access_time_rounded, size: 16, color: c.ink2),
+            const SizedBox(width: UgamSpacing.xs),
+            Expanded(
+              child: Text(
+                time != null ? time!.format(context) : hint,
+                style: UgamText.body.copyWith(
+                  color: time != null ? c.ink : c.ink3,
                   fontSize: 14,
                 ),
                 overflow: TextOverflow.ellipsis,

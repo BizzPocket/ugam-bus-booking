@@ -1,6 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,14 +8,13 @@ import 'package:uuid/uuid.dart';
 import '../controllers/user_controller.dart';
 import '../design/ugam.dart';
 import '../models/passenger.dart';
-import '../models/request_line.dart';
-import '../models/seat_type.dart';
 import '../models/tour.dart';
-import '../models/trip_type.dart';
+import '../routes/app_routes.dart';
 import '../services/customer_requests_store.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/phone_normalize.dart';
+import '../widgets/booking_capture_form.dart';
 
 /// Customer-side seat request form — image-5 fidelity.
 ///
@@ -32,9 +30,10 @@ import '../utils/phone_normalize.dart';
 /// card on top + single-column UgamInput fields + sticky bottom UgamCTA
 /// with passenger-count chip.
 ///
-/// Seat choices are intentionally limited to Double Sofa and Single Sofa.
-/// The agent decides upper/lower berth assignment later, so the customer
-/// doesn't have to think about it.
+/// The input collection (name/phone/trip-type/seat counts/note) is delegated
+/// to the shared [BookingCaptureForm] so every booking surface stays in sync.
+/// This screen owns only the Scaffold, the tour preview, the submit CTA, and
+/// the persistence + WhatsApp handoff.
 class CustomerBookingRequestScreen extends StatefulWidget {
   final Tour tour;
   final CustomerRequestEntry? existing;
@@ -54,69 +53,41 @@ class CustomerBookingRequestScreen extends StatefulWidget {
 
 class _CustomerBookingRequestScreenState
     extends State<CustomerBookingRequestScreen> {
-  final _name = TextEditingController();
-  final _phone = TextEditingController();
-  final _note = TextEditingController();
-
-  int _doubleSofa = 0;
-  int _singleSofa = 0;
-  TripType _tripType = TripType.roundTrip;
+  final _formKey = GlobalKey<BookingCaptureFormState>();
 
   bool _saving = false;
-  bool _showNote = false;
 
-  int get _totalSeats => _doubleSofa + _singleSofa;
+  // Pre-fill payload for edit mode (and the "Book" deep-link, which may pass an
+  // existing entry to resume). Built once in initState from [widget.existing].
+  BookingCaptureInitial? _initial;
 
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
     if (e != null) {
-      _name.text = e.customerName;
-      _phone.text = normalisePhone(e.customerPhone);
-      _doubleSofa = e.doubleSofa;
-      _singleSofa = e.singleSofa;
-      _tripType = e.tripType;
-      if (e.note != null && e.note!.isNotEmpty) {
-        _note.text = e.note!;
-        _showNote = true;
-      }
+      _initial = BookingCaptureInitial(
+        name: e.customerName,
+        phone: e.customerPhone,
+        tripType: e.tripType,
+        doubleSofa: e.doubleSofa,
+        singleSofa: e.singleSofa,
+        note: e.note,
+      );
     }
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _phone.dispose();
-    _note.dispose();
-    super.dispose();
   }
 
   // ─── BUSINESS LOGIC — PRESERVED VERBATIM ───────────────────────────
 
   Future<void> _submit() async {
-    final name = _name.text.trim();
-    final phone = _phone.text.trim();
+    // The shared form validates and surfaces inline field errors itself; it
+    // returns null when invalid, so we early-return without touching the network.
+    final data = _formKey.currentState?.collect();
+    if (data == null) return;
 
-    if (name.isEmpty) {
-      AppSnackBar.error(tr('customer_booking.err_name_required'));
-      return;
-    }
-    if (phone.length != 10) {
-      AppSnackBar.error(tr('customer_booking.err_phone_invalid'));
-      return;
-    }
-    if (!isPlausibleIndianMobile(phone)) {
-      AppSnackBar.error(tr('customer_booking.err_phone_fake'));
-      return;
-    }
-    if (_totalSeats == 0) {
-      AppSnackBar.error(tr('customer_booking.err_no_seats'));
-      return;
-    }
     final adminPhone = widget.tour.createdBy;
     final hasOrganiser = adminPhone != null && adminPhone.isNotEmpty;
-    final normalisedPhone = '+91${normalisePhone(phone)}';
+    final normalisedPhone = data.normalisedPhone;
 
     // Anti-abuse (no external verification): block a repeat pending request for
     // this trip from the same number, and rate-limit rapid-fire submissions.
@@ -130,27 +101,24 @@ class _CustomerBookingRequestScreenState
 
     setState(() => _saving = true);
     try {
-      final note = _note.text.trim();
       if (widget.isEditing) {
         await _submitEdit(
-          name: name,
-          normalisedPhone: normalisedPhone,
-          note: note,
+          data: data,
           adminPhone: adminPhone,
           hasOrganiser: hasOrganiser,
         );
       } else {
         await _submitCreate(
-          name: name,
-          rawPhone: phone,
-          normalisedPhone: normalisedPhone,
-          note: note,
+          data: data,
           adminPhone: adminPhone,
           hasOrganiser: hasOrganiser,
         );
         await _markSubmitted();
       }
-    } catch (_) {
+    } catch (e, st) {
+      // Surface the real cause in logs so a failing submit can be diagnosed
+      // (the customer still sees the friendly message).
+      debugPrint('customer booking submit failed — $e\n$st');
       AppSnackBar.error(tr('customer_booking.err_save_failed'));
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -166,10 +134,12 @@ class _CustomerBookingRequestScreenState
   Future<String?> _preflightCreate(String normalisedPhone) async {
     final mine = normalisePhone(normalisedPhone);
     final existing = await CustomerRequestsStore().list();
-    final duplicate = existing.any((e) =>
-        e.tourId == widget.tour.id &&
-        normalisePhone(e.customerPhone) == mine &&
-        e.status.toLowerCase() == 'pending');
+    final duplicate = existing.any(
+      (e) =>
+          e.tourId == widget.tour.id &&
+          normalisePhone(e.customerPhone) == mine &&
+          e.status.toLowerCase() == 'pending',
+    );
     if (duplicate) return tr('customer_booking.err_duplicate');
 
     final prefs = await SharedPreferences.getInstance();
@@ -182,65 +152,95 @@ class _CustomerBookingRequestScreenState
   Future<void> _markSubmitted() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(
-        _kLastRequestMsKey, DateTime.now().millisecondsSinceEpoch);
+      _kLastRequestMsKey,
+      DateTime.now().millisecondsSinceEpoch,
+    );
   }
 
   Future<void> _submitCreate({
-    required String name,
-    required String rawPhone,
-    required String normalisedPhone,
-    required String note,
+    required BookingCaptureData data,
     required String? adminPhone,
     required bool hasOrganiser,
   }) async {
+    final name = data.name;
+    final rawPhone = data.phone;
+    final normalisedPhone = data.normalisedPhone;
+    final note = data.note ?? '';
     final requestId = const Uuid().v4();
+    final requestLines = data.lines;
+    final rawForm = <String, dynamic>{
+      'double_sofa': data.doubleSofa,
+      'single_sofa': data.singleSofa,
+      'trip_type': data.tripType.storageKey,
+      if (note.isNotEmpty) 'note': note,
+    };
 
-    await Supabase.instance.client.from('booking_requests').insert({
-      'id': requestId,
-      'tour_id': widget.tour.id,
-      'customer_phone': normalisedPhone,
-      'customer_name': name,
-      'party_size': _totalSeats,
-      'trip_type': _tripType.storageKey,
-      'raw_form': {
-        'double_sofa': _doubleSofa,
-        'single_sofa': _singleSofa,
-        'trip_type': _tripType.storageKey,
-        if (note.isNotEmpty) 'note': note,
-      },
-    });
+    try {
+      // Atomic create via a SECURITY DEFINER RPC: inserts the request AND
+      // upserts the passenger in ONE transaction. Unlike a raw anon upsert,
+      // this correctly handles a returning customer re-submitting the same
+      // trip (the ON CONFLICT update runs as the function owner, so it isn't
+      // blocked by the missing anon UPDATE policy on passengers).
+      await Supabase.instance.client.rpc(
+        'submit_booking_request',
+        params: {
+          'p_request_id': requestId,
+          'p_tour_id': widget.tour.id,
+          'p_phone': normalisedPhone,
+          'p_name': name,
+          'p_party_size': data.totalSeats,
+          'p_trip_type': data.tripType.storageKey,
+          'p_raw_form': rawForm,
+          'p_request_lines': requestLines.map((l) => l.toMap()).toList(),
+          'p_note': note.isEmpty ? null : note,
+        },
+      );
+    } on PostgrestException catch (e) {
+      // RPC not deployed yet (migration 014). Fall back to the legacy two
+      // writes so first-time bookings still go through.
+      if (e.code != 'PGRST202') rethrow;
+      await Supabase.instance.client.from('booking_requests').insert({
+        'id': requestId,
+        'tour_id': widget.tour.id,
+        'customer_phone': normalisedPhone,
+        'customer_name': name,
+        'party_size': data.totalSeats,
+        'trip_type': data.tripType.storageKey,
+        'raw_form': rawForm,
+      });
+      final passenger = Passenger(
+        tourId: widget.tour.id,
+        name: name,
+        phone: normalisedPhone,
+        requestLines: requestLines,
+        note: note.isEmpty ? null : note,
+        tripType: data.tripType,
+      );
+      await Supabase.instance.client
+          .from('passengers')
+          .upsert(passenger.toMap(), onConflict: 'tour_id,phone');
+    }
 
-    final requestLines = _buildRequestLines();
-    final passenger = Passenger(
-      tourId: widget.tour.id,
-      name: name,
-      phone: normalisedPhone,
-      requestLines: requestLines,
-      note: note.isEmpty ? null : note,
-      tripType: _tripType,
+    await CustomerRequestsStore().upsert(
+      CustomerRequestEntry(
+        id: requestId,
+        tourId: widget.tour.id,
+        tourTitle: widget.tour.title,
+        tourFromCity: widget.tour.fromCity,
+        tourToCity: widget.tour.toCity,
+        tourDepartureDate: widget.tour.departureDate,
+        tourPricePerSeat: widget.tour.pricePerSeat,
+        customerName: name,
+        customerPhone: normalisedPhone,
+        partySize: data.totalSeats,
+        doubleSofa: data.doubleSofa,
+        singleSofa: data.singleSofa,
+        note: note.isEmpty ? null : note,
+        tripType: data.tripType,
+        status: 'pending',
+        createdAt: DateTime.now(),
+      ),
     );
-    await Supabase.instance.client
-        .from('passengers')
-        .upsert(passenger.toMap(), onConflict: 'tour_id,phone');
-
-    await CustomerRequestsStore().upsert(CustomerRequestEntry(
-      id: requestId,
-      tourId: widget.tour.id,
-      tourTitle: widget.tour.title,
-      tourFromCity: widget.tour.fromCity,
-      tourToCity: widget.tour.toCity,
-      tourDepartureDate: widget.tour.departureDate,
-      tourPricePerSeat: widget.tour.pricePerSeat,
-      customerName: name,
-      customerPhone: normalisedPhone,
-      partySize: _totalSeats,
-      doubleSofa: _doubleSofa,
-      singleSofa: _singleSofa,
-      note: note.isEmpty ? null : note,
-      tripType: _tripType,
-      status: 'pending',
-      createdAt: DateTime.now(),
-    ));
 
     if (hasOrganiser && Get.isRegistered<UserController>()) {
       // ignore: unawaited_futures
@@ -251,54 +251,68 @@ class _CustomerBookingRequestScreenState
       );
     }
 
+    // Whether WhatsApp actually opened. Previously this bool was discarded and
+    // the customer was told "tap Send in WhatsApp" even when WhatsApp never
+    // launched (not installed / link rejected) — so they'd wait for a send they
+    // couldn't make and the organiser would seem unreachable. The request is
+    // already saved server-side regardless, so we just message honestly.
+    var whatsAppOpened = false;
     if (hasOrganiser) {
-      await WhatsAppService().sendBookingRequest(
+      whatsAppOpened = await WhatsAppService().sendBookingRequest(
         adminPhone: adminPhone!,
         tour: widget.tour,
         customerName: name,
-        singleSofaCount: _singleSofa,
-        doubleSofaCount: _doubleSofa,
+        singleSofaCount: data.singleSofa,
+        doubleSofaCount: data.doubleSofa,
         note: note.isEmpty ? null : note,
-        tripType: _tripType,
+        tripType: data.tripType,
       );
     }
 
     if (!mounted) return;
-    Get.back();
+    // Hand off to "My Requests" so the customer SEES their submitted request
+    // being tracked (status, seats once assigned) instead of being dropped
+    // back on the tour detail with no path to it. `offNamed` replaces this
+    // form, so back from My Requests returns to the tour list/detail.
+    Get.offNamed(AppRoutes.customerMyRequests);
+    final String message;
+    if (!hasOrganiser) {
+      message = tr('customer_booking.success_sent_no_wa');
+    } else if (whatsAppOpened) {
+      message = tr('customer_booking.success_sent_wa');
+    } else {
+      message = tr('customer_booking.success_saved_wa_failed');
+    }
     AppSnackBar.success(
-      hasOrganiser
-          ? tr('customer_booking.success_sent_wa')
-          : tr('customer_booking.success_sent_no_wa'),
+      message,
       title: tr('customer_booking.success_title_submitted'),
     );
   }
 
   Future<void> _submitEdit({
-    required String name,
-    required String normalisedPhone,
-    required String note,
+    required BookingCaptureData data,
     required String? adminPhone,
     required bool hasOrganiser,
   }) async {
     final existing = widget.existing!;
-    final requestLines = _buildRequestLines();
-    final requestLinesJson =
-        requestLines.map((rl) => rl.toMap()).toList();
+    final name = data.name;
+    final note = data.note ?? '';
+    final requestLinesJson = data.lines.map((rl) => rl.toMap()).toList();
 
     final ok = await Supabase.instance.client.rpc(
       'booking_request_customer_update',
       params: {
         'p_id': existing.id,
-        'p_party_size': _totalSeats,
+        'p_party_size': data.totalSeats,
         'p_customer_name': name,
         'p_raw_form': {
-          'double_sofa': _doubleSofa,
-          'single_sofa': _singleSofa,
-          'trip_type': _tripType.storageKey,
+          'double_sofa': data.doubleSofa,
+          'single_sofa': data.singleSofa,
+          'trip_type': data.tripType.storageKey,
           if (note.isNotEmpty) 'note': note,
         },
         'p_request_lines': requestLinesJson,
-        'p_trip_type': _tripType.storageKey,
+        'p_trip_type': data.tripType.storageKey,
       },
     );
 
@@ -313,25 +327,28 @@ class _CustomerBookingRequestScreenState
       return;
     }
 
-    await CustomerRequestsStore().upsert(existing.copyWith(
-      customerName: name,
-      partySize: _totalSeats,
-      doubleSofa: _doubleSofa,
-      singleSofa: _singleSofa,
-      note: note.isEmpty ? null : note,
-      tripType: _tripType,
-      customerEditedAt: DateTime.now(),
-      lastRefreshedAt: DateTime.now(),
-    ));
+    await CustomerRequestsStore().upsert(
+      existing.copyWith(
+        customerName: name,
+        partySize: data.totalSeats,
+        doubleSofa: data.doubleSofa,
+        singleSofa: data.singleSofa,
+        note: note.isEmpty ? null : note,
+        tripType: data.tripType,
+        customerEditedAt: DateTime.now(),
+        lastRefreshedAt: DateTime.now(),
+      ),
+    );
 
     if (hasOrganiser) {
       await WhatsAppService().sendBookingRequest(
         adminPhone: adminPhone!,
         tour: widget.tour,
         customerName: name,
-        singleSofaCount: _singleSofa,
-        doubleSofaCount: _doubleSofa,
+        singleSofaCount: data.singleSofa,
+        doubleSofaCount: data.doubleSofa,
         note: note.isEmpty ? null : note,
+        tripType: data.tripType,
         isUpdate: true,
       );
     }
@@ -346,18 +363,12 @@ class _CustomerBookingRequestScreenState
     );
   }
 
-  List<RequestLine> _buildRequestLines() => <RequestLine>[
-        if (_doubleSofa > 0)
-          RequestLine(seatType: SeatType.doubleSofa, qty: _doubleSofa),
-        if (_singleSofa > 0)
-          RequestLine(seatType: SeatType.singleSofa, qty: _singleSofa),
-      ];
-
   // ─── UI ────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final seatCount = _formKey.currentState?.totalSeats ?? 0;
 
     return Scaffold(
       backgroundColor: c.bg,
@@ -383,96 +394,19 @@ class _CustomerBookingRequestScreenState
                   _TourPreviewCard(tour: widget.tour, c: c),
                   const SizedBox(height: UgamSpacing.xl),
                   _SectionEyebrow(
-                      label: tr('customer_booking.section_who_is_booking'),
-                      c: c),
-                  const SizedBox(height: UgamSpacing.md),
-                  UgamInput(
-                    label: tr('customer_booking.label_your_name'),
-                    hint: tr('customer_booking.hint_your_name'),
-                    controller: _name,
-                  ),
-                  const SizedBox(height: UgamSpacing.lg),
-                  UgamPhoneInput(
-                    controller: _phone,
-                    label: tr('customer_booking.label_phone'),
-                  ),
-                  const SizedBox(height: UgamSpacing.xl),
-                  _SectionEyebrow(
-                    label: tr('customer_booking.label_trip_type')
-                        .toUpperCase(),
+                    label: tr('customer_booking.section_who_is_booking'),
                     c: c,
                   ),
                   const SizedBox(height: UgamSpacing.md),
-                  _TripTypeSelector(
-                    value: _tripType,
+                  BookingCaptureForm(
+                    key: _formKey,
                     fromCity: widget.tour.fromCity,
                     toCity: widget.tour.toCity,
-                    onChanged: (v) => setState(() => _tripType = v),
+                    initial: _initial,
+                    enableContacts: false,
+                    // Live-update the CTA's count chip as seats change.
+                    onChanged: () => setState(() {}),
                   ),
-                  const SizedBox(height: UgamSpacing.xl),
-                  _SectionEyebrow(
-                    label: tr('customer_booking.label_seat_count')
-                        .toUpperCase(),
-                    c: c,
-                  ),
-                  const SizedBox(height: UgamSpacing.md),
-                  _SeatTile(
-                    icon: Icons.king_bed_rounded,
-                    label: tr('customer_booking.seat_double_sofa_label'),
-                    sublabel: tr('customer_booking.seat_double_sofa_sub'),
-                    value: _doubleSofa,
-                    onChanged: (v) => setState(() => _doubleSofa = v),
-                  ),
-                  const SizedBox(height: UgamSpacing.sm),
-                  _SeatTile(
-                    icon: Icons.single_bed_rounded,
-                    label: tr('customer_booking.seat_single_sofa_label'),
-                    sublabel: tr('customer_booking.seat_single_sofa_sub'),
-                    value: _singleSofa,
-                    onChanged: (v) => setState(() => _singleSofa = v),
-                  ),
-                  const SizedBox(height: UgamSpacing.lg),
-                  if (!_showNote)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: GestureDetector(
-                        onTap: () => setState(() => _showNote = true),
-                        behavior: HitTestBehavior.opaque,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: UgamSpacing.md,
-                            vertical: UgamSpacing.sm,
-                          ),
-                          decoration: BoxDecoration(
-                            color: c.cardElev,
-                            borderRadius:
-                                BorderRadius.circular(UgamRadius.chip),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.add_rounded, size: 14, color: c.ink2),
-                              const SizedBox(width: 4),
-                              Text(
-                                tr('customer_booking.add_note_button'),
-                                style: UgamText.bodyStrong
-                                    .copyWith(color: c.ink2, fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    )
-                  else
-                    UgamInput(
-                      label: tr('customer_booking.label_note'),
-                      hint: tr('customer_booking.hint_note'),
-                      controller: _note,
-                      maxLength: 200,
-                      autofocus: true,
-                    ),
-                  const SizedBox(height: UgamSpacing.md),
-                  _Totals(seatCount: _totalSeats, c: c),
                 ],
               ),
             ),
@@ -481,10 +415,19 @@ class _CustomerBookingRequestScreenState
                 label: _saving
                     ? tr('customer_booking.button_saving')
                     : (widget.isEditing
-                        ? tr('customer_booking.button_update')
-                        : tr('customer_booking.button_submit')),
+                          ? tr('customer_booking.button_update')
+                          : tr('customer_booking.button_submit')),
                 leadingIcon: Icons.send_rounded,
                 loading: _saving,
+                // Live "N seats" tabular value on the right — reads off the
+                // shared form's totalSeats getter, refreshed via onChanged.
+                trailingValue: seatCount > 0
+                    ? (seatCount == 1
+                          ? tr('customer_booking.cta_seat_count_one')
+                          : tr('customer_booking.cta_seat_count', namedArgs: {
+                              'n': '$seatCount',
+                            }))
+                    : null,
                 onPressed: _submit,
               ),
             ),
@@ -583,8 +526,10 @@ class _TourPreviewCard extends StatelessWidget {
                       child: Text(
                         _formatDate(tour.departureDate),
                         style: UgamText.tabular(
-                          UgamText.micro
-                              .copyWith(color: Colors.white, fontSize: 9.5),
+                          UgamText.micro.copyWith(
+                            color: Colors.white,
+                            fontSize: 9.5,
+                          ),
                         ),
                       ),
                     ),
@@ -622,10 +567,18 @@ class _TourPreviewCard extends StatelessWidget {
 
   static String _formatDate(DateTime d) {
     const keys = [
-      'app.month.short.jan','app.month.short.feb','app.month.short.mar',
-      'app.month.short.apr','app.month.short.may','app.month.short.jun',
-      'app.month.short.jul','app.month.short.aug','app.month.short.sep',
-      'app.month.short.oct','app.month.short.nov','app.month.short.dec',
+      'app.month.short.jan',
+      'app.month.short.feb',
+      'app.month.short.mar',
+      'app.month.short.apr',
+      'app.month.short.may',
+      'app.month.short.jun',
+      'app.month.short.jul',
+      'app.month.short.aug',
+      'app.month.short.sep',
+      'app.month.short.oct',
+      'app.month.short.nov',
+      'app.month.short.dec',
     ];
     return '${d.day.toString().padLeft(2, '0')} ${tr(keys[d.month - 1]).toUpperCase()}';
   }
@@ -643,307 +596,6 @@ class _SectionEyebrow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-    );
-  }
-}
-
-// ─── SEAT TILE ────────────────────────────────────────────────────────
-
-class _SeatTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String sublabel;
-  final int value;
-  final ValueChanged<int> onChanged;
-
-  const _SeatTile({
-    required this.icon,
-    required this.label,
-    required this.sublabel,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    final selected = value > 0;
-    return AnimatedContainer(
-      duration: UgamMotion.tab,
-      curve: UgamMotion.easeOut,
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.gutter,
-        UgamSpacing.sm + 2,
-        UgamSpacing.gutter,
-      ),
-      decoration: BoxDecoration(
-        color: selected ? c.accentFill : c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              icon,
-              size: 22,
-              color: selected ? c.accent : c.ink2,
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(label,
-                    style: UgamText.titleS
-                        .copyWith(color: c.ink, fontSize: 15)),
-                const SizedBox(height: 2),
-                Text(sublabel,
-                    style: UgamText.caption
-                        .copyWith(color: c.ink2, fontSize: 11)),
-              ],
-            ),
-          ),
-          _StepperButton(
-            icon: Icons.remove_rounded,
-            enabled: value > 0,
-            onTap: () {
-              HapticFeedback.lightImpact();
-              onChanged(value - 1);
-            },
-          ),
-          SizedBox(
-            width: 32,
-            child: Text(
-              '$value',
-              textAlign: TextAlign.center,
-              style: UgamText.tabular(
-                UgamText.titleM.copyWith(
-                  color: selected ? c.accent : c.ink,
-                  fontSize: 18,
-                ),
-              ),
-            ),
-          ),
-          _StepperButton(
-            icon: Icons.add_rounded,
-            enabled: value < 8,
-            onTap: () {
-              HapticFeedback.lightImpact();
-              onChanged(value + 1);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StepperButton extends StatelessWidget {
-  final IconData icon;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  const _StepperButton({
-    required this.icon,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: enabled ? c.accent : c.card,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        alignment: Alignment.center,
-        child: Icon(
-          icon,
-          size: 18,
-          color: enabled ? c.onAccent : c.ink3,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── TRIP TYPE SELECTOR ───────────────────────────────────────────────
-
-class _TripTypeSelector extends StatelessWidget {
-  final TripType value;
-  final String fromCity;
-  final String toCity;
-  final ValueChanged<TripType> onChanged;
-
-  const _TripTypeSelector({
-    required this.value,
-    required this.fromCity,
-    required this.toCity,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _TripTypeOption(
-          icon: Icons.sync_alt_rounded,
-          title: tr('customer_booking.trip_round_title'),
-          subtitle: tr('customer_booking.trip_round_sub', namedArgs: {
-            'from': fromCity,
-            'to': toCity,
-          }),
-          selected: value == TripType.roundTrip,
-          onTap: () => onChanged(TripType.roundTrip),
-        ),
-        const SizedBox(height: UgamSpacing.sm),
-        _TripTypeOption(
-          icon: Icons.arrow_forward_rounded,
-          title: tr('customer_booking.trip_outbound_title',
-              namedArgs: {'from': fromCity, 'to': toCity}),
-          subtitle: tr('customer_booking.trip_outbound_sub'),
-          selected: value == TripType.outboundOnly,
-          onTap: () => onChanged(TripType.outboundOnly),
-        ),
-        const SizedBox(height: UgamSpacing.sm),
-        _TripTypeOption(
-          icon: Icons.arrow_back_rounded,
-          title: tr('customer_booking.trip_return_title',
-              namedArgs: {'from': toCity, 'to': fromCity}),
-          subtitle: tr('customer_booking.trip_return_sub'),
-          selected: value == TripType.returnOnly,
-          onTap: () => onChanged(TripType.returnOnly),
-        ),
-      ],
-    );
-  }
-}
-
-class _TripTypeOption extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _TripTypeOption({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: UgamMotion.tab,
-        curve: UgamMotion.easeOut,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.gutter,
-          vertical: UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: selected ? c.accentFill : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                icon,
-                size: 20,
-                color: selected ? c.accent : c.ink2,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(title,
-                      style: UgamText.bodyStrong
-                          .copyWith(color: c.ink, fontSize: 14)),
-                  const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: UgamText.caption
-                          .copyWith(color: c.ink2, fontSize: 11)),
-                ],
-              ),
-            ),
-            Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_off_rounded,
-              size: 20,
-              color: selected ? c.accent : c.ink3,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── TOTALS ───────────────────────────────────────────────────────────
-
-class _Totals extends StatelessWidget {
-  final int seatCount;
-  final UgamColorSet c;
-
-  const _Totals({
-    required this.seatCount,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.xs,
-        vertical: UgamSpacing.sm,
-      ),
-      child: Row(
-        children: [
-          Text(
-            plural('customer_booking.totals_seat', seatCount),
-            style: UgamText.tabular(
-              UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

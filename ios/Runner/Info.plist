@@ -38,6 +38,10 @@
 	<true/>
 	<key>NSContactsUsageDescription</key>
 	<string>Ugam Booking matches your saved contacts to incoming bookings so you instantly see who booked.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

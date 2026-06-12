@@ -18,15 +18,20 @@ class UgamSheet {
     String? title,
     bool isDismissible = true,
     bool enableDrag = true,
+    bool showClose = true,
   }) {
     final isCupertino =
         Theme.of(context).platform == TargetPlatform.iOS ||
-            Theme.of(context).platform == TargetPlatform.macOS;
+        Theme.of(context).platform == TargetPlatform.macOS;
 
     if (isCupertino) {
       return showCupertinoModalPopup<T>(
         context: context,
-        builder: (ctx) => _SheetShell(title: title, child: builder(ctx)),
+        builder: (ctx) => _SheetShell(
+          title: title,
+          showClose: showClose,
+          child: builder(ctx),
+        ),
       );
     }
 
@@ -37,16 +42,18 @@ class UgamSheet {
       isDismissible: isDismissible,
       enableDrag: enableDrag,
       useSafeArea: true,
-      builder: (ctx) => _SheetShell(title: title, child: builder(ctx)),
+      builder: (ctx) =>
+          _SheetShell(title: title, showClose: showClose, child: builder(ctx)),
     );
   }
 }
 
 class _SheetShell extends StatelessWidget {
   final String? title;
+  final bool showClose;
   final Widget child;
 
-  const _SheetShell({this.title, required this.child});
+  const _SheetShell({this.title, this.showClose = true, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -65,20 +72,59 @@ class _SheetShell extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           const SizedBox(height: UgamSpacing.sm),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: c.ink3,
-              borderRadius: BorderRadius.circular(2),
+          // Tappable grab handle — a second, discoverable way to dismiss
+          // (besides swipe-down and tap-outside).
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).maybePop(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: c.ink3,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
           ),
           if (title != null) ...[
-            const SizedBox(height: UgamSpacing.lg),
+            const SizedBox(height: UgamSpacing.md),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.xl),
-              child: Text(title!,
-                  style: UgamText.titleL.copyWith(color: c.ink)),
+              padding: const EdgeInsets.only(
+                left: UgamSpacing.xl,
+                right: UgamSpacing.md,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title!,
+                      style: UgamText.titleL.copyWith(color: c.ink),
+                    ),
+                  ),
+                  if (showClose)
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => Navigator.of(context).maybePop(),
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: c.cardElev,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 18,
+                          color: c.ink2,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
           Flexible(

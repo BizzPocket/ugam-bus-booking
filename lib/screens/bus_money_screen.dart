@@ -1,7 +1,7 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:intl/intl.dart';
 
 import '../controllers/money_controller.dart';
 import '../design/ugam.dart';
@@ -45,145 +45,200 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      appBar: AppBar(
-        title: Text('Money · ${widget.bus.name}'),
-      ),
       body: SafeArea(
-        top: false,
-        child: Obx(() {
-          final s = controller.summaryForBus(widget.bus.id);
-          final expenses = controller.expenses
-              .where((e) => e.busId == widget.bus.id)
-              .toList();
-          final handovers = controller.handovers
-              .where((h) => h.busId == widget.bus.id)
-              .toList();
-          final t = controller.tourSummary();
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(
-              UgamSpacing.gutter,
-              UgamSpacing.sm,
-              UgamSpacing.gutter,
-              UgamSpacing.huge,
+        child: Column(
+          children: [
+            UgamAppBar(
+              title: tr(
+                'bus_money.app_bar_title',
+                namedArgs: {'name': widget.bus.name},
+              ),
             ),
-            children: [
-              // ── Stat grid ──────────────────────────────────────
-              Row(
-                children: [
-                  Expanded(
-                    child: UgamStatTile(
-                      icon: Icons.payments_rounded,
-                      value: _money(s.collected),
-                      label: 'Collected',
-                      variant: UgamStatVariant.good,
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  Expanded(
-                    child: UgamStatTile(
-                      icon: Icons.receipt_long_rounded,
-                      value: _money(s.expensesTotal),
-                      label: 'Expenses',
-                      variant: UgamStatVariant.warm,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: UgamSpacing.md),
-              Row(
-                children: [
-                  Expanded(
-                    child: UgamStatTile(
-                      icon: Icons.account_balance_rounded,
-                      value: _money(s.expectedHandover),
-                      label: 'Expected handover',
-                      variant: UgamStatVariant.accent,
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  Expanded(
-                    child: UgamStatTile(
-                      icon: Icons.pending_actions_rounded,
-                      value: _money(s.outstandingHandover),
-                      label: 'Outstanding',
-                      variant: UgamStatVariant.neutral,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: UgamSpacing.lg),
-              UgamCTA(
-                label: 'Collect from passengers',
-                leadingIcon: Icons.groups_rounded,
-                onPressed: () => Get.to(
-                  () => CollectionScreen(tour: widget.tour, bus: widget.bus),
-                  transition: Transition.cupertino,
-                ),
-              ),
-              const SizedBox(height: UgamSpacing.xl),
+            Expanded(
+              child: Obx(() {
+                final s = controller.summaryForBus(widget.bus.id);
+                final expenses = controller.expenses
+                    .where((e) => e.busId == widget.bus.id)
+                    .toList();
+                final handovers = controller.handovers
+                    .where((h) => h.busId == widget.bus.id)
+                    .toList();
+                final t = controller.tourSummary();
 
-              // ── Expenses ───────────────────────────────────────
-              _SectionHeader(
-                title: 'Expenses',
-                actionLabel: 'Add',
-                onAction: () => _openExpenseSheet(context),
-              ),
-              const SizedBox(height: UgamSpacing.sm),
-              if (expenses.isEmpty)
-                _EmptyLine(text: 'No expenses logged for this bus yet.')
-              else
-                ...expenses.map(
-                  (e) => Padding(
-                    padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
-                    child: _ExpenseRow(
-                      expense: e,
-                      onDelete: () => controller.deleteExpense(e.id),
-                    ),
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    UgamSpacing.sm,
+                    UgamSpacing.gutter,
+                    UgamSpacing.huge,
                   ),
-                ),
-              const SizedBox(height: UgamSpacing.xl),
-
-              // ── Handover ───────────────────────────────────────
-              _SectionHeader(
-                title: 'Handover to admin',
-                actionLabel: 'Record',
-                onAction: () =>
-                    _openHandoverSheet(context, s.expectedHandover),
-              ),
-              const SizedBox(height: UgamSpacing.sm),
-              if (handovers.isEmpty)
-                _EmptyLine(text: 'No handover recorded yet.')
-              else
-                ...handovers.map(
-                  (h) => Padding(
-                    padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
-                    child: _HandoverRow(
-                      handover: h,
-                      onDelete: () => controller.deleteHandover(h.id),
+                  children: [
+                    // ── Stat grid ──────────────────────────────────────
+                    Row(
+                      children: [
+                        Expanded(
+                          child: UgamStatTile(
+                            icon: Icons.payments_rounded,
+                            value: _money(s.collected),
+                            label: tr('bus_money.stat_collected'),
+                            variant: UgamStatVariant.good,
+                          ),
+                        ),
+                        const SizedBox(width: UgamSpacing.md),
+                        Expanded(
+                          child: UgamStatTile(
+                            icon: Icons.receipt_long_rounded,
+                            value: _money(s.expensesTotal),
+                            label: tr('bus_money.stat_expenses'),
+                            variant: UgamStatVariant.warm,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ),
-              const SizedBox(height: UgamSpacing.xl),
+                    const SizedBox(height: UgamSpacing.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: UgamStatTile(
+                            icon: Icons.account_balance_rounded,
+                            value: _money(s.expectedHandover),
+                            label: tr('bus_money.stat_expected_handover'),
+                            variant: UgamStatVariant.accent,
+                          ),
+                        ),
+                        const SizedBox(width: UgamSpacing.md),
+                        Expanded(
+                          child: UgamStatTile(
+                            icon: Icons.pending_actions_rounded,
+                            value: _money(s.outstandingHandover),
+                            label: tr('bus_money.stat_outstanding'),
+                            variant: UgamStatVariant.neutral,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    UgamCTA(
+                      label: tr('bus_money.collect_from_passengers'),
+                      leadingIcon: Icons.groups_rounded,
+                      onPressed: () => Get.to(
+                        () => CollectionScreen(
+                          tour: widget.tour,
+                          bus: widget.bus,
+                        ),
+                        transition: Transition.cupertino,
+                      ),
+                    ),
+                    const SizedBox(height: UgamSpacing.xl),
 
-              // ── Tour rollup ────────────────────────────────────
-              _TourRollupCard(summary: t),
-            ],
-          );
-        }),
+                    // ── Expenses ───────────────────────────────────────
+                    _SectionHeader(
+                      title: tr('bus_money.section_expenses'),
+                      actionLabel: tr('app.action.add'),
+                      onAction: () => _openExpenseSheet(context),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    // The auto bus-owner rent is derived from the bus (the
+                    // single source of truth, already inside expensesTotal) —
+                    // so it counts as content for the empty check.
+                    if (widget.bus.busPrice <= 0 && expenses.isEmpty)
+                      _EmptyLine(text: tr('bus_money.expenses_empty'))
+                    else ...[
+                      // Fixed, non-deletable rent row at the top: derived from
+                      // the bus, not a DB row, so it has no delete icon.
+                      if (widget.bus.busPrice > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.sm,
+                          ),
+                          child: _BusOwnerRentRow(
+                            busPrice: widget.bus.busPrice,
+                          ),
+                        ),
+                      ...expenses.map(
+                        (e) => Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.sm,
+                          ),
+                          child: _ExpenseRow(
+                            expense: e,
+                            onTap: () =>
+                                _openExpenseSheet(context, existing: e),
+                            // await + swallow: the controller already rolls
+                            // back and shows an error toast on failure;
+                            // without this the rethrow becomes an uncaught
+                            // async exception.
+                            onDelete: () async {
+                              try {
+                                await controller.deleteExpense(e.id);
+                              } catch (_) {}
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: UgamSpacing.xl),
+
+                    // ── Handover ───────────────────────────────────────
+                    _SectionHeader(
+                      title: tr('bus_money.section_handover_to_admin'),
+                      actionLabel: tr('bus_money.action_record'),
+                      onAction: () =>
+                          _openHandoverSheet(context, s.expectedHandover),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    if (handovers.isEmpty)
+                      _EmptyLine(text: tr('bus_money.handover_empty'))
+                    else
+                      ...handovers.map(
+                        (h) => Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.sm,
+                          ),
+                          child: _HandoverRow(
+                            handover: h,
+                            onTap: () => _openHandoverSheet(
+                              context,
+                              h.expectedAmount,
+                              existing: h,
+                            ),
+                            onDelete: () async {
+                              try {
+                                await controller.deleteHandover(h.id);
+                              } catch (_) {}
+                            },
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: UgamSpacing.xl),
+
+                    // ── Tour rollup ────────────────────────────────────
+                    _TourRollupCard(summary: t),
+                  ],
+                );
+              }),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  void _openExpenseSheet(BuildContext context) {
-    ExpenseCategory category = ExpenseCategory.other;
-    final labelCtrl = TextEditingController();
-    final amountCtrl = TextEditingController();
-    final paidByCtrl = TextEditingController();
+  void _openExpenseSheet(BuildContext context, {Expense? existing}) {
+    ExpenseCategory category = existing?.category ?? ExpenseCategory.other;
+    final labelCtrl = TextEditingController(text: existing?.label ?? '');
+    final amountCtrl = TextEditingController(
+      text: (existing == null || existing.amount == 0)
+          ? ''
+          : existing.amount.toStringAsFixed(0),
+    );
+    final paidByCtrl = TextEditingController(text: existing?.paidBy ?? '');
 
     UgamSheet.show<void>(
       context,
-      title: 'Add expense',
+      title: existing == null
+          ? tr('bus_money.add_expense')
+          : tr('bus_money.edit_expense'),
       builder: (sheetCtx) {
         final sc = UgamColors.of(sheetCtx);
         return SingleChildScrollView(
@@ -194,71 +249,96 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'CATEGORY',
+                    tr('bus_money.field_category'),
                     style: UgamText.micro.copyWith(color: sc.ink2),
                   ),
                   const SizedBox(height: UgamSpacing.sm),
                   Wrap(
                     spacing: UgamSpacing.sm,
                     runSpacing: UgamSpacing.sm,
-                    children: ExpenseCategory.values.map((cat) {
-                      final active = cat == category;
-                      return GestureDetector(
-                        onTap: () => setSheetState(() => category = cat),
-                        behavior: HitTestBehavior.opaque,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: UgamSpacing.lg,
-                            vertical: UgamSpacing.sm + 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: active ? sc.accentFill : sc.cardElev,
-                            borderRadius:
-                                BorderRadius.circular(UgamRadius.chip),
-                            border: Border.all(
-                              color: active ? sc.accent : sc.border,
+                    // busOwner is excluded: the bus rent is the single source
+                    // of truth (Bus.busPrice) and must never be added manually,
+                    // or it would be double-counted.
+                    children: ExpenseCategory.values
+                        .where((c) => c != ExpenseCategory.busOwner)
+                        .map((cat) {
+                          final active = cat == category;
+                          return GestureDetector(
+                            onTap: () => setSheetState(() => category = cat),
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: UgamSpacing.lg,
+                                vertical: UgamSpacing.sm + 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: active ? sc.accentFill : sc.cardElev,
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.chip,
+                                ),
+                                border: Border.all(
+                                  color: active ? sc.accent : sc.border,
+                                ),
+                              ),
+                              child: Text(
+                                cat.displayName,
+                                style: UgamText.caption.copyWith(
+                                  color: active ? sc.accent : sc.ink2,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            cat.displayName,
-                            style: UgamText.caption.copyWith(
-                              color: active ? sc.accent : sc.ink2,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                          );
+                        })
+                        .toList(),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
-                  UgamInput(label: 'Label', controller: labelCtrl),
+                  UgamInput(
+                    label: tr('bus_money.field_label'),
+                    controller: labelCtrl,
+                  ),
                   const SizedBox(height: UgamSpacing.md),
                   UgamInput(
-                    label: 'Amount',
+                    label: tr('bus_money.field_amount'),
                     controller: amountCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     inputFormatters: [
                       FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                     ],
                   ),
                   const SizedBox(height: UgamSpacing.md),
-                  UgamInput(label: 'Paid by', controller: paidByCtrl),
+                  UgamInput(
+                    label: tr('bus_money.field_paid_by'),
+                    controller: paidByCtrl,
+                  ),
                   const SizedBox(height: UgamSpacing.lg),
                   UgamCTA(
-                    label: 'Save expense',
+                    label: tr('bus_money.save_expense'),
                     onPressed: () async {
                       final paidBy = paidByCtrl.text.trim();
+                      final amount =
+                          double.tryParse(amountCtrl.text.trim()) ?? 0;
+                      final label = labelCtrl.text.trim();
+                      // Editing reuses the same id (an update, not a new row)
+                      // by going through copyWith, which preserves id/createdAt.
                       await controller.upsertExpense(
-                        Expense(
-                          tourId: widget.tour.id,
-                          busId: widget.bus.id,
-                          category: category,
-                          label: labelCtrl.text.trim(),
-                          amount:
-                              double.tryParse(amountCtrl.text.trim()) ?? 0,
-                          paidBy: paidBy.isEmpty ? null : paidBy,
-                        ),
+                        existing == null
+                            ? Expense(
+                                tourId: widget.tour.id,
+                                busId: widget.bus.id,
+                                category: category,
+                                label: label,
+                                amount: amount,
+                                paidBy: paidBy.isEmpty ? null : paidBy,
+                              )
+                            : existing.copyWith(
+                                category: category,
+                                label: label,
+                                amount: amount,
+                                paidBy: paidBy.isEmpty ? null : paidBy,
+                              ),
                       );
                       if (innerCtx.mounted) Navigator.of(innerCtx).pop();
                     },
@@ -272,46 +352,66 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
     );
   }
 
-  void _openHandoverSheet(BuildContext context, double expected) {
-    final handedCtrl = TextEditingController(text: expected.toStringAsFixed(0));
-    final noteCtrl = TextEditingController();
+  void _openHandoverSheet(
+    BuildContext context,
+    double expected, {
+    BusHandover? existing,
+  }) {
+    final handedCtrl = TextEditingController(
+      text: (existing?.handedOverAmount ?? expected).toStringAsFixed(0),
+    );
+    final noteCtrl = TextEditingController(text: existing?.note ?? '');
 
     UgamSheet.show<void>(
       context,
-      title: 'Record handover',
+      title: existing == null
+          ? tr('bus_money.record_handover')
+          : tr('bus_money.edit_handover'),
       builder: (sheetCtx) {
         return SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ReadOnlyLine(label: 'Expected', value: _money(expected)),
+              _ReadOnlyLine(
+                label: tr('bus_money.field_expected'),
+                value: _money(expected),
+              ),
               const SizedBox(height: UgamSpacing.lg),
               UgamInput(
-                label: 'Handed over',
+                label: tr('bus_money.field_handed_over'),
                 controller: handedCtrl,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 inputFormatters: [
                   FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                 ],
               ),
               const SizedBox(height: UgamSpacing.md),
-              UgamInput(label: 'Note', controller: noteCtrl),
+              UgamInput(
+                label: tr('bus_money.field_note'),
+                controller: noteCtrl,
+              ),
               const SizedBox(height: UgamSpacing.lg),
               UgamCTA(
-                label: 'Save handover',
+                label: tr('bus_money.save_handover'),
                 onPressed: () async {
                   final note = noteCtrl.text.trim();
+                  final handed = double.tryParse(handedCtrl.text.trim()) ?? 0;
                   await controller.recordHandover(
-                    BusHandover(
-                      tourId: widget.tour.id,
-                      busId: widget.bus.id,
-                      expectedAmount: expected,
-                      handedOverAmount:
-                          double.tryParse(handedCtrl.text.trim()) ?? 0,
-                      note: note.isEmpty ? null : note,
-                    ),
+                    existing == null
+                        ? BusHandover(
+                            tourId: widget.tour.id,
+                            busId: widget.bus.id,
+                            expectedAmount: expected,
+                            handedOverAmount: handed,
+                            note: note.isEmpty ? null : note,
+                          )
+                        : existing.copyWith(
+                            handedOverAmount: handed,
+                            note: note.isEmpty ? null : note,
+                          ),
                   );
                   if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
                 },
@@ -377,9 +477,89 @@ class _SectionHeader extends StatelessWidget {
 
 class _ExpenseRow extends StatelessWidget {
   final Expense expense;
-  final VoidCallback onDelete;
+  final VoidCallback onTap;
+  // Null for a derived (non-DB) row such as the auto bus-owner rent: the
+  // trash icon is hidden and the row can't be deleted.
+  final VoidCallback? onDelete;
 
-  const _ExpenseRow({required this.expense, required this.onDelete});
+  const _ExpenseRow({
+    required this.expense,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    // Tapping the row opens the edit sheet; the inner delete GestureDetector
+    // (opaque) swallows its own taps so deleting never also triggers an edit.
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: UgamCard.plain(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.gutter,
+          vertical: UgamSpacing.md,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
+              child: Text(
+                expense.category.displayName,
+                style: UgamText.micro.copyWith(color: c.ink2),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Text(
+                expense.label.isEmpty ? '—' : expense.label,
+                style: UgamText.bodyStrong.copyWith(color: c.ink),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              _money(expense.amount),
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(color: c.ink),
+              ),
+            ),
+            if (onDelete != null) ...[
+              const SizedBox(width: 4),
+              GestureDetector(
+                onTap: onDelete,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.delete_outline_rounded,
+                    size: 18,
+                    color: c.ink3,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The auto bus-owner rent shown at the top of the expense ledger. It mirrors
+/// [_ExpenseRow] styling but is derived from [Bus.busPrice] (the single source
+/// of truth, already folded into expensesTotal) — so it is non-deletable and
+/// not editable.
+class _BusOwnerRentRow extends StatelessWidget {
+  final double busPrice;
+
+  const _BusOwnerRentRow({required this.busPrice});
 
   @override
   Widget build(BuildContext context) {
@@ -398,14 +578,14 @@ class _ExpenseRow extends StatelessWidget {
               borderRadius: BorderRadius.circular(UgamRadius.chip),
             ),
             child: Text(
-              expense.category.displayName,
+              ExpenseCategory.busOwner.displayName,
               style: UgamText.micro.copyWith(color: c.ink2),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Text(
-              expense.label.isEmpty ? '—' : expense.label,
+              tr('bus_money.bus_owner_rent'),
               style: UgamText.bodyStrong.copyWith(color: c.ink),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -413,20 +593,8 @@ class _ExpenseRow extends StatelessWidget {
           ),
           const SizedBox(width: UgamSpacing.sm),
           Text(
-            _money(expense.amount),
-            style: UgamText.tabular(
-              UgamText.bodyStrong.copyWith(color: c.ink),
-            ),
-          ),
-          const SizedBox(width: 4),
-          GestureDetector(
-            onTap: onDelete,
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Icon(Icons.delete_outline_rounded,
-                  size: 18, color: c.ink3),
-            ),
+            _money(busPrice),
+            style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
           ),
         ],
       ),
@@ -436,46 +604,63 @@ class _ExpenseRow extends StatelessWidget {
 
 class _HandoverRow extends StatelessWidget {
   final BusHandover handover;
+  final VoidCallback onTap;
   final VoidCallback onDelete;
 
-  const _HandoverRow({required this.handover, required this.onDelete});
+  const _HandoverRow({
+    required this.handover,
+    required this.onTap,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final date = DateFormat('d MMM, h:mm a').format(handover.settledAt);
-    return UgamCard.plain(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.gutter,
-        vertical: UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Handed ${_money(handover.handedOverAmount)} of '
-                  '${_money(handover.expectedAmount)}',
-                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: UgamCard.plain(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.gutter,
+          vertical: UgamSpacing.md,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr(
+                      'bus_money.handed_of',
+                      namedArgs: {
+                        'handed': _money(handover.handedOverAmount),
+                        'expected': _money(handover.expectedAmount),
+                      },
+                    ),
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(date, style: UgamText.caption.copyWith(color: c.ink2)),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: onDelete,
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 18,
+                  color: c.ink3,
                 ),
-                const SizedBox(height: 2),
-                Text(date, style: UgamText.caption.copyWith(color: c.ink2)),
-              ],
+              ),
             ),
-          ),
-          GestureDetector(
-            onTap: onDelete,
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Icon(Icons.delete_outline_rounded,
-                  size: 18, color: c.ink3),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -494,16 +679,31 @@ class _TourRollupCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Tour totals', style: UgamText.titleM.copyWith(color: c.ink)),
+          Text(
+            tr('bus_money.tour_totals'),
+            style: UgamText.titleM.copyWith(color: c.ink),
+          ),
           const SizedBox(height: UgamSpacing.md),
-          _RollupRow(label: 'Total collected', value: _money(summary.totalCollected)),
-          _RollupRow(label: 'Total expenses', value: _money(summary.totalExpenses)),
-          _RollupRow(label: 'Net', value: _money(summary.totalNet)),
           _RollupRow(
-            label: 'Outstanding',
+            label: tr('bus_money.rollup_total_collected'),
+            value: _money(summary.totalCollected),
+          ),
+          _RollupRow(
+            label: tr('bus_money.rollup_total_expenses'),
+            value: _money(summary.totalExpenses),
+          ),
+          _RollupRow(
+            label: tr('bus_money.rollup_net'),
+            value: _money(summary.totalNet),
+          ),
+          _RollupRow(
+            label: tr('bus_money.stat_outstanding'),
             value: _money(summary.totalOutstandingHandover),
           ),
-          _RollupRow(label: 'To return', value: _money(summary.totalToReturn)),
+          _RollupRow(
+            label: tr('bus_money.rollup_to_return'),
+            value: _money(summary.totalToReturn),
+          ),
         ],
       ),
     );
@@ -527,9 +727,7 @@ class _RollupRow extends StatelessWidget {
           Text(label, style: UgamText.body.copyWith(color: c.ink2)),
           Text(
             value,
-            style: UgamText.tabular(
-              UgamText.bodyStrong.copyWith(color: c.ink),
-            ),
+            style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
           ),
         ],
       ),
@@ -567,9 +765,7 @@ class _ReadOnlyLine extends StatelessWidget {
         Text(label, style: UgamText.body.copyWith(color: c.ink2)),
         Text(
           value,
-          style: UgamText.tabular(
-            UgamText.titleS.copyWith(color: c.ink),
-          ),
+          style: UgamText.tabular(UgamText.titleS.copyWith(color: c.ink)),
         ),
       ],
     );

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "180135587966",
+    "project_id": "ugam-booking",
+    "storage_bucket": "ugam-booking.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:180135587966:android:c36434fd4b3b442e14e82f",
+        "android_client_info": {
+          "package_name": "com.occubitsolution.ugambooking"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCD8XOgTn29zl1Zinf-PkiviBqJfsP_95I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -155,10 +155,10 @@ class GroupCascade {
     // The engine's verdict is authoritative. Group placement is all-or-nothing
     // (the engine commits NOTHING and raises groupWontFit when a group can't
     // fully fit), so a CAPACITY/TYPE exception about any member or the group
-    // means "no fit". A priorityNoFrontSeat exception does NOT block the move —
-    // the passenger WAS seated, just not on a front sofa, which is still a fit.
+    // means "no fit". A priorityNoLowerBerth exception does NOT block the move —
+    // the passenger WAS seated, just not on a lower berth, which is still a fit.
     final exceptionsForGroup = plan.exceptions.where((e) {
-      if (e.type == SeatingExceptionType.priorityNoFrontSeat) return false;
+      if (e.type == SeatingExceptionType.priorityNoLowerBerth) return false;
       return (e.passengerId != null && memberIdSet.contains(e.passengerId)) ||
           (gid != null && gid.isNotEmpty && e.groupId == gid);
     });
@@ -200,6 +200,117 @@ class GroupCascade {
       blockedReason:
           '$label does not fit on ${destinationBus.name}: $shortfallText.',
     );
+  }
+
+  /// Plan the ACTUAL seat assignments for moving [mover] (and its whole group)
+  /// onto [destinationBus]. Returns `memberId -> the engine-proposed
+  /// [SeatAssignment] list (all on [destinationBus])` when the entire group
+  /// fully fits, or `null` when it does not (same verdict [planMove] reports as
+  /// `destinationFits == false`).
+  ///
+  /// This reuses the EXACT trial-snapshot logic [planMove] builds — members
+  /// stripped of their seats so the engine freely (re)places their request
+  /// lines on the destination bus, non-member destination-bus berths seeded as
+  /// LOCKED synthetic occupants so those exact berths read as taken — then runs
+  /// [SeatingEngine.propose] against the single-bus snapshot. The caller
+  /// ([TourController.moveGroupToBus]) writes the returned assignments
+  /// atomically, REPLACING each member's entire `assignedSeats` (so nobody is
+  /// left behind on their old bus). The chosen anchor seat is intentionally NOT
+  /// preserved: within a bus, arrangement is free, so the engine decides exact
+  /// berths.
+  static Map<String, List<SeatAssignment>>? planAssignments({
+    required Passenger mover,
+    required Bus destinationBus,
+    required List<Passenger> passengers,
+  }) {
+    // ── Resolve the group (identical to planMove) ─────────────────────────
+    final gid = mover.groupId;
+    final List<Passenger> members;
+    if (gid != null && gid.isNotEmpty) {
+      members = passengers
+          .where((p) => p.groupId == gid)
+          .toList()
+        ..sort((a, b) => a.id.compareTo(b.id));
+      if (!members.any((p) => p.id == mover.id)) {
+        members.add(mover);
+        members.sort((a, b) => a.id.compareTo(b.id));
+      }
+    } else {
+      members = [mover];
+    }
+    final memberIds = members.map((p) => p.id).toList();
+    final memberIdSet = memberIds.toSet();
+
+    final layout = destinationBus.layout;
+    if (layout == null) return null;
+
+    // Cells the destination bus actually has (skip empty / aisle cells).
+    final cellById = <String, SeatCell>{};
+    for (final c in layout.grid) {
+      final sid = c.seatId;
+      if (sid != null && c.seatType != null) cellById[sid] = c;
+    }
+
+    // ── Build the trial passenger set (identical to planMove) ─────────────
+    // Group members stripped of their current seats so the engine freely
+    // (re)places their request lines on the destination bus.
+    final trial = <Passenger>[
+      for (final m in members)
+        m.copyWith(assignedSeats: const <SeatAssignment>[]),
+    ];
+
+    // Non-member occupants of the destination bus: seed their berths as LOCKED
+    // synthetic passengers so the engine treats those exact berths as taken.
+    var occIdx = 0;
+    for (final p in passengers) {
+      if (memberIdSet.contains(p.id)) continue;
+      final held = <SeatAssignment>[];
+      for (final a in p.assignedSeats) {
+        if (a.busId != destinationBus.id) continue;
+        if (!cellById.containsKey(a.seatId)) continue;
+        held.add(SeatAssignment(
+          busId: destinationBus.id,
+          seatId: a.seatId,
+          locked: true,
+        ));
+      }
+      if (held.isEmpty) continue;
+      trial.add(Passenger(
+        id: '__occ_${occIdx++}__${p.id}',
+        tourId: mover.tourId,
+        name: '__occupant__',
+        phone: '',
+        requestLines: const [],
+        assignedSeats: held,
+      ));
+    }
+
+    // ── Mirror the engine: propose on the single-bus snapshot ─────────────
+    final plan = SeatingEngine.propose(
+      buses: [destinationBus],
+      passengers: trial,
+    );
+
+    // The same all-or-nothing fit verdict planMove uses: a CAPACITY/TYPE
+    // exception about any member or the group means "no fit" (a
+    // priorityNoLowerBerth does NOT block — the member WAS seated). Then verify
+    // every member's request lines were fully placed.
+    final blocking = plan.exceptions.any((e) {
+      if (e.type == SeatingExceptionType.priorityNoLowerBerth) return false;
+      return (e.passengerId != null && memberIdSet.contains(e.passengerId)) ||
+          (gid != null && gid.isNotEmpty && e.groupId == gid);
+    });
+    if (blocking) return null;
+
+    final result = <String, List<SeatAssignment>>{};
+    for (final m in members) {
+      final needed = m.requestLines.fold<int>(
+          0, (s, l) => s + l.qty * _berthsPerUnit(l.seatType));
+      final proposed = plan.forPassenger(m.id);
+      if (proposed.length < needed) return null; // short — group does not fit.
+      result[m.id] = proposed;
+    }
+    return result;
   }
 
   /// Physical berths one request-line unit of [type] consumes (a Double Sofa

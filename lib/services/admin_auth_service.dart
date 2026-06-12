@@ -52,6 +52,21 @@ class AdminAuthService {
     return Admin.fromMap(Map<String, dynamic>.from(row));
   }
 
+  /// Persists the admin's editable settings (name, WhatsApp, business,
+  /// payment, notification prefs) to their own `admins` row and returns the
+  /// freshly-stored record. Writes through the `admins_update_self` RLS
+  /// policy (id = auth.uid()), so it only ever touches the caller's own row.
+  /// Throws on network/permission failure.
+  Future<Admin> updateAdmin(Admin admin) async {
+    final row = await _client
+        .from('admins')
+        .update(admin.toUpdateMap())
+        .eq('id', admin.id)
+        .select()
+        .single();
+    return Admin.fromMap(Map<String, dynamic>.from(row));
+  }
+
   /// Sign out — clears the Supabase session.
   Future<void> signOut() async => _client.auth.signOut();
 

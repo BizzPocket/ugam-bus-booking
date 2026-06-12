@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../tokens.dart';
 
@@ -44,16 +45,18 @@ class UgamSkeleton extends StatefulWidget {
   State<UgamSkeleton> createState() => _UgamSkeletonState();
 }
 
-class _UgamSkeletonState extends State<UgamSkeleton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl = AnimationController(
-    vsync: this,
-    duration: UgamMotion.shimmer,
-  )..repeat();
+class _UgamSkeletonState extends State<UgamSkeleton> {
+  // Every skeleton shares ONE app-wide ticker instead of spinning up its own
+  // AnimationController. A loading list of N skeletons used to create N tickers
+  // AND repaint N moving 3-stop gradient shaders every frame — a real
+  // raster-thread spike on low-end GPUs at the exact moment the device is busy
+  // fetching data. Now it's one ticker (auto-paused when no skeleton is on
+  // screen) and a cheap solid-colour pulse (no shader).
+  late final Animation<double> _pulse = _SkeletonPulse.instance.acquire();
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _SkeletonPulse.instance.release();
     super.dispose();
   }
 
@@ -64,26 +67,51 @@ class _UgamSkeletonState extends State<UgamSkeleton>
       width: widget.width,
       height: widget.height,
       child: AnimatedBuilder(
-        animation: _ctrl,
+        animation: _pulse,
         builder: (_, _) {
-          final t = _ctrl.value;
           return DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(widget.radius),
-              gradient: LinearGradient(
-                colors: [c.cardElev, c.card, c.cardElev],
-                stops: [
-                  (t - 0.3).clamp(0, 1).toDouble(),
-                  t.clamp(0, 1).toDouble(),
-                  (t + 0.3).clamp(0, 1).toDouble(),
-                ],
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-              ),
+              color: Color.lerp(c.cardElev, c.card, _pulse.value),
             ),
           );
         },
       ),
     );
   }
+}
+
+/// App-wide, ref-counted shimmer driver. One [AnimationController] backs every
+/// [UgamSkeleton] on screen; it starts when the first skeleton mounts and stops
+/// when the last one is disposed, so idle screens pay nothing.
+class _SkeletonPulse {
+  _SkeletonPulse._();
+  static final _SkeletonPulse instance = _SkeletonPulse._();
+
+  AnimationController? _controller;
+  int _refs = 0;
+
+  Animation<double> acquire() {
+    _refs++;
+    final ctrl = _controller ??= AnimationController(
+      vsync: _GlobalTickerProvider(),
+      duration: UgamMotion.shimmer,
+    );
+    if (!ctrl.isAnimating) ctrl.repeat(reverse: true);
+    return ctrl.view;
+  }
+
+  void release() {
+    _refs--;
+    if (_refs <= 0) {
+      _refs = 0;
+      _controller?.stop();
+    }
+  }
+}
+
+/// A minimal app-lifetime [TickerProvider] for the shared shimmer controller.
+class _GlobalTickerProvider implements TickerProvider {
+  @override
+  Ticker createTicker(TickerCallback onTick) => Ticker(onTick);
 }

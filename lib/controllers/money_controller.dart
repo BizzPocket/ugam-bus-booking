@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as dev;
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:get/get.dart';
 
 import '../models/collection.dart';
@@ -9,6 +10,7 @@ import '../models/bus_handover.dart';
 import '../models/money_summary.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
+import 'tour_controller.dart';
 
 /// Loads & persists the money tables (`collections`, `expenses`,
 /// `bus_handovers`) for a single tour via [SyncService], and exposes
@@ -125,7 +127,10 @@ class MoneyController extends GetxController {
       }
     } catch (e) {
       await refreshForTour(c.tourId);
-      AppSnackBar.error('Could not save collection. $e', title: 'Save failed');
+      AppSnackBar.error(
+        tr('errors.save_collection', namedArgs: {'e': '$e'}),
+        title: tr('errors.save_failed'),
+      );
       rethrow;
     }
   }
@@ -138,8 +143,8 @@ class MoneyController extends GetxController {
     } catch (e) {
       await refreshForTour(removed?.tourId ?? _loadedTourId ?? '');
       AppSnackBar.error(
-        'Could not delete collection. $e',
-        title: 'Delete failed',
+        tr('errors.delete_collection', namedArgs: {'e': '$e'}),
+        title: tr('errors.delete_failed'),
       );
       rethrow;
     }
@@ -174,7 +179,10 @@ class MoneyController extends GetxController {
       }
     } catch (err) {
       await refreshForTour(e.tourId);
-      AppSnackBar.error('Could not save expense. $err', title: 'Save failed');
+      AppSnackBar.error(
+        tr('errors.save_expense', namedArgs: {'e': '$err'}),
+        title: tr('errors.save_failed'),
+      );
       rethrow;
     }
   }
@@ -186,25 +194,50 @@ class MoneyController extends GetxController {
       await _sync.smartDelete(table: 'expenses', entityId: id);
     } catch (e) {
       await refreshForTour(removed?.tourId ?? _loadedTourId ?? '');
-      AppSnackBar.error('Could not delete expense. $e', title: 'Delete failed');
+      AppSnackBar.error(
+        tr('errors.delete_expense', namedArgs: {'e': '$e'}),
+        title: tr('errors.delete_failed'),
+      );
       rethrow;
     }
   }
 
   // ── Handovers ─────────────────────────────────────────────
 
+  /// Records a new handover or, when [h] carries an existing id, updates it —
+  /// so a logged handover can be corrected after the fact (mirrors
+  /// [upsertExpense]).
   Future<void> recordHandover(BusHandover h) async {
-    handovers.add(h);
+    final idx = handovers.indexWhere((x) => x.id == h.id);
+    final existedBefore = idx >= 0;
+
+    if (existedBefore) {
+      handovers[idx] = h;
+    } else {
+      handovers.add(h);
+    }
     handovers.refresh();
+
     try {
-      await _sync.smartInsert(
-        table: 'bus_handovers',
-        entityId: h.id,
-        data: h.toMap(),
-      );
+      if (existedBefore) {
+        await _sync.smartUpdate(
+          table: 'bus_handovers',
+          entityId: h.id,
+          data: h.toMap(),
+        );
+      } else {
+        await _sync.smartInsert(
+          table: 'bus_handovers',
+          entityId: h.id,
+          data: h.toMap(),
+        );
+      }
     } catch (e) {
       await refreshForTour(h.tourId);
-      AppSnackBar.error('Could not record handover. $e', title: 'Save failed');
+      AppSnackBar.error(
+        tr('errors.record_handover', namedArgs: {'e': '$e'}),
+        title: tr('errors.save_failed'),
+      );
       rethrow;
     }
   }
@@ -217,8 +250,8 @@ class MoneyController extends GetxController {
     } catch (e) {
       await refreshForTour(removed?.tourId ?? _loadedTourId ?? '');
       AppSnackBar.error(
-        'Could not delete handover. $e',
-        title: 'Delete failed',
+        tr('errors.delete_handover', namedArgs: {'e': '$e'}),
+        title: tr('errors.delete_failed'),
       );
       rethrow;
     }
@@ -226,17 +259,34 @@ class MoneyController extends GetxController {
 
   // ── Aggregation ───────────────────────────────────────────
 
+  /// Per-bus owner rent (`Bus.busPrice`) for the loaded tour, keyed by bus id.
+  /// The rent is auto-counted as a `busOwner` expense in the summaries (single
+  /// source of truth — never a DB expense row). Resolves from the loaded tour's
+  /// buses via [TourController]; guards for a missing tour / not-registered
+  /// controller by treating every rent as 0, so it never throws.
+  Map<String, double> _busRents() {
+    final tourId = _loadedTourId;
+    if (tourId == null || !Get.isRegistered<TourController>()) {
+      return const {};
+    }
+    final buses = Get.find<TourController>().getTour(tourId)?.buses;
+    if (buses == null) return const {};
+    return {for (final b in buses) b.id: b.busPrice};
+  }
+
   BusMoneySummary summaryForBus(String busId) => BusMoneySummary.compute(
     busId: busId,
     collections: collections.toList(),
     expenses: expenses.toList(),
     handovers: handovers.toList(),
+    busRent: _busRents()[busId] ?? 0,
   );
 
   TourMoneySummary tourSummary() => TourMoneySummary.compute(
     collections: collections.toList(),
     expenses: expenses.toList(),
     handovers: handovers.toList(),
+    busRentsTotal: _busRents().values.fold(0.0, (sum, r) => sum + r),
   );
 
   /// Read-only summaries for every bus id in [busIds], in the order given.
@@ -247,6 +297,7 @@ class MoneyController extends GetxController {
     final cols = collections.toList();
     final exps = expenses.toList();
     final hands = handovers.toList();
+    final rents = _busRents();
     return [
       for (final id in busIds)
         BusMoneySummary.compute(
@@ -254,6 +305,7 @@ class MoneyController extends GetxController {
           collections: cols,
           expenses: exps,
           handovers: hands,
+          busRent: rents[id] ?? 0,
         ),
     ];
   }

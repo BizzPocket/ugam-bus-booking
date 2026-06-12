@@ -7,7 +7,6 @@ import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/services/group_cascade.dart';
-import 'package:occubusbooking/services/seating_engine.dart';
 
 // ── Fixture helpers ─────────────────────────────────────────────────────────
 
@@ -349,13 +348,12 @@ void main() {
       expect(plan.blockedReason, contains('Group Joshi'));
     });
 
-    test('a seated-but-not-front priority member still counts as a fit', () {
-      // Only a NON-front sofa row exists (front rows are 0..frontRowCount-1).
-      // A priority group member is seated there; the engine raises
-      // priorityNoFrontSeat but the passenger IS placed, so the move fits.
-      final frontRows = SeatingEngine.frontRowCount; // first non-front row index
+    test('a seated-but-not-lower priority member still counts as a fit', () {
+      // Only an UPPER berth exists. A priority group member is seated there; the
+      // engine raises priorityNoLowerBerth but the passenger IS placed, so the
+      // move fits.
       final bus = _bus('b1', [
-        _seat(frontRows, 0, SeatType.singleSofa, SeatPosition.upper, 'SUx'),
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SUx'),
       ]);
       final a = _p('g_a',
           groupId: 'VIP',

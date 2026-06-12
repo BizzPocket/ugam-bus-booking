@@ -54,8 +54,9 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   /// Resolves handler status for any entries we haven't checked yet and caches
   /// the result. Safe to call repeatedly — already-resolved ids are skipped.
   Future<void> _resolveHandlers(List<CustomerRequestEntry> entries) async {
-    final pending =
-        entries.where((e) => !_handlerStatus.containsKey(e.id)).toList();
+    final pending = entries
+        .where((e) => !_handlerStatus.containsKey(e.id))
+        .toList();
     if (pending.isEmpty) return;
     for (final e in pending) {
       try {
@@ -104,44 +105,52 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       tour = Get.find<TourController>().getTour(entry.tourId);
     }
     tour ??= _tourFromEntry(entry);
-    await Get.to<void>(() => CustomerBookingRequestScreen(
-          tour: tour!,
-          existing: entry,
-        ));
+    await Get.to<void>(
+      () => CustomerBookingRequestScreen(tour: tour!, existing: entry),
+    );
     _refresh();
   }
 
   Tour _tourFromEntry(CustomerRequestEntry e) => Tour(
-        id: e.tourId,
-        title: e.tourTitle,
-        fromCity: e.tourFromCity,
-        toCity: e.tourToCity,
-        departureDate: e.tourDepartureDate,
-        pricePerSeat: e.tourPricePerSeat,
-      );
+    id: e.tourId,
+    title: e.tourTitle,
+    fromCity: e.tourFromCity,
+    toCity: e.tourToCity,
+    departureDate: e.tourDepartureDate,
+    pricePerSeat: e.tourPricePerSeat,
+  );
 
   // ─── UI ────────────────────────────────────────────────────────────
 
+  /// Active tickets only — trips whose date has passed (completed/past) are
+  /// hidden; they're history, not live bookings. Tickets for tours the
+  /// organiser deleted are flagged `rejected` on refresh, so they surface
+  /// under the "Cancelled" tab rather than as live tickets.
+  List<CustomerRequestEntry> get _live =>
+      _entries.where((e) => !e.isPast).toList();
+
   List<CustomerRequestEntry> get _visible {
+    final live = _live;
     switch (_filter) {
       case _StatusFilter.pending:
-        return _entries
+        return live
             .where((e) => e.status == 'pending' && !e.hasSeatsAssigned)
             .toList();
       case _StatusFilter.confirmed:
-        return _entries
+        return live
             .where((e) => e.hasSeatsAssigned || e.status == 'accepted')
             .toList();
       case _StatusFilter.cancelled:
-        return _entries.where((e) => e.status == 'rejected').toList();
+        return live.where((e) => e.status == 'rejected').toList();
       case _StatusFilter.all:
-        return _entries;
+        return live;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final live = _live;
 
     return Scaffold(
       backgroundColor: c.bg,
@@ -155,7 +164,7 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
               onRefresh: _refreshing ? null : _refresh,
               onBack: () => Get.back(),
             ),
-            if (!_loading && _entries.isNotEmpty) ...[
+            if (!_loading && live.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   UgamSpacing.gutter,
@@ -170,27 +179,27 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                   items: [
                     UgamTabItem(
                       label: tr('customer_my_requests.tab_all'),
-                      count: _entries.length,
+                      count: live.length,
                     ),
                     UgamTabItem(
                       label: tr('customer_my_requests.tab_pending'),
-                      count: _entries
-                          .where((e) =>
-                              e.status == 'pending' && !e.hasSeatsAssigned)
+                      count: live
+                          .where(
+                            (e) => e.status == 'pending' && !e.hasSeatsAssigned,
+                          )
                           .length,
                     ),
                     UgamTabItem(
                       label: tr('customer_my_requests.tab_confirmed'),
-                      count: _entries
-                          .where((e) =>
-                              e.hasSeatsAssigned || e.status == 'accepted')
+                      count: live
+                          .where(
+                            (e) => e.hasSeatsAssigned || e.status == 'accepted',
+                          )
                           .length,
                     ),
                     UgamTabItem(
                       label: tr('customer_my_requests.tab_cancelled'),
-                      count: _entries
-                          .where((e) => e.status == 'rejected')
-                          .length,
+                      count: live.where((e) => e.status == 'rejected').length,
                     ),
                   ],
                 ),
@@ -199,45 +208,43 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
             Expanded(
               child: _loading
                   ? _LoadingShimmer()
-                  : _entries.isEmpty
-                      ? UgamEmpty(
-                          icon: Icons.inbox_outlined,
-                          title: tr('customer_my_requests.empty_title'),
-                          body: tr('customer_my_requests.empty_body'),
-                        )
-                      : _visible.isEmpty
-                          ? UgamEmpty(
-                              icon: Icons.filter_alt_off_rounded,
-                              title: tr('customer_my_requests.empty_filter_title'),
-                              body: tr('customer_my_requests.empty_filter_body'),
-                            )
-                          : RefreshIndicator(
-                              color: c.accent,
-                              onRefresh: _refresh,
-                              child: ListView.separated(
-                                physics: const AlwaysScrollableScrollPhysics(
-                                  parent: BouncingScrollPhysics(),
-                                ),
-                                padding: const EdgeInsets.fromLTRB(
-                                  UgamSpacing.gutter,
-                                  UgamSpacing.sm,
-                                  UgamSpacing.gutter,
-                                  140,
-                                ),
-                                itemCount: _visible.length,
-                                separatorBuilder: (_, _) => const SizedBox(
-                                    height: UgamSpacing.sm + 2),
-                                itemBuilder: (_, i) => _RequestRow(
-                                  entry: _visible[i],
-                                  isHandler:
-                                      _handlerStatus[_visible[i].id] ?? false,
-                                  onTap: () => _onRowTap(_visible[i]),
-                                  onEdit: () => _openEdit(_visible[i]),
-                                  onViewChart: () =>
-                                      _openFullChart(_visible[i]),
-                                ),
-                              ),
-                            ),
+                  : live.isEmpty
+                  ? UgamEmpty(
+                      icon: Icons.inbox_outlined,
+                      title: tr('customer_my_requests.empty_title'),
+                      body: tr('customer_my_requests.empty_body'),
+                    )
+                  : _visible.isEmpty
+                  ? UgamEmpty(
+                      icon: Icons.filter_alt_off_rounded,
+                      title: tr('customer_my_requests.empty_filter_title'),
+                      body: tr('customer_my_requests.empty_filter_body'),
+                    )
+                  : RefreshIndicator(
+                      color: c.accent,
+                      onRefresh: _refresh,
+                      child: ListView.separated(
+                        physics: const AlwaysScrollableScrollPhysics(
+                          parent: BouncingScrollPhysics(),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(
+                          UgamSpacing.gutter,
+                          UgamSpacing.sm,
+                          UgamSpacing.gutter,
+                          140,
+                        ),
+                        itemCount: _visible.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(height: UgamSpacing.sm + 2),
+                        itemBuilder: (_, i) => _RequestRow(
+                          entry: _visible[i],
+                          isHandler: _handlerStatus[_visible[i].id] ?? false,
+                          onTap: () => _onRowTap(_visible[i]),
+                          onEdit: () => _openEdit(_visible[i]),
+                          onViewChart: () => _openFullChart(_visible[i]),
+                        ),
+                      ),
+                    ),
             ),
           ],
         ),
@@ -426,22 +433,29 @@ class _RequestRow extends StatelessWidget {
                     children: [
                       Text(
                         entry.tourTitle,
-                        style: UgamText.titleS
-                            .copyWith(color: c.ink, fontSize: 14.5),
+                        style: UgamText.titleS.copyWith(
+                          color: c.ink,
+                          fontSize: 14.5,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 3),
                       Row(
                         children: [
-                          Icon(Icons.south_east_rounded,
-                              size: 12, color: c.ink2),
+                          Icon(
+                            Icons.south_east_rounded,
+                            size: 12,
+                            color: c.ink2,
+                          ),
                           const SizedBox(width: 4),
                           Flexible(
                             child: Text(
                               '${entry.tourFromCity} → ${entry.tourToCity}',
-                              style: UgamText.caption
-                                  .copyWith(color: c.ink2, fontSize: 12),
+                              style: UgamText.caption.copyWith(
+                                color: c.ink2,
+                                fontSize: 12,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -451,23 +465,25 @@ class _RequestRow extends StatelessWidget {
                       const SizedBox(height: UgamSpacing.sm + 2),
                       Row(
                         children: [
-                          UgamStatusDot(
-                            label: statusLabel,
-                            tone: statusTone,
-                          ),
+                          UgamStatusDot(label: statusLabel, tone: statusTone),
                           const SizedBox(width: UgamSpacing.sm),
                           Flexible(
                             child: Text(
                               _seatsLabel(entry),
                               style: UgamText.caption.copyWith(
-                                  color: c.ink, fontSize: 11.5),
+                                color: c.ink,
+                                fontSize: 11.5,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const Spacer(),
-                          Icon(Icons.chevron_right_rounded,
-                              size: 18, color: c.ink3),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 18,
+                            color: c.ink3,
+                          ),
                         ],
                       ),
                     ],
@@ -480,11 +496,7 @@ class _RequestRow extends StatelessWidget {
                 entry.canEdit ||
                 entry.hasSeatsAssigned) ...[
               const SizedBox(height: UgamSpacing.sm + 2),
-              _RowFooter(
-                entry: entry,
-                c: c,
-                onEdit: onEdit,
-              ),
+              _RowFooter(entry: entry, c: c, onEdit: onEdit),
             ],
             if (isHandler) ...[
               const SizedBox(height: UgamSpacing.sm + 2),
@@ -498,7 +510,10 @@ class _RequestRow extends StatelessWidget {
 
   (String, UgamStatusTone) _statusFor(CustomerRequestEntry e) {
     if (e.hasSeatsAssigned) {
-      return (tr('customer_my_requests.chip_seats_assigned'), UgamStatusTone.good);
+      return (
+        tr('customer_my_requests.chip_seats_assigned'),
+        UgamStatusTone.good,
+      );
     }
     if (e.status == 'accepted') {
       return (tr('customer_my_requests.chip_confirmed'), UgamStatusTone.good);
@@ -512,24 +527,44 @@ class _RequestRow extends StatelessWidget {
   String _seatsLabel(CustomerRequestEntry e) {
     final parts = <String>[];
     if (e.doubleSofa > 0) {
-      parts.add(tr('customer_my_requests.seats_double',
-          namedArgs: {'count': e.doubleSofa.toString()}));
+      parts.add(
+        tr(
+          'customer_my_requests.seats_double',
+          namedArgs: {'count': e.doubleSofa.toString()},
+        ),
+      );
     }
     if (e.singleSofa > 0) {
-      parts.add(tr('customer_my_requests.seats_single',
-          namedArgs: {'count': e.singleSofa.toString()}));
+      parts.add(
+        tr(
+          'customer_my_requests.seats_single',
+          namedArgs: {'count': e.singleSofa.toString()},
+        ),
+      );
     }
     if (parts.isEmpty) {
-      return tr('customer_my_requests.seats_fallback',
-          namedArgs: {'count': e.partySize.toString()});
+      return tr(
+        'customer_my_requests.seats_fallback',
+        namedArgs: {'count': e.partySize.toString()},
+      );
     }
     return parts.join(' + ');
   }
 
   static String _formatDate(DateTime d) {
     const months = [
-      'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-      'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
     ];
     return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
   }
@@ -551,27 +586,40 @@ class _RowFooter extends StatelessWidget {
     final widgets = <Widget>[];
 
     if (entry.wasEdited) {
-      widgets.add(const UgamReqChip(
-        label: 'EDITED',
-        variant: UgamChipVariant.neutral,
-      ));
+      widgets.add(
+        UgamReqChip(
+          label: tr('customer_my_requests.chip_edited'),
+          variant: UgamChipVariant.neutral,
+        ),
+      );
     }
     if (entry.tripType == TripType.outboundOnly) {
-      widgets.add(const UgamReqChip(
-        label: 'ONE-WAY OUT',
-        variant: UgamChipVariant.warm,
-      ));
+      widgets.add(
+        UgamReqChip(
+          label: tr('customer_my_requests.chip_oneway_out'),
+          variant: UgamChipVariant.warm,
+        ),
+      );
     } else if (entry.tripType == TripType.returnOnly) {
-      widgets.add(const UgamReqChip(
-        label: 'ONE-WAY RETURN',
-        variant: UgamChipVariant.warm,
-      ));
+      widgets.add(
+        UgamReqChip(
+          label: tr('customer_my_requests.chip_oneway_return'),
+          variant: UgamChipVariant.warm,
+        ),
+      );
     }
     if (entry.hasSeatsAssigned) {
-      widgets.add(UgamReqChip(
-        label: 'SEATS: ${entry.assignedSeats.map((s) => s.seatId).join(", ")}',
-        variant: UgamChipVariant.good,
-      ));
+      widgets.add(
+        UgamReqChip(
+          label: tr(
+            'customer_my_requests.chip_seats',
+            namedArgs: {
+              'seats': entry.assignedSeats.map((s) => s.seatId).join(", "),
+            },
+          ),
+          variant: UgamChipVariant.good,
+        ),
+      );
     }
 
     return Container(
@@ -587,13 +635,7 @@ class _RowFooter extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(
-            child: Wrap(
-              spacing: 5,
-              runSpacing: 5,
-              children: widgets,
-            ),
-          ),
+          Expanded(child: Wrap(spacing: 5, runSpacing: 5, children: widgets)),
           if (entry.canEdit) ...[
             const SizedBox(width: UgamSpacing.sm),
             GestureDetector(
@@ -615,8 +657,10 @@ class _RowFooter extends StatelessWidget {
                     const SizedBox(width: 4),
                     Text(
                       tr('customer_my_requests.edit_request_btn'),
-                      style: UgamText.bodyStrong
-                          .copyWith(color: c.onAccent, fontSize: 11),
+                      style: UgamText.bodyStrong.copyWith(
+                        color: c.onAccent,
+                        fontSize: 11,
+                      ),
                     ),
                   ],
                 ),
@@ -661,8 +705,10 @@ class _HandlerChartButton extends StatelessWidget {
             Expanded(
               child: Text(
                 tr('customer_my_requests.view_full_chart'),
-                style: UgamText.bodyStrong
-                    .copyWith(color: c.onAccent, fontSize: 12.5),
+                style: UgamText.bodyStrong.copyWith(
+                  color: c.onAccent,
+                  fontSize: 12.5,
+                ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),

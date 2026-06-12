@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/auth_controller.dart';
+import '../controllers/finance_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
-import '../utils/app_dialogs.dart';
+import '../routes/app_routes.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/language_picker_sheet.dart';
 
@@ -46,8 +47,11 @@ class SettingsScreen extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                       alignment: Alignment.center,
-                      child: Icon(Icons.arrow_back_rounded,
-                          size: 19, color: c.ink),
+                      child: Icon(
+                        Icons.arrow_back_rounded,
+                        size: 19,
+                        color: c.ink,
+                      ),
                     ),
                   ),
                   const SizedBox(width: UgamSpacing.md),
@@ -73,31 +77,43 @@ class SettingsScreen extends StatelessWidget {
                   children: [
                     _ProfileHero(authCtrl: authCtrl, c: c),
                     const SizedBox(height: UgamSpacing.md),
-                    Obx(() => _AgentStatsRow(
-                          tours: tourCtrl.tours.toList(),
-                          c: c,
-                        )),
+                    Obx(
+                      () =>
+                          _AgentStatsRow(tours: tourCtrl.tours.toList(), c: c),
+                    ),
+                    const SizedBox(height: UgamSpacing.md),
+                    _FinanceCard(c: c),
                     const SizedBox(height: UgamSpacing.xl),
-                    Text('ACCOUNT',
-                        style: UgamText.micro.copyWith(color: c.ink3)),
+                    Text(
+                      tr('settings.account_section'),
+                      style: UgamText.micro.copyWith(color: c.ink3),
+                    ),
                     const SizedBox(height: UgamSpacing.sm),
-                    Obx(() => _AccountCard(
-                          phone: authCtrl.userPhone.value,
-                          whatsapp: authCtrl.userPhone.value,
-                          c: c,
-                        )),
+                    Obx(
+                      () => _AccountCard(
+                        phone: authCtrl.userPhone.value,
+                        whatsapp: authCtrl.userPhone.value,
+                        c: c,
+                      ),
+                    ),
                     const SizedBox(height: UgamSpacing.xl),
-                    Text('APPEARANCE',
-                        style: UgamText.micro.copyWith(color: c.ink3)),
+                    Text(
+                      tr('settings.appearance').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink3),
+                    ),
                     const SizedBox(height: UgamSpacing.sm),
-                    Obx(() => _ThemeTriPicker(
-                          mode: themeCtrl.themeMode.value,
-                          onPick: themeCtrl.setMode,
-                          c: c,
-                        )),
+                    Obx(
+                      () => _ThemeTriPicker(
+                        mode: themeCtrl.themeMode.value,
+                        onPick: themeCtrl.setMode,
+                        c: c,
+                      ),
+                    ),
                     const SizedBox(height: UgamSpacing.xl),
-                    Text(tr('settings.title').toUpperCase(),
-                        style: UgamText.micro.copyWith(color: c.ink3)),
+                    Text(
+                      tr('settings.title').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink3),
+                    ),
                     const SizedBox(height: UgamSpacing.sm),
                     Container(
                       decoration: BoxDecoration(
@@ -112,7 +128,8 @@ class SettingsScreen extends StatelessWidget {
                             iconTone: UgamStatVariant.accent,
                             title: tr('settings.account_details_title'),
                             subtitle: tr('settings.account_details_subtitle'),
-                            onTap: () {},
+                            onTap: () =>
+                                Get.toNamed(AppRoutes.accountDetails),
                           ),
                           _Divider(c: c),
                           _SettingsRow(
@@ -121,7 +138,8 @@ class SettingsScreen extends StatelessWidget {
                             iconTone: UgamStatVariant.good,
                             title: tr('settings.whatsapp_title'),
                             subtitle: tr('settings.whatsapp_subtitle'),
-                            onTap: () {},
+                            onTap: () =>
+                                Get.toNamed(AppRoutes.whatsappSettings),
                           ),
                           _Divider(c: c),
                           _SettingsRow(
@@ -130,7 +148,8 @@ class SettingsScreen extends StatelessWidget {
                             iconTone: UgamStatVariant.warm,
                             title: tr('settings.payment_title'),
                             subtitle: tr('settings.payment_subtitle'),
-                            onTap: () {},
+                            onTap: () =>
+                                Get.toNamed(AppRoutes.paymentSettings),
                           ),
                           _Divider(c: c),
                           _SettingsRow(
@@ -139,7 +158,8 @@ class SettingsScreen extends StatelessWidget {
                             iconTone: UgamStatVariant.accent,
                             title: tr('settings.notifications_title'),
                             subtitle: tr('settings.notifications_subtitle'),
-                            onTap: () {},
+                            onTap: () =>
+                                Get.toNamed(AppRoutes.notificationsSettings),
                           ),
                           _Divider(c: c),
                           _SettingsRow(
@@ -157,11 +177,12 @@ class SettingsScreen extends StatelessWidget {
                     _DangerRow(
                       c: c,
                       onLogout: () async {
-                        final ok = await AppDialogs.confirm(
+                        final ok = await UgamDialog.confirm(
+                          context,
                           title: tr('settings.logout'),
                           message: tr('settings.logout_confirm_message'),
-                          confirmText: tr('settings.logout'),
-                          isDestructive: true,
+                          confirmLabel: tr('settings.logout'),
+                          destructive: true,
                         );
                         if (ok) authCtrl.logout();
                       },
@@ -169,23 +190,29 @@ class SettingsScreen extends StatelessWidget {
                       // have no server-side account (local phone only).
                       onDeleteAccount: authCtrl.isAdmin
                           ? () async {
-                              final ok = await AppDialogs.confirm(
+                              final ok = await UgamDialog.confirm(
+                                context,
                                 title: tr(
-                                    'settings.delete_account_confirm_title'),
+                                  'settings.delete_account_confirm_title',
+                                ),
                                 message: tr(
-                                    'settings.delete_account_confirm_message'),
-                                confirmText:
-                                    tr('settings.delete_account_confirm_cta'),
-                                isDestructive: true,
+                                  'settings.delete_account_confirm_message',
+                                ),
+                                confirmLabel: tr(
+                                  'settings.delete_account_confirm_cta',
+                                ),
+                                destructive: true,
                               );
                               if (!ok) return;
                               try {
                                 await authCtrl.deleteAccount();
                                 AppSnackBar.success(
-                                    tr('settings.delete_account_success'));
+                                  tr('settings.delete_account_success'),
+                                );
                               } catch (_) {
                                 AppSnackBar.error(
-                                    tr('settings.delete_account_error'));
+                                  tr('settings.delete_account_error'),
+                                );
                               }
                             }
                           : null,
@@ -217,6 +244,115 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
+String _fmtSignedInr(num v) {
+  String grp(int n) {
+    final s = n.toString();
+    if (s.length <= 3) return s;
+    final last3 = s.substring(s.length - 3);
+    var rest = s.substring(0, s.length - 3);
+    final parts = <String>[];
+    while (rest.length > 2) {
+      parts.insert(0, rest.substring(rest.length - 2));
+      rest = rest.substring(0, rest.length - 2);
+    }
+    if (rest.isNotEmpty) parts.insert(0, rest);
+    return '${parts.join(',')},$last3';
+  }
+
+  final r = v.round();
+  if (r == 0) return '₹0';
+  return r > 0 ? '+₹${grp(r)}' : '−₹${grp(r.abs())}';
+}
+
+/// Prominent Profit & Loss entry inside Settings. Shows the lifetime realised
+/// net across all completed tours and opens the full [FinanceScreen] report.
+/// This is the one place the cross-tour P&L surfaces in the main flow, so it
+/// leads the settings body rather than hiding in the list below.
+class _FinanceCard extends StatefulWidget {
+  final UgamColorSet c;
+  const _FinanceCard({required this.c});
+
+  @override
+  State<_FinanceCard> createState() => _FinanceCardState();
+}
+
+class _FinanceCardState extends State<_FinanceCard> {
+  FinanceController get _finance => Get.find<FinanceController>();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _finance.ensureLoaded();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.c;
+    return Obx(() {
+      final loaded = _finance.loadedOnce.value;
+      final net = loaded ? _finance.lifetimeNet : 0.0;
+      final profit = net >= 0;
+      final netColor = !loaded
+          ? c.ink3
+          : (net.round() == 0 ? c.ink : (profit ? c.good : c.danger));
+
+      return UgamCard.plain(
+        elev: true,
+        onTap: () => Get.toNamed(AppRoutes.finance),
+        padding: const EdgeInsets.all(UgamSpacing.lg),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                borderRadius: BorderRadius.circular(13),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.insights_rounded, size: 21, color: c.accent),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('finance.card_eyebrow'),
+                    style: UgamText.micro.copyWith(color: c.ink3),
+                  ),
+                  const SizedBox(height: 3),
+                  if (!loaded)
+                    Text(
+                      tr('finance.card_loading'),
+                      style: UgamText.titleS.copyWith(color: c.ink3),
+                    )
+                  else
+                    Text(
+                      _fmtSignedInr(net),
+                      style: UgamText.tabular(
+                        UgamText.numLg.copyWith(color: netColor, fontSize: 22),
+                      ),
+                    ),
+                  const SizedBox(height: 2),
+                  Text(
+                    tr('finance.card_lifetime'),
+                    style: UgamText.caption.copyWith(color: c.ink3),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+          ],
+        ),
+      );
+    });
+  }
+}
+
 class _ProfileHero extends StatelessWidget {
   final AuthController authCtrl;
   final UgamColorSet c;
@@ -235,16 +371,17 @@ class _ProfileHero extends StatelessWidget {
           Container(
             width: 60,
             height: 60,
-            decoration: BoxDecoration(
-              color: c.accent,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
             alignment: Alignment.center,
-            child: Obx(() => Text(
-                  authCtrl.initials.isNotEmpty ? authCtrl.initials : '👋',
-                  style: UgamText.titleM
-                      .copyWith(color: c.onAccent, fontSize: 22),
-                )),
+            child: Obx(
+              () => Text(
+                authCtrl.initials.isNotEmpty ? authCtrl.initials : '👋',
+                style: UgamText.titleM.copyWith(
+                  color: c.onAccent,
+                  fontSize: 22,
+                ),
+              ),
+            ),
           ),
           const SizedBox(width: UgamSpacing.lg),
           Expanded(
@@ -252,15 +389,16 @@ class _ProfileHero extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Obx(() => Text(
-                      authCtrl.userName.value.isNotEmpty
-                          ? authCtrl.userName.value
-                          : tr('settings.welcome'),
-                      style: UgamText.titleM
-                          .copyWith(color: c.ink, fontSize: 17),
-                    )),
+                Obx(
+                  () => Text(
+                    authCtrl.userName.value.isNotEmpty
+                        ? authCtrl.userName.value
+                        : tr('settings.welcome'),
+                    style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17),
+                  ),
+                ),
                 const SizedBox(height: 6),
-                const UgamReqChip(label: 'ADMIN'),
+                UgamReqChip(label: tr('settings.admin_badge')),
               ],
             ),
           ),
@@ -291,20 +429,37 @@ class _AgentStatsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final tourCount = tours.length;
-    final passengerCount =
-        tours.fold<int>(0, (sum, t) => sum + t.passengers.length);
-    final monthRevenue = tours.where((t) {
-      return t.departureDate.year == now.year &&
-          t.departureDate.month == now.month;
-    }).fold<double>(
-        0, (sum, t) => sum + (t.pricePerSeat * t.totalSeatsAssigned));
+    final passengerCount = tours.fold<int>(
+      0,
+      (sum, t) => sum + t.passengers.length,
+    );
+    final monthRevenue = tours
+        .where((t) {
+          return t.departureDate.year == now.year &&
+              t.departureDate.month == now.month;
+        })
+        .fold<double>(
+          0,
+          (sum, t) => sum + (t.pricePerSeat * t.totalSeatsAssigned),
+        );
 
     final items = <_StatItem>[
-      _StatItem(value: '$tourCount', label: tourCount == 1 ? 'tour' : 'tours'),
       _StatItem(
-          value: '$passengerCount',
-          label: passengerCount == 1 ? 'passenger' : 'passengers'),
-      _StatItem(value: _formatRevenue(monthRevenue), label: 'this month'),
+        value: '$tourCount',
+        label: tourCount == 1
+            ? tr('settings.stat_tour')
+            : tr('settings.stat_tours'),
+      ),
+      _StatItem(
+        value: '$passengerCount',
+        label: passengerCount == 1
+            ? tr('settings.stat_passenger')
+            : tr('settings.stat_passengers'),
+      ),
+      _StatItem(
+        value: _formatRevenue(monthRevenue),
+        label: tr('settings.stat_this_month'),
+      ),
     ];
 
     return Container(
@@ -340,11 +495,7 @@ class _AgentStatsRow extends StatelessWidget {
               ),
             ),
             if (i < items.length - 1)
-              Container(
-                width: 1,
-                height: 28,
-                color: c.border,
-              ),
+              Container(width: 1, height: 28, color: c.border),
           ],
         ],
       ),
@@ -381,7 +532,7 @@ class _AccountCard extends StatelessWidget {
             c: c,
             icon: Icons.phone_rounded,
             iconTone: UgamStatVariant.accent,
-            label: 'Phone',
+            label: tr('settings.phone_label'),
             value: phone,
           ),
           _Divider(c: c),
@@ -389,7 +540,7 @@ class _AccountCard extends StatelessWidget {
             c: c,
             icon: Icons.chat_bubble_rounded,
             iconTone: UgamStatVariant.good,
-            label: 'WhatsApp',
+            label: tr('settings.whatsapp_label'),
             value: whatsapp,
           ),
         ],
@@ -445,8 +596,7 @@ class _AccountRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label,
-                    style: UgamText.caption.copyWith(color: c.ink2)),
+                Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
                 const SizedBox(height: 2),
                 Row(
                   children: [
@@ -493,10 +643,19 @@ class _ThemeTriPicker extends StatelessWidget {
     return UgamTabPills(
       currentIndex: ThemeMode.values.indexOf(mode),
       onChanged: (i) => onPick(ThemeMode.values[i]),
-      items: const [
-        UgamTabItem(label: 'System', icon: Icons.brightness_auto_rounded),
-        UgamTabItem(label: 'Light', icon: Icons.light_mode_rounded),
-        UgamTabItem(label: 'Dark', icon: Icons.dark_mode_rounded),
+      items: [
+        UgamTabItem(
+          label: tr('settings.theme_system'),
+          icon: Icons.brightness_auto_rounded,
+        ),
+        UgamTabItem(
+          label: tr('settings.theme_light'),
+          icon: Icons.light_mode_rounded,
+        ),
+        UgamTabItem(
+          label: tr('settings.theme_dark'),
+          icon: Icons.dark_mode_rounded,
+        ),
       ],
     );
   }
@@ -554,13 +713,18 @@ class _SettingsRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(title,
-                      style: UgamText.titleS
-                          .copyWith(color: c.ink, fontSize: 15)),
+                  Text(
+                    title,
+                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+                  ),
                   const SizedBox(height: 1),
-                  Text(subtitle,
-                      style: UgamText.caption
-                          .copyWith(color: c.ink3, fontSize: 12)),
+                  Text(
+                    subtitle,
+                    style: UgamText.caption.copyWith(
+                      color: c.ink3,
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -659,13 +823,21 @@ class _DangerRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(title,
-                      style: UgamText.titleS
-                          .copyWith(color: c.danger, fontSize: 15)),
+                  Text(
+                    title,
+                    style: UgamText.titleS.copyWith(
+                      color: c.danger,
+                      fontSize: 15,
+                    ),
+                  ),
                   const SizedBox(height: 1),
-                  Text(subtitle,
-                      style: UgamText.caption
-                          .copyWith(color: c.ink3, fontSize: 12)),
+                  Text(
+                    subtitle,
+                    style: UgamText.caption.copyWith(
+                      color: c.ink3,
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               ),
             ),

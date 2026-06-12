@@ -1,16 +1,19 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../design/text_styles.dart';
 import '../design/tokens.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
+import 'seat_chart_tile.dart';
 
 /// Renders a [BusLayout] as one combined 5-column grid (no deck toggle).
 ///
 /// Column placement follows [SeatGridCols]: single-upper | single-lower |
-/// aisle | double-upper | double-lower. The aisle (col 2) is an empty gap
-/// except on the balcony (back) row, where it carries an upper + lower berth
-/// pair rendered as a single split tile.
+/// aisle | double-upper | double-lower. The aisle (col 2) is an empty gap on a
+/// normal row. The back bench — the last row, when it carries aisle berths — is
+/// drawn flat instead: every seat in that row packed across the full width as
+/// equal full-size tiles, with no centre gap.
 ///
 /// The widget owns *placement*; the caller owns *appearance* via [tileBuilder]
 /// (or uses [CombinedSeatGrid.seatTile] for the standard look). The grid scales
@@ -31,6 +34,51 @@ class CombinedSeatGrid extends StatelessWidget {
   final bool showDriver;
   final String? driverLabel;
 
+  // ── Optional drag-to-move/swap + edit-flags hooks ──────────────────────────
+  // All default off/null so existing (read-only) call sites are unaffected: the
+  // grid wraps tiles in a [SeatDragWrapper] ONLY when [enableDrag] is true.
+
+  /// Master switch for long-press drag of a booked seat onto another seat. When
+  /// off the grid renders exactly as before (no [SeatDragWrapper] at all).
+  final bool enableDrag;
+
+  /// Fired when one seat is dropped onto another. The caller decides move (free
+  /// target) vs swap (occupied target) and calls the group-safe controller
+  /// (TourController.moveSeat / swapSeats). The grid writes NO data.
+  final void Function(String fromSeatId, String toSeatId)? onSeatDraggedToSeat;
+
+  /// Per-cell: can this seat be PICKED UP? The caller answers (e.g. "true only
+  /// for a single, unambiguous occupant"). Defaults to false when null, so no
+  /// seat is draggable unless the caller opts it in.
+  final bool Function(SeatCell cell)? canDragSeat;
+
+  /// Per-cell: the live drop-target classification against the in-flight drag.
+  /// The caller owns the move-vs-swap/blocked rules; the grid only paints the
+  /// returned highlight. Returns [SeatDropHighlight.none] when null.
+  final SeatDropHighlight Function(SeatCell cell)? dropHighlightFor;
+
+  /// True while a drag is in flight anywhere in this grid (drives whether the
+  /// per-cell highlight paints). The caller flips this in its own setState from
+  /// [onSeatDragStarted] / [onSeatDragEnded].
+  final bool dragActive;
+
+  /// Per-cell label for the chip that follows the finger (usually the occupant
+  /// name). Null hides the name (seat id only).
+  final String? Function(SeatCell cell)? dragLabelFor;
+
+  /// True when a rejected drop should still be REPORTED (so the caller can toast
+  /// the reason) instead of silently bouncing. Off by default.
+  final bool reportRejectedDrops;
+
+  /// Called when a seat is lifted / released. The caller toggles [dragActive].
+  final void Function(SeatCell cell)? onSeatDragStarted;
+  final VoidCallback? onSeatDragEnded;
+
+  /// Per-seat "edit flags" affordance: long-press (when drag is OFF) opens the
+  /// caller's flag editor (forward / reserved / handler …). Null disables it.
+  /// Independent of [enableDrag]; a screen uses one OR the other.
+  final void Function(String seatId)? onSeatLongPressForFlags;
+
   const CombinedSeatGrid({
     super.key,
     required this.layout,
@@ -41,6 +89,16 @@ class CombinedSeatGrid extends StatelessWidget {
     this.rowGap = 6,
     this.showDriver = true,
     this.driverLabel,
+    this.enableDrag = false,
+    this.onSeatDraggedToSeat,
+    this.canDragSeat,
+    this.dropHighlightFor,
+    this.dragActive = false,
+    this.dragLabelFor,
+    this.reportRejectedDrops = false,
+    this.onSeatDragStarted,
+    this.onSeatDragEnded,
+    this.onSeatLongPressForFlags,
   });
 
   bool _rowHasSeats(int row) =>
@@ -80,7 +138,7 @@ class CombinedSeatGrid extends StatelessWidget {
               Icon(Icons.account_circle_rounded, size: 16, color: c.ink3),
               const SizedBox(width: 6),
               Text(
-                (driverLabel ?? 'DRIVER').toUpperCase(),
+                (driverLabel ?? tr('seat_ui.driver')).toUpperCase(),
                 style: UgamText.micro.copyWith(letterSpacing: 1, color: c.ink3),
               ),
             ],
@@ -112,13 +170,17 @@ class CombinedSeatGrid extends StatelessWidget {
     bool hasLeft,
     bool hasRight,
   ) {
+    // A row carrying seats in the aisle column is the back bench: draw it flat
+    // (full-width, full-size, no centre gap) so the leftover/balcony berths read
+    // as a real bench rather than a tiny half-height middle sofa.
     final pair = layout.balconyPair(row);
-    final hasBalcony = pair.upper.hasSeat || pair.lower.hasSeat;
+    if (pair.upper.hasSeat || pair.lower.hasSeat) {
+      return _benchRow(context, row);
+    }
 
     // The aisle is a real (blank) column so the grid reads as 5-wide: it shows
-    // whenever both lanes exist, and on the balcony row it carries the split
-    // upper/lower pair. Collapsed only when one whole lane is absent.
-    final showAisle = hasBalcony || (hasLeft && hasRight);
+    // whenever both lanes exist. Collapsed only when one whole lane is absent.
+    final showAisle = hasLeft && hasRight;
 
     final cols = <Widget>[];
     void add(Widget w) {
@@ -133,15 +195,15 @@ class CombinedSeatGrid extends StatelessWidget {
       add(_slot(context, layout.cellAt(row, SeatGridCols.singleLower)));
     }
     if (showAisle) {
-      add(hasBalcony
-          ? _balconyAisle(context, pair)
-          : SizedBox(width: cellWidth, height: cellHeight));
+      add(SizedBox(width: cellWidth, height: cellHeight));
+    }
+    // Doubles render Lower then Upper (so the layout reads U L | L U, with the
+    // two lower columns toward the centre aisle).
+    if (usedCols.contains(SeatGridCols.doubleLower)) {
+      add(_slot(context, layout.cellAt(row, SeatGridCols.doubleLower)));
     }
     if (usedCols.contains(SeatGridCols.doubleUpper)) {
       add(_slot(context, layout.cellAt(row, SeatGridCols.doubleUpper)));
-    }
-    if (usedCols.contains(SeatGridCols.doubleLower)) {
-      add(_slot(context, layout.cellAt(row, SeatGridCols.doubleLower)));
     }
 
     return Row(
@@ -151,42 +213,81 @@ class CombinedSeatGrid extends StatelessWidget {
     );
   }
 
+  /// The back bench: every seat in [row] (lane berths + the aisle berths) drawn
+  /// as equal full-size tiles packed across the full width — no centre gap, no
+  /// half-height split. A bench is wider than a normal 2+2 row, so the grid's
+  /// [FittedBox] scales every tile down a touch to fit, exactly like the snug
+  /// back row of a real coach.
+  Widget _benchRow(BuildContext context, int row) {
+    final seats = layout.grid.where((c) => c.row == row && c.hasSeat).toList()
+      ..sort((a, b) {
+        if (a.col != b.col) return a.col.compareTo(b.col);
+        return _posRank(a.position) - _posRank(b.position);
+      });
+    final cols = <Widget>[];
+    for (final cell in seats) {
+      if (cols.isNotEmpty) cols.add(SizedBox(width: colGap));
+      cols.add(_slot(context, cell));
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: cols,
+    );
+  }
+
+  /// Stable ordering for two berths sharing the aisle column: upper before lower.
+  static int _posRank(SeatPosition? p) => switch (p) {
+        SeatPosition.upper => 0,
+        SeatPosition.lower => 1,
+        null => 2,
+      };
+
   /// A fixed lane slot. Empty cells render as blank space so columns align.
+  /// Non-empty tiles are wrapped with the optional drag / flag affordances when
+  /// the caller opted in; otherwise the tile renders exactly as before.
   Widget _slot(BuildContext context, SeatCell cell) {
     return SizedBox(
       width: cellWidth,
       height: cellHeight,
       child: cell.isEmpty
           ? null
-          : FittedBox(fit: BoxFit.scaleDown, child: tileBuilder(context, cell)),
+          : FittedBox(
+              fit: BoxFit.scaleDown,
+              child: _wrapTile(context, cell, tileBuilder(context, cell)),
+            ),
     );
   }
 
-  /// The balcony aisle column: a full seat-width slot holding the upper berth
-  /// stacked over the lower berth.
-  Widget _balconyAisle(
-    BuildContext context,
-    ({SeatCell upper, SeatCell lower}) pair,
-  ) {
-    final halfH = (cellHeight - 2) / 2;
-    Widget half(SeatCell cell) => SizedBox(
-          width: cellWidth,
-          height: halfH,
-          child: cell.isEmpty
-              ? null
-              : FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: tileBuilder(context, cell),
-                ),
-        );
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        half(pair.upper),
-        const SizedBox(height: 2),
-        half(pair.lower),
-      ],
-    );
+  /// Layers the optional drag-to-move/swap and flag-edit affordances over a
+  /// rendered [tile]. Returns the bare tile unchanged when nothing is enabled,
+  /// so read-only call sites are visually identical.
+  Widget _wrapTile(BuildContext context, SeatCell cell, Widget tile) {
+    final seatId = cell.seatId;
+    if (enableDrag && seatId != null) {
+      return SeatDragWrapper(
+        seatId: seatId,
+        draggable: canDragSeat?.call(cell) ?? false,
+        dragLabel: dragLabelFor?.call(cell),
+        dragActive: dragActive,
+        highlight: dropHighlightFor?.call(cell) ?? SeatDropHighlight.none,
+        acceptForReason: reportRejectedDrops,
+        onDragStarted: onSeatDragStarted == null
+            ? null
+            : () => onSeatDragStarted!(cell),
+        onDragEnd: onSeatDragEnded,
+        onSeatDropped: onSeatDraggedToSeat,
+        child: tile,
+      );
+    }
+    if (onSeatLongPressForFlags != null && seatId != null) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onLongPress: () => onSeatLongPressForFlags!(seatId),
+        child: tile,
+      );
+    }
+    return tile;
   }
 
   /// Standard seat tile: rounded surface with the seat ID and a short type
@@ -244,8 +345,8 @@ class CombinedSeatGrid extends StatelessWidget {
 
   /// Short uppercase label for a seat type ("SINGLE" / "DOUBLE" / "SEATER").
   static String shortType(SeatType t) => switch (t) {
-        SeatType.singleSofa => 'SINGLE',
-        SeatType.doubleSofa => 'DOUBLE',
-        SeatType.seater => 'SEATER',
+        SeatType.singleSofa => tr('seat_ui.type_single'),
+        SeatType.doubleSofa => tr('seat_ui.type_double'),
+        SeatType.seater => tr('seat_ui.type_seater'),
       };
 }

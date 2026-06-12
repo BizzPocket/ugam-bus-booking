@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -18,9 +19,9 @@ String? _tripLabel(TripType t) {
     case TripType.roundTrip:
       return null;
     case TripType.outboundOnly:
-      return 'Outbound only';
+      return tr('collection.trip_outbound_only');
     case TripType.returnOnly:
-      return 'Return only';
+      return tr('collection.trip_return_only');
   }
 }
 
@@ -96,21 +97,28 @@ class _CollectionScreenState extends State<CollectionScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      appBar: AppBar(title: Text('Collection · ${widget.bus.name}')),
       body: SafeArea(
-        top: false,
-        child: Obx(() {
-          final s = controller.summaryForBus(widget.bus.id);
-          final lines = _seatLines.where(_passesFilter).toList();
-
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(
-              UgamSpacing.gutter,
-              UgamSpacing.sm,
-              UgamSpacing.gutter,
-              UgamSpacing.huge,
+        child: Column(
+          children: [
+            UgamAppBar(
+              title: tr(
+                'collection.app_bar_title',
+                namedArgs: {'bus': widget.bus.name},
+              ),
             ),
-            children: [
+            Expanded(
+              child: Obx(() {
+                final s = controller.summaryForBus(widget.bus.id);
+                final lines = _seatLines.where(_passesFilter).toList();
+
+                return ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    UgamSpacing.sm,
+                    UgamSpacing.gutter,
+                    UgamSpacing.huge,
+                  ),
+                  children: [
               _SummaryHeader(
                 collected: s.collected,
                 toReturn: s.toReturnTotal,
@@ -120,10 +128,10 @@ class _CollectionScreenState extends State<CollectionScreen> {
               UgamTabPills(
                 currentIndex: _filter,
                 onChanged: (i) => setState(() => _filter = i),
-                items: const [
-                  UgamTabItem(label: 'All'),
-                  UgamTabItem(label: 'To return'),
-                  UgamTabItem(label: 'To collect'),
+                items: [
+                  UgamTabItem(label: tr('collection.filter_all')),
+                  UgamTabItem(label: tr('collection.filter_to_return')),
+                  UgamTabItem(label: tr('collection.filter_to_collect')),
                 ],
               ),
               const SizedBox(height: UgamSpacing.lg),
@@ -134,7 +142,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                   ),
                   child: Center(
                     child: Text(
-                      'No passengers match this filter.',
+                      tr('collection.empty_no_match'),
                       style: UgamText.body.copyWith(color: c.ink2),
                     ),
                   ),
@@ -149,10 +157,13 @@ class _CollectionScreenState extends State<CollectionScreen> {
                       onTap: () => _openCollectSheet(context, line),
                     ),
                   );
-                }),
-            ],
-          );
-        }),
+                    }),
+                  ],
+                );
+              }),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -189,19 +200,34 @@ class _CollectionScreenState extends State<CollectionScreen> {
               final balance = received - returned - due;
 
               final (String balLabel, Color balColor) = balance > 0
-                  ? ('Change to return: ${_money(balance)}', sc.warm)
+                  ? (
+                      tr(
+                        'collection.change_to_return',
+                        namedArgs: {'amount': _money(balance)},
+                      ),
+                      sc.warm,
+                    )
                   : balance < 0
-                  ? ('Still to collect: ${_money(-balance)}', sc.danger)
-                  : ('Settled', sc.good);
+                  ? (
+                      tr(
+                        'collection.still_to_collect',
+                        namedArgs: {'amount': _money(-balance)},
+                      ),
+                      sc.danger,
+                    )
+                  : (tr('collection.settled'), sc.good);
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _ReadOnlyLine(label: 'Amount due', value: _money(due)),
+                  _ReadOnlyLine(
+                    label: tr('collection.amount_due'),
+                    value: _money(due),
+                  ),
                   const SizedBox(height: UgamSpacing.lg),
                   UgamInput(
-                    label: 'Received',
+                    label: tr('collection.received'),
                     controller: receivedCtrl,
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
@@ -213,7 +239,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                   ),
                   const SizedBox(height: UgamSpacing.md),
                   UgamInput(
-                    label: 'Returned to customer',
+                    label: tr('collection.returned_to_customer'),
                     controller: returnedCtrl,
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
@@ -224,9 +250,15 @@ class _CollectionScreenState extends State<CollectionScreen> {
                     onChanged: (_) => setSheetState(() {}),
                   ),
                   const SizedBox(height: UgamSpacing.md),
-                  UgamInput(label: 'Collected by', controller: collectedByCtrl),
+                  UgamInput(
+                    label: tr('collection.collected_by'),
+                    controller: collectedByCtrl,
+                  ),
                   const SizedBox(height: UgamSpacing.md),
-                  UgamInput(label: 'Note', controller: noteCtrl),
+                  UgamInput(
+                    label: tr('collection.note'),
+                    controller: noteCtrl,
+                  ),
                   const SizedBox(height: UgamSpacing.lg),
                   Container(
                     width: double.infinity,
@@ -245,7 +277,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                   ),
                   const SizedBox(height: UgamSpacing.lg),
                   UgamCTA(
-                    label: 'Save',
+                    label: tr('app.action.save'),
                     onPressed: () async {
                       final base =
                           col ??
@@ -312,7 +344,7 @@ class _SummaryHeader extends StatelessWidget {
           child: UgamStatTile(
             icon: Icons.payments_rounded,
             value: _money(collected),
-            label: 'Collected',
+            label: tr('collection.collected'),
             variant: UgamStatVariant.good,
           ),
         ),
@@ -321,7 +353,7 @@ class _SummaryHeader extends StatelessWidget {
           child: UgamStatTile(
             icon: Icons.undo_rounded,
             value: _money(toReturn),
-            label: 'To return',
+            label: tr('collection.filter_to_return'),
             variant: UgamStatVariant.warm,
           ),
         ),
@@ -330,7 +362,7 @@ class _SummaryHeader extends StatelessWidget {
           child: UgamStatTile(
             icon: Icons.account_balance_wallet_rounded,
             value: _money(toCollect),
-            label: 'To collect',
+            label: tr('collection.filter_to_collect'),
             variant: UgamStatVariant.accent,
           ),
         ),
@@ -364,16 +396,22 @@ class _PassengerRow extends StatelessWidget {
     late final String chipLabel;
     late final Color chipColor;
     if (col != null && col.isReturnDue) {
-      chipLabel = 'Return ${_money(col.changeToReturn)}';
+      chipLabel = tr(
+        'collection.chip_return',
+        namedArgs: {'amount': _money(col.changeToReturn)},
+      );
       chipColor = c.warm;
     } else if (balance < 0) {
-      chipLabel = 'Due ${_money(due - received)}';
+      chipLabel = tr(
+        'collection.chip_due',
+        namedArgs: {'amount': _money(due - received)},
+      );
       chipColor = c.danger;
     } else if (col != null && col.isSquare && received > 0) {
-      chipLabel = 'Paid';
+      chipLabel = tr('collection.chip_paid');
       chipColor = c.good;
     } else {
-      chipLabel = 'Not collected';
+      chipLabel = tr('collection.chip_not_collected');
       chipColor = c.ink3;
     }
 
@@ -399,8 +437,17 @@ class _PassengerRow extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       passenger.phone.trim().isEmpty
-                          ? 'Seat ${line.seatId}'
-                          : '${passenger.phone} · Seat ${line.seatId}',
+                          ? tr(
+                              'collection.seat_label',
+                              namedArgs: {'seat': line.seatId},
+                            )
+                          : tr(
+                              'collection.phone_seat_label',
+                              namedArgs: {
+                                'phone': passenger.phone,
+                                'seat': line.seatId,
+                              },
+                            ),
                       style: UgamText.caption.copyWith(color: c.ink2),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -424,11 +471,15 @@ class _PassengerRow extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _MetricCol(label: 'Due', value: _money(due), c: c),
+                child: _MetricCol(
+                  label: tr('collection.metric_due'),
+                  value: _money(due),
+                  c: c,
+                ),
               ),
               Expanded(
                 child: _MetricCol(
-                  label: 'Received',
+                  label: tr('collection.received'),
                   value: _money(received),
                   c: c,
                 ),

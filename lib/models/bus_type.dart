@@ -1,3 +1,5 @@
+import 'package:easy_localization/easy_localization.dart';
+
 /// What kind of seats a bus carries.
 ///
 /// - [sleeper]: every seat is a sleeper berth (split lower/upper).
@@ -11,11 +13,11 @@ enum BusType {
   String get displayName {
     switch (this) {
       case BusType.sleeper:
-        return 'Sleeper';
+        return tr('enums.bus_type.sleeper');
       case BusType.seater:
-        return 'Seater';
+        return tr('enums.bus_type.seater');
       case BusType.mixed:
-        return 'Mixed';
+        return tr('enums.bus_type.mixed');
     }
   }
 

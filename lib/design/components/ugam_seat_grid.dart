@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -183,13 +184,13 @@ class UgamSeatLegend extends StatelessWidget {
     final c = UgamColors.of(context);
     return Row(
       children: [
-        _swatch(c.cardElev, 'Available', context),
+        _swatch(c.cardElev, tr('app.label.available'), context),
         const SizedBox(width: UgamSpacing.md),
-        _swatch(c.accent, 'Selected', context),
+        _swatch(c.accent, tr('seat_ui.selected'), context),
         const SizedBox(width: UgamSpacing.md),
-        _swatch(c.ink3, 'Taken', context),
+        _swatch(c.ink3, tr('seat_ui.taken'), context),
         const SizedBox(width: UgamSpacing.md),
-        _swatch(c.warm, 'Ladies', context),
+        _swatch(c.warm, tr('seat_ui.ladies'), context),
       ],
     );
   }

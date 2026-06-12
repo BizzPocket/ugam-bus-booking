@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'app_snackbar.dart';
@@ -20,14 +21,14 @@ class PhoneDialer {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
       if (!ok) {
         AppSnackBar.error(
-          'Could not open the dialer for $phone.',
-          title: 'Call failed',
+          tr('errors.dialer_open_failed', namedArgs: {'phone': phone}),
+          title: tr('errors.call_failed'),
         );
       }
-    } catch (e) {
+    } catch (_) {
       AppSnackBar.error(
-        'Could not open the dialer. $e',
-        title: 'Call failed',
+        tr('errors.dialer_open_failed_generic'),
+        title: tr('errors.call_failed'),
       );
     }
   }

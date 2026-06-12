@@ -1,16 +1,20 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import '../design/tokens.dart';
 
-/// Production-ready dialog utilities.
+import '../design/ugam.dart';
+
+/// Context-free dialog utilities (callable from controllers/anywhere via
+/// `Get.dialog`). The visual treatment is shared with [UgamDialog] —
+/// same card surface, title/body type, and [UgamButton] actions — so a
+/// confirm raised here is indistinguishable from one raised with a
+/// `BuildContext`.
 class AppDialogs {
   AppDialogs._();
 
-  /// Shows a confirmation dialog for destructive or important actions.
-  /// Returns `true` if confirmed, `false` if cancelled. When [confirmText] or
-  /// [cancelText] are omitted, the localised defaults from `app.action.*` are
-  /// used so dialogs read in the active language.
+  /// Confirmation dialog for destructive or important actions. Returns
+  /// `true` only if confirmed; barrier/back dismissal returns `false`.
+  /// Localised `app.action.*` defaults are used when labels are omitted.
   static Future<bool> confirm({
     required String title,
     required String message,
@@ -22,63 +26,31 @@ class AppDialogs {
     final resolvedCancel = cancelText ?? tr('app.action.cancel');
     final result = await Get.dialog<bool>(
       Builder(
-        builder: (context) {
-          final colorScheme = Theme.of(context).colorScheme;
-
-          return AlertDialog(
-            backgroundColor: UgamColors.of(context).card,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+        builder: (context) => _DialogShell(
+          title: title,
+          message: message,
+          actions: [
+            UgamButton(
+              label: resolvedCancel,
+              kind: UgamButtonKind.ghost,
+              onPressed: () => Get.back(result: false),
             ),
-            title: Text(
-              title,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 18,
-                color: colorScheme.onSurface,
-              ),
+            UgamButton(
+              label: resolvedConfirm,
+              kind: isDestructive
+                  ? UgamButtonKind.danger
+                  : UgamButtonKind.primary,
+              onPressed: () => Get.back(result: true),
             ),
-            content: Text(
-              message,
-              style: TextStyle(
-                fontSize: 14,
-                color: colorScheme.onSurfaceVariant,
-                height: 1.5,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Get.back(result: false),
-                child: Text(
-                  resolvedCancel,
-                  style: TextStyle(
-                    color: colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: () => Get.back(result: true),
-                style: TextButton.styleFrom(
-                  foregroundColor: isDestructive
-                      ? colorScheme.error
-                      : colorScheme.primary,
-                ),
-                child: Text(
-                  resolvedConfirm,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          );
-        },
+          ],
+        ),
       ),
       barrierDismissible: true,
     );
     return result ?? false;
   }
 
-  /// Shows an error dialog for critical errors that need acknowledgment.
+  /// Error dialog that needs acknowledgement.
   static Future<void> error({
     required String title,
     required String message,
@@ -86,49 +58,91 @@ class AppDialogs {
     await Get.dialog(
       Builder(
         builder: (context) {
-          final colorScheme = Theme.of(context).colorScheme;
-
-          return AlertDialog(
-            backgroundColor: UgamColors.of(context).card,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            icon: Icon(
-              Icons.error_outline_rounded,
-              color: colorScheme.error,
-              size: 40,
-            ),
-            title: Text(
-              title,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 18,
-                color: colorScheme.onSurface,
-              ),
-            ),
-            content: Text(
-              message,
-              style: TextStyle(
-                fontSize: 14,
-                color: colorScheme.onSurfaceVariant,
-                height: 1.5,
-              ),
-              textAlign: TextAlign.center,
-            ),
+          final c = UgamColors.of(context);
+          return _DialogShell(
+            icon: Icon(Icons.error_outline_rounded, color: c.danger, size: 40),
+            title: title,
+            message: message,
+            centerText: true,
             actions: [
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: () => Get.back(),
-                  child: Text(
-                    tr('app.action.ok'),
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
+              UgamButton(
+                label: tr('app.action.ok'),
+                expand: true,
+                onPressed: () => Get.back(),
               ),
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Shared visual shell so [AppDialogs] matches [UgamDialog] exactly.
+class _DialogShell extends StatelessWidget {
+  final String title;
+  final String message;
+  final List<Widget> actions;
+  final Widget? icon;
+  final bool centerText;
+
+  const _DialogShell({
+    required this.title,
+    required this.message,
+    required this.actions,
+    this.icon,
+    this.centerText = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final align = centerText
+        ? CrossAxisAlignment.center
+        : CrossAxisAlignment.stretch;
+    final textAlign = centerText ? TextAlign.center : TextAlign.start;
+    return Dialog(
+      backgroundColor: c.card,
+      insetPadding: const EdgeInsets.symmetric(horizontal: UgamSpacing.xl),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(UgamSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: align,
+          children: [
+            if (icon != null) ...[
+              icon!,
+              const SizedBox(height: UgamSpacing.md),
+            ],
+            Text(
+              title,
+              style: UgamText.titleM.copyWith(color: c.ink),
+              textAlign: textAlign,
+            ),
+            const SizedBox(height: UgamSpacing.sm),
+            Text(
+              message,
+              style: UgamText.body.copyWith(color: c.ink2, height: 1.4),
+              textAlign: textAlign,
+            ),
+            const SizedBox(height: UgamSpacing.xl),
+            if (actions.length == 1)
+              actions.first
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  for (final a in actions) ...[
+                    Flexible(child: a),
+                    const SizedBox(width: UgamSpacing.sm),
+                  ],
+                ]..removeLast(),
+              ),
+          ],
+        ),
       ),
     );
   }
