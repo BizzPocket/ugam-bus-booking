@@ -30,52 +30,53 @@ import 'package:flutter/material.dart';
 class Brand {
   const Brand._();
 
-  /// Dark-mode accent — soft champagne gold. Reads premium on graphite and
-  /// is light enough to carry near-black text (see [UgamColorSet.onAccent]).
-  static const Color champagne = Color(0xFFC9A86A);
+  /// Dark-mode accent — electric lime. The single high-energy SIGNAL color of
+  /// the Bold-Transit DNA; bright enough to carry BLACK text
+  /// (see [UgamColorSet.onAccent]) for the signature lime-on-black look.
+  static const Color signal = Color(0xFFC6F432);
 
-  /// Light-mode accent — deeper champagne, for contrast on the near-white
-  /// ground; also carries near-black text.
-  static const Color champagneDeep = Color(0xFFA8854A);
+  /// Light-mode accent — deeper lime, for legibility as text/icons on the
+  /// white ground; also carries black text on its fills.
+  static const Color signalDeep = Color(0xFF65A30D);
 }
 
 class UgamColors {
   const UgamColors._();
 
   static const UgamColorSet dark = UgamColorSet(
-    bg: Color(0xFF0B0B0C),          // Graphite near-black — neutral, faintly cool
-    card: Color(0xFF161618),        // Graphite tile, lifted so cards read as distinct
-    cardElev: Color(0xFF1F1F22),    // Elevated graphite surface
-    border: Color(0xFF2C2C30),      // Crisp neutral hairline = defined edges
-    ink: Color(0xFFFAF9F7),         // Clean near-white
-    ink2: Color(0xFFA8A29E),        // Secondary text
-    ink3: Color(0xFF78716C),        // Tertiary / meta
-    accent: Brand.champagne,        // Soft champagne gold — glows on graphite
-    accentFill: Color(0x29C9A86A),  // 16% alpha of champagne
-    good: Color(0xFF10B981),        // Vibrant Emerald
-    goodFill: Color(0x2910B981),
-    warm: Color(0xFFF59E0B),        // Vibrant Amber — attention / ladies
-    warmFill: Color(0x2EF59E0B),    // 18% alpha
-    danger: Color(0xFFEF4444),      // Vibrant Red
-    onAccent: Color(0xFF1A1408),    // Near-black ink on champagne (premium, AA contrast)
+    bg: Color(0xFF0A0A0A),          // True near-black — stark transit ground
+    card: Color(0xFF141414),        // Lifted black tile, reads as a distinct card
+    cardElev: Color(0xFF1E1E1E),    // Elevated surface
+    border: Color(0xFF2A2A2A),      // Crisp neutral hairline = defined edges
+    ink: Color(0xFFFFFFFF),         // Pure white — maximum contrast
+    ink2: Color(0xFFA1A1AA),        // Secondary (cool gray)
+    ink3: Color(0xFF6B6B72),        // Tertiary / meta
+    accent: Brand.signal,           // Electric lime — the one signal color
+    accentFill: Color(0x24C6F432),  // ~14% lime, for tonal surfaces
+    good: Color(0xFF34D399),        // Emerald — paid / success
+    goodFill: Color(0x2934D399),
+    warm: Color(0xFFFFB020),        // Amber — attention / ladies
+    warmFill: Color(0x2EFFB020),
+    danger: Color(0xFFFF453A),      // Vivid red
+    onAccent: Color(0xFF0A0A0A),    // BLACK ink on lime — the signature look
   );
 
   static const UgamColorSet light = UgamColorSet(
-    bg: Color(0xFFFAFAF8),          // Near-white graphite-tinted ground
+    bg: Color(0xFFFFFFFF),          // Stark white ground
     card: Color(0xFFFFFFFF),        // White cards
-    cardElev: Color(0xFFF5F4F0),    // Soft elevated surface
-    border: Color(0xFFE7E5DF),      // Neutral hairline
-    ink: Color(0xFF1C1A17),         // Near-black ink — ~15:1 on the ground
-    ink2: Color(0xFF57534E),        // Readable secondary (AA)
-    ink3: Color(0xFFA8A29E),        // Tertiary / meta
-    accent: Brand.champagneDeep,    // Deeper champagne — brand primary on near-white
-    accentFill: Color(0xFFF3ECDD),  // Pale champagne tint behind accent icons/chips
+    cardElev: Color(0xFFF4F4F5),    // Soft elevated surface
+    border: Color(0xFFE4E4E7),      // Neutral hairline
+    ink: Color(0xFF0A0A0A),         // Near-black ink — max contrast on white
+    ink2: Color(0xFF52525B),        // Readable secondary (AA)
+    ink3: Color(0xFFA1A1AA),        // Tertiary / meta
+    accent: Brand.signalDeep,       // Deeper lime — legible as text/icons on white
+    accentFill: Color(0x1F84CC16),  // Pale lime tint behind accent chips/icons
     good: Color(0xFF059669),
     goodFill: Color(0xFFD1FAE5),
-    warm: Color(0xFFD97706),        // Amber — attention / ladies
+    warm: Color(0xFFB45309),        // Amber — attention / ladies
     warmFill: Color(0xFFFEF3C7),
     danger: Color(0xFFDC2626),
-    onAccent: Color(0xFF241C12),    // Near-black ink on deep champagne (premium, AA contrast)
+    onAccent: Color(0xFF0A0A0A),    // Black ink on lime fills
   );
 
   static UgamColorSet of(BuildContext context) =>
@@ -123,15 +124,15 @@ class UgamColorSet {
 class UgamRadius {
   const UgamRadius._();
 
-  static const double card = 22;
-  static const double photo = 16;
-  static const double input = 14;
+  static const double card = 16;
+  static const double photo = 12;
+  static const double input = 10;
   static const double chip = 999; // pill
   static const double iconBtn = 999; // circle when w==h
-  static const double sheet = 28;
-  static const double stat = 18;
-  static const double row = 16;
-  static const double seat = 8;
+  static const double sheet = 20;
+  static const double stat = 12;
+  static const double row = 12;
+  static const double seat = 6;
 }
 
 /// Spacing scale. Default lateral gutter is 14; default vertical rhythm 20.

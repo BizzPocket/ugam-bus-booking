@@ -16,43 +16,46 @@ class UgamText {
   static const String _family = 'Inter';
 
   // ── Display / page titles ──────────────────────────────────────────
+  // Bold-Transit DNA: headings are HEAVY (w800) and tightly tracked for the
+  // utilitarian, high-impact transit look. Inter (variable) resolves w800 from
+  // the bundled TTF, so no extra font asset is needed.
   static const TextStyle display = TextStyle(
     fontFamily: _family,
     fontSize: 32,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.6,
-    height: 1.1,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -1.0,
+    height: 1.05,
   );
 
   static const TextStyle titleXl = TextStyle(
     fontFamily: _family,
     fontSize: 26,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.5,
-    height: 1.15,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.8,
+    height: 1.1,
   );
 
   static const TextStyle titleL = TextStyle(
     fontFamily: _family,
     fontSize: 22,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.4,
-    height: 1.2,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.6,
+    height: 1.15,
   );
 
   static const TextStyle titleM = TextStyle(
     fontFamily: _family,
     fontSize: 18,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.3,
-    height: 1.25,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.5,
+    height: 1.2,
   );
 
   static const TextStyle titleS = TextStyle(
     fontFamily: _family,
     fontSize: 15,
     fontWeight: FontWeight.w700,
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
     height: 1.3,
   );
 
@@ -78,31 +81,33 @@ class UgamText {
     height: 1.35,
   );
 
-  /// UPPERCASE labels — section eyebrows, badge text.
+  /// UPPERCASE labels — section eyebrows, badge text. Wider tracking gives the
+  /// "transit signage" feel.
   static const TextStyle micro = TextStyle(
     fontFamily: _family,
     fontSize: 10,
-    fontWeight: FontWeight.w600,
-    letterSpacing: 0.4,
+    fontWeight: FontWeight.w700,
+    letterSpacing: 0.8,
     height: 1.2,
   );
 
-  // ── Numeric (tabular figures) ──────────────────────────────────────
+  // ── Numeric (tabular figures) — big, heavy hero numbers are core to the
+  // Bold-Transit look (departures, counts, money). ───────────────────────────
   static const TextStyle numLg = TextStyle(
     fontFamily: _family,
     fontSize: 20,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.4,
-    height: 1.1,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.6,
+    height: 1.05,
     fontFeatures: [FontFeature.tabularFigures()],
   );
 
   static const TextStyle numXl = TextStyle(
     fontFamily: _family,
     fontSize: 26,
-    fontWeight: FontWeight.w700,
-    letterSpacing: -0.5,
-    height: 1.05,
+    fontWeight: FontWeight.w800,
+    letterSpacing: -0.8,
+    height: 1.0,
     fontFeatures: [FontFeature.tabularFigures()],
   );
 
