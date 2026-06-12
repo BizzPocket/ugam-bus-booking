@@ -196,6 +196,9 @@
     "footer_made_by": "Occubit Solution દ્વારા · devam.org"
   },
   "dashboard": {
+    "qa_requests": "વિનંતીઓ",
+    "qa_assign": "સોંપો",
+    "recent_seats_chip": "{n} સીટ",
     "greeting_morning": "સુપ્રભાત",
     "greeting_afternoon": "નમસ્તે",
     "greeting_evening": "શુભ સંધ્યા",
@@ -1260,6 +1263,8 @@
     "tagline": "ઉગમ ફોજ બસ બુકિંગ"
   },
   "tour_detail": {
+    "duration_day_one": "1 દિવસ",
+    "duration_day_other": "{n} દિવસ",
     "not_found_title": "મળ્યું નહીં",
     "not_found_body": "ટૂર મળ્યો નહીં",
     "title": "ટૂર વિગત",
@@ -1387,6 +1392,7 @@
     "action_done_subtitle_ready": "કંઈ અટકાવતું નથી — ઉપડવા સુધી નિરાંતે રહો."
   },
   "tour_seat_assignment": {
+    "tooltip_manage_buses": "બસ સંચાલન",
     "title": "સીટ સોંપણી",
     "picker_title": "સીટ {seat} · {bus}",
     "picker_subtitle": "અહીં બેસાડવા પ્રવાસી પર ટૅપ કરો.",

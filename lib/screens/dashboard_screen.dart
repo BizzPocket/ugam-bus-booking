@@ -10,6 +10,7 @@ import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../routes/app_routes.dart';
+import '../utils/formatters.dart';
 import 'create_tour_screen.dart';
 import 'main_shell.dart';
 import 'manage_buses_screen.dart';
@@ -163,9 +164,21 @@ class DashboardScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: UgamSpacing.md),
                         for (var i = 0; i < recent.length; i++) ...[
-                          _RecentRequestRow(
-                            entry: recent[i],
-                            c: c,
+                          UgamRequestRow(
+                            initials: _recentInitials(recent[i].passenger.name),
+                            name: recent[i].passenger.name,
+                            timeAgo: _recentAgo(recent[i].passenger.createdAt),
+                            chips: [
+                              UgamReqChip(
+                                label: tr(
+                                  'dashboard.recent_seats_chip',
+                                  namedArgs: {
+                                    'n':
+                                        '${recent[i].passenger.totalSeatsRequested}',
+                                  },
+                                ).toUpperCase(),
+                              ),
+                            ],
                             // Tour-first: open the request's tour workspace.
                             onTap: () => Get.to(
                               () => TourDetailScreen(tourId: recent[i].tour.id),
@@ -396,8 +409,7 @@ class _Greeting extends StatelessWidget {
               Row(
                 children: [
                   Text(greeting,
-                      style: UgamText.body
-                          .copyWith(color: c.ink2, fontSize: 13)),
+                      style: UgamText.caption.copyWith(color: c.ink2)),
                   const SizedBox(width: UgamSpacing.sm),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -411,7 +423,7 @@ class _Greeting extends StatelessWidget {
                     child: Text(
                       DateFormat('EEE, d MMM').format(DateTime.now()),
                       style: UgamText.tabular(
-                        UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
+                        UgamText.micro.copyWith(color: c.ink2),
                       ),
                     ),
                   ),
@@ -420,7 +432,7 @@ class _Greeting extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 displayName,
-                style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 26),
+                style: UgamText.titleXl.copyWith(color: c.ink),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -437,14 +449,16 @@ class _Greeting extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: c.accent,
+              // Tonal, not solid: the one solid-champagne focal on this
+              // screen is the Create quick-action tile (accent rationing).
+              color: c.accentFill,
               shape: BoxShape.circle,
+              border: Border.all(color: c.accent.withValues(alpha: 0.28)),
             ),
             alignment: Alignment.center,
             child: Text(
               displayInitials,
-              style: UgamText.bodyStrong
-                  .copyWith(color: c.onAccent, fontSize: 15),
+              style: UgamText.bodyStrong.copyWith(color: c.accent),
             ),
           ),
         ),
@@ -720,7 +734,9 @@ class _NoTripsTodayTile extends StatelessWidget {
   }
 }
 
-/// 4 chunky quick-action tiles in a single row.
+/// High-frequency quick-action tiles in a single row. The agent's daily
+/// drivers: spin up a tour, triage incoming requests, jump into seat
+/// assignment. Settings lives in the nav, so it's dropped here.
 class _QuickActions extends StatelessWidget {
   final UgamColorSet c;
   final ShellController shell;
@@ -735,6 +751,8 @@ class _QuickActions extends StatelessWidget {
             label: tr('dashboard.qa_create'),
             icon: Icons.add_rounded,
             c: c,
+            // The single solid-champagne focal on this screen (no sticky
+            // CTA here): the most-used action gets the gold tile.
             primary: true,
             onTap: () {
               HapticFeedback.lightImpact();
@@ -746,25 +764,26 @@ class _QuickActions extends StatelessWidget {
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
           child: _QA(
-            label: tr('dashboard.qa_tours'),
-            icon: Icons.location_on_rounded,
+            label: tr('dashboard.qa_requests'),
+            icon: Icons.chat_bubble_rounded,
             c: c,
             onTap: () {
               HapticFeedback.selectionClick();
-              shell.switchTab(1);
+              // Tabs: 0=Dashboard 1=Tours 2=Charts/Assign 3=Requests.
+              shell.switchTab(3);
             },
           ),
         ),
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
           child: _QA(
-            label: tr('dashboard.qa_settings'),
-            icon: Icons.settings_rounded,
+            label: tr('dashboard.qa_assign'),
+            icon: Icons.event_seat_rounded,
             c: c,
             onTap: () {
               HapticFeedback.selectionClick();
-              Get.to(() => const SettingsScreen(),
-                  transition: Transition.cupertino);
+              // The Charts/Assign tab — seat fill + handler charts.
+              shell.switchTab(2);
             },
           ),
         ),
@@ -847,22 +866,6 @@ class _RevenueHero extends StatelessWidget {
     required this.c,
   });
 
-  String _format() {
-    if (revenue >= 100000) {
-      final lakhs = revenue / 100000;
-      return lakhs == lakhs.roundToDouble()
-          ? '₹${lakhs.toInt()}L'
-          : '₹${lakhs.toStringAsFixed(1)}L';
-    }
-    if (revenue >= 1000) {
-      final k = revenue / 1000;
-      return k == k.roundToDouble()
-          ? '₹${k.toInt()}K'
-          : '₹${k.toStringAsFixed(1)}K';
-    }
-    return '₹${revenue.toInt()}';
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -913,7 +916,7 @@ class _RevenueHero extends StatelessWidget {
           ),
           const SizedBox(height: UgamSpacing.sm + 2),
           Text(
-            _format(),
+            Formatters.formatMoneyInrCompact(revenue),
             style: UgamText.tabular(
               UgamText.display.copyWith(
                 color: c.ink,
@@ -955,71 +958,33 @@ class _SmallStatsRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _MiniStat(
+          child: UgamStatTile(
+            icon: Icons.location_on_rounded,
             value: '$active',
             label: tr('dashboard.mini_active'),
-            c: c,
+            variant: UgamStatVariant.accent,
           ),
         ),
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
-          child: _MiniStat(
+          child: UgamStatTile(
+            icon: Icons.event_seat_rounded,
             value: '$todaySeats',
             label: tr('dashboard.mini_today'),
-            c: c,
+            variant: UgamStatVariant.neutral,
           ),
         ),
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
-          child: _MiniStat(
+          child: UgamStatTile(
+            icon: Icons.hourglass_bottom_rounded,
             value: '$waitlist',
             label: tr('dashboard.mini_waitlist'),
-            tint: waitlist > 0 ? UgamStatusTone.warm : null,
-            c: c,
+            variant:
+                waitlist > 0 ? UgamStatVariant.warm : UgamStatVariant.neutral,
           ),
         ),
       ],
-    );
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  final String value;
-  final String label;
-  final UgamColorSet c;
-  final UgamStatusTone? tint;
-  const _MiniStat({
-    required this.value,
-    required this.label,
-    required this.c,
-    this.tint,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Color valueColor = c.ink;
-    if (tint == UgamStatusTone.warm) valueColor = c.warm;
-    if (tint == UgamStatusTone.good) valueColor = c.good;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        vertical: UgamSpacing.md,
-        horizontal: UgamSpacing.sm,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          Text(value,
-              style: UgamText.tabular(UgamText.titleL
-                  .copyWith(color: valueColor, fontSize: 22))),
-          const SizedBox(height: 2),
-          Text(label.toUpperCase(),
-              style: UgamText.micro
-                  .copyWith(color: c.ink3, fontSize: 9.5)),
-        ],
-      ),
     );
   }
 }
@@ -1043,8 +1008,7 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(label,
-            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17)),
+        Text(label, style: UgamText.titleM.copyWith(color: c.ink)),
         if (meta != null) ...[
           const SizedBox(width: UgamSpacing.sm),
           Container(
@@ -1056,7 +1020,7 @@ class _SectionLabel extends StatelessWidget {
             child: Text(
               meta!,
               style: UgamText.tabular(
-                UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
+                UgamText.micro.copyWith(color: c.ink2),
               ),
             ),
           ),
@@ -1069,8 +1033,7 @@ class _SectionLabel extends StatelessWidget {
             child: Row(
               children: [
                 Text(action!,
-                    style: UgamText.bodyStrong
-                        .copyWith(color: c.ink2, fontSize: 12)),
+                    style: UgamText.caption.copyWith(color: c.ink2)),
                 const SizedBox(width: 2),
                 Icon(Icons.chevron_right_rounded, size: 16, color: c.ink2),
               ],
@@ -1106,78 +1069,75 @@ class _AttentionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final toneColor = switch (item.tone) {
+    // Tone drives the CARD tint (de-solidified: no more solid tone-colored
+    // CTA slab). The per-row action is a quiet tonal UgamButton so solid
+    // champagne stays rationed to the one focal tile up top.
+    final cardTone = switch (item.tone) {
+      UgamStatusTone.accent => UgamCardTone.accent,
+      UgamStatusTone.good => UgamCardTone.good,
+      UgamStatusTone.warm => UgamCardTone.warm,
+      UgamStatusTone.neutral => UgamCardTone.none,
+    };
+    final iconColor = switch (item.tone) {
       UgamStatusTone.accent => c.accent,
       UgamStatusTone.good => c.good,
       UgamStatusTone.warm => c.warm,
       UgamStatusTone.neutral => c.ink2,
     };
-    final toneFill = switch (item.tone) {
+    final iconFill = switch (item.tone) {
       UgamStatusTone.accent => c.accentFill,
       UgamStatusTone.good => c.goodFill,
       UgamStatusTone.warm => c.warmFill,
       UgamStatusTone.neutral => c.card,
     };
 
-    return GestureDetector(
+    return UgamCard.plain(
       onTap: item.onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.md - 2),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: toneFill,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              alignment: Alignment.center,
-              child: Icon(item.ctaIcon, size: 18, color: toneColor),
+      tone: cardTone,
+      padding: const EdgeInsets.all(UgamSpacing.md - 2),
+      radius: 18,
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: iconFill,
+              borderRadius: BorderRadius.circular(12),
             ),
-            const SizedBox(width: UgamSpacing.md - 2),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    item.tour.title,
-                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 14),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    item.reason,
-                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11.5),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
+            alignment: Alignment.center,
+            child: Icon(item.ctaIcon, size: 18, color: iconColor),
+          ),
+          const SizedBox(width: UgamSpacing.md - 2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.tour.title,
+                  style: UgamText.titleS.copyWith(color: c.ink),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  item.reason,
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
-            const SizedBox(width: UgamSpacing.sm),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.md, vertical: UgamSpacing.sm),
-              decoration: BoxDecoration(
-                color: toneColor,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Text(
-                item.ctaLabel,
-                style: UgamText.bodyStrong
-                    .copyWith(color: c.onAccent, fontSize: 12),
-              ),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          UgamButton(
+            label: item.ctaLabel,
+            icon: item.ctaIcon,
+            kind: UgamButtonKind.tonal,
+            onPressed: item.onTap,
+          ),
+        ],
       ),
     );
   }
@@ -1189,103 +1149,22 @@ class _RecentEntry {
   _RecentEntry({required this.tour, required this.passenger});
 }
 
-class _RecentRequestRow extends StatelessWidget {
-  final _RecentEntry entry;
-  final UgamColorSet c;
-  final VoidCallback onTap;
-
-  const _RecentRequestRow({
-    required this.entry,
-    required this.c,
-    required this.onTap,
-  });
-
-  String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+/// Two-letter avatar initials for a passenger name.
+String _recentInitials(String name) {
+  final parts = name.trim().split(RegExp(r'\s+'));
+  if (parts.length >= 2) {
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
+  return name.isNotEmpty ? name[0].toUpperCase() : '?';
+}
 
-  String _ago(DateTime t) {
-    final d = DateTime.now().difference(t);
-    if (d.inDays > 0) return '${d.inDays}d';
-    if (d.inHours > 0) return '${d.inHours}h';
-    if (d.inMinutes > 0) return '${d.inMinutes}m';
-    return tr('dashboard.ago_now');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = entry.passenger;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.md - 2),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: c.card,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _initials(p.name),
-                style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md - 2),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          p.name,
-                          style: UgamText.bodyStrong.copyWith(
-                            color: c.ink,
-                            fontSize: 13,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Text(
-                        _ago(p.createdAt),
-                        style: UgamText.tabular(
-                          UgamText.caption.copyWith(color: c.ink3, fontSize: 10.5),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    tr('dashboard.recent_subtitle', namedArgs: {
-                      'title': entry.tour.title,
-                      'n': '${p.totalSeatsRequested}',
-                    }),
-                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11.5),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+/// Compact "time since" label for a recent request (e.g. `3h`, `2d`).
+String _recentAgo(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inDays > 0) return '${d.inDays}d';
+  if (d.inHours > 0) return '${d.inHours}h';
+  if (d.inMinutes > 0) return '${d.inMinutes}m';
+  return tr('dashboard.ago_now');
 }
 
 class _LoadingShimmer extends StatelessWidget {

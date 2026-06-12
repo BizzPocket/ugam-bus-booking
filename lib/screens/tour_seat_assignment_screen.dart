@@ -16,7 +16,6 @@ import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../services/chart_footer_store.dart';
 import '../services/seat_chart_pdf.dart';
-import '../utils/app_dialogs.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_drop_engine.dart';
@@ -481,19 +480,13 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       return;
     }
 
-    final c = UgamColors.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: c.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(UgamRadius.sheet),
-        ),
+    UgamSheet.show<void>(
+      context,
+      title: tr(
+        'tour_seat_assignment.picker_title',
+        namedArgs: {'seat': cell.seatId ?? '', 'bus': bus.name},
       ),
       builder: (sheetCtx) => _SeatPassengerPicker(
-        seatId: cell.seatId ?? '',
-        busName: bus.name,
         candidates: candidates,
         activeId: activeId,
         onPick: (p) {
@@ -590,11 +583,11 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     ];
 
     return seatHasLegRoom(
-      activeTrip: active.tripType,
-      need: need,
-      cap: cap,
-      occupants: holders,
-    )
+          activeTrip: active.tripType,
+          need: need,
+          cap: cap,
+          occupants: holders,
+        )
         ? need
         : 0;
   }
@@ -611,7 +604,8 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     Passenger other,
     int berths,
   ) async {
-    final confirmed = await AppDialogs.confirm(
+    final confirmed = await UgamDialog.confirm(
+      context,
       title: tr('tour_seat_assignment.share_confirm_title'),
       message: tr(
         'tour_seat_assignment.share_confirm_body',
@@ -621,7 +615,8 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           'currentName': passenger.displayName,
         },
       ),
-      confirmText: tr('tour_seat_assignment.share_confirm_yes'),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('tour_seat_assignment.share_confirm_yes'),
     );
     if (!confirmed) return;
     await _placeBerths(passenger, bus, tour, cell, berths);
@@ -768,14 +763,17 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// Chip label that follows the finger — the occupant's name, or "A + B" for a
   /// shared double moving as a unit.
   String? _dragLabelFor(Tour tour, Bus bus, SeatCell cell) {
-    final ids = (cell.seatId == null
-            ? const <String>[]
-            : _assignmentMap(tour, bus.id)[cell.seatId] ?? const <String>[])
-        .toSet();
+    final ids =
+        (cell.seatId == null
+                ? const <String>[]
+                : _assignmentMap(tour, bus.id)[cell.seatId] ?? const <String>[])
+            .toSet();
     if (ids.isEmpty) return null;
     final names = ids
-        .map((id) =>
-            tour.passengers.firstWhereOrNull((p) => p.id == id)?.displayName)
+        .map(
+          (id) =>
+              tour.passengers.firstWhereOrNull((p) => p.id == id)?.displayName,
+        )
         .whereType<String>()
         .where((n) => n.isNotEmpty);
     return names.isEmpty ? null : names.join(' + ');
@@ -822,16 +820,22 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         return;
       case SeatDropBlock.tooSmall:
         AppSnackBar.warning(
-          tr('tour_seat_assignment.drop.too_small_body', namedArgs: {
-            'name': _dragLabelFor(_tour!, _selectedBus(_tour!)!, fromCell) ?? '',
-          }),
+          tr(
+            'tour_seat_assignment.drop.too_small_body',
+            namedArgs: {
+              'name':
+                  _dragLabelFor(_tour!, _selectedBus(_tour!)!, fromCell) ?? '',
+            },
+          ),
           title: tr('tour_seat_assignment.drop.too_small_title'),
         );
         return;
       case SeatDropBlock.held:
         AppSnackBar.warning(
-          tr('tour_seat_assignment.drop.held_body',
-              namedArgs: {'seat': toSeatId}),
+          tr(
+            'tour_seat_assignment.drop.held_body',
+            namedArgs: {'seat': toSeatId},
+          ),
           title: tr('tour_seat_assignment.drop.held_title'),
         );
         return;
@@ -866,8 +870,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     if (fromOccs.isEmpty) return;
 
     final decision = _decideDrop(tour, bus, fromCell, targetCell);
-    final mover = tour.passengers
-        .firstWhereOrNull((p) => p.id == fromOccs.first.passengerId);
+    final mover = tour.passengers.firstWhereOrNull(
+      (p) => p.id == fromOccs.first.passengerId,
+    );
 
     switch (decision.action) {
       case SeatDropAction.blocked:
@@ -885,8 +890,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           toBusId: bus.id,
         );
         AppSnackBar.success(
-          tr('tour_seat_assignment.drop.moved_body',
-              namedArgs: {'name': mover.displayName, 'seat': toSeatId}),
+          tr(
+            'tour_seat_assignment.drop.moved_body',
+            namedArgs: {'name': mover.displayName, 'seat': toSeatId},
+          ),
           title: tr('tour_seat_assignment.drop.moved_title'),
         );
         return;
@@ -903,27 +910,36 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           berths: 1,
         );
         AppSnackBar.success(
-          tr('tour_seat_assignment.drop.split_body',
-              namedArgs: {'name': mover.displayName, 'seat': toSeatId}),
+          tr(
+            'tour_seat_assignment.drop.split_body',
+            namedArgs: {'name': mover.displayName, 'seat': toSeatId},
+          ),
           title: tr('tour_seat_assignment.drop.split_title'),
         );
         return;
 
       case SeatDropAction.fill:
         if (mover == null) return;
-        final occ = tour.passengers
-            .firstWhereOrNull((p) => p.id == _occupantsOn(tour, bus, targetCell)
-                .firstOrNull
-                ?.passengerId);
+        final occ = tour.passengers.firstWhereOrNull(
+          (p) =>
+              p.id ==
+              _occupantsOn(tour, bus, targetCell).firstOrNull?.passengerId,
+        );
         if (occ == null) return;
-        final confirmed = await AppDialogs.confirm(
+        if (!mounted) return;
+        final confirmed = await UgamDialog.confirm(
+          context,
           title: tr('tour_seat_assignment.share_confirm_title'),
-          message: tr('tour_seat_assignment.share_confirm_body', namedArgs: {
-            'seat': toSeatId,
-            'otherName': occ.displayName,
-            'currentName': mover.displayName,
-          }),
-          confirmText: tr('tour_seat_assignment.share_confirm_yes'),
+          message: tr(
+            'tour_seat_assignment.share_confirm_body',
+            namedArgs: {
+              'seat': toSeatId,
+              'otherName': occ.displayName,
+              'currentName': mover.displayName,
+            },
+          ),
+          cancelLabel: tr('app.action.cancel'),
+          confirmLabel: tr('tour_seat_assignment.share_confirm_yes'),
         );
         if (!confirmed) return;
         await _ctrl.moveSeat(
@@ -936,11 +952,14 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           berths: 1,
         );
         AppSnackBar.success(
-          tr('tour_seat_assignment.drop.filled_body', namedArgs: {
-            'a': mover.displayName,
-            'b': occ.displayName,
-            'seat': toSeatId,
-          }),
+          tr(
+            'tour_seat_assignment.drop.filled_body',
+            namedArgs: {
+              'a': mover.displayName,
+              'b': occ.displayName,
+              'seat': toSeatId,
+            },
+          ),
           title: tr('tour_seat_assignment.drop.filled_title'),
         );
         return;
@@ -961,8 +980,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           busBId: bus.id,
         );
         AppSnackBar.success(
-          tr('tour_seat_assignment.drop.swapped_body',
-              namedArgs: {'a': mover.displayName, 'b': occ.displayName}),
+          tr(
+            'tour_seat_assignment.drop.swapped_body',
+            namedArgs: {'a': mover.displayName, 'b': occ.displayName},
+          ),
           title: tr('tour_seat_assignment.drop.swapped_title'),
         );
         return;
@@ -975,10 +996,13 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           toSeatId: toSeatId,
         );
         AppSnackBar.success(
-          tr('tour_seat_assignment.drop.moved_both_body', namedArgs: {
-            'names': _dragLabelFor(tour, bus, fromCell) ?? '',
-            'seat': toSeatId,
-          }),
+          tr(
+            'tour_seat_assignment.drop.moved_both_body',
+            namedArgs: {
+              'names': _dragLabelFor(tour, bus, fromCell) ?? '',
+              'seat': toSeatId,
+            },
+          ),
           title: tr('tour_seat_assignment.drop.moved_both_title'),
         );
         return;
@@ -994,22 +1018,17 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   void _showSeatFlagsSheet(SeatCell cell, Bus bus) {
     final seatId = cell.seatId;
     if (seatId == null) return;
-    final c = UgamColors.of(context);
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: c.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(UgamRadius.sheet),
-        ),
-      ),
+    UgamSheet.show<void>(
+      context,
+      showClose: false,
       builder: (_) => _SeatFlagsSheet(
         seatId: seatId,
         typeLabel: cell.typeLabel,
         busName: bus.name,
         forward: cell.forward,
         reserved: cell.reserved,
-        onForward: (v) => _ctrl.setSeatForward(widget.tourId, bus.id, seatId, v),
+        onForward: (v) =>
+            _ctrl.setSeatForward(widget.tourId, bus.id, seatId, v),
         onReserved: (v) =>
             _ctrl.setSeatReserved(widget.tourId, bus.id, seatId, v),
       ),
@@ -1066,10 +1085,16 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     final content = Column(
       children: [
         if (!widget.embedded)
-          _TopBar(
+          UgamAppBar(
             title: tr('tour_seat_assignment.title'),
-            tourId: widget.tourId,
-            c: c,
+            actions: [
+              UgamAppBarAction(
+                icon: Icons.directions_bus_filled_rounded,
+                tooltip: tr('tour_seat_assignment.tooltip_manage_buses'),
+                onTap: () =>
+                    Get.to(() => ManageBusesScreen(tourId: widget.tourId)),
+              ),
+            ],
           ),
         Expanded(
           child: Obx(() {
@@ -1128,8 +1153,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                 tour.status == TourStatus.locked && tour.buses.isNotEmpty;
 
             final pending = tour.passengers
-                .where((p) =>
-                    !p.isFullyAssigned && !p.isWaitlisted && !p.journeyDone)
+                .where(
+                  (p) =>
+                      !p.isFullyAssigned && !p.isWaitlisted && !p.journeyDone,
+                )
                 .toList();
 
             return Column(
@@ -1288,17 +1315,14 @@ class _PendingLine {
 
 /// Bottom-sheet list of pending passengers who can take a tapped EMPTY seat —
 /// seat-first assignment. Each row shows the name + their outstanding request;
-/// the currently-selected passenger (if any) is tagged at the top.
+/// the currently-selected passenger (if any) is tagged at the top. The sheet
+/// chrome (handle + seat/bus title) is supplied by [UgamSheet.show].
 class _SeatPassengerPicker extends StatelessWidget {
-  final String seatId;
-  final String busName;
   final List<Passenger> candidates;
   final String? activeId;
   final ValueChanged<Passenger> onPick;
 
   const _SeatPassengerPicker({
-    required this.seatId,
-    required this.busName,
     required this.candidates,
     required this.activeId,
     required this.onPick,
@@ -1307,58 +1331,31 @@ class _SeatPassengerPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.sm + 4,
-        UgamSpacing.gutter,
-        UgamSpacing.lg + MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: UgamSpacing.md),
-              decoration: BoxDecoration(
-                color: c.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          tr('tour_seat_assignment.picker_subtitle'),
+          style: UgamText.caption.copyWith(color: c.ink2),
+        ),
+        const SizedBox(height: UgamSpacing.md),
+        Flexible(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.55,
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              physics: const BouncingScrollPhysics(),
+              itemCount: candidates.length,
+              separatorBuilder: (_, _) =>
+                  const SizedBox(height: UgamSpacing.sm),
+              itemBuilder: (_, i) => _row(c, candidates[i]),
             ),
           ),
-          Text(
-            tr(
-              'tour_seat_assignment.picker_title',
-              namedArgs: {'seat': seatId, 'bus': busName},
-            ),
-            style: UgamText.titleM.copyWith(color: c.ink),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            tr('tour_seat_assignment.picker_subtitle'),
-            style: UgamText.caption.copyWith(color: c.ink2),
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Flexible(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.55,
-              ),
-              child: ListView.separated(
-                shrinkWrap: true,
-                physics: const BouncingScrollPhysics(),
-                itemCount: candidates.length,
-                separatorBuilder: (_, _) =>
-                    const SizedBox(height: UgamSpacing.sm),
-                itemBuilder: (_, i) => _row(c, candidates[i]),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1380,14 +1377,14 @@ class _SeatPassengerPicker extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: c.accent,
+                color: isActive ? c.accent : c.accentFill,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
               child: Text(
                 SeatChartTile.initials(p.displayName),
                 style: UgamText.bodyStrong.copyWith(
-                  color: c.onAccent,
+                  color: isActive ? c.onAccent : c.accent,
                   fontSize: 13,
                 ),
               ),
@@ -1427,73 +1424,6 @@ class _SeatPassengerPicker extends StatelessWidget {
   }
 }
 
-// ─── Top bar ───────────────────────────────────────────────────────────
-
-class _TopBar extends StatelessWidget {
-  final String title;
-  final String tourId;
-  final UgamColorSet c;
-
-  const _TopBar({required this.title, required this.tourId, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              title,
-              style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: () => Get.to(() => ManageBusesScreen(tourId: tourId)),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Icons.directions_bus_filled_rounded,
-                size: 19,
-                color: c.ink,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Edit-seats toggle ─────────────────────────────────────────────────
 
 /// A compact pill that flips the workbench between PLACE mode (tap a free seat
@@ -1528,8 +1458,11 @@ class _EditSeatsToggle extends StatelessWidget {
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
           decoration: BoxDecoration(
-            color: editMode ? c.accent : c.cardElev,
+            color: editMode ? c.accentFill : c.cardElev,
             borderRadius: BorderRadius.circular(UgamRadius.chip),
+            border: editMode
+                ? Border.all(color: c.accent.withValues(alpha: 0.28))
+                : null,
           ),
           alignment: Alignment.center,
           child: Row(
@@ -1538,7 +1471,7 @@ class _EditSeatsToggle extends StatelessWidget {
               Icon(
                 editMode ? Icons.check_rounded : Icons.tune_rounded,
                 size: 16,
-                color: editMode ? c.onAccent : c.ink,
+                color: editMode ? c.accent : c.ink,
               ),
               const SizedBox(width: 6),
               Text(
@@ -1546,7 +1479,7 @@ class _EditSeatsToggle extends StatelessWidget {
                     ? tr('app.action.done')
                     : tr('tour_seat_assignment.edit_seats'),
                 style: UgamText.caption.copyWith(
-                  color: editMode ? c.onAccent : c.ink,
+                  color: editMode ? c.accent : c.ink,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -1597,8 +1530,11 @@ class _BusPills extends StatelessWidget {
                 vertical: UgamSpacing.sm,
               ),
               decoration: BoxDecoration(
-                color: selected ? c.accent : c.cardElev,
+                color: selected ? c.accentFill : c.cardElev,
                 borderRadius: BorderRadius.circular(UgamRadius.chip),
+                border: selected
+                    ? Border.all(color: c.accent.withValues(alpha: 0.28))
+                    : null,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1606,7 +1542,7 @@ class _BusPills extends StatelessWidget {
                   Text(
                     bus.name,
                     style: UgamText.bodyStrong.copyWith(
-                      color: selected ? c.onAccent : c.ink,
+                      color: selected ? c.accent : c.ink,
                       fontSize: 12,
                     ),
                   ),
@@ -1618,7 +1554,7 @@ class _BusPills extends StatelessWidget {
                     ),
                     decoration: BoxDecoration(
                       color: selected
-                          ? c.onAccent.withValues(alpha: 0.18)
+                          ? c.accent.withValues(alpha: 0.16)
                           : c.card,
                       borderRadius: BorderRadius.circular(UgamRadius.chip),
                     ),
@@ -1626,7 +1562,7 @@ class _BusPills extends StatelessWidget {
                       '$assigned/$capacity',
                       style: UgamText.tabular(
                         UgamText.caption.copyWith(
-                          color: selected ? c.onAccent : c.ink2,
+                          color: selected ? c.accent : c.ink2,
                           fontWeight: FontWeight.w700,
                           fontSize: 10.5,
                         ),
@@ -2044,8 +1980,11 @@ class _PassengerCard extends StatelessWidget {
                       vertical: 5,
                     ),
                     decoration: BoxDecoration(
-                      color: selected ? c.accent : c.cardElev,
+                      color: selected ? c.accentFill : c.cardElev,
                       borderRadius: BorderRadius.circular(UgamRadius.chip),
+                      border: selected
+                          ? Border.all(color: c.accent.withValues(alpha: 0.28))
+                          : null,
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -2056,13 +1995,13 @@ class _PassengerCard extends StatelessWidget {
                             child: Icon(
                               Icons.check_circle_rounded,
                               size: 12,
-                              color: selected ? c.onAccent : c.good,
+                              color: selected ? c.accent : c.good,
                             ),
                           ),
                         Text(
                           p.displayName,
                           style: UgamText.caption.copyWith(
-                            color: selected ? c.onAccent : c.ink,
+                            color: selected ? c.accent : c.ink,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -2406,99 +2345,80 @@ class _SeatFlagsSheetState extends State<_SeatFlagsSheet> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.sm + 4,
-        UgamSpacing.gutter,
-        UgamSpacing.xl,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: UgamSpacing.md),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                color: c.border,
-                borderRadius: BorderRadius.circular(2),
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.tune_rounded, size: 18, color: c.ink),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr(
+                      'tour_seat_assignment.seat_label',
+                      namedArgs: {'seat': widget.seatId},
+                    ),
+                    style: UgamText.titleM.copyWith(color: c.ink),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${widget.typeLabel} · ${widget.busName}',
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                  ),
+                ],
               ),
             ),
-          ),
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: c.cardElev,
-                  borderRadius: BorderRadius.circular(UgamRadius.input),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.tune_rounded, size: 18, color: c.ink),
-              ),
-              const SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tr(
-                        'tour_seat_assignment.seat_label',
-                        namedArgs: {'seat': widget.seatId},
-                      ),
-                      style: UgamText.titleM.copyWith(color: c.ink),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${widget.typeLabel} · ${widget.busName}',
-                      style: UgamText.caption.copyWith(color: c.ink2),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          _FlagSwitch(
-            icon: Icons.star_rounded,
-            title: tr('tour_seat_assignment.flags.forward_title'),
-            subtitle: tr('tour_seat_assignment.flags.forward_subtitle'),
-            value: _forward,
-            // Warm = attention; the forward zone is the priority/premium band.
-            activeColor: c.warm,
-            c: c,
-            onChanged: (v) {
-              setState(() => _forward = v);
-              widget.onForward(v);
-            },
-          ),
-          const SizedBox(height: UgamSpacing.sm),
-          _FlagSwitch(
-            icon: Icons.lock_outline_rounded,
-            title: tr('tour_seat_assignment.flags.reserved_title'),
-            subtitle: tr('tour_seat_assignment.flags.reserved_subtitle'),
-            value: _reserved,
-            activeColor: c.accent,
-            c: c,
-            onChanged: (v) {
-              setState(() => _reserved = v);
-              widget.onReserved(v);
-            },
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          UgamButton(
-            label: tr('app.action.done'),
-            kind: UgamButtonKind.ghost,
-            onPressed: () => Navigator.of(context).pop(),
-            expand: true,
-          ),
-        ],
-      ),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        _FlagSwitch(
+          icon: Icons.star_rounded,
+          title: tr('tour_seat_assignment.flags.forward_title'),
+          subtitle: tr('tour_seat_assignment.flags.forward_subtitle'),
+          value: _forward,
+          // Warm = attention; the forward zone is the priority/premium band.
+          activeColor: c.warm,
+          c: c,
+          onChanged: (v) {
+            setState(() => _forward = v);
+            widget.onForward(v);
+          },
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        _FlagSwitch(
+          icon: Icons.lock_outline_rounded,
+          title: tr('tour_seat_assignment.flags.reserved_title'),
+          subtitle: tr('tour_seat_assignment.flags.reserved_subtitle'),
+          value: _reserved,
+          activeColor: c.accent,
+          c: c,
+          onChanged: (v) {
+            setState(() => _reserved = v);
+            widget.onReserved(v);
+          },
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        UgamButton(
+          label: tr('app.action.done'),
+          kind: UgamButtonKind.ghost,
+          onPressed: () => Navigator.of(context).pop(),
+          expand: true,
+        ),
+      ],
     );
   }
 }

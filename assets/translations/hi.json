@@ -196,6 +196,9 @@
     "footer_made_by": "Occubit Solution द्वारा · devam.org"
   },
   "dashboard": {
+    "qa_requests": "अनुरोध",
+    "qa_assign": "असाइन",
+    "recent_seats_chip": "{n} सीटें",
     "greeting_morning": "सुप्रभात",
     "greeting_afternoon": "नमस्ते",
     "greeting_evening": "शुभ संध्या",
@@ -1260,6 +1263,8 @@
     "tagline": "उगम फौज बस बुकिंग"
   },
   "tour_detail": {
+    "duration_day_one": "1 दिन",
+    "duration_day_other": "{n} दिन",
     "not_found_title": "नहीं मिला",
     "not_found_body": "यात्रा नहीं मिली",
     "title": "यात्रा विवरण",
@@ -1387,6 +1392,7 @@
     "action_done_subtitle_ready": "कुछ नहीं रोक रहा — प्रस्थान तक निश्चिंत रहें।"
   },
   "tour_seat_assignment": {
+    "tooltip_manage_buses": "बस प्रबंधन",
     "title": "सीट असाइनमेंट",
     "picker_title": "सीट {seat} · {bus}",
     "picker_subtitle": "यहाँ बैठाने के लिए यात्री पर टैप करें।",

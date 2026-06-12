@@ -196,6 +196,9 @@
     "footer_made_by": "Made by Occubit Solution · devam.org"
   },
   "dashboard": {
+    "qa_requests": "Requests",
+    "qa_assign": "Assign",
+    "recent_seats_chip": "{n} seats",
     "greeting_morning": "Good Morning",
     "greeting_afternoon": "Good Afternoon",
     "greeting_evening": "Good Evening",
@@ -1260,6 +1263,8 @@
     "tagline": "Ugam Fauj Bus Booking"
   },
   "tour_detail": {
+    "duration_day_one": "1 day",
+    "duration_day_other": "{n} days",
     "not_found_title": "Not Found",
     "not_found_body": "Tour not found",
     "title": "Tour Detail",
@@ -1387,6 +1392,7 @@
     "action_done_subtitle_ready": "Nothing blocking — sit tight until departure."
   },
   "tour_seat_assignment": {
+    "tooltip_manage_buses": "Manage buses",
     "title": "Seat Assignment",
     "picker_title": "Seat {seat} · {bus}",
     "picker_subtitle": "Tap a passenger to seat them here.",

@@ -14,6 +14,7 @@ import '../models/trip_type.dart';
 import '../routes/app_routes.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_dialogs.dart';
+import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
 import 'add_bus_screen.dart';
 import 'edit_tour_screen.dart';
@@ -161,7 +162,11 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
         return _ActivityTab(tour: tour, c: c);
       case 0:
       default:
-        return _OverviewTab(tour: tour, c: c);
+        return _OverviewTab(
+          tour: tour,
+          c: c,
+          onSwitchTab: (i) => setState(() => _tabIndex = i),
+        );
     }
   }
 }
@@ -234,9 +239,11 @@ class _HeroSection extends StatelessWidget {
             top: topInset + UgamSpacing.sm,
             child: Row(
               children: [
-                _ChromeCircle(
+                UgamIconButton(
                   icon: Icons.arrow_back_rounded,
                   onTap: onBack,
+                  size: 42,
+                  semanticLabel: tr('app.action.back'),
                 ),
                 const Spacer(),
                 Container(
@@ -270,9 +277,11 @@ class _HeroSection extends StatelessWidget {
                 ),
                 const Spacer(),
                 // Single overflow entry — edit / delete live in the sheet.
-                _ChromeCircle(
+                UgamIconButton(
                   icon: Icons.more_vert_rounded,
                   onTap: () => _showActions(context),
+                  size: 42,
+                  semanticLabel: tr('tour_detail.actions_title'),
                 ),
               ],
             ),
@@ -282,23 +291,13 @@ class _HeroSection extends StatelessWidget {
             left: UgamSpacing.gutter,
             right: UgamSpacing.gutter,
             bottom: -28,
-            child: Container(
+            child: UgamCard.plain(
+              elev: true,
               padding: const EdgeInsets.fromLTRB(
                 UgamSpacing.lg,
                 UgamSpacing.md,
                 UgamSpacing.md,
                 UgamSpacing.md,
-              ),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(22),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x14000000),
-                    blurRadius: 12,
-                    offset: Offset(0, 4),
-                  ),
-                ],
               ),
               child: Row(
                 children: [
@@ -337,7 +336,7 @@ class _HeroSection extends StatelessWidget {
                             ),
                             const SizedBox(width: UgamSpacing.sm),
                             Text(
-                              _durationLabel(tour),
+                              _durationLabel(context, tour),
                               style: UgamText.tabular(
                                 UgamText.caption
                                     .copyWith(color: c.ink2, fontSize: 11),
@@ -368,7 +367,7 @@ class _HeroSection extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          '₹${tour.pricePerSeat.toStringAsFixed(0)}',
+                          Formatters.formatMoneyInr(tour.pricePerSeat),
                           style: UgamText.tabular(
                             UgamText.titleM
                                 .copyWith(color: c.accent, fontSize: 18),
@@ -389,39 +388,16 @@ class _HeroSection extends StatelessWidget {
     );
   }
 
-  String _durationLabel(Tour t) {
+  String _durationLabel(BuildContext context, Tour t) {
     final r = t.returnDate;
-    if (r == null) return DateFormat('MMM d').format(t.departureDate);
+    final locale = context.locale.toString();
+    if (r == null) {
+      return Formatters.formatDateShort(t.departureDate, locale: locale);
+    }
     final days = r.difference(t.departureDate).inDays + 1;
-    return '$days day${days == 1 ? "" : "s"}';
-  }
-}
-
-class _ChromeCircle extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _ChromeCircle({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.45),
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Icon(icon, size: 19, color: Colors.white),
-      ),
-    );
+    return days == 1
+        ? tr('tour_detail.duration_day_one')
+        : tr('tour_detail.duration_day_other', namedArgs: {'n': '$days'});
   }
 }
 
@@ -526,8 +502,13 @@ class _TabBar extends StatelessWidget {
 class _OverviewTab extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
+  final ValueChanged<int> onSwitchTab;
 
-  const _OverviewTab({required this.tour, required this.c});
+  const _OverviewTab({
+    required this.tour,
+    required this.c,
+    required this.onSwitchTab,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -542,7 +523,12 @@ class _OverviewTab extends StatelessWidget {
 
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        _NextActionCard(tour: tour, action: action, c: c),
+        _NextActionCard(
+          tour: tour,
+          action: action,
+          c: c,
+          onSwitchTab: onSwitchTab,
+        ),
         const SizedBox(height: UgamSpacing.lg),
         _SectionEyebrow(label: tr('tour_detail.at_a_glance'), c: c),
         const SizedBox(height: UgamSpacing.md),
@@ -586,7 +572,7 @@ class _OverviewTab extends StatelessWidget {
             Expanded(
               child: UgamStatTile(
                 icon: Icons.currency_rupee_rounded,
-                value: _formatMoney(revenue),
+                value: Formatters.formatMoneyInrCompact(revenue),
                 label: tr('tour_detail.stat_revenue'),
                 variant: UgamStatVariant.accent,
               ),
@@ -603,46 +589,31 @@ class _OverviewTab extends StatelessWidget {
     );
   }
 
-  static String _formatMoney(double v) {
-    if (v >= 100000) {
-      final l = v / 100000;
-      return l == l.roundToDouble()
-          ? '₹${l.toInt()}L'
-          : '₹${l.toStringAsFixed(1)}L';
-    }
-    if (v >= 1000) {
-      final k = v / 1000;
-      return k == k.roundToDouble()
-          ? '₹${k.toInt()}K'
-          : '₹${k.toStringAsFixed(1)}K';
-    }
-    return '₹${v.toInt()}';
-  }
 }
 
 class _NextActionCard extends StatelessWidget {
   final Tour tour;
   final _NextAction action;
   final UgamColorSet c;
+  final ValueChanged<int> onSwitchTab;
 
   const _NextActionCard({
     required this.tour,
     required this.action,
     required this.c,
+    required this.onSwitchTab,
   });
 
   @override
   Widget build(BuildContext context) {
     final tone = action.tone;
-    final fill = _toneFill(tone, c);
     final fg = _toneColor(tone, c);
-    return Container(
+    // Tappable: fires the SAME action as the bottom sticky CTA (reuses
+    // _runAction) so the card and the sticky button stay in lock-step.
+    return UgamCard.plain(
+      tone: _cardToneFor(tone),
+      onTap: () => _runAction(action, tour, onSwitchTab),
       padding: const EdgeInsets.all(UgamSpacing.lg),
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: fg.withValues(alpha: 0.18)),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -680,6 +651,8 @@ class _NextActionCard extends StatelessWidget {
                   ],
                 ),
               ),
+              const SizedBox(width: UgamSpacing.sm),
+              Icon(Icons.arrow_forward_rounded, size: 18, color: fg),
             ],
           ),
           if (action.subtitle != null) ...[
@@ -694,6 +667,13 @@ class _NextActionCard extends StatelessWidget {
     );
   }
 }
+
+UgamCardTone _cardToneFor(UgamStatusTone t) => switch (t) {
+      UgamStatusTone.accent => UgamCardTone.accent,
+      UgamStatusTone.good => UgamCardTone.good,
+      UgamStatusTone.warm => UgamCardTone.warm,
+      UgamStatusTone.neutral => UgamCardTone.none,
+    };
 
 /// A single broadcast card: campaign icon + title + hint, a PRIMARY
 /// "Send broadcast on WhatsApp" CTA (opens WhatsApp's own broadcast/group
@@ -751,13 +731,9 @@ class _BroadcastCardState extends State<_BroadcastCard> {
   @override
   Widget build(BuildContext context) {
     final c = widget.c;
-    return Container(
+    return UgamCard.plain(
+      elev: true,
       padding: const EdgeInsets.all(UgamSpacing.lg - 2),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: c.border),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -801,31 +777,27 @@ class _BroadcastCardState extends State<_BroadcastCard> {
           const SizedBox(height: UgamSpacing.md),
           Row(
             children: [
+              // Demoted from solid-gold UgamCTA to TONAL — the bottom sticky CTA
+              // is the one rationed champagne focal point per screen.
               Expanded(
-                child: UgamCTA(
+                child: UgamButton(
                   label: _sending
                       ? tr('tour_detail.sending_broadcast')
                       : tr('tour_detail.send_broadcast_whatsapp'),
-                  leadingIcon: Icons.send_rounded,
+                  icon: Icons.send_rounded,
+                  kind: UgamButtonKind.tonal,
                   loading: _sending,
+                  expand: true,
                   onPressed: _send,
                 ),
               ),
               const SizedBox(width: UgamSpacing.sm),
-              GestureDetector(
+              UgamIconButton(
+                icon: Icons.copy_rounded,
                 onTap: _copy,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: c.card,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: c.border),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(Icons.copy_rounded, size: 18, color: c.ink2),
-                ),
+                size: 50,
+                iconSize: 18,
+                semanticLabel: tr('tour_detail.copy_broadcast_message'),
               ),
             ],
           ),
@@ -986,52 +958,44 @@ class _ManageRequestsButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return UgamCard.plain(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(UgamRadius.card),
-          border: Border.all(color: c.border),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: c.accentFill,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.edit_note_rounded, size: 19, color: c.accent),
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.md,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: c.accentFill,
+              borderRadius: BorderRadius.circular(10),
             ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    tr('tour_detail.manage_requests'),
-                    style: UgamText.titleS.copyWith(color: c.ink),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    tr('tour_detail.manage_requests_hint'),
-                    style: UgamText.caption.copyWith(color: c.ink3),
-                  ),
-                ],
-              ),
+            alignment: Alignment.center,
+            child: Icon(Icons.edit_note_rounded, size: 19, color: c.accent),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr('tour_detail.manage_requests'),
+                  style: UgamText.titleS.copyWith(color: c.ink),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tr('tour_detail.manage_requests_hint'),
+                  style: UgamText.caption.copyWith(color: c.ink3),
+                ),
+              ],
             ),
-            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-          ],
-        ),
+          ),
+          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+        ],
       ),
     );
   }
@@ -1047,12 +1011,10 @@ class _PassengerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final tone = _passengerTone(passenger);
     final dotColor = _toneColor(tone, c);
-    return Container(
+    return UgamCard.plain(
+      elev: true,
+      radius: UgamRadius.row,
       padding: const EdgeInsets.all(UgamSpacing.md - 2),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-      ),
       child: Row(
         children: [
           Container(
@@ -1214,8 +1176,9 @@ class _BusListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
+    return UgamCard.plain(
+      elev: true,
+      padding: const EdgeInsets.all(UgamSpacing.sm),
       onTap: () {
         HapticFeedback.selectionClick();
         Get.to(
@@ -1223,13 +1186,7 @@ class _BusListItem extends StatelessWidget {
           transition: Transition.cupertino,
         );
       },
-      child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.sm),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
+      child: Row(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(14),
@@ -1295,8 +1252,7 @@ class _BusListItem extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 }
 
@@ -1501,12 +1457,10 @@ class _TimelineRow extends StatelessWidget {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm),
-              child: Container(
+              child: UgamCard.plain(
+                elev: true,
+                radius: 14,
                 padding: const EdgeInsets.all(UgamSpacing.md - 2),
-                decoration: BoxDecoration(
-                  color: c.cardElev,
-                  borderRadius: BorderRadius.circular(14),
-                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,

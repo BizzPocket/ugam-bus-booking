@@ -323,10 +323,21 @@ class _RequestsScreenState extends State<RequestsScreen> {
                     duration: UgamMotion.tab,
                     curve: UgamMotion.easeOut,
                     child: _searchVisible
-                        ? _SearchField(
-                            c: c,
-                            controller: _searchCtrl,
-                            onChanged: (v) => setState(() => _query = v.trim()),
+                        ? Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              UgamSpacing.gutter,
+                              0,
+                              UgamSpacing.gutter,
+                              UgamSpacing.md,
+                            ),
+                            child: UgamSearchField(
+                              hint: tr('requests.search_hint'),
+                              controller: _searchCtrl,
+                              autofocus: true,
+                              onChanged: (v) =>
+                                  setState(() => _query = v.trim()),
+                              onClear: () => setState(() => _query = ''),
+                            ),
                           )
                         : const SizedBox.shrink(),
                   ),
@@ -415,50 +426,16 @@ class _RequestsScreenState extends State<RequestsScreen> {
       children: [
         if (activeTours.length > 1) ...[
           const SizedBox(height: UgamSpacing.xs),
-          SizedBox(
-            height: 38,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.gutter,
-              ),
-              itemCount: activeTours.length,
-              separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
-              itemBuilder: (_, i) {
-                final tour = activeTours[i];
-                final isActive = i == _selectedTourIndex;
-                return GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    setState(() {
-                      _selectedTourIndex = i;
-                      _exitSelection();
-                    });
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: AnimatedContainer(
-                    duration: UgamMotion.tab,
-                    curve: UgamMotion.easeOut,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: UgamSpacing.lg,
-                      vertical: UgamSpacing.sm,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isActive ? c.accent : c.cardElev,
-                      borderRadius: BorderRadius.circular(UgamRadius.chip),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      tour.title,
-                      style: UgamText.bodyStrong.copyWith(
-                        color: isActive ? c.onAccent : c.ink2,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
+          UgamSelectorPills(
+            currentIndex: _selectedTourIndex,
+            onChanged: (i) => setState(() {
+              _selectedTourIndex = i;
+              _exitSelection();
+            }),
+            items: [
+              for (final tour in activeTours)
+                UgamSelectorItem(label: tour.title),
+            ],
           ),
         ],
         const SizedBox(height: UgamSpacing.md),
@@ -816,63 +793,6 @@ class _MenuRow extends StatelessWidget {
   }
 }
 
-class _SearchField extends StatelessWidget {
-  final UgamColorSet c;
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-
-  const _SearchField({
-    required this.c,
-    required this.controller,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        0,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search_rounded, size: 18, color: c.ink2),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                autofocus: true,
-                onChanged: onChanged,
-                style: UgamText.body.copyWith(color: c.ink, fontSize: 14),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  hintText: tr('requests.search_hint'),
-                  hintStyle: UgamText.body.copyWith(
-                    color: c.ink3,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Capacity banner ──────────────────────────────────────────────────
 
 /// At-a-glance demand-vs-capacity strip: how many berths the ACTIVE (non-
@@ -1164,109 +1084,56 @@ class _BulkActionBar extends StatelessWidget {
             children: [
               Expanded(
                 child: isWaitlistTab
-                    ? _BulkBtn(
+                    ? UgamButton(
                         icon: Icons.arrow_back_rounded,
                         label: tr('requests.bulk.promote'),
-                        onTap: enabled ? onPromote : null,
-                        c: c,
+                        kind: UgamButtonKind.ghost,
+                        expand: true,
+                        onPressed: enabled ? onPromote : null,
                       )
-                    : _BulkBtn(
+                    : UgamButton(
                         icon: Icons.hourglass_top_rounded,
                         label: tr('requests.bulk.waitlist'),
-                        onTap: enabled ? onWaitlist : null,
-                        c: c,
+                        kind: UgamButtonKind.ghost,
+                        expand: true,
+                        onPressed: enabled ? onWaitlist : null,
                       ),
               ),
               if (canConfirm)
                 Expanded(
-                  child: _BulkBtn(
+                  child: UgamButton(
                     icon: Icons.verified_rounded,
                     label: tr('requests.bulk.confirm'),
-                    primary: true,
-                    onTap: enabled ? onConfirm : null,
-                    c: c,
+                    // The ONE accent in the bulk bar (per accent-rationing).
+                    kind: UgamButtonKind.primary,
+                    expand: true,
+                    onPressed: enabled ? onConfirm : null,
                   ),
                 ),
               Expanded(
-                child: _BulkBtn(
+                child: UgamButton(
                   icon: Icons.chat_rounded,
                   label: tr('requests.bulk.send_wa'),
-                  // Send WA is the accent primary only when Confirm isn't taking
-                  // that slot (Assigned tab).
-                  primary: !canConfirm,
-                  onTap: enabled ? onSendWA : null,
-                  c: c,
+                  // Accent primary only when Confirm isn't taking that slot
+                  // (Assigned tab); otherwise a quiet ghost.
+                  kind: canConfirm
+                      ? UgamButtonKind.ghost
+                      : UgamButtonKind.primary,
+                  expand: true,
+                  onPressed: enabled ? onSendWA : null,
                 ),
               ),
               Expanded(
-                child: _BulkBtn(
+                child: UgamButton(
                   icon: Icons.close_rounded,
                   label: tr('requests.bulk.decline'),
-                  danger: true,
-                  onTap: enabled ? onDecline : null,
-                  c: c,
+                  kind: UgamButtonKind.dangerTonal,
+                  expand: true,
+                  onPressed: enabled ? onDecline : null,
                 ),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BulkBtn extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final bool primary;
-  final bool danger;
-  final UgamColorSet c;
-  const _BulkBtn({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    required this.c,
-    this.primary = false,
-    this.danger = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    final bg = primary
-        ? (enabled ? c.accent : c.accent.withValues(alpha: 0.4))
-        : Colors.transparent;
-    final fg = primary
-        ? c.onAccent
-        : danger
-        ? (enabled ? c.danger : c.danger.withValues(alpha: 0.4))
-        : (enabled ? c.ink : c.ink3);
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 44,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
-        ),
-        alignment: Alignment.center,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: fg),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: UgamText.bodyStrong.copyWith(color: fg, fontSize: 12.5),
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -1983,11 +1850,13 @@ class _CardActions extends StatelessWidget {
         declineItem,
       ];
     } else if (isWaitlisted) {
-      // WAITLIST — Confirm clears the waitlist flag and fires the WhatsApp; the
-      // circle drops them back to New.
-      primaryLabel = tr('requests.action.confirm');
-      primaryIcon = Icons.verified_rounded;
-      primaryAction = _confirm;
+      // WAITLIST — "Confirm & seat" is the primary: it clears the waitlist flag
+      // (via setConfirmed) and jumps straight into the seat grid, collapsing the
+      // waitlist→confirm→assign shuffle. Plain "Confirm" (confirm + WhatsApp,
+      // no seating) drops into the overflow. The circle drops back to New.
+      primaryLabel = tr('requests.action.confirm_and_seat');
+      primaryIcon = Icons.event_seat_rounded;
+      primaryAction = _confirmAndSeat;
       secondary = _circleButton(
         icon: Icons.arrow_back_rounded,
         fill: c.cardElev,
@@ -1997,19 +1866,22 @@ class _CardActions extends StatelessWidget {
       );
       menu = [
         editItem,
-        // Skip the waitlist→confirm→assign shuffle: confirm and seat in one tap.
+        // Plain confirm (no seating) — confirms + fires the WhatsApp template.
         _MenuItem(
-          tr('requests.action.confirm_and_seat'),
-          Icons.event_seat_rounded,
-          _confirmAndSeat,
+          tr('requests.action.confirm'),
+          Icons.verified_rounded,
+          _confirm,
         ),
         declineItem,
       ];
     } else {
-      // NEW — two clear icon buttons: Confirm (primary) and Waitlist (circle).
-      primaryLabel = tr('requests.action.confirm');
-      primaryIcon = Icons.verified_rounded;
-      primaryAction = _confirm;
+      // NEW — "Confirm & seat" is the primary (confirm + jump into the seat
+      // grid, pre-selected to this passenger), collapsing the usual two-step
+      // Confirm-then-Assign. Plain "Confirm" (confirm + WhatsApp, no seating)
+      // lives in the overflow. The circle waitlists.
+      primaryLabel = tr('requests.action.confirm_and_seat');
+      primaryIcon = Icons.event_seat_rounded;
+      primaryAction = _confirmAndSeat;
       secondary = _circleButton(
         icon: Icons.hourglass_top_rounded,
         fill: c.cardElev,
@@ -2019,12 +1891,11 @@ class _CardActions extends StatelessWidget {
       );
       menu = [
         editItem,
-        // One-tap Confirm → seat grid (pre-selected to this passenger),
-        // collapsing the usual two-step Confirm-then-Assign.
+        // Plain confirm (no seating) — confirms + fires the WhatsApp template.
         _MenuItem(
-          tr('requests.action.confirm_and_seat'),
-          Icons.event_seat_rounded,
-          _confirmAndSeat,
+          tr('requests.action.confirm'),
+          Icons.verified_rounded,
+          _confirm,
         ),
         _MenuItem(
           tr('requests.action.assign_seats'),
