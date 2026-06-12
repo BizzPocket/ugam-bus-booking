@@ -196,6 +196,8 @@
     "footer_made_by": "Made by Occubit Solution · devam.org"
   },
   "dashboard": {
+    "eyebrow_actions": "Quick actions",
+    "eyebrow_pulse": "At a glance",
     "qa_requests": "Requests",
     "qa_assign": "Assign",
     "recent_seats_chip": "{n} seats",
@@ -281,6 +283,11 @@
     }
   },
   "requests": {
+    "eyebrow": "Triage board",
+    "section": {
+      "capacity": "Capacity",
+      "triage": "Triage"
+    },
     "title": "Requests",
     "menu": {
       "tooltip": "More actions",

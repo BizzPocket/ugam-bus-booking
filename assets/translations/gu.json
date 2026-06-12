@@ -196,6 +196,8 @@
     "footer_made_by": "Occubit Solution દ્વારા · devam.org"
   },
   "dashboard": {
+    "eyebrow_actions": "ઝડપી ક્રિયાઓ",
+    "eyebrow_pulse": "એક નજરમાં",
     "qa_requests": "વિનંતીઓ",
     "qa_assign": "સોંપો",
     "recent_seats_chip": "{n} સીટ",
@@ -281,6 +283,11 @@
     }
   },
   "requests": {
+    "eyebrow": "ટ્રાયજ બોર્ડ",
+    "section": {
+      "capacity": "ક્ષમતા",
+      "triage": "ટ્રાયજ"
+    },
     "title": "વિનંતીઓ",
     "menu": {
       "tooltip": "વધુ ક્રિયાઓ",

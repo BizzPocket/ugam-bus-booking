@@ -196,6 +196,8 @@
     "footer_made_by": "Occubit Solution द्वारा · devam.org"
   },
   "dashboard": {
+    "eyebrow_actions": "त्वरित क्रियाएँ",
+    "eyebrow_pulse": "एक नज़र में",
     "qa_requests": "अनुरोध",
     "qa_assign": "असाइन",
     "recent_seats_chip": "{n} सीटें",
@@ -281,6 +283,11 @@
     }
   },
   "requests": {
+    "eyebrow": "ट्रायेज बोर्ड",
+    "section": {
+      "capacity": "क्षमता",
+      "triage": "ट्रायेज"
+    },
     "title": "अनुरोध",
     "menu": {
       "tooltip": "और क्रियाएं",
