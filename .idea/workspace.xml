@@ -4,14 +4,7 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="069cdba7-46ea-4b35-b56b-21e7253b6116" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/lib/screens/add_bus_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/add_bus_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/bus_status_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/bus_status_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/create_tour_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/create_tour_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/edit_tour_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/edit_tour_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/manage_buses_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/manage_buses_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/tour_groups_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/tour_groups_screen.dart" afterDir="false" />
-    </list>
+    <list default="true" id="069cdba7-46ea-4b35-b56b-21e7253b6116" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

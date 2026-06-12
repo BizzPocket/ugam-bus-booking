@@ -30,14 +30,14 @@ import 'package:flutter/material.dart';
 class Brand {
   const Brand._();
 
-  /// Dark-mode accent — electric lime. The single high-energy SIGNAL color of
-  /// the Bold-Transit DNA; bright enough to carry BLACK text
-  /// (see [UgamColorSet.onAccent]) for the signature lime-on-black look.
-  static const Color signal = Color(0xFFC6F432);
+  /// Dark-mode accent — champagne gold. The single signal color; light enough
+  /// to carry near-black text (see [UgamColorSet.onAccent]) — premium gold on
+  /// the stark black Bold-Transit ground.
+  static const Color champagne = Color(0xFFC9A86A);
 
-  /// Light-mode accent — deeper lime, for legibility as text/icons on the
-  /// white ground; also carries black text on its fills.
-  static const Color signalDeep = Color(0xFF65A30D);
+  /// Light-mode accent — deeper champagne, for legibility as text/icons on the
+  /// white ground; also carries near-black text on its fills.
+  static const Color champagneDeep = Color(0xFFA8854A);
 }
 
 class UgamColors {
@@ -51,14 +51,14 @@ class UgamColors {
     ink: Color(0xFFFFFFFF),         // Pure white — maximum contrast
     ink2: Color(0xFFA1A1AA),        // Secondary (cool gray)
     ink3: Color(0xFF6B6B72),        // Tertiary / meta
-    accent: Brand.signal,           // Electric lime — the one signal color
-    accentFill: Color(0x24C6F432),  // ~14% lime, for tonal surfaces
+    accent: Brand.champagne,        // Champagne gold — the one signal color
+    accentFill: Color(0x29C9A86A),  // ~16% champagne, for tonal surfaces
     good: Color(0xFF34D399),        // Emerald — paid / success
     goodFill: Color(0x2934D399),
     warm: Color(0xFFFFB020),        // Amber — attention / ladies
     warmFill: Color(0x2EFFB020),
     danger: Color(0xFFFF453A),      // Vivid red
-    onAccent: Color(0xFF0A0A0A),    // BLACK ink on lime — the signature look
+    onAccent: Color(0xFF1A1408),    // Near-black ink on champagne (premium)
   );
 
   static const UgamColorSet light = UgamColorSet(
@@ -69,14 +69,14 @@ class UgamColors {
     ink: Color(0xFF0A0A0A),         // Near-black ink — max contrast on white
     ink2: Color(0xFF52525B),        // Readable secondary (AA)
     ink3: Color(0xFFA1A1AA),        // Tertiary / meta
-    accent: Brand.signalDeep,       // Deeper lime — legible as text/icons on white
-    accentFill: Color(0x1F84CC16),  // Pale lime tint behind accent chips/icons
+    accent: Brand.champagneDeep,    // Deeper champagne — legible on white
+    accentFill: Color(0xFFF3ECDD),  // Pale champagne tint behind accent chips/icons
     good: Color(0xFF059669),
     goodFill: Color(0xFFD1FAE5),
     warm: Color(0xFFB45309),        // Amber — attention / ladies
     warmFill: Color(0xFFFEF3C7),
     danger: Color(0xFFDC2626),
-    onAccent: Color(0xFF0A0A0A),    // Black ink on lime fills
+    onAccent: Color(0xFF241C12),    // Near-black ink on champagne fills
   );
 
   static UgamColorSet of(BuildContext context) =>
