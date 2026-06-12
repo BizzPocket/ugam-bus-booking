@@ -6,6 +6,7 @@ import '../controllers/finance_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour_finance.dart';
 import '../routes/app_routes.dart';
+import '../utils/formatters.dart';
 
 /// FINANCE — the cross-tour Profit & Loss report.
 ///
@@ -27,7 +28,11 @@ class FinanceScreen extends StatefulWidget {
 
 class _FinanceScreenState extends State<FinanceScreen> {
   FinanceController get _finance => Get.find<FinanceController>();
-  FinancePeriod _period = FinancePeriod.allTime;
+
+  // Default the report to "this month" — the agent's most common question is
+  // "how am I doing right now", not the lifetime total. Pure initial-state
+  // change (no new persistence); the user can still switch to year / all time.
+  FinancePeriod _period = FinancePeriod.thisMonth;
 
   @override
   void initState() {
@@ -49,11 +54,14 @@ class _FinanceScreenState extends State<FinanceScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _Header(c: c),
+            UgamAppBar(
+              eyebrow: tr('finance.eyebrow'),
+              title: tr('finance.title'),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 UgamSpacing.gutter,
-                0,
+                UgamSpacing.sm,
                 UgamSpacing.gutter,
                 UgamSpacing.md,
               ),
@@ -73,10 +81,10 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 final firstLoading =
                     _finance.isLoading.value && !_finance.loadedOnce.value;
                 if (firstLoading) {
-                  return _Loading(c: c);
+                  return const _Loading();
                 }
                 if (_finance.loadFailed.value && !_finance.loadedOnce.value) {
-                  return _ErrorState(c: c, onRetry: _finance.reload);
+                  return _ErrorState(onRetry: _finance.reload);
                 }
 
                 final tours = _finance.financesFor(_period);
@@ -99,10 +107,10 @@ class _FinanceScreenState extends State<FinanceScreen> {
                     children: [
                       _HeroCard(totals: totals, c: c),
                       const SizedBox(height: UgamSpacing.md),
-                      _StatTriple(totals: totals, c: c),
+                      _StatTriple(totals: totals),
                       const SizedBox(height: UgamSpacing.xl),
                       if (tours.isEmpty)
-                        _Empty(c: c)
+                        const _Empty()
                       else ...[
                         Text(
                           tr('finance.per_tour'),
@@ -132,106 +140,30 @@ class _FinanceScreenState extends State<FinanceScreen> {
   }
 }
 
-// ── Money formatting (Indian grouping) ──────────────────────────────────────
-
-String _grp(int n) {
-  final s = n.toString();
-  if (s.length <= 3) return s;
-  final last3 = s.substring(s.length - 3);
-  var rest = s.substring(0, s.length - 3);
-  final parts = <String>[];
-  while (rest.length > 2) {
-    parts.insert(0, rest.substring(rest.length - 2));
-    rest = rest.substring(0, rest.length - 2);
-  }
-  if (rest.isNotEmpty) parts.insert(0, rest);
-  return '${parts.join(',')},$last3';
-}
+// ── Money formatting ─────────────────────────────────────────────────────────
+// All rupee grouping is delegated to the shared [Formatters]; these thin
+// wrappers only add the explicit +/− sign presentation the report needs.
 
 /// Unsigned amount, e.g. `₹1,72,000`.
-String _inr(num v) => '₹${_grp(v.abs().round())}';
+String _inr(num v) => Formatters.formatMoneyInr(v.abs());
 
 /// Signed amount with explicit +/−, e.g. `+₹38,200` / `−₹4,100` / `₹0`.
 String _signedInr(num v) {
   final r = v.round();
   if (r == 0) return '₹0';
-  return r > 0 ? '+₹${_grp(r)}' : '−₹${_grp(r.abs())}';
+  final body = Formatters.formatMoneyInr(r.abs());
+  return r > 0 ? '+$body' : '−$body';
 }
 
 /// Compact amount for tight stat columns, e.g. `₹1.7L`, `₹38K`, signed.
 String _compactSigned(num v) {
-  final neg = v < 0;
-  final a = v.abs();
-  String body;
-  if (a >= 100000) {
-    final l = a / 100000;
-    body = '₹${l.toStringAsFixed(l >= 10 ? 0 : 1)}L';
-  } else if (a >= 1000) {
-    final k = a / 1000;
-    body = '₹${k.toStringAsFixed(k >= 10 ? 0 : 1)}K';
-  } else {
-    body = '₹${a.round()}';
-  }
-  if (a.round() == 0) return '₹0';
-  return neg ? '−$body' : '+$body';
+  if (v.round() == 0) return '₹0';
+  final body = Formatters.formatMoneyInrCompact(v.abs());
+  return v < 0 ? '−$body' : '+$body';
 }
 
-String _dateLabel(DateTime d) => DateFormat('d MMM yyyy').format(d);
-
-// ── Header ──────────────────────────────────────────────────────────────────
-
-class _Header extends StatelessWidget {
-  final UgamColorSet c;
-  const _Header({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr('finance.eyebrow'),
-                  style: UgamText.micro.copyWith(color: c.ink3),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  tr('finance.title'),
-                  style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+String _dateLabel(BuildContext context, DateTime d) =>
+    Formatters.formatDateMedium(d, locale: context.locale.languageCode);
 
 // ── Hero net card ────────────────────────────────────────────────────────────
 
@@ -262,7 +194,10 @@ class _HeroCard extends StatelessWidget {
                 style: UgamText.micro.copyWith(color: c.ink3),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.sm,
+                  vertical: UgamSpacing.xs,
+                ),
                 decoration: BoxDecoration(
                   color: profit ? c.goodFill : c.danger.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(UgamRadius.chip),
@@ -277,7 +212,7 @@ class _HeroCard extends StatelessWidget {
                       size: 13,
                       color: profit ? c.good : c.danger,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: UgamSpacing.xs),
                     Text(
                       totals.tourCount == 1
                           ? tr('finance.from_tours_one',
@@ -296,9 +231,7 @@ class _HeroCard extends StatelessWidget {
           const SizedBox(height: UgamSpacing.sm),
           Text(
             _signedInr(totals.net),
-            style: UgamText.tabular(
-              UgamText.numXl.copyWith(color: netColor, fontSize: 34),
-            ),
+            style: UgamText.tabular(UgamText.numXl.copyWith(color: netColor)),
           ),
           const SizedBox(height: UgamSpacing.md),
           _MarginBar(revenue: totals.revenue, expenses: totals.expenses, c: c),
@@ -360,16 +293,14 @@ class _HeroMetric extends StatelessWidget {
               height: 7,
               decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: UgamSpacing.xs + 2),
             Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: UgamSpacing.xs),
         Text(
           value,
-          style: UgamText.tabular(
-            UgamText.numLg.copyWith(color: color, fontSize: 18),
-          ),
+          style: UgamText.tabular(UgamText.numLg.copyWith(color: color)),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -429,63 +360,42 @@ class _MarginBar extends StatelessWidget {
 
 class _StatTriple extends StatelessWidget {
   final FinanceTotals totals;
-  final UgamColorSet c;
-  const _StatTriple({required this.totals, required this.c});
+  const _StatTriple({required this.totals});
 
   @override
   Widget build(BuildContext context) {
-    final items = <({String label, String value})>[
-      (label: tr('finance.stat_tours'), value: '${totals.tourCount}'),
+    final items = <({IconData icon, String label, String value})>[
       (
+        icon: Icons.event_rounded,
+        label: tr('finance.stat_tours'),
+        value: '${totals.tourCount}',
+      ),
+      (
+        icon: Icons.bar_chart_rounded,
         label: tr('finance.stat_avg'),
         value: totals.tourCount == 0 ? '—' : _compactSigned(totals.avgNet),
       ),
       (
+        icon: Icons.workspace_premium_rounded,
         label: tr('finance.stat_best'),
         value: totals.best == null ? '—' : _compactSigned(totals.best!.net),
       ),
     ];
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.md,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.stat),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    items[i].value,
-                    style: UgamText.tabular(
-                      UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    items[i].label,
-                    style: UgamText.caption.copyWith(color: c.ink2),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
+    return Row(
+      children: [
+        for (var i = 0; i < items.length; i++) ...[
+          Expanded(
+            child: UgamStatTile(
+              icon: items[i].icon,
+              value: items[i].value,
+              label: items[i].label,
+              variant: UgamStatVariant.neutral,
             ),
-            if (i < items.length - 1)
-              Container(width: 1, height: 28, color: c.border),
-          ],
+          ),
+          if (i < items.length - 1) const SizedBox(width: UgamSpacing.sm),
         ],
-      ),
+      ],
     );
   }
 }
@@ -515,7 +425,7 @@ class _TourFinanceRow extends StatelessWidget {
     final busLabel = tf.buses == 1
         ? tr('finance.bus_one', namedArgs: {'n': '${tf.buses}'})
         : tr('finance.bus_other', namedArgs: {'n': '${tf.buses}'});
-    final meta = '${_dateLabel(tf.date)} · $busLabel';
+    final meta = '${_dateLabel(context, tf.date)} · $busLabel';
 
     final marginPct = tf.revenue > 0
         ? tr('finance.margin_pct',
@@ -536,7 +446,7 @@ class _TourFinanceRow extends StatelessWidget {
                 height: 38,
                 decoration: BoxDecoration(
                   color: iconBg,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 alignment: Alignment.center,
                 child: Icon(
@@ -578,9 +488,8 @@ class _TourFinanceRow extends StatelessWidget {
                 children: [
                   Text(
                     _signedInr(tf.net),
-                    style: UgamText.tabular(
-                      UgamText.numLg.copyWith(color: netColor, fontSize: 17),
-                    ),
+                    style:
+                        UgamText.tabular(UgamText.numLg.copyWith(color: netColor)),
                   ),
                   const SizedBox(height: 1),
                   Text(
@@ -664,94 +573,72 @@ class _MiniMetric extends StatelessWidget {
 // ── Empty / loading / error states ───────────────────────────────────────────
 
 class _Empty extends StatelessWidget {
-  final UgamColorSet c;
-  const _Empty({required this.c});
+  const _Empty();
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.insights_rounded, size: 26, color: c.ink3),
-            ),
-            const SizedBox(height: UgamSpacing.md),
-            Text(
-              tr('finance.empty_title'),
-              style: UgamText.titleS.copyWith(color: c.ink),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: UgamSpacing.xl),
-              child: Text(
-                tr('finance.empty_body'),
-                style: UgamText.caption.copyWith(color: c.ink3),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ],
-        ),
+      child: UgamEmpty(
+        icon: Icons.insights_rounded,
+        title: tr('finance.empty_title'),
+        body: tr('finance.empty_body'),
       ),
     );
   }
 }
 
+/// Initial-load skeleton: a hero placeholder, a stat strip, and a couple of
+/// per-tour row placeholders — mirrors the real layout instead of a spinner.
 class _Loading extends StatelessWidget {
-  final UgamColorSet c;
-  const _Loading({required this.c});
+  const _Loading();
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: SizedBox(
-        width: 26,
-        height: 26,
-        child: CircularProgressIndicator(strokeWidth: 2.4, color: c.accent),
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.xs,
+        UgamSpacing.gutter,
+        UgamSpacing.xxl,
       ),
+      children: [
+        const UgamSkeleton(height: 184, radius: UgamRadius.card),
+        const SizedBox(height: UgamSpacing.md),
+        Row(
+          children: const [
+            Expanded(child: UgamSkeleton(height: 84, radius: UgamRadius.stat)),
+            SizedBox(width: UgamSpacing.sm),
+            Expanded(child: UgamSkeleton(height: 84, radius: UgamRadius.stat)),
+            SizedBox(width: UgamSpacing.sm),
+            Expanded(child: UgamSkeleton(height: 84, radius: UgamRadius.stat)),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.xl),
+        const UgamSkeleton(height: 120, radius: UgamRadius.card),
+        const SizedBox(height: UgamSpacing.md),
+        const UgamSkeleton(height: 120, radius: UgamRadius.card),
+      ],
     );
   }
 }
 
 class _ErrorState extends StatelessWidget {
-  final UgamColorSet c;
   final Future<void> Function() onRetry;
-  const _ErrorState({required this.c, required this.onRetry});
+  const _ErrorState({required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(UgamSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.cloud_off_rounded, size: 34, color: c.ink3),
-            const SizedBox(height: UgamSpacing.md),
-            Text(
-              tr('finance.error_title'),
-              style: UgamText.titleS.copyWith(color: c.ink),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: UgamSpacing.lg),
-            UgamCTA(
-              label: tr('finance.error_retry'),
-              leadingIcon: Icons.refresh_rounded,
-              onPressed: () => onRetry(),
-            ),
-          ],
-        ),
+    // Error/empty states must NOT use solid champagne — the retry is TONAL.
+    return UgamEmpty(
+      icon: Icons.cloud_off_rounded,
+      title: tr('finance.error_title'),
+      cta: UgamButton(
+        label: tr('finance.error_retry'),
+        icon: Icons.refresh_rounded,
+        kind: UgamButtonKind.tonal,
+        onPressed: () => onRetry(),
       ),
     );
   }

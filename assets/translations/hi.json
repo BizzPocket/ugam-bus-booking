@@ -963,6 +963,7 @@
     "ping_loading": "सर्वर को पिंग किया जा रहा है…"
   },
   "charts": {
+    "call_passenger": "यात्री को कॉल करें",
     "title": "चार्ट",
     "driver_label": "ड्राइवर",
     "edit_seats": "सीटें संपादित करें",
@@ -1534,6 +1535,7 @@
     "auto_released_many": "मेल बनाने के लिए {count} अतिरिक्त सीटें छोड़ीं"
   },
   "bus_money": {
+    "eyebrow": "बस पैसा",
     "app_bar_title": "पैसा · {name}",
     "stat_collected": "एकत्रित",
     "stat_expenses": "खर्च",
@@ -1572,6 +1574,8 @@
     "delete_confirm": "हटाएँ"
   },
   "collection": {
+    "eyebrow": "वित्त",
+    "mark_paid": "भुगतान चिह्नित करें · {amount}",
     "app_bar_title": "एकत्र राशि · {bus}",
     "trip_outbound_only": "केवल जाना",
     "trip_return_only": "केवल वापसी",
@@ -1597,6 +1601,7 @@
     "metric_due": "बकाया"
   },
   "handler_chart": {
+    "badge_half_suffix": "{leg} ½",
     "bus_chart": "बस चार्ट",
     "expand_chart": "फुल स्क्रीन चार्ट",
     "error_load": "बस चार्ट लोड नहीं हो सका। कृपया पुनः प्रयास करें।",
@@ -1820,6 +1825,7 @@
     "create_group_seats": "ग्रुप बनाएँ ({n}) · {seats} सीट"
   },
   "tour_money_board": {
+    "eyebrow": "टूर मनी",
     "money_board": "मनी बोर्ड",
     "tour_money": "टूर के पैसे",
     "tour_not_found": "टूर नहीं मिला.",

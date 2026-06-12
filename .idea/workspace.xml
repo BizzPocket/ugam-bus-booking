@@ -5,8 +5,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="069cdba7-46ea-4b35-b56b-21e7253b6116" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/lib/design/components/ugam_app_bar.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/design/components/ugam_app_bar.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/design/components/ugam_card.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/design/components/ugam_card.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/screens/bus_money_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/bus_money_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/screens/charts_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/charts_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/screens/collection_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/collection_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/screens/finance_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/finance_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/screens/handler_bus_chart_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/handler_bus_chart_screen.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/screens/tour_money_board_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/tour_money_board_screen.dart" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

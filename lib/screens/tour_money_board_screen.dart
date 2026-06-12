@@ -8,14 +8,9 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
+import '../utils/formatters.dart';
 import 'bus_money_screen.dart';
 import 'collection_screen.dart';
-
-String _money(num v) {
-  final neg = v < 0;
-  final abs = v.abs().toStringAsFixed(0);
-  return neg ? '-₹$abs' : '₹$abs';
-}
 
 /// TOUR MONEY BOARD — a scannable, mostly read-only roll-up of every bus on
 /// a tour. Each row shows that bus's money summary (collected / to-collect /
@@ -75,10 +70,14 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
         bottom: false,
         child: Column(
           children: [
-            _Header(
-              title: _tours.getTour(widget.tourId)?.title ?? '',
-              c: c,
-            ),
+            Obx(() {
+              final title = _tours.getTour(widget.tourId)?.title ?? '';
+              return UgamAppBar(
+                eyebrow: tr('tour_money_board.eyebrow'),
+                title:
+                    title.isEmpty ? tr('tour_money_board.tour_money') : title,
+              );
+            }),
             Expanded(
               child: Obx(() {
                 final tour = _tours.getTour(widget.tourId);
@@ -97,7 +96,10 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                     _money.summariesForBuses(buses.map((b) => b.id));
 
                 if (buses.isEmpty) {
-                  return _Empty(c: c);
+                  return UgamEmpty(
+                    icon: Icons.account_balance_wallet_outlined,
+                    title: tr('tour_money_board.no_buses'),
+                  );
                 }
 
                 return ListView(
@@ -146,65 +148,6 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
   }
 }
 
-// ─── Header (matches tour_overview_screen idiom) ────────────────────────────
-
-class _Header extends StatelessWidget {
-  final String title;
-  final UgamColorSet c;
-
-  const _Header({required this.title, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr('tour_money_board.money_board'),
-                  style: UgamText.micro.copyWith(color: c.ink3),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  title.isEmpty ? tr('tour_money_board.tour_money') : title,
-                  style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Per-bus money row ──────────────────────────────────────────────────────
 
 class _BusMoneyRow extends StatelessWidget {
@@ -227,208 +170,181 @@ class _BusMoneyRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // warm = needs action (outstanding handover / shortfall) — attention only.
-    // good = settled. neutral = nothing has moved yet → no ring.
-    final (Color? ring, UgamStatusTone tone, String statusLabel) =
+    // good = settled. neutral = nothing has moved yet → no tint.
+    final (UgamCardTone cardTone, UgamStatusTone tone, String statusLabel) =
         switch (state) {
       BusMoneyState.actionNeeded => (
-          c.warm,
+          UgamCardTone.warm,
           UgamStatusTone.warm,
           summary.outstandingHandover > 0.005
               ? tr(
                   'tour_money_board.handover_due',
-                  namedArgs: {'n': _money(summary.outstandingHandover)},
+                  namedArgs: {
+                    'n': Formatters.formatMoneyInr(summary.outstandingHandover)
+                  },
                 )
               : tr(
                   'tour_money_board.to_collect_amount',
-                  namedArgs: {'n': _money(summary.toCollectTotal)},
+                  namedArgs: {
+                    'n': Formatters.formatMoneyInr(summary.toCollectTotal)
+                  },
                 ),
         ),
-      BusMoneyState.settled =>
-        (c.good, UgamStatusTone.good, tr('tour_money_board.settled')),
-      BusMoneyState.neutral =>
-        (null, UgamStatusTone.neutral, tr('tour_money_board.no_activity')),
+      BusMoneyState.settled => (
+          UgamCardTone.good,
+          UgamStatusTone.good,
+          tr('tour_money_board.settled'),
+        ),
+      BusMoneyState.neutral => (
+          UgamCardTone.none,
+          UgamStatusTone.neutral,
+          tr('tour_money_board.no_activity'),
+        ),
     };
 
-    return Container(
-      decoration: ring == null
-          ? null
-          : BoxDecoration(
-              borderRadius: BorderRadius.circular(UgamRadius.card),
-              border: Border.all(color: ring.withValues(alpha: 0.55)),
-            ),
-      child: UgamCard.plain(
-        onTap: onTap,
-        padding: const EdgeInsets.all(UgamSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── Title row: icon + name/type + status dot ───────────────
-            Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: c.cardElev,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.directions_bus_filled_rounded,
-                    size: 18,
-                    color: c.ink2,
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        bus.name,
-                        style: UgamText.titleS.copyWith(color: c.ink),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        bus.busType,
-                        style: UgamText.caption.copyWith(color: c.ink3),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.sm),
-                Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-              ],
-            ),
-            const SizedBox(height: UgamSpacing.md),
-            // ── Headline money pair: collected + expected handover ─────
-            Row(
-              children: [
-                Expanded(
-                  child: _Metric(
-                    label: tr('tour_money_board.collected'),
-                    value: _money(summary.collected),
-                    valueColor: c.ink,
-                    c: c,
-                  ),
-                ),
-                Expanded(
-                  child: _Metric(
-                    label: tr('tour_money_board.handover'),
-                    value: _money(summary.handedOver),
-                    valueColor: c.ink,
-                    c: c,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: UgamSpacing.sm + 2),
-            // ── Secondary money triplet ────────────────────────────────
-            Row(
-              children: [
-                Expanded(
-                  child: _Metric(
-                    label: tr('tour_money_board.to_collect'),
-                    value: _money(summary.toCollectTotal),
-                    valueColor:
-                        summary.toCollectTotal > 0.005 ? c.danger : c.ink2,
-                    c: c,
-                  ),
-                ),
-                Expanded(
-                  child: _Metric(
-                    label: tr('tour_money_board.to_return'),
-                    value: _money(summary.toReturnTotal),
-                    valueColor:
-                        summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
-                    c: c,
-                  ),
-                ),
-                Expanded(
-                  child: _Metric(
-                    label: tr('tour_money_board.expenses'),
-                    value: _money(summary.expensesTotal),
-                    valueColor: c.ink2,
-                    c: c,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: UgamSpacing.md),
-            Divider(height: 1, color: c.border),
-            const SizedBox(height: UgamSpacing.sm + 2),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                UgamStatusDot(label: statusLabel, tone: tone),
-                Text(
-                  tr(
-                    'tour_money_board.outstanding_amount',
-                    namedArgs: {'n': _money(summary.outstandingHandover)},
-                  ),
-                  style: UgamText.tabular(
-                    UgamText.caption.copyWith(
-                      color: summary.outstandingHandover > 0.005
-                          ? c.warm
-                          : c.ink3,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: UgamSpacing.md),
-            // One-tap shortcut straight into this bus's CollectionScreen —
-            // no detour through BusMoneyScreen. The row itself still opens
-            // the full per-bus detail view.
-            _CollectButton(onTap: onCollect, c: c),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A prominent per-row "Collect" quick action. Its own opaque tap handler
-/// swallows the gesture so it never also triggers the row's open-detail tap.
-class _CollectButton extends StatelessWidget {
-  final VoidCallback onTap;
-  final UgamColorSet c;
-
-  const _CollectButton({required this.onTap, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
+    return UgamCard.plain(
+      tone: cardTone,
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm + 2),
-        decoration: BoxDecoration(
-          color: c.accentFill,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.groups_rounded, size: 17, color: c.accent),
-            const SizedBox(width: UgamSpacing.sm),
-            Text(
-              tr('tour_money_board.collect'),
-              style: UgamText.caption.copyWith(
-                color: c.accent,
-                fontWeight: FontWeight.w700,
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Title row: icon + name/type + status dot ───────────────
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: c.cardElev,
+                  borderRadius: BorderRadius.circular(UgamRadius.seat),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.directions_bus_filled_rounded,
+                  size: 18,
+                  color: c.ink2,
+                ),
               ),
-            ),
-          ],
-        ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      bus.name,
+                      style: UgamText.titleS.copyWith(color: c.ink),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: UgamSpacing.xs),
+                    Text(
+                      bus.busType,
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          // ── Headline money pair: collected + expected handover ─────
+          Row(
+            children: [
+              Expanded(
+                child: _Metric(
+                  label: tr('tour_money_board.collected'),
+                  value: Formatters.formatMoneyInr(summary.collected),
+                  valueColor: c.ink,
+                  c: c,
+                ),
+              ),
+              Expanded(
+                child: _Metric(
+                  label: tr('tour_money_board.handover'),
+                  value: Formatters.formatMoneyInr(summary.handedOver),
+                  valueColor: c.ink,
+                  c: c,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          // ── Secondary money triplet ────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: _Metric(
+                  label: tr('tour_money_board.to_collect'),
+                  value: Formatters.formatMoneyInr(summary.toCollectTotal),
+                  valueColor:
+                      summary.toCollectTotal > 0.005 ? c.danger : c.ink2,
+                  c: c,
+                ),
+              ),
+              Expanded(
+                child: _Metric(
+                  label: tr('tour_money_board.to_return'),
+                  value: Formatters.formatMoneyInr(summary.toReturnTotal),
+                  valueColor:
+                      summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
+                  c: c,
+                ),
+              ),
+              Expanded(
+                child: _Metric(
+                  label: tr('tour_money_board.expenses'),
+                  value: Formatters.formatMoneyInr(summary.expensesTotal),
+                  valueColor: c.ink2,
+                  c: c,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          Divider(height: 1, color: c.border),
+          const SizedBox(height: UgamSpacing.md),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              UgamStatusDot(label: statusLabel, tone: tone),
+              Text(
+                tr(
+                  'tour_money_board.outstanding_amount',
+                  namedArgs: {
+                    'n': Formatters.formatMoneyInr(summary.outstandingHandover)
+                  },
+                ),
+                style: UgamText.tabular(
+                  UgamText.caption.copyWith(
+                    color: summary.outstandingHandover > 0.005
+                        ? c.warm
+                        : c.ink3,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          // One-tap shortcut straight into this bus's CollectionScreen —
+          // no detour through BusMoneyScreen. The row itself still opens
+          // the full per-bus detail view. Tonal (quiet primary) so it never
+          // competes with the single solid-champagne totals capsule below.
+          UgamButton(
+            label: tr('tour_money_board.collect'),
+            icon: Icons.groups_rounded,
+            kind: UgamButtonKind.tonal,
+            expand: true,
+            onPressed: onCollect,
+          ),
+        ],
       ),
     );
   }
@@ -454,10 +370,11 @@ class _Metric extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-        const SizedBox(height: 2),
+        const SizedBox(height: UgamSpacing.xs),
         Text(
           value,
-          style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: valueColor)),
+          style:
+              UgamText.tabular(UgamText.bodyStrong.copyWith(color: valueColor)),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -510,7 +427,7 @@ class _TotalsCapsule extends StatelessWidget {
                 Expanded(
                   child: _TotalCol(
                     label: tr('tour_money_board.collected'),
-                    value: _money(summary.totalCollected),
+                    value: Formatters.formatMoneyInr(summary.totalCollected),
                     color: c.ink,
                     c: c,
                   ),
@@ -518,7 +435,7 @@ class _TotalsCapsule extends StatelessWidget {
                 Expanded(
                   child: _TotalCol(
                     label: tr('tour_money_board.expenses'),
-                    value: _money(summary.totalExpenses),
+                    value: Formatters.formatMoneyInr(summary.totalExpenses),
                     color: c.ink2,
                     c: c,
                   ),
@@ -526,16 +443,16 @@ class _TotalsCapsule extends StatelessWidget {
                 Expanded(
                   child: _TotalCol(
                     label: tr('tour_money_board.net'),
-                    value: _money(summary.totalNet),
+                    value: Formatters.formatMoneyInr(summary.totalNet),
                     color: c.ink,
                     c: c,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: UgamSpacing.sm + 2),
+            const SizedBox(height: UgamSpacing.md),
             Divider(height: 1, color: c.border),
-            const SizedBox(height: UgamSpacing.sm + 2),
+            const SizedBox(height: UgamSpacing.md),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -544,7 +461,7 @@ class _TotalsCapsule extends StatelessWidget {
                   style: UgamText.body.copyWith(color: c.ink2),
                 ),
                 Text(
-                  _money(outstanding),
+                  Formatters.formatMoneyInr(outstanding),
                   style: UgamText.tabular(
                     UgamText.titleS.copyWith(
                       color: settled ? c.good : c.warm,
@@ -580,44 +497,15 @@ class _TotalCol extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-        const SizedBox(height: 2),
+        const SizedBox(height: UgamSpacing.xs),
         Text(
           value,
-          style: UgamText.tabular(UgamText.numLg.copyWith(color: color, fontSize: 17)),
+          style: UgamText.tabular(
+              UgamText.numLg.copyWith(color: color, fontSize: 17)),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
       ],
-    );
-  }
-}
-
-// ─── Empty state ────────────────────────────────────────────────────────────
-
-class _Empty extends StatelessWidget {
-  final UgamColorSet c;
-
-  const _Empty({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.account_balance_wallet_outlined,
-                size: 40, color: c.ink3),
-            const SizedBox(height: UgamSpacing.md),
-            Text(
-              tr('tour_money_board.no_buses'),
-              style: UgamText.body.copyWith(color: c.ink2),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

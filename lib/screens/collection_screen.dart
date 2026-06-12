@@ -10,9 +10,8 @@ import '../models/collection.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
+import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
-
-String _money(num v) => '₹${v.toStringAsFixed(0)}';
 
 String? _tripLabel(TripType t) {
   switch (t) {
@@ -101,6 +100,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
         child: Column(
           children: [
             UgamAppBar(
+              eyebrow: tr('collection.eyebrow'),
               title: tr(
                 'collection.app_bar_title',
                 namedArgs: {'bus': widget.bus.name},
@@ -111,53 +111,67 @@ class _CollectionScreenState extends State<CollectionScreen> {
                 final s = controller.summaryForBus(widget.bus.id);
                 final lines = _seatLines.where(_passesFilter).toList();
 
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    UgamSpacing.gutter,
-                    UgamSpacing.sm,
-                    UgamSpacing.gutter,
-                    UgamSpacing.huge,
-                  ),
+                return Column(
                   children: [
-              _SummaryHeader(
-                collected: s.collected,
-                toReturn: s.toReturnTotal,
-                toCollect: s.toCollectTotal,
-              ),
-              const SizedBox(height: UgamSpacing.lg),
-              UgamTabPills(
-                currentIndex: _filter,
-                onChanged: (i) => setState(() => _filter = i),
-                items: [
-                  UgamTabItem(label: tr('collection.filter_all')),
-                  UgamTabItem(label: tr('collection.filter_to_return')),
-                  UgamTabItem(label: tr('collection.filter_to_collect')),
-                ],
-              ),
-              const SizedBox(height: UgamSpacing.lg),
-              if (lines.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: UgamSpacing.huge,
-                  ),
-                  child: Center(
-                    child: Text(
-                      tr('collection.empty_no_match'),
-                      style: UgamText.body.copyWith(color: c.ink2),
+                    // Pinned summary + filters — stay put while the roster scrolls.
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        UgamSpacing.gutter,
+                        UgamSpacing.sm,
+                        UgamSpacing.gutter,
+                        UgamSpacing.lg,
+                      ),
+                      child: Column(
+                        children: [
+                          _SummaryHeader(
+                            collected: s.collected,
+                            toReturn: s.toReturnTotal,
+                            toCollect: s.toCollectTotal,
+                          ),
+                          const SizedBox(height: UgamSpacing.lg),
+                          UgamTabPills(
+                            currentIndex: _filter,
+                            onChanged: (i) => setState(() => _filter = i),
+                            items: [
+                              UgamTabItem(label: tr('collection.filter_all')),
+                              UgamTabItem(
+                                label: tr('collection.filter_to_return'),
+                              ),
+                              UgamTabItem(
+                                label: tr('collection.filter_to_collect'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                )
-              else
-                ...lines.map((line) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: UgamSpacing.md),
-                    child: _PassengerRow(
-                      line: line,
-                      bus: widget.bus,
-                      onTap: () => _openCollectSheet(context, line),
+                    Expanded(
+                      child: lines.isEmpty
+                          ? UgamEmpty(
+                              icon: Icons.account_balance_wallet_rounded,
+                              title: tr('collection.empty_no_match'),
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(
+                                UgamSpacing.gutter,
+                                0,
+                                UgamSpacing.gutter,
+                                UgamSpacing.huge,
+                              ),
+                              itemCount: lines.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: UgamSpacing.md),
+                              itemBuilder: (_, i) {
+                                final line = lines[i];
+                                return _PassengerRow(
+                                  line: line,
+                                  bus: widget.bus,
+                                  onTap: () => _openCollectSheet(context, line),
+                                  onMarkPaid: () => _markPaid(line),
+                                );
+                              },
+                            ),
                     ),
-                  );
-                    }),
                   ],
                 );
               }),
@@ -166,6 +180,28 @@ class _CollectionScreenState extends State<CollectionScreen> {
         ),
       ),
     );
+  }
+
+  /// One-tap full settlement for a shortfall row: records the entire
+  /// [_SeatCollectionLine.due] as received (no refund) and squares the line.
+  /// Pure reuse of [MoneyController.upsertCollection] with the exact Collection
+  /// shape the detail sheet's Save builds — no new money math or persistence.
+  Future<void> _markPaid(_SeatCollectionLine line) async {
+    final base =
+        line.col ??
+        Collection(
+          tourId: widget.tour.id,
+          busId: widget.bus.id,
+          passengerId: line.passenger.id,
+          seatId: line.seatId,
+        );
+    final updated = base.copyWith(
+      seatId: line.seatId,
+      amountDue: line.due,
+      amountReceived: line.due,
+      amountRefunded: 0,
+    );
+    await controller.upsertCollection(updated);
   }
 
   void _openCollectSheet(BuildContext context, _SeatCollectionLine line) {
@@ -199,23 +235,30 @@ class _CollectionScreenState extends State<CollectionScreen> {
               final returned = parse(returnedCtrl);
               final balance = received - returned - due;
 
-              final (String balLabel, Color balColor) = balance > 0
+              final (String balLabel, Color balColor, UgamCardTone balTone) =
+                  balance > 0
                   ? (
                       tr(
                         'collection.change_to_return',
-                        namedArgs: {'amount': _money(balance)},
+                        namedArgs: {
+                          'amount': Formatters.formatMoneyInr(balance),
+                        },
                       ),
                       sc.warm,
+                      UgamCardTone.warm,
                     )
                   : balance < 0
                   ? (
                       tr(
                         'collection.still_to_collect',
-                        namedArgs: {'amount': _money(-balance)},
+                        namedArgs: {
+                          'amount': Formatters.formatMoneyInr(-balance),
+                        },
                       ),
                       sc.danger,
+                      UgamCardTone.danger,
                     )
-                  : (tr('collection.settled'), sc.good);
+                  : (tr('collection.settled'), sc.good, UgamCardTone.good);
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
@@ -223,7 +266,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                 children: [
                   _ReadOnlyLine(
                     label: tr('collection.amount_due'),
-                    value: _money(due),
+                    value: Formatters.formatMoneyInr(due),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
                   UgamInput(
@@ -260,19 +303,19 @@ class _CollectionScreenState extends State<CollectionScreen> {
                     controller: noteCtrl,
                   ),
                   const SizedBox(height: UgamSpacing.lg),
-                  Container(
-                    width: double.infinity,
+                  UgamCard.plain(
+                    tone: balTone,
+                    radius: UgamRadius.row,
                     padding: const EdgeInsets.symmetric(
                       horizontal: UgamSpacing.lg,
                       vertical: UgamSpacing.md,
                     ),
-                    decoration: BoxDecoration(
-                      color: balColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(UgamRadius.row),
-                    ),
-                    child: Text(
-                      balLabel,
-                      style: UgamText.bodyStrong.copyWith(color: balColor),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: Text(
+                        balLabel,
+                        style: UgamText.bodyStrong.copyWith(color: balColor),
+                      ),
                     ),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
@@ -343,7 +386,7 @@ class _SummaryHeader extends StatelessWidget {
         Expanded(
           child: UgamStatTile(
             icon: Icons.payments_rounded,
-            value: _money(collected),
+            value: Formatters.formatMoneyInr(collected),
             label: tr('collection.collected'),
             variant: UgamStatVariant.good,
           ),
@@ -352,7 +395,7 @@ class _SummaryHeader extends StatelessWidget {
         Expanded(
           child: UgamStatTile(
             icon: Icons.undo_rounded,
-            value: _money(toReturn),
+            value: Formatters.formatMoneyInr(toReturn),
             label: tr('collection.filter_to_return'),
             variant: UgamStatVariant.warm,
           ),
@@ -361,7 +404,7 @@ class _SummaryHeader extends StatelessWidget {
         Expanded(
           child: UgamStatTile(
             icon: Icons.account_balance_wallet_rounded,
-            value: _money(toCollect),
+            value: Formatters.formatMoneyInr(toCollect),
             label: tr('collection.filter_to_collect'),
             variant: UgamStatVariant.accent,
           ),
@@ -375,11 +418,13 @@ class _PassengerRow extends StatelessWidget {
   final _SeatCollectionLine line;
   final Bus bus;
   final VoidCallback onTap;
+  final VoidCallback onMarkPaid;
 
   const _PassengerRow({
     required this.line,
     required this.bus,
     required this.onTap,
+    required this.onMarkPaid,
   });
 
   @override
@@ -391,28 +436,33 @@ class _PassengerRow extends StatelessWidget {
     final received = col?.amountReceived ?? 0;
     final balance = col == null ? -due : col.balance;
     final trip = _tripLabel(passenger.tripType);
+    final shortfall = due - received;
+    final isShortfall = balance < 0;
 
-    // Status chip resolution.
+    // Status chip resolution. UgamReqChip carries the tone via variant; the
+    // shortfall ("due") state maps to the accent attention variant since the
+    // chip set has no danger tone (the row's Mark-paid action + danger metric
+    // already flag the owed amount).
     late final String chipLabel;
-    late final Color chipColor;
+    late final UgamChipVariant chipVariant;
     if (col != null && col.isReturnDue) {
       chipLabel = tr(
         'collection.chip_return',
-        namedArgs: {'amount': _money(col.changeToReturn)},
+        namedArgs: {'amount': Formatters.formatMoneyInr(col.changeToReturn)},
       );
-      chipColor = c.warm;
-    } else if (balance < 0) {
+      chipVariant = UgamChipVariant.warm;
+    } else if (isShortfall) {
       chipLabel = tr(
         'collection.chip_due',
-        namedArgs: {'amount': _money(due - received)},
+        namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
       );
-      chipColor = c.danger;
+      chipVariant = UgamChipVariant.accent;
     } else if (col != null && col.isSquare && received > 0) {
       chipLabel = tr('collection.chip_paid');
-      chipColor = c.good;
+      chipVariant = UgamChipVariant.good;
     } else {
       chipLabel = tr('collection.chip_not_collected');
-      chipColor = c.ink3;
+      chipVariant = UgamChipVariant.neutral;
     }
 
     return UgamCard.plain(
@@ -464,7 +514,7 @@ class _PassengerRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: UgamSpacing.sm),
-              _StatusChip(label: chipLabel, color: chipColor),
+              UgamReqChip(label: chipLabel, variant: chipVariant),
             ],
           ),
           const SizedBox(height: UgamSpacing.sm),
@@ -473,19 +523,34 @@ class _PassengerRow extends StatelessWidget {
               Expanded(
                 child: _MetricCol(
                   label: tr('collection.metric_due'),
-                  value: _money(due),
+                  value: Formatters.formatMoneyInr(due),
                   c: c,
                 ),
               ),
               Expanded(
                 child: _MetricCol(
                   label: tr('collection.received'),
-                  value: _money(received),
+                  value: Formatters.formatMoneyInr(received),
                   c: c,
                 ),
               ),
             ],
           ),
+          // One-tap full settlement — only when the seat still owes money.
+          // Tonal (never solid gold) per the accent-rationing law.
+          if (isShortfall) ...[
+            const SizedBox(height: UgamSpacing.md),
+            UgamButton(
+              label: tr(
+                'collection.mark_paid',
+                namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
+              ),
+              icon: Icons.check_rounded,
+              kind: UgamButtonKind.tonal,
+              expand: true,
+              onPressed: onMarkPaid,
+            ),
+          ],
         ],
       ),
     );
@@ -515,30 +580,6 @@ class _MetricCol extends StatelessWidget {
           style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
         ),
       ],
-    );
-  }
-}
-
-class _StatusChip extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _StatusChip({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Text(
-        label,
-        style: UgamText.tabular(
-          UgamText.caption.copyWith(color: color, fontWeight: FontWeight.w700),
-        ),
-      ),
     );
   }
 }

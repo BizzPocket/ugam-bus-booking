@@ -17,12 +17,11 @@ import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/time_format.dart';
 import 'fullscreen_chart_screen.dart';
-
-String _money(num v) => '₹${v.toStringAsFixed(0)}';
 
 /// The passengers holding one seat, resolved by leg.
 ///
@@ -149,8 +148,9 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   String? _selectedBusId;
 
   /// Chart vs roster. The handler most often needs full names + mobiles to
-  /// call people, so a List (roster) sits alongside the visual Grid.
-  _ViewMode _viewMode = _ViewMode.grid;
+  /// call people, so the call-first List (roster) is the default view; the
+  /// visual Grid sits alongside it.
+  _ViewMode _viewMode = _ViewMode.list;
 
   /// Local, mutable collection cache keyed by '"$passengerId|$busId"'.
   /// Seeded from the manifest once loaded; updated in-place after each save so
@@ -414,14 +414,14 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
               'handler_chart.delete_expense_msg_category',
               namedArgs: {
                 'category': expense.category.displayName.toLowerCase(),
-                'amount': _money(expense.amount),
+                'amount': Formatters.formatMoneyInr(expense.amount),
               },
             )
           : tr(
               'handler_chart.delete_expense_msg_label',
               namedArgs: {
                 'label': expense.label,
-                'amount': _money(expense.amount),
+                'amount': Formatters.formatMoneyInr(expense.amount),
               },
             ),
       confirmLabel: tr('app.action.delete'),
@@ -552,7 +552,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
 
   Widget _body(UgamColorSet c) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const _LoadingSkeleton();
     }
     if (_error != null) {
       return Center(
@@ -606,10 +606,21 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             UgamSpacing.gutter,
             UgamSpacing.sm,
           ),
-          child: _ViewToggle(
-            mode: _viewMode,
-            onChanged: (m) => setState(() => _viewMode = m),
-            c: c,
+          child: UgamTabPills(
+            items: [
+              UgamTabItem(
+                label: tr('handler_chart.view_list'),
+                icon: Icons.format_list_bulleted_rounded,
+              ),
+              UgamTabItem(
+                label: tr('handler_chart.view_grid'),
+                icon: Icons.grid_view_rounded,
+              ),
+            ],
+            currentIndex: _viewMode == _ViewMode.list ? 0 : 1,
+            onChanged: (i) => setState(
+              () => _viewMode = i == 0 ? _ViewMode.list : _ViewMode.grid,
+            ),
           ),
         ),
         Expanded(
@@ -671,6 +682,51 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   }
 }
 
+// ─── Loading skeleton ──────────────────────────────────────────────────
+
+/// The initial-load placeholder for the chart body: the view toggle, the
+/// money-summary tiles, and the roster card mocked as shimmering blocks so
+/// the layout reads while the manifest fetches (replaces the bare spinner).
+class _LoadingSkeleton extends StatelessWidget {
+  const _LoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.md,
+        UgamSpacing.gutter,
+        UgamSpacing.xl,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const UgamSkeleton(height: 44, radius: UgamRadius.input),
+          const SizedBox(height: UgamSpacing.lg),
+          const UgamSkeleton.text(width: 140),
+          const SizedBox(height: UgamSpacing.md),
+          Row(
+            children: const [
+              Expanded(child: UgamSkeleton(height: 76, radius: UgamRadius.card)),
+              SizedBox(width: UgamSpacing.md),
+              Expanded(child: UgamSkeleton(height: 76, radius: UgamRadius.card)),
+              SizedBox(width: UgamSpacing.md),
+              Expanded(child: UgamSkeleton(height: 76, radius: UgamRadius.card)),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          for (var i = 0; i < 4; i++) ...[
+            const UgamSkeleton.row(),
+            const SizedBox(height: UgamSpacing.sm),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Top bar ───────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
@@ -705,19 +761,10 @@ class _TopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          GestureDetector(
+          UgamIconButton(
+            icon: Icons.arrow_back_rounded,
             onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
+            semanticLabel: tr('app.action.back'),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -729,52 +776,18 @@ class _TopBar extends StatelessWidget {
             ),
           ),
           if (onMessage != null) ...[
-            Semantics(
-              button: true,
-              label: tr('bus_message.message_bus'),
-              child: GestureDetector(
-                onTap: onMessage,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: c.accentFill,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.campaign_rounded,
-                    size: 19,
-                    color: c.accent,
-                  ),
-                ),
-              ),
+            UgamIconButton(
+              icon: Icons.campaign_rounded,
+              onTap: onMessage,
+              semanticLabel: tr('bus_message.message_bus'),
             ),
             const SizedBox(width: UgamSpacing.sm),
           ],
           if (onExpand != null) ...[
-            Semantics(
-              button: true,
-              label: tr('handler_chart.expand_chart'),
-              child: GestureDetector(
-                onTap: onExpand,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: c.cardElev,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.open_in_full_rounded,
-                    size: 19,
-                    color: c.ink,
-                  ),
-                ),
-              ),
+            UgamIconButton(
+              icon: Icons.open_in_full_rounded,
+              onTap: onExpand,
+              semanticLabel: tr('handler_chart.expand_chart'),
             ),
             const SizedBox(width: UgamSpacing.sm),
           ],
@@ -1337,99 +1350,10 @@ class _PriceBandRow extends StatelessWidget {
         ),
         const SizedBox(width: UgamSpacing.sm),
         Text(
-          tr('handler_chart.band_per_person', namedArgs: {'amount': _money(band.price)}),
+          tr('handler_chart.band_per_person', namedArgs: {'amount': Formatters.formatMoneyInr(band.price)}),
           style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
         ),
       ],
-    );
-  }
-}
-
-// ─── Grid / List toggle ────────────────────────────────────────────────
-
-/// A two-segment pill switching the chart between the visual seat [grid] and
-/// the call-first [list] (roster). DNA: accent fill on the selected segment,
-/// cardElev track.
-class _ViewToggle extends StatelessWidget {
-  final _ViewMode mode;
-  final ValueChanged<_ViewMode> onChanged;
-  final UgamColorSet c;
-
-  const _ViewToggle({
-    required this.mode,
-    required this.onChanged,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        children: [
-          _segment(
-            icon: Icons.grid_view_rounded,
-            label: tr('handler_chart.view_grid'),
-            selected: mode == _ViewMode.grid,
-            onTap: () => onChanged(_ViewMode.grid),
-          ),
-          _segment(
-            icon: Icons.format_list_bulleted_rounded,
-            label: tr('handler_chart.view_list'),
-            selected: mode == _ViewMode.list,
-            onTap: () => onChanged(_ViewMode.list),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _segment({
-    required IconData icon,
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return Expanded(
-      child: Semantics(
-        button: true,
-        selected: selected,
-        label: label,
-        child: GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
-          child: Container(
-            height: 36,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: selected ? c.accent : Colors.transparent,
-              borderRadius: BorderRadius.circular(UgamRadius.chip),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  icon,
-                  size: 15,
-                  color: selected ? c.onAccent : c.ink2,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: UgamText.caption.copyWith(
-                    color: selected ? c.onAccent : c.ink2,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1685,7 +1609,9 @@ class _TripBadge extends StatelessWidget {
     final base = !oneWay
         ? tr('handler_chart.badge_round_trip')
         : (isRet ? tr('handler_chart.badge_ret') : tr('handler_chart.badge_go'));
-    final label = oneWay ? '$base ½' : base;
+    final label = oneWay
+        ? tr('handler_chart.badge_half_suffix', namedArgs: {'leg': base})
+        : base;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -1944,7 +1870,7 @@ class _SummaryHeader extends StatelessWidget {
             Expanded(
               child: UgamStatTile(
                 icon: Icons.payments_rounded,
-                value: _money(collected),
+                value: Formatters.formatMoneyInr(collected),
                 label: tr('handler_chart.stat_collected'),
                 variant: UgamStatVariant.good,
               ),
@@ -1953,7 +1879,7 @@ class _SummaryHeader extends StatelessWidget {
             Expanded(
               child: UgamStatTile(
                 icon: Icons.undo_rounded,
-                value: _money(toReturn),
+                value: Formatters.formatMoneyInr(toReturn),
                 label: tr('handler_chart.stat_to_return'),
                 variant: UgamStatVariant.warm,
               ),
@@ -1962,7 +1888,7 @@ class _SummaryHeader extends StatelessWidget {
             Expanded(
               child: UgamStatTile(
                 icon: Icons.account_balance_wallet_rounded,
-                value: _money(toCollect),
+                value: Formatters.formatMoneyInr(toCollect),
                 label: tr('handler_chart.stat_to_collect'),
                 variant: UgamStatVariant.accent,
               ),
@@ -1975,7 +1901,7 @@ class _SummaryHeader extends StatelessWidget {
             Expanded(
               child: UgamStatTile(
                 icon: Icons.receipt_long_rounded,
-                value: _money(spent),
+                value: Formatters.formatMoneyInr(spent),
                 label: tr('handler_chart.stat_spent'),
                 variant: UgamStatVariant.warm,
               ),
@@ -1984,7 +1910,7 @@ class _SummaryHeader extends StatelessWidget {
             Expanded(
               child: UgamStatTile(
                 icon: Icons.account_balance_rounded,
-                value: _money(inHand),
+                value: Formatters.formatMoneyInr(inHand),
                 label: tr('handler_chart.stat_in_hand'),
                 variant: UgamStatVariant.neutral,
               ),
@@ -2184,33 +2110,11 @@ class _CollectSheetState extends State<_CollectSheet> {
                   ),
                 ),
                 if (hasPhone)
-                  GestureDetector(
-                    onTap: () => PhoneDialer.call(passenger.phone),
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: UgamSpacing.md,
-                        vertical: UgamSpacing.sm,
-                      ),
-                      decoration: BoxDecoration(
-                        color: c.accent,
-                        borderRadius: BorderRadius.circular(UgamRadius.chip),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.call_rounded, size: 15, color: c.onAccent),
-                          const SizedBox(width: 6),
-                          Text(
-                            tr('handler_chart.call'),
-                            style: UgamText.caption.copyWith(
-                              color: c.onAccent,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                  UgamButton(
+                    label: tr('handler_chart.call'),
+                    icon: Icons.call_rounded,
+                    kind: UgamButtonKind.tonal,
+                    onPressed: () => PhoneDialer.call(passenger.phone),
                   ),
               ],
             ),
@@ -2221,7 +2125,7 @@ class _CollectSheetState extends State<_CollectSheet> {
           const SizedBox(height: UgamSpacing.sm),
           _ReadOnlyLine(
             label: tr('handler_chart.amount_due'),
-            value: _money(due),
+            value: Formatters.formatMoneyInr(due),
           ),
           // One-way leg → the due above is already HALVED. Spell that out so the
           // handler knows the amount differs from a full round-trip seat.
@@ -2235,7 +2139,9 @@ class _CollectSheetState extends State<_CollectSheet> {
                 return Row(
                   children: [
                     SeatLegPill(
-                      label: isRet ? 'RET' : 'GO',
+                      label: isRet
+                          ? tr('handler_chart.badge_ret')
+                          : tr('handler_chart.badge_go'),
                       tint: tint,
                       half: true,
                     ),
@@ -2291,7 +2197,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                   ? (
                       tr(
                         'handler_chart.balance_change',
-                        namedArgs: {'amount': _money(balance)},
+                        namedArgs: {'amount': Formatters.formatMoneyInr(balance)},
                       ),
                       c.warm,
                     )
@@ -2299,7 +2205,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                   ? (
                       tr(
                         'handler_chart.balance_still_to_collect',
-                        namedArgs: {'amount': _money(-balance)},
+                        namedArgs: {'amount': Formatters.formatMoneyInr(-balance)},
                       ),
                       c.danger,
                     )
@@ -2403,7 +2309,7 @@ class _ExpensesSection extends StatelessWidget {
                         'handler_chart.bus_expenses_total',
                         namedArgs: {
                           'bus': busName,
-                          'amount': _money(total),
+                          'amount': Formatters.formatMoneyInr(total),
                         },
                       ),
                       style: UgamText.caption.copyWith(color: c.ink2),
@@ -2549,7 +2455,7 @@ class _HandlerExpenseRow extends StatelessWidget {
             ),
             const SizedBox(width: UgamSpacing.sm),
             Text(
-              _money(expense.amount),
+              Formatters.formatMoneyInr(expense.amount),
               style: UgamText.tabular(
                 UgamText.bodyStrong.copyWith(color: c.ink),
               ),

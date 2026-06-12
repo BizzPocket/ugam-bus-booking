@@ -87,7 +87,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
   }
 
   void _pickTour(String tourId) {
-    HapticFeedback.selectionClick();
+    // Haptic fires inside UgamSelectorPills.onChanged.
     setState(() {
       _selectedTourId = tourId;
       // A fresh tour resets the bus pick so the new tour's first bus shows.
@@ -96,7 +96,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
   }
 
   void _pickBus(String busId) {
-    HapticFeedback.selectionClick();
+    // Haptic fires inside UgamSelectorPills.onChanged.
     setState(() => _selectedBusId = busId);
   }
 
@@ -163,20 +163,24 @@ class _ChartsScreenState extends State<ChartsScreen> {
             children: [
               _Header(c: c),
               if (eligible.length > 1) ...[
-                _TourPills(
-                  tours: eligible,
-                  selectedTourId: tour.id,
-                  onTap: _pickTour,
-                  c: c,
+                UgamSelectorPills(
+                  items: [
+                    for (final t in eligible) UgamSelectorItem(label: t.title),
+                  ],
+                  currentIndex: eligible.indexWhere((t) => t.id == tour.id),
+                  onChanged: (i) => _pickTour(eligible[i].id),
                 ),
                 const SizedBox(height: UgamSpacing.md),
               ],
               if (tour.buses.length > 1) ...[
-                _BusPills(
-                  buses: tour.buses,
-                  selectedBusId: bus.id,
-                  onTap: _pickBus,
-                  c: c,
+                UgamSelectorPills(
+                  items: [
+                    for (final b in tour.buses)
+                      UgamSelectorItem(label: b.name),
+                  ],
+                  currentIndex:
+                      tour.buses.indexWhere((b) => b.id == bus.id),
+                  onChanged: (i) => _pickBus(tour.buses[i].id),
                 ),
                 const SizedBox(height: UgamSpacing.sm),
               ],
@@ -227,9 +231,16 @@ class _ChartsScreenState extends State<ChartsScreen> {
               const SizedBox(height: UgamSpacing.sm),
               const _Legend(),
               const SizedBox(height: UgamSpacing.sm + 2),
-              _EditSeatsLink(
-                c: c,
-                onTap: () => _editSeats(tour.id, bus.id),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.gutter,
+                ),
+                child: UgamButton(
+                  label: tr('charts.edit_seats'),
+                  icon: Icons.grid_view_rounded,
+                  kind: UgamButtonKind.ghost,
+                  onPressed: () => _editSeats(tour.id, bus.id),
+                ),
               ),
               SizedBox(
                 height: MediaQuery.of(context).padding.bottom + UgamSpacing.md,
@@ -287,19 +298,12 @@ class _ChartsScreenState extends State<ChartsScreen> {
               ),
               if (passenger.phone.trim().isNotEmpty) ...[
                 const SizedBox(width: UgamSpacing.sm),
-                GestureDetector(
+                UgamIconButton(
+                  icon: Icons.phone_rounded,
                   onTap: () => PhoneDialer.call(passenger.phone),
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: c.accentFill,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(Icons.phone_rounded, size: 18, color: c.accent),
-                  ),
+                  size: 40,
+                  iconSize: 18,
+                  semanticLabel: tr('charts.call_passenger'),
                 ),
               ],
             ],
@@ -333,133 +337,10 @@ class _Header extends StatelessWidget {
           Expanded(
             child: Text(
               tr('charts.title'),
-              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
+              style: UgamText.titleXl.copyWith(color: c.ink),
             ),
-          ),
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
-            alignment: Alignment.center,
-            child: Icon(Icons.table_chart_rounded, size: 19, color: c.ink),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ─── Tour pills ────────────────────────────────────────────────────────
-
-/// Horizontal pills of the eligible tours (active + has buses), soonest first.
-/// Mirrors the Requests-tab tour selector: accent fill on the active pill,
-/// cardElev otherwise.
-class _TourPills extends StatelessWidget {
-  final List<Tour> tours;
-  final String selectedTourId;
-  final ValueChanged<String> onTap;
-  final UgamColorSet c;
-
-  const _TourPills({
-    required this.tours,
-    required this.selectedTourId,
-    required this.onTap,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 38,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-        itemCount: tours.length,
-        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
-        itemBuilder: (_, i) {
-          final tour = tours[i];
-          final active = tour.id == selectedTourId;
-          return GestureDetector(
-            onTap: () => onTap(tour.id),
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: UgamMotion.tab,
-              curve: UgamMotion.easeOut,
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.lg,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: active ? c.accent : c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                tour.title,
-                style: UgamText.bodyStrong.copyWith(
-                  color: active ? c.onAccent : c.ink2,
-                  fontSize: 12.5,
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ─── Bus pills ─────────────────────────────────────────────────────────
-
-/// Horizontal pills for the selected tour's buses. Same DNA the handler /
-/// bus-status charts use, so the chart browser reads consistently.
-class _BusPills extends StatelessWidget {
-  final List<Bus> buses;
-  final String selectedBusId;
-  final ValueChanged<String> onTap;
-  final UgamColorSet c;
-
-  const _BusPills({
-    required this.buses,
-    required this.selectedBusId,
-    required this.onTap,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-        itemCount: buses.length,
-        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
-        itemBuilder: (ctx, i) {
-          final bus = buses[i];
-          final selected = bus.id == selectedBusId;
-          return GestureDetector(
-            onTap: () => onTap(bus.id),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.lg,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: selected ? c.accent : c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                bus.name,
-                style: UgamText.bodyStrong.copyWith(
-                  color: selected ? c.onAccent : c.ink,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -507,12 +388,7 @@ class _Tally extends StatelessWidget {
               ),
               Text(
                 bus.name.toUpperCase(),
-                style: UgamText.caption.copyWith(
-                  color: c.ink2,
-                  fontSize: 10.5,
-                  letterSpacing: 0.6,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: UgamText.micro.copyWith(color: c.ink2),
               ),
             ],
           ),
@@ -524,7 +400,10 @@ class _Tally extends StatelessWidget {
                 Text(
                   '${(ratio * 100).round()}%',
                   style: UgamText.tabular(
-                    UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 12),
+                    UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -746,54 +625,6 @@ class _LegendItem extends StatelessWidget {
   }
 }
 
-// ─── Edit seats link ───────────────────────────────────────────────────
-
-/// A single outlined pill below the chart that hands off to the unified
-/// editable grid for the bus on screen. The browser stays read-only; this is
-/// the deliberate one-tap escape hatch into editing.
-class _EditSeatsLink extends StatelessWidget {
-  final UgamColorSet c;
-  final VoidCallback onTap;
-
-  const _EditSeatsLink({required this.c, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: UgamSpacing.md,
-            vertical: UgamSpacing.md,
-          ),
-          decoration: BoxDecoration(
-            color: c.card,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-            border: Border.all(color: c.border),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.grid_view_rounded, size: 15, color: c.ink),
-              const SizedBox(width: 6),
-              Text(
-                tr('charts.edit_seats'),
-                style: UgamText.bodyStrong.copyWith(
-                  color: c.ink,
-                  fontSize: 12.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Occupant sheet row ────────────────────────────────────────────────
 
 class _SheetRow extends StatelessWidget {
@@ -816,7 +647,7 @@ class _SheetRow extends StatelessWidget {
           Expanded(
             child: Text(
               value.isEmpty ? '—' : value,
-              style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+              style: UgamText.bodyStrong.copyWith(color: c.ink),
             ),
           ),
         ],

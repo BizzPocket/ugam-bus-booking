@@ -963,6 +963,7 @@
     "ping_loading": "સર્વરને પિંગ કરી રહ્યું છે…"
   },
   "charts": {
+    "call_passenger": "પ્રવાસીને કૉલ કરો",
     "title": "ચાર્ટ",
     "driver_label": "ડ્રાઈવર",
     "edit_seats": "બેઠકો સંપાદિત કરો",
@@ -1534,6 +1535,7 @@
     "auto_released_many": "{count} વધારાની સીટ છૂટી કરી — વિનંતી મેચ થાય તે માટે"
   },
   "bus_money": {
+    "eyebrow": "બસ પૈસા",
     "app_bar_title": "પૈસા · {name}",
     "stat_collected": "એકઠી કરેલ",
     "stat_expenses": "ખર્ચ",
@@ -1572,6 +1574,8 @@
     "delete_confirm": "કાઢી નાખો"
   },
   "collection": {
+    "eyebrow": "નાણાં",
+    "mark_paid": "ચૂકવેલ ગણો · {amount}",
     "app_bar_title": "એકઠી રકમ · {bus}",
     "trip_outbound_only": "ફક્ત જવાનું",
     "trip_return_only": "ફક્ત પાછા આવવાનું",
@@ -1597,6 +1601,7 @@
     "metric_due": "બાકી"
   },
   "handler_chart": {
+    "badge_half_suffix": "{leg} ½",
     "bus_chart": "બસ ચાર્ટ",
     "expand_chart": "પૂર્ણ સ્ક્રીન ચાર્ટ",
     "error_load": "બસ ચાર્ટ લોડ થઈ શક્યો નહીં. ફરી પ્રયાસ કરો.",
@@ -1820,6 +1825,7 @@
     "create_group_seats": "ગ્રુપ બનાવો ({n}) · {seats} સીટ"
   },
   "tour_money_board": {
+    "eyebrow": "ટૂર મની",
     "money_board": "મની બોર્ડ",
     "tour_money": "ટૂરના પૈસા",
     "tour_not_found": "ટૂર મળી નથી.",

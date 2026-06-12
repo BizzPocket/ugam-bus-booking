@@ -963,6 +963,7 @@
     "ping_loading": "Pinging server…"
   },
   "charts": {
+    "call_passenger": "Call passenger",
     "title": "Charts",
     "driver_label": "Driver",
     "edit_seats": "Edit seats",
@@ -1534,6 +1535,7 @@
     "auto_released_many": "Released {count} extra seats to keep the request consistent"
   },
   "bus_money": {
+    "eyebrow": "BUS MONEY",
     "app_bar_title": "Money · {name}",
     "stat_collected": "Collected",
     "stat_expenses": "Expenses",
@@ -1572,6 +1574,8 @@
     "delete_confirm": "Delete"
   },
   "collection": {
+    "eyebrow": "FINANCE",
+    "mark_paid": "Mark paid · {amount}",
     "app_bar_title": "Collection · {bus}",
     "trip_outbound_only": "Outbound only",
     "trip_return_only": "Return only",
@@ -1597,6 +1601,7 @@
     "metric_due": "Due"
   },
   "handler_chart": {
+    "badge_half_suffix": "{leg} ½",
     "bus_chart": "Bus chart",
     "expand_chart": "Full screen chart",
     "error_load": "We couldn't load the bus chart. Please try again.",
@@ -1820,6 +1825,7 @@
     "create_group_seats": "Create group ({n}) · {seats} seats"
   },
   "tour_money_board": {
+    "eyebrow": "TOUR MONEY",
     "money_board": "MONEY BOARD",
     "tour_money": "Tour money",
     "tour_not_found": "Tour not found.",
