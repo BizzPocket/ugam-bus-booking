@@ -10,11 +10,8 @@ import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../routes/app_routes.dart';
-import '../utils/formatters.dart';
 import 'create_tour_screen.dart';
 import 'main_shell.dart';
-import 'manage_buses_screen.dart';
-import 'notify_screen.dart';
 import 'settings_screen.dart';
 import 'tour_detail_screen.dart';
 
@@ -68,22 +65,6 @@ class DashboardScreen extends StatelessWidget {
             );
           }
 
-          // The outer Obx already rebuilds this whole subtree whenever `tours`
-          // changes (it reads `tours.isEmpty` above), so the per-section Obx
-          // wrappers were redundant subscriptions that each re-scanned the
-          // full tour/passenger list on the same change. Derive every section's
-          // data ONCE here instead — same reactivity, a fraction of the work.
-          final tours = tourCtrl.tours;
-          final todayTour = _showTodayTrip ? _todaysTour(tours) : null;
-          final nextTour = _showTodayTrip ? _nextUpcomingTour(tours) : null;
-          final revenue = _thisWeekRevenue(tours);
-          final seatsSold = _thisWeekSeatsSold(tours);
-          final activeCount = tourCtrl.activeTours.length;
-          final todaySeats = _todaysTotalSeats(tours);
-          final waitlist = _waitlistCount(tours);
-          final attention = _needsAttention(tours);
-          final recent = _recentRequests(tours);
-
           return RefreshIndicator(
             onRefresh: tourCtrl.refreshTours,
             color: c.accent,
@@ -104,38 +85,58 @@ class DashboardScreen extends StatelessWidget {
                       c: c,
                     )),
                 const SizedBox(height: UgamSpacing.xl),
-                // TEMP: today's-trip section gated by [_showTodayTrip].
+                // TEMP: today's-trip section gated by [_showTodayTrip]. The
+                // collection-if keeps the Obx out of the tree entirely when
+                // hidden — an Obx whose builder reads no observable throws.
                 if (_showTodayTrip)
-                  Padding(
+                  Obx(() {
+                    final today = _todaysTour(tourCtrl.tours);
+                    final card = today != null
+                        ? _TodayHeroCard(tour: today, c: c)
+                        : _NoTripsTodayTile(
+                            nextTour: _nextUpcomingTour(tourCtrl.tours),
+                            c: c,
+                          );
                     // Bottom spacer lives inside the section so hiding it
                     // leaves one clean gap before the quick actions.
-                    padding: const EdgeInsets.only(bottom: UgamSpacing.xl),
-                    child: todayTour != null
-                        ? _TodayHeroCard(tour: todayTour, c: c)
-                        : _NoTripsTodayTile(nextTour: nextTour, c: c),
-                  ),
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: UgamSpacing.xl),
+                      child: card,
+                    );
+                  }),
                 _QuickActions(c: c, shell: shell),
                 const SizedBox(height: UgamSpacing.xl),
-                _RevenueHero(
-                  revenue: revenue,
-                  seatsSold: seatsSold,
-                  c: c,
-                ),
+                Obx(() {
+                  final revenue = _thisWeekRevenue(tourCtrl.tours);
+                  final seatsSold = _thisWeekSeatsSold(tourCtrl.tours);
+                  return _RevenueHero(
+                    revenue: revenue,
+                    seatsSold: seatsSold,
+                    c: c,
+                  );
+                }),
                 const SizedBox(height: UgamSpacing.md),
-                _SmallStatsRow(
-                  active: activeCount,
-                  todaySeats: todaySeats,
-                  waitlist: waitlist,
-                  c: c,
-                ),
+                Obx(() {
+                  final active = tourCtrl.activeTours.length;
+                  final todaySeats = _todaysTotalSeats(tourCtrl.tours);
+                  final waitlist = _waitlistCount(tourCtrl.tours);
+                  return _SmallStatsRow(
+                    active: active,
+                    todaySeats: todaySeats,
+                    waitlist: waitlist,
+                    c: c,
+                  );
+                }),
                 const SizedBox(height: UgamSpacing.xl + UgamSpacing.xs),
-                if (attention.isNotEmpty)
-                  Column(
+                Obx(() {
+                  final attention = _needsAttention(tourCtrl.tours);
+                  if (attention.isEmpty) return const SizedBox.shrink();
+                  return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _SectionLabel(
-                        label: tr('dashboard.section_attention'),
+                        label: 'Needs attention',
                         meta: '${attention.length}',
                         c: c,
                       ),
@@ -146,51 +147,37 @@ class DashboardScreen extends StatelessWidget {
                           const SizedBox(height: UgamSpacing.sm + 2),
                       ],
                     ],
-                  ),
-                if (recent.isNotEmpty)
-                  Padding(
+                  );
+                }),
+                Obx(() {
+                  final recent = _recentRequests(tourCtrl.tours);
+                  if (recent.isEmpty) return const SizedBox.shrink();
+                  return Padding(
                     padding: const EdgeInsets.only(top: UgamSpacing.xl),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         _SectionLabel(
-                          label: tr('dashboard.section_recent'),
-                          action: tr('dashboard.see_all'),
-                          // Tabs: 0=Dashboard 1=Tours 2=Charts 3=Requests
-                          // 4=Settings. Requests is 3 (was wrongly 2=Charts).
-                          onAction: () => shell.switchTab(3),
+                          label: 'Recent requests',
+                          action: 'See all',
+                          onAction: () => shell.switchTab(3), // Requests tab
                           c: c,
                         ),
                         const SizedBox(height: UgamSpacing.md),
                         for (var i = 0; i < recent.length; i++) ...[
-                          UgamRequestRow(
-                            initials: _recentInitials(recent[i].passenger.name),
-                            name: recent[i].passenger.name,
-                            timeAgo: _recentAgo(recent[i].passenger.createdAt),
-                            chips: [
-                              UgamReqChip(
-                                label: tr(
-                                  'dashboard.recent_seats_chip',
-                                  namedArgs: {
-                                    'n':
-                                        '${recent[i].passenger.totalSeatsRequested}',
-                                  },
-                                ).toUpperCase(),
-                              ),
-                            ],
-                            // Tour-first: open the request's tour workspace.
-                            onTap: () => Get.to(
-                              () => TourDetailScreen(tourId: recent[i].tour.id),
-                              transition: Transition.cupertino,
-                            ),
+                          _RecentRequestRow(
+                            entry: recent[i],
+                            c: c,
+                            onTap: () => shell.switchTab(3), // Requests tab
                           ),
                           if (i != recent.length - 1)
                             const SizedBox(height: UgamSpacing.sm + 2),
                         ],
                       ],
                     ),
-                  ),
+                  );
+                }),
               ],
             ),
           );
@@ -293,9 +280,8 @@ class DashboardScreen extends StatelessWidget {
       if (tour.passengers.isNotEmpty && tour.buses.isEmpty) {
         items.add(_AttentionItem(
           tour: tour,
-          reason: tr('dashboard.attention_no_bus',
-              namedArgs: {'n': '${tour.passengers.length}'}),
-          ctaLabel: tr('dashboard.cta_add_bus'),
+          reason: 'No bus yet · ${tour.passengers.length} request${tour.passengers.length == 1 ? "" : "s"} waiting',
+          ctaLabel: 'Add bus',
           ctaIcon: Icons.directions_bus_rounded,
           tone: UgamStatusTone.warm,
           onTap: () => Get.to(
@@ -311,15 +297,12 @@ class DashboardScreen extends StatelessWidget {
             tour.totalSeatsRequested - tour.totalSeatsAssigned;
         items.add(_AttentionItem(
           tour: tour,
-          reason: tr('dashboard.attention_unassigned',
-              namedArgs: {'n': '$remaining'}),
-          // Standardized seating entry: single "Seats" label opening the
-          // SeatsScreen SUMMARY (tourOverview), never the bare grid.
-          ctaLabel: tr('seats.title'),
-          ctaIcon: Icons.event_seat_rounded,
+          reason: '$remaining seat${remaining == 1 ? "" : "s"} not yet assigned',
+          ctaLabel: 'Assign',
+          ctaIcon: Icons.grid_view_rounded,
           tone: UgamStatusTone.accent,
           onTap: () => Get.toNamed(
-            AppRoutes.tourOverview,
+            AppRoutes.seatAssignment,
             arguments: {'tourId': tour.id},
           ),
         ));
@@ -328,34 +311,27 @@ class DashboardScreen extends StatelessWidget {
       if (tour.allSeatsAssigned && tour.handlerId == null) {
         items.add(_AttentionItem(
           tour: tour,
-          reason: tr('dashboard.attention_pick_handler'),
-          ctaLabel: tr('dashboard.cta_pick'),
+          reason: 'All seats assigned · pick a handler',
+          ctaLabel: 'Pick',
           ctaIcon: Icons.person_pin_rounded,
           tone: UgamStatusTone.good,
-          // The handler is picked in ManageBusesScreen (the per-bus handler
-          // picker home) — NOT the seat screen — so the CTA lands where the
-          // action actually lives.
           onTap: () => Get.to(
-            () => ManageBusesScreen(tourId: tour.id),
+            () => TourDetailScreen(tourId: tour.id),
             transition: Transition.cupertino,
           ),
         ));
         continue;
       }
-      if (tour.allSeatsAssigned &&
-          tour.handlerId != null &&
-          tour.status != TourStatus.locked) {
+      if (tour.allSeatsAssigned && tour.handlerId != null) {
         items.add(_AttentionItem(
           tour: tour,
-          reason: tr('dashboard.attention_ready_lock'),
-          ctaLabel: tr('dashboard.cta_lock'),
+          reason: 'Ready to lock & notify',
+          ctaLabel: 'Lock',
           ctaIcon: Icons.lock_rounded,
           tone: UgamStatusTone.good,
-          // Open the tour-scoped Notify screen for THIS tour.
-          onTap: () => Get.to(
-            () => NotifyScreen(tourId: tour.id),
-            transition: Transition.cupertino,
-          ),
+          onTap: () {
+            Get.find<ShellController>().switchTab(4);
+          },
         ));
       }
     }
@@ -409,7 +385,8 @@ class _Greeting extends StatelessWidget {
               Row(
                 children: [
                   Text(greeting,
-                      style: UgamText.caption.copyWith(color: c.ink2)),
+                      style: UgamText.body
+                          .copyWith(color: c.ink2, fontSize: 13)),
                   const SizedBox(width: UgamSpacing.sm),
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -423,7 +400,7 @@ class _Greeting extends StatelessWidget {
                     child: Text(
                       DateFormat('EEE, d MMM').format(DateTime.now()),
                       style: UgamText.tabular(
-                        UgamText.micro.copyWith(color: c.ink2),
+                        UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
                       ),
                     ),
                   ),
@@ -432,7 +409,7 @@ class _Greeting extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 displayName,
-                style: UgamText.titleXl.copyWith(color: c.ink),
+                style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 26),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -449,16 +426,14 @@ class _Greeting extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              // Tonal, not solid: the one solid-champagne focal on this
-              // screen is the Create quick-action tile (accent rationing).
-              color: c.accentFill,
+              color: c.accent,
               shape: BoxShape.circle,
-              border: Border.all(color: c.accent.withValues(alpha: 0.28)),
             ),
             alignment: Alignment.center,
             child: Text(
               displayInitials,
-              style: UgamText.bodyStrong.copyWith(color: c.accent),
+              style: UgamText.bodyStrong
+                  .copyWith(color: c.onAccent, fontSize: 15),
             ),
           ),
         ),
@@ -476,13 +451,9 @@ class _TodayHeroCard extends StatelessWidget {
   String _countdown() {
     final now = DateTime.now();
     final diff = tour.departureDate.difference(now);
-    if (diff.isNegative) return tr('dashboard.countdown_now');
-    if (diff.inHours < 1) {
-      return tr('dashboard.countdown_minutes',
-          namedArgs: {'n': '${diff.inMinutes}'});
-    }
-    return tr('dashboard.countdown_hours',
-        namedArgs: {'n': '${diff.inHours}'});
+    if (diff.isNegative) return 'NOW';
+    if (diff.inHours < 1) return 'IN ${diff.inMinutes}M';
+    return 'IN ${diff.inHours}H';
   }
 
   @override
@@ -520,7 +491,7 @@ class _TodayHeroCard extends StatelessWidget {
                             BorderRadius.circular(UgamRadius.chip),
                       ),
                       child: Text(
-                        tr('dashboard.today'),
+                        'TODAY',
                         style: UgamText.micro
                             .copyWith(color: c.onAccent, fontSize: 10),
                       ),
@@ -595,11 +566,7 @@ class _TodayHeroCard extends StatelessWidget {
                                   size: 12, color: Colors.white),
                               const SizedBox(width: 4),
                               Text(
-                                tr('dashboard.seats_count', namedArgs: {
-                                  'assigned': '${tour.totalSeatsAssigned}',
-                                  'total':
-                                      '${tour.totalBusSeats > 0 ? tour.totalBusSeats : tour.totalSeatsRequested}',
-                                }),
+                                '${tour.totalSeatsAssigned}/${tour.totalBusSeats > 0 ? tour.totalBusSeats : tour.totalSeatsRequested} seats',
                                 style: UgamText.tabular(
                                   UgamText.bodyStrong.copyWith(
                                     color: Colors.white,
@@ -672,19 +639,14 @@ class _NoTripsTodayTile extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  next == null
-                      ? tr('dashboard.no_upcoming_trips')
-                      : tr('dashboard.no_trips_today'),
+                  next == null ? 'No upcoming trips' : 'No trips today',
                   style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   next == null
-                      ? tr('dashboard.no_trips_cta')
-                      : tr('dashboard.next_trip', namedArgs: {
-                          'name': next.title,
-                          'when': _daysUntil(next.departureDate),
-                        }),
+                      ? 'Create a tour to start collecting requests'
+                      : 'Next: ${next.title} in ${_daysUntil(next.departureDate)}',
                   style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -713,7 +675,7 @@ class _NoTripsTodayTile extends StatelessWidget {
                   Icon(Icons.add_rounded, size: 14, color: c.onAccent),
                   const SizedBox(width: 4),
                   Text(
-                    tr('dashboard.new'),
+                    'New',
                     style: UgamText.bodyStrong
                         .copyWith(color: c.onAccent, fontSize: 12),
                   ),
@@ -728,15 +690,13 @@ class _NoTripsTodayTile extends StatelessWidget {
 
   String _daysUntil(DateTime when) {
     final days = when.difference(DateTime.now()).inDays;
-    if (days <= 0) return tr('dashboard.days_today');
-    if (days == 1) return tr('dashboard.days_one');
-    return tr('dashboard.days_other', namedArgs: {'n': '$days'});
+    if (days <= 0) return 'today';
+    if (days == 1) return '1 day';
+    return '$days days';
   }
 }
 
-/// High-frequency quick-action tiles in a single row. The agent's daily
-/// drivers: spin up a tour, triage incoming requests, jump into seat
-/// assignment. Settings lives in the nav, so it's dropped here.
+/// 4 chunky quick-action tiles in a single row.
 class _QuickActions extends StatelessWidget {
   final UgamColorSet c;
   final ShellController shell;
@@ -748,11 +708,9 @@ class _QuickActions extends StatelessWidget {
       children: [
         Expanded(
           child: _QA(
-            label: tr('dashboard.qa_create'),
+            label: 'Create',
             icon: Icons.add_rounded,
             c: c,
-            // The single solid-champagne focal on this screen (no sticky
-            // CTA here): the most-used action gets the gold tile.
             primary: true,
             onTap: () {
               HapticFeedback.lightImpact();
@@ -764,12 +722,23 @@ class _QuickActions extends StatelessWidget {
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
           child: _QA(
-            label: tr('dashboard.qa_requests'),
-            icon: Icons.chat_bubble_rounded,
+            label: 'Tours',
+            icon: Icons.location_on_rounded,
             c: c,
             onTap: () {
               HapticFeedback.selectionClick();
-              // Tabs: 0=Dashboard 1=Tours 2=Charts/Assign 3=Requests.
+              shell.switchTab(1);
+            },
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.md - 4),
+        Expanded(
+          child: _QA(
+            label: 'Assign',
+            icon: Icons.grid_view_rounded,
+            c: c,
+            onTap: () {
+              HapticFeedback.selectionClick();
               shell.switchTab(3);
             },
           ),
@@ -777,13 +746,12 @@ class _QuickActions extends StatelessWidget {
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
           child: _QA(
-            label: tr('dashboard.qa_assign'),
-            icon: Icons.event_seat_rounded,
+            label: 'Notify',
+            icon: Icons.notifications_active_rounded,
             c: c,
             onTap: () {
               HapticFeedback.selectionClick();
-              // The Charts/Assign tab — seat fill + handler charts.
-              shell.switchTab(2);
+              shell.switchTab(4);
             },
           ),
         ),
@@ -866,6 +834,22 @@ class _RevenueHero extends StatelessWidget {
     required this.c,
   });
 
+  String _format() {
+    if (revenue >= 100000) {
+      final lakhs = revenue / 100000;
+      return lakhs == lakhs.roundToDouble()
+          ? '₹${lakhs.toInt()}L'
+          : '₹${lakhs.toStringAsFixed(1)}L';
+    }
+    if (revenue >= 1000) {
+      final k = revenue / 1000;
+      return k == k.roundToDouble()
+          ? '₹${k.toInt()}K'
+          : '₹${k.toStringAsFixed(1)}K';
+    }
+    return '₹${revenue.toInt()}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -887,7 +871,7 @@ class _RevenueHero extends StatelessWidget {
           Row(
             children: [
               Text(
-                tr('dashboard.this_week'),
+                'THIS WEEK',
                 style: UgamText.micro.copyWith(color: c.ink3),
               ),
               const Spacer(),
@@ -905,7 +889,7 @@ class _RevenueHero extends StatelessWidget {
                         size: 11, color: c.good),
                     const SizedBox(width: 3),
                     Text(
-                      tr('dashboard.stat_revenue'),
+                      'Revenue',
                       style: UgamText.micro
                           .copyWith(color: c.good, fontSize: 9.5),
                     ),
@@ -916,7 +900,7 @@ class _RevenueHero extends StatelessWidget {
           ),
           const SizedBox(height: UgamSpacing.sm + 2),
           Text(
-            Formatters.formatMoneyInrCompact(revenue),
+            _format(),
             style: UgamText.tabular(
               UgamText.display.copyWith(
                 color: c.ink,
@@ -930,8 +914,8 @@ class _RevenueHero extends StatelessWidget {
           const SizedBox(height: UgamSpacing.xs),
           Text(
             seatsSold == 0
-                ? tr('dashboard.no_seats_sold')
-                : tr('dashboard.seats_sold', namedArgs: {'n': '$seatsSold'}),
+                ? 'No seats sold this week'
+                : '$seatsSold seat${seatsSold == 1 ? "" : "s"} sold across active tours',
             style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
           ),
         ],
@@ -958,33 +942,71 @@ class _SmallStatsRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: UgamStatTile(
-            icon: Icons.location_on_rounded,
+          child: _MiniStat(
             value: '$active',
-            label: tr('dashboard.mini_active'),
-            variant: UgamStatVariant.accent,
+            label: 'Active',
+            c: c,
           ),
         ),
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
-          child: UgamStatTile(
-            icon: Icons.event_seat_rounded,
+          child: _MiniStat(
             value: '$todaySeats',
-            label: tr('dashboard.mini_today'),
-            variant: UgamStatVariant.neutral,
+            label: 'Today',
+            c: c,
           ),
         ),
         const SizedBox(width: UgamSpacing.md - 4),
         Expanded(
-          child: UgamStatTile(
-            icon: Icons.hourglass_bottom_rounded,
+          child: _MiniStat(
             value: '$waitlist',
-            label: tr('dashboard.mini_waitlist'),
-            variant:
-                waitlist > 0 ? UgamStatVariant.warm : UgamStatVariant.neutral,
+            label: 'Waitlist',
+            tint: waitlist > 0 ? UgamStatusTone.warm : null,
+            c: c,
           ),
         ),
       ],
+    );
+  }
+}
+
+class _MiniStat extends StatelessWidget {
+  final String value;
+  final String label;
+  final UgamColorSet c;
+  final UgamStatusTone? tint;
+  const _MiniStat({
+    required this.value,
+    required this.label,
+    required this.c,
+    this.tint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Color valueColor = c.ink;
+    if (tint == UgamStatusTone.warm) valueColor = c.warm;
+    if (tint == UgamStatusTone.good) valueColor = c.good;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        vertical: UgamSpacing.md,
+        horizontal: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Text(value,
+              style: UgamText.tabular(UgamText.titleL
+                  .copyWith(color: valueColor, fontSize: 22))),
+          const SizedBox(height: 2),
+          Text(label.toUpperCase(),
+              style: UgamText.micro
+                  .copyWith(color: c.ink3, fontSize: 9.5)),
+        ],
+      ),
     );
   }
 }
@@ -1008,7 +1030,8 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(label, style: UgamText.titleM.copyWith(color: c.ink)),
+        Text(label,
+            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17)),
         if (meta != null) ...[
           const SizedBox(width: UgamSpacing.sm),
           Container(
@@ -1020,7 +1043,7 @@ class _SectionLabel extends StatelessWidget {
             child: Text(
               meta!,
               style: UgamText.tabular(
-                UgamText.micro.copyWith(color: c.ink2),
+                UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
               ),
             ),
           ),
@@ -1033,7 +1056,8 @@ class _SectionLabel extends StatelessWidget {
             child: Row(
               children: [
                 Text(action!,
-                    style: UgamText.caption.copyWith(color: c.ink2)),
+                    style: UgamText.bodyStrong
+                        .copyWith(color: c.ink2, fontSize: 12)),
                 const SizedBox(width: 2),
                 Icon(Icons.chevron_right_rounded, size: 16, color: c.ink2),
               ],
@@ -1069,75 +1093,78 @@ class _AttentionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Tone drives the CARD tint (de-solidified: no more solid tone-colored
-    // CTA slab). The per-row action is a quiet tonal UgamButton so solid
-    // champagne stays rationed to the one focal tile up top.
-    final cardTone = switch (item.tone) {
-      UgamStatusTone.accent => UgamCardTone.accent,
-      UgamStatusTone.good => UgamCardTone.good,
-      UgamStatusTone.warm => UgamCardTone.warm,
-      UgamStatusTone.neutral => UgamCardTone.none,
-    };
-    final iconColor = switch (item.tone) {
+    final toneColor = switch (item.tone) {
       UgamStatusTone.accent => c.accent,
       UgamStatusTone.good => c.good,
       UgamStatusTone.warm => c.warm,
       UgamStatusTone.neutral => c.ink2,
     };
-    final iconFill = switch (item.tone) {
+    final toneFill = switch (item.tone) {
       UgamStatusTone.accent => c.accentFill,
       UgamStatusTone.good => c.goodFill,
       UgamStatusTone.warm => c.warmFill,
       UgamStatusTone.neutral => c.card,
     };
 
-    return UgamCard.plain(
+    return GestureDetector(
       onTap: item.onTap,
-      tone: cardTone,
-      padding: const EdgeInsets.all(UgamSpacing.md - 2),
-      radius: 18,
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: iconFill,
-              borderRadius: BorderRadius.circular(12),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md - 2),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: toneFill,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              alignment: Alignment.center,
+              child: Icon(item.ctaIcon, size: 18, color: toneColor),
             ),
-            alignment: Alignment.center,
-            child: Icon(item.ctaIcon, size: 18, color: iconColor),
-          ),
-          const SizedBox(width: UgamSpacing.md - 2),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  item.tour.title,
-                  style: UgamText.titleS.copyWith(color: c.ink),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  item.reason,
-                  style: UgamText.caption.copyWith(color: c.ink2),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+            const SizedBox(width: UgamSpacing.md - 2),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    item.tour.title,
+                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 14),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    item.reason,
+                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11.5),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: UgamSpacing.sm),
-          UgamButton(
-            label: item.ctaLabel,
-            icon: item.ctaIcon,
-            kind: UgamButtonKind.tonal,
-            onPressed: item.onTap,
-          ),
-        ],
+            const SizedBox(width: UgamSpacing.sm),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.md, vertical: UgamSpacing.sm),
+              decoration: BoxDecoration(
+                color: toneColor,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
+              child: Text(
+                item.ctaLabel,
+                style: UgamText.bodyStrong
+                    .copyWith(color: c.onAccent, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1149,22 +1176,100 @@ class _RecentEntry {
   _RecentEntry({required this.tour, required this.passenger});
 }
 
-/// Two-letter avatar initials for a passenger name.
-String _recentInitials(String name) {
-  final parts = name.trim().split(RegExp(r'\s+'));
-  if (parts.length >= 2) {
-    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-  }
-  return name.isNotEmpty ? name[0].toUpperCase() : '?';
-}
+class _RecentRequestRow extends StatelessWidget {
+  final _RecentEntry entry;
+  final UgamColorSet c;
+  final VoidCallback onTap;
 
-/// Compact "time since" label for a recent request (e.g. `3h`, `2d`).
-String _recentAgo(DateTime t) {
-  final d = DateTime.now().difference(t);
-  if (d.inDays > 0) return '${d.inDays}d';
-  if (d.inHours > 0) return '${d.inHours}h';
-  if (d.inMinutes > 0) return '${d.inMinutes}m';
-  return tr('dashboard.ago_now');
+  const _RecentRequestRow({
+    required this.entry,
+    required this.c,
+    required this.onTap,
+  });
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2) return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+  }
+
+  String _ago(DateTime t) {
+    final d = DateTime.now().difference(t);
+    if (d.inDays > 0) return '${d.inDays}d';
+    if (d.inHours > 0) return '${d.inHours}h';
+    if (d.inMinutes > 0) return '${d.inMinutes}m';
+    return 'now';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = entry.passenger;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md - 2),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: c.card,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                _initials(p.name),
+                style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md - 2),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          p.name,
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.ink,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        _ago(p.createdAt),
+                        style: UgamText.tabular(
+                          UgamText.caption.copyWith(color: c.ink3, fontSize: 10.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    '${entry.tour.title} · ${p.totalSeatsRequested} seat${p.totalSeatsRequested == 1 ? "" : "s"}',
+                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11.5),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _LoadingShimmer extends StatelessWidget {
