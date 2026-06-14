@@ -1124,9 +1124,17 @@ class SeatingEngine {
             // which WHOLE double you claim, so a position-agnostic match is
             // fine for completing an already-locked cell. Otherwise fall back
             // to draining a single line, else bucket as a leftover single.
-            if (_drainDoubleCrossFill(pending) &&
+            // Claim the partner berth FIRST. Only when it actually succeeds do
+            // we drain the doubleSofa line — otherwise the speculative
+            // `_drainDoubleCrossFill` would consume the line and, on refusal,
+            // never restore it (the old `&&` short-circuit bug), silently
+            // marking the passenger satisfied while holding only one berth.
+            final hasDoubleLine = pending.any((l) =>
+                l.seatType == SeatType.doubleSofa && l.remaining > 0);
+            if (hasDoubleLine &&
                 state.tryClaimPartnerBerth(
                     g.busId, g.seatId, TripLeg.forTrip(p.tripType))) {
+              _drainDoubleCrossFill(pending);
               state.assign(p.id, g.busId, g.seatId,
                   groupId: p.groupId, legs: TripLeg.forTrip(p.tripType));
             } else if (!_drain(pending, [SeatType.singleSofa], cell.position)) {

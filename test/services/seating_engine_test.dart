@@ -1795,4 +1795,44 @@ void main() {
       expect(p1.forPassenger('ret').single.seatId, 'ST1');
     });
   });
+
+  // Regression for the latent _buildPendingLines over-satisfaction bug: when a
+  // passenger holds ONE locked berth of a double they requested whole, but the
+  // partner berth is taken (so they can't complete it), the old code decremented
+  // the doubleSofa line via `_drainDoubleCrossFill` and — because of `&&`
+  // short-circuit — never restored it on partner refusal, silently marking the
+  // passenger satisfied while holding only half their berths. They then vanished
+  // with NO exception. The fix only consumes the line when the partner is
+  // actually claimable.
+  group('own-cell double completion never silently over-satisfies', () {
+    test('half-held double whose partner is taken surfaces an exception '
+        'instead of vanishing', () {
+      final buses = [
+        _bus('b1', [
+          _seat(0, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+        ]),
+      ];
+      // P wants a WHOLE double (2 berths) but holds only one LOCKED berth of
+      // DL1; Q locks the other berth on the same legs, so P can never complete
+      // DL1 and there is no other double free.
+      final p = _p('P',
+          lines: [_line(SeatType.doubleSofa, null, 1)],
+          assigned: const [
+            SeatAssignment(busId: 'b1', seatId: 'DL1', locked: true),
+          ]);
+      final q = _p('Q',
+          lines: [_line(SeatType.singleSofa, null, 1)],
+          assigned: const [
+            SeatAssignment(busId: 'b1', seatId: 'DL1', locked: true),
+          ]);
+
+      final plan = SeatingEngine.propose(buses: buses, passengers: [p, q]);
+
+      // P holds only 1 of the 2 berths they need — that shortfall MUST surface,
+      // not be silently swallowed.
+      expect(plan.forPassenger('P').length, 1);
+      expect(plan.exceptions.where((e) => e.passengerId == 'P'), isNotEmpty,
+          reason: 'a passenger left half-seated must raise an exception');
+    });
+  });
 }
