@@ -7,7 +7,9 @@ import '../models/attendance.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/expense.dart';
+import '../models/income_entry.dart';
 import '../models/handler_manifest.dart';
+import '../models/handler_tour_ref.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_ticket.dart';
 import '../models/trip_type.dart';
@@ -128,11 +130,11 @@ class CustomerRequestEntry {
   /// opens the seat-layout sheet whose LIVE lookup returns nothing — the dead
   /// "No layout" empty state the customer sees over a still-"allocated" card.
   CustomerRequestEntry markCancelled({DateTime? at}) => copyWith(
-        status: 'rejected',
-        assignedSeats: const [],
-        tourLocked: false,
-        lastRefreshedAt: at ?? DateTime.now(),
-      );
+    status: 'rejected',
+    assignedSeats: const [],
+    tourLocked: false,
+    lastRefreshedAt: at ?? DateTime.now(),
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -382,6 +384,26 @@ class CustomerRequestsStore {
         .toList();
   }
 
+  /// "Find tours I handle by phone": resolves every tour where [phone] is the
+  /// designated handler into a booking_request ref the UI can feed straight to
+  /// the existing requestId-scoped HandlerBusChartScreen flow — no request id
+  /// entered by hand. Phone is matched on its last 10 digits server-side, so
+  /// +91 / spaces never cause a miss. Goes through the `handler_requests_by_phone`
+  /// SECURITY DEFINER RPC (handlers are anonymous). Tours whose handler has no
+  /// booking_request aren't returned (they can't be managed via that flow).
+  Future<List<HandlerTourRef>> handlerRequestsByPhone(String phone) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_requests_by_phone',
+      params: {'p_phone': phone},
+    );
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((m) => HandlerTourRef.fromJson(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
   /// Whether this request belongs to the tour's designated handler. Only the
   /// handler may pull the full bus chart, so the UI gates on this first. Goes
   /// through a SECURITY DEFINER RPC since customers are anonymous. Any error
@@ -475,6 +497,37 @@ class CustomerRequestsStore {
     final result = await client.rpc(
       'handler_delete_expense',
       params: {'p_request_id': requestId, 'p_expense_id': expenseId},
+    );
+    return result as bool? ?? false;
+  }
+
+  /// Inserts or updates a bus [IncomeEntry] for the handler's tour via a SECURITY
+  /// DEFINER RPC (customers are anonymous). The income is sent as a jsonb
+  /// payload; the server resolves the tour from the request and verifies the
+  /// bus belongs to it. Returns the upserted row, or null when the caller isn't
+  /// the tour's handler (or the bus isn't on their tour). Lets exceptions
+  /// propagate so the UI can surface a real failure.
+  Future<IncomeEntry?> handlerUpsertIncome(
+    String requestId,
+    IncomeEntry i,
+  ) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_upsert_income',
+      params: {'p_request_id': requestId, 'p_income': i.toMap()},
+    );
+    if (result is! Map) return null;
+    return IncomeEntry.fromMap(Map<String, dynamic>.from(result));
+  }
+
+  /// Deletes one income the handler logged on their own tour via a SECURITY
+  /// DEFINER RPC. Returns true when a row was removed (false when the caller
+  /// isn't the handler or the income isn't on their tour).
+  Future<bool> handlerDeleteIncome(String requestId, String incomeId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_delete_income',
+      params: {'p_request_id': requestId, 'p_income_id': incomeId},
     );
     return result as bool? ?? false;
   }

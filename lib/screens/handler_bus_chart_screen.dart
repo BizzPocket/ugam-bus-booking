@@ -13,6 +13,7 @@ import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/expense.dart';
 import '../models/handler_manifest.dart';
+import '../models/income_entry.dart';
 import '../models/passenger.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
@@ -25,19 +26,6 @@ import '../utils/phone_dialer.dart';
 import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
 import 'fullscreen_chart_screen.dart';
-
-/// Builds a leg-resolved occupant view for [seatId] on [busId] from the
-/// manifest's passengers — the single-seat slice of the shared resolver. A
-/// whole-double (one passenger, two assignment entries on the SAME seatId)
-/// still resolves to a single occupant; a genuine leg-shared seat resolves to
-/// two distinct people on disjoint legs.
-SeatOccupancy _occupantsForSeat(
-  HandlerManifest manifest,
-  String busId,
-  String seatId,
-) =>
-    seatOccupantsForBus(manifest.passengers, busId)[seatId] ??
-    const SeatOccupancy();
 
 /// Resolves the leg-aware occupants for EVERY seat on [busId] in a single
 /// O(passengers × assignedSeats) pass, keyed by seatId — delegating to the
@@ -98,6 +86,11 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   /// and the "spent / in hand" summary refresh without a full reload.
   final Map<String, Expense> _expenses = {};
 
+  /// Local, mutable income cache keyed by income id. Seeded from the manifest
+  /// and updated in-place after each add / delete so the per-bus income ledger
+  /// and the "income / in hand" summary refresh without a full reload.
+  final Map<String, IncomeEntry> _income = {};
+
   /// Local, mutable attendance cache keyed by '"$passengerId|$busId|$leg"'.
   /// Seeded from the manifest once loaded; updated in-place after each toggle
   /// so the boarding tally refreshes without a full reload.
@@ -115,6 +108,13 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   /// Expenses logged against [busId], oldest first.
   List<Expense> _expensesForBus(String busId) {
     final list = _expenses.values.where((e) => e.busId == busId).toList();
+    list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return list;
+  }
+
+  /// Income entries logged against [busId], oldest first.
+  List<IncomeEntry> _incomesForBus(String busId) {
+    final list = _income.values.where((i) => i.busId == busId).toList();
     list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return list;
   }
@@ -228,8 +228,12 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     double toReturn = 0;
     double toCollect = 0;
     double spent = 0;
+    double income = 0;
     for (final e in _expensesForBus(bus.id)) {
       spent += e.amount;
+    }
+    for (final i in _incomesForBus(bus.id)) {
+      income += i.amount;
     }
     for (final p in manifest.passengers) {
       // Distinct seats only: a whole double-sofa = TWO entries on one seatId,
@@ -257,6 +261,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
       toReturn: toReturn,
       toCollect: toCollect,
       spent: spent,
+      income: income,
     );
   }
 
@@ -287,6 +292,13 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           ..addEntries(
             (manifest?.expenses ?? const <Expense>[]).map(
               (e) => MapEntry(e.id, e),
+            ),
+          );
+        _income
+          ..clear()
+          ..addEntries(
+            (manifest?.incomes ?? const <IncomeEntry>[]).map(
+              (i) => MapEntry(i.id, i),
             ),
           );
         _attendance
@@ -320,36 +332,33 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     return manifest.buses.first;
   }
 
-  void _onSeatTapped(Bus bus, String seatId, Passenger occupant) {
-    final manifest = _manifest;
-    // A leg-shared seat (a GO occupant + a different RETURN occupant) needs a
-    // chooser: the handler picks which person to call / collect from. A single
-    // occupant goes straight to the collect sheet.
-    final occ = manifest == null
-        ? const SeatOccupancy()
-        : _occupantsForSeat(manifest, bus.id, seatId);
-    if (occ.isLegShared) {
-      _showLegSharedChooser(bus, seatId, occ);
+  void _onSeatTapped(Bus bus, String seatId, List<Passenger> occupants) {
+    if (occupants.isEmpty) return;
+    // A shared seat (a Double Sofa can carry up to four riders across GO+RET, or
+    // two on one leg) needs a chooser so the handler picks whom to call /
+    // collect from. A single occupant goes straight to the collect sheet.
+    if (occupants.length == 1) {
+      _showOccupantSheet(bus, seatId, occupants.first);
       return;
     }
-    _showOccupantSheet(bus, seatId, occupant);
+    _showOccupantChooser(bus, seatId, occupants);
   }
 
-  /// Leg-shared seat → a small chooser listing the GO occupant and the RETURN
-  /// occupant (each with phone + Call), so the handler picks whom to act on
-  /// before the collect sheet opens.
-  Future<void> _showLegSharedChooser(
+  /// Shared seat → a small chooser listing EVERY rider (each with phone + Call),
+  /// so the handler picks whom to act on before the collect sheet opens. Was
+  /// leg-shared-only (one GO + one RETURN); now lists all riders so a Double
+  /// Sofa booked by three or four one-way passengers is fully reachable.
+  Future<void> _showOccupantChooser(
     Bus bus,
     String seatId,
-    SeatOccupancy occ,
+    List<Passenger> occupants,
   ) {
     return UgamSheet.show<void>(
       context,
       title: tr('handler_chart.seat_shared_title', namedArgs: {'seat': seatId}),
-      builder: (sheetCtx) => _LegSharedChooserSheet(
+      builder: (sheetCtx) => _OccupantChooserSheet(
         seatId: seatId,
-        go: occ.go,
-        ret: occ.ret,
+        occupants: occupants,
         onPick: (p) {
           Navigator.of(sheetCtx).pop();
           _showOccupantSheet(bus, seatId, p);
@@ -492,6 +501,86 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     }
   }
 
+  /// Opens the add/edit income sheet for [bus]. Pass [existing] to edit a logged
+  /// income entry. On save the server-returned row is cached so the ledger and
+  /// the "income / in hand" summary refresh without a reload. Income is cash the
+  /// handler takes in outside the seat fares (e.g. cabin / gallery spots), so it
+  /// ADDS to what they hold.
+  Future<void> _showIncomeSheet(Bus bus, {IncomeEntry? existing}) {
+    final tourId = bus.tourId?.isNotEmpty == true ? bus.tourId! : '';
+    return UgamSheet.show<void>(
+      context,
+      title: existing == null
+          ? tr('handler_chart.add_income')
+          : tr('handler_chart.edit_income'),
+      builder: (sheetCtx) => _IncomeSheet(
+        existing: existing,
+        onSave: (category, label, amount, receivedBy) async {
+          final base =
+              existing ??
+              IncomeEntry(tourId: tourId, busId: bus.id, label: label);
+          final updated = base.copyWith(
+            busId: bus.id,
+            category: category,
+            label: label,
+            amount: amount,
+            receivedBy: receivedBy.isEmpty ? null : receivedBy,
+          );
+          final saved = await _store.handlerUpsertIncome(
+            widget.requestId,
+            updated,
+          );
+          if (saved == null) {
+            throw StateError('Handler income save was rejected.');
+          }
+          if (!mounted) return;
+          setState(() => _income[saved.id] = saved);
+        },
+      ),
+    );
+  }
+
+  /// Confirms then removes a logged income entry, both on the server and in the
+  /// local cache.
+  Future<void> _deleteIncome(IncomeEntry income) async {
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('handler_chart.delete_income_title'),
+      message: income.label.isEmpty
+          ? tr(
+              'handler_chart.delete_income_msg_category',
+              namedArgs: {
+                'category': income.category.displayName.toLowerCase(),
+                'amount': Formatters.formatMoneyInr(income.amount),
+              },
+            )
+          : tr(
+              'handler_chart.delete_income_msg_label',
+              namedArgs: {
+                'label': income.label,
+                'amount': Formatters.formatMoneyInr(income.amount),
+              },
+            ),
+      confirmLabel: tr('app.action.delete'),
+      destructive: true,
+    );
+    if (ok != true) return;
+    try {
+      final removed = await _store.handlerDeleteIncome(
+        widget.requestId,
+        income.id,
+      );
+      if (!removed) {
+        AppSnackBar.error(tr('handler_chart.error_delete_income'));
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _income.remove(income.id));
+    } catch (_) {
+      AppSnackBar.error(tr('handler_chart.error_delete_income'));
+    }
+  }
+
   /// HANDLER per-bus announcement (F4). Opens a composer for the CURRENTLY
   /// selected bus and sends the typed free-text to every seated passenger on
   /// that bus via the `bus-message` Edge Function (which re-verifies the caller
@@ -546,14 +635,11 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   void _openFullscreenChart(Bus bus) {
     final layout = bus.layout;
     if (layout == null || layout.totalCells == 0) return;
-    final occupantsBySeat = _occupantsBySeatForBus(_manifest!, bus.id);
-    final occupantsForFullscreen = <String, List<Passenger>>{};
-    for (final entry in occupantsBySeat.entries) {
-      final occ = entry.value;
-      occupantsForFullscreen[entry.key] = occ.isLegShared
-          ? <Passenger>[occ.go!, occ.ret!]
-          : (occ.sole != null ? <Passenger>[occ.sole!] : const <Passenger>[]);
-    }
+    // EVERY rider per seat (a Double Sofa can seat up to four across GO+RET),
+    // so the full-screen chart shows the same complete roster the inline grid
+    // and its occupant sheet now show — not just one holder per leg.
+    final occupantsForFullscreen =
+        occupantListForBus(_manifest!.passengers, bus.id);
     FullscreenChartScreen.open(
       context,
       layout: layout,
@@ -648,7 +734,12 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     final summary = _summaryForBus(manifest, bus);
 
     // Resolve occupants for the whole bus once, not per seat cell.
+    // [occupantsBySeat] keeps one holder per leg (drives the tile's GO/RET split
+    // + the money dot's primary). [fullOccupantsBySeat] keeps EVERY rider on a
+    // seat (a Double Sofa seats up to four across GO+RET), so the tile shows all
+    // of them and a seat tap can offer the full roster.
     final occupantsBySeat = _occupantsBySeatForBus(manifest, bus.id);
+    final fullOccupantsBySeat = occupantListForBus(manifest.passengers, bus.id);
 
     final grid = _viewMode == _ViewMode.grid;
     final attendance = _viewMode == _ViewMode.attendance;
@@ -723,6 +814,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                   toReturn: summary.toReturn,
                   toCollect: summary.toCollect,
                   spent: summary.spent,
+                  income: summary.income,
                   inHand: summary.inHand,
                 ),
                 const SizedBox(height: UgamSpacing.md),
@@ -732,9 +824,11 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                   _SeatGrid(
                     bus: bus,
                     occupantsBySeat: occupantsBySeat,
+                    fullOccupantsBySeat: fullOccupantsBySeat,
                     collectionFor: (pId, seatId) =>
                         _collectionFor(pId, bus.id, seatId),
-                    onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
+                    onTapSeat: (seatId, occupants) =>
+                        _onSeatTapped(bus, seatId, occupants),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
                   UgamSeatChartLegend(c: c),
@@ -746,6 +840,14 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                     onAdd: () => _showExpenseSheet(bus),
                     onEdit: (e) => _showExpenseSheet(bus, existing: e),
                     onDelete: (e) => _deleteExpense(e),
+                  ),
+                  const SizedBox(height: UgamSpacing.xl),
+                  _IncomeSection(
+                    busName: bus.name,
+                    incomes: _incomesForBus(bus.id),
+                    onAdd: () => _showIncomeSheet(bus),
+                    onEdit: (i) => _showIncomeSheet(bus, existing: i),
+                    onDelete: (i) => _deleteIncome(i),
                   ),
                 ] else if (attendance)
                   _AttendanceView(
@@ -765,10 +867,11 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                 else ...[
                   _SeatRoster(
                     bus: bus,
-                    occupantsBySeat: occupantsBySeat,
+                    fullOccupantsBySeat: fullOccupantsBySeat,
                     collectionFor: (pId, seatId) =>
                         _collectionFor(pId, bus.id, seatId),
-                    onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
+                    onTapSeat: (seatId, occupants) =>
+                        _onSeatTapped(bus, seatId, occupants),
                   ),
                   _PriceBandKey(bus: bus),
                   const SizedBox(height: UgamSpacing.xl),
@@ -778,6 +881,14 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                     onAdd: () => _showExpenseSheet(bus),
                     onEdit: (e) => _showExpenseSheet(bus, existing: e),
                     onDelete: (e) => _deleteExpense(e),
+                  ),
+                  const SizedBox(height: UgamSpacing.xl),
+                  _IncomeSection(
+                    busName: bus.name,
+                    incomes: _incomesForBus(bus.id),
+                    onAdd: () => _showIncomeSheet(bus),
+                    onEdit: (i) => _showIncomeSheet(bus, existing: i),
+                    onDelete: (i) => _deleteIncome(i),
                   ),
                 ],
               ],
@@ -879,15 +990,23 @@ extension _MoneyStateView on _MoneyState {
 
 class _SeatGrid extends StatelessWidget {
   final Bus bus;
+
+  /// One holder per leg — drives the tile's GO/RET split and the money dot's
+  /// primary passenger.
   final Map<String, SeatOccupancy> occupantsBySeat;
+
+  /// EVERY distinct rider per seat — handed to the tile (so a sofa shared by up
+  /// to four riders shows them all + the "+N" badge) and to the tap handler.
+  final Map<String, List<Passenger>> fullOccupantsBySeat;
   final Collection? Function(String passengerId, String seatId) collectionFor;
-  final void Function(String seatId, Passenger passenger) onTapOccupant;
+  final void Function(String seatId, List<Passenger> occupants) onTapSeat;
 
   const _SeatGrid({
     required this.bus,
     required this.occupantsBySeat,
+    required this.fullOccupantsBySeat,
     required this.collectionFor,
-    required this.onTapOccupant,
+    required this.onTapSeat,
   });
 
   /// The collection state for an occupied seat, mirroring collection_screen's
@@ -940,11 +1059,12 @@ class _SeatGrid extends StatelessWidget {
           final occ = cell.seatId == null
               ? const SeatOccupancy()
               : (occupantsBySeat[cell.seatId!] ?? const SeatOccupancy());
-          final List<Passenger> occList = occ.isLegShared
-              ? <Passenger>[occ.go!, occ.ret!]
-              : (occ.sole != null
-                    ? <Passenger>[occ.sole!]
-                    : const <Passenger>[]);
+          // EVERY rider on this seat (up to four on a Double Sofa across
+          // GO+RET). The canonical tile draws the leg split for the first two
+          // and badges the rest; the tap hands the whole list to the chooser.
+          final List<Passenger> occList = cell.seatId == null
+              ? const <Passenger>[]
+              : (fullOccupantsBySeat[cell.seatId!] ?? const <Passenger>[]);
           // The money dot follows the GO occupant first (then RETURN) — the
           // primary person whose due/collection drives the at-a-glance state.
           final primary = occ.go ?? occ.ret;
@@ -969,9 +1089,9 @@ class _SeatGrid extends StatelessWidget {
                 moneyDotColor: primary == null
                     ? null
                     : money.color(UgamColors.of(ctx)),
-                onTapBooked: primary == null
+                onTapBooked: occList.isEmpty
                     ? null
-                    : () => onTapOccupant(cell.seatId!, primary),
+                    : () => onTapSeat(cell.seatId!, occList),
               ),
             ),
           );
@@ -1126,15 +1246,18 @@ class _PriceBandRow extends StatelessWidget {
 /// collect sheet the grid uses.
 class _SeatRoster extends StatelessWidget {
   final Bus bus;
-  final Map<String, SeatOccupancy> occupantsBySeat;
+
+  /// EVERY distinct rider per seat — a row is emitted per rider, so a Double
+  /// Sofa shared by three or four one-way passengers lists all of them.
+  final Map<String, List<Passenger>> fullOccupantsBySeat;
   final Collection? Function(String passengerId, String seatId) collectionFor;
-  final void Function(String seatId, Passenger passenger) onTapOccupant;
+  final void Function(String seatId, List<Passenger> occupants) onTapSeat;
 
   const _SeatRoster({
     required this.bus,
-    required this.occupantsBySeat,
+    required this.fullOccupantsBySeat,
     required this.collectionFor,
-    required this.onTapOccupant,
+    required this.onTapSeat,
   });
 
   _MoneyState _moneyState(Passenger passenger, String seatId) {
@@ -1171,15 +1294,17 @@ class _SeatRoster extends StatelessWidget {
     for (final cell in layout.grid) {
       final seatId = cell.seatId;
       if (seatId == null) continue;
-      final occ = occupantsBySeat[seatId] ?? const SeatOccupancy();
-      if (occ.isEmpty) continue;
-      for (final p in occ.all) {
+      final occupants = fullOccupantsBySeat[seatId] ?? const <Passenger>[];
+      if (occupants.isEmpty) continue;
+      for (final p in occupants) {
         rows.add(
           _RosterRow(
             seatId: seatId,
             passenger: p,
             money: _moneyState(p, seatId),
-            onTap: () => onTapOccupant(seatId, p),
+            // A roster row is one specific rider — go straight to their sheet
+            // (single-element list skips the chooser).
+            onTap: () => onTapSeat(seatId, <Passenger>[p]),
             c: c,
           ),
         );
@@ -1404,16 +1529,14 @@ class _TripBadge extends StatelessWidget {
 /// A chooser for a leg-shared seat: lists the GO occupant and the RETURN
 /// occupant, each with phone + a Call button, so the handler picks whom to
 /// collect from / call before the collect sheet opens.
-class _LegSharedChooserSheet extends StatelessWidget {
+class _OccupantChooserSheet extends StatelessWidget {
   final String seatId;
-  final Passenger? go;
-  final Passenger? ret;
+  final List<Passenger> occupants;
   final ValueChanged<Passenger> onPick;
 
-  const _LegSharedChooserSheet({
+  const _OccupantChooserSheet({
     required this.seatId,
-    required this.go,
-    required this.ret,
+    required this.occupants,
     required this.onPick,
   });
 
@@ -1429,21 +1552,16 @@ class _LegSharedChooserSheet extends StatelessWidget {
           style: UgamText.body.copyWith(color: c.ink2),
         ),
         const SizedBox(height: UgamSpacing.md),
-        if (go != null)
+        for (var i = 0; i < occupants.length; i++) ...[
+          if (i > 0) const SizedBox(height: UgamSpacing.sm),
           _LegSharedTile(
-            passenger: go!,
-            leg: TripType.outboundOnly,
-            onPick: () => onPick(go!),
+            passenger: occupants[i],
+            // The badge reads each rider's own leg (GO / RET / round-trip).
+            leg: occupants[i].tripType,
+            onPick: () => onPick(occupants[i]),
             c: c,
           ),
-        if (go != null && ret != null) const SizedBox(height: UgamSpacing.sm),
-        if (ret != null)
-          _LegSharedTile(
-            passenger: ret!,
-            leg: TripType.returnOnly,
-            onPick: () => onPick(ret!),
-            c: c,
-          ),
+        ],
       ],
     );
   }
@@ -1739,16 +1857,22 @@ class _BusSummary {
   /// Total of every expense logged against this bus.
   final double spent;
 
+  /// Total of every income entry logged against this bus (cabin / gallery /
+  /// other cash taken in outside the seat fares).
+  final double income;
+
   const _BusSummary({
     required this.collected,
     required this.toReturn,
     required this.toCollect,
     required this.spent,
+    required this.income,
   });
 
   /// Net cash the handler should be holding for this bus — what was collected
-  /// less what was spent. This is what they hand over to the admin.
-  double get inHand => collected - spent;
+  /// plus extra income taken in, less what was spent. This is what they hand
+  /// over to the admin.
+  double get inHand => collected + income - spent;
 }
 
 /// Boarding tally for one bus + leg: how many of the [total] expected
@@ -1777,6 +1901,7 @@ class _SummaryHeader extends StatelessWidget {
   final double toReturn;
   final double toCollect;
   final double spent;
+  final double income;
   final double inHand;
 
   const _SummaryHeader({
@@ -1784,6 +1909,7 @@ class _SummaryHeader extends StatelessWidget {
     required this.toReturn,
     required this.toCollect,
     required this.spent,
+    required this.income,
     required this.inHand,
   });
 
@@ -1824,6 +1950,15 @@ class _SummaryHeader extends StatelessWidget {
         const SizedBox(height: UgamSpacing.md),
         Row(
           children: [
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.savings_rounded,
+                value: Formatters.formatMoneyInr(income),
+                label: tr('handler_chart.stat_income'),
+                variant: UgamStatVariant.good,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
             Expanded(
               child: UgamStatTile(
                 icon: Icons.receipt_long_rounded,
@@ -2536,6 +2671,346 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
             label: _saving
                 ? tr('handler_chart.saving')
                 : tr('handler_chart.save_expense'),
+            onPressed: _saving ? null : _save,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Income section ────────────────────────────────────────────────────
+
+/// The handler's per-bus income ledger: a header with the running total + an
+/// Add action, then one tappable row per logged income entry (tap to edit,
+/// trash to delete). Mirrors [_ExpensesSection], scoped to the bus the handler
+/// is currently viewing so they can log cabin / gallery cash taken in on the
+/// ground — money that ADDS to what they hold, unlike an expense.
+class _IncomeSection extends StatelessWidget {
+  final String busName;
+  final List<IncomeEntry> incomes;
+  final VoidCallback onAdd;
+  final ValueChanged<IncomeEntry> onEdit;
+  final ValueChanged<IncomeEntry> onDelete;
+
+  const _IncomeSection({
+    required this.busName,
+    required this.incomes,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final total = incomes.fold<double>(0, (sum, i) => sum + i.amount);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('handler_chart.bus_income'),
+                    style: UgamText.titleM.copyWith(color: c.ink),
+                  ),
+                  if (incomes.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      tr(
+                        'handler_chart.bus_income_total',
+                        namedArgs: {
+                          'bus': busName,
+                          'amount': Formatters.formatMoneyInr(total),
+                        },
+                      ),
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            UgamButton(
+              label: tr('app.action.add'),
+              icon: Icons.add_rounded,
+              kind: UgamButtonKind.tonal,
+              onPressed: onAdd,
+            ),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        if (incomes.isEmpty)
+          UgamCard.plain(
+            padding: const EdgeInsets.symmetric(
+              vertical: UgamSpacing.lg,
+              horizontal: UgamSpacing.md,
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.savings_outlined, size: 18, color: c.ink3),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(
+                  child: Text(
+                    tr('handler_chart.no_income'),
+                    style: UgamText.caption.copyWith(color: c.ink3),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          UgamCard.plain(
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+            child: Column(
+              children: [
+                for (final i in incomes)
+                  _HandlerIncomeRow(
+                    income: i,
+                    onTap: () => onEdit(i),
+                    onDelete: () => onDelete(i),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One income line: category chip, label (+ "received by"), amount, and a
+/// delete affordance. The whole row taps through to edit.
+class _HandlerIncomeRow extends StatelessWidget {
+  final IncomeEntry income;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _HandlerIncomeRow({
+    required this.income,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final receivedBy = (income.receivedBy ?? '').trim();
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.sm + 2,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
+              child: Text(
+                income.category.displayName,
+                style: UgamText.micro.copyWith(color: c.ink2),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    income.label.isEmpty
+                        ? income.category.displayName
+                        : income.label,
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (receivedBy.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      tr(
+                        'handler_chart.received_by',
+                        namedArgs: {'name': receivedBy},
+                      ),
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              Formatters.formatMoneyInr(income.amount),
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(color: c.good),
+              ),
+            ),
+            const SizedBox(width: 2),
+            Semantics(
+              button: true,
+              label: tr('handler_chart.delete_income'),
+              child: GestureDetector(
+                onTap: onDelete,
+                behavior: HitTestBehavior.opaque,
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: _DeleteGlyph(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Income sheet ──────────────────────────────────────────────────────
+
+/// Add / edit one bus income entry. Category chips (cabin / gallery / other) +
+/// what-for label + amount + "received by", mirroring [_ExpenseSheet]. [onSave]
+/// persists via the handler RPC and updates the ledger; this widget owns the
+/// controllers and pops on success.
+class _IncomeSheet extends StatefulWidget {
+  final IncomeEntry? existing;
+  final Future<void> Function(
+    IncomeCategory category,
+    String label,
+    double amount,
+    String receivedBy,
+  )
+  onSave;
+
+  const _IncomeSheet({required this.existing, required this.onSave});
+
+  @override
+  State<_IncomeSheet> createState() => _IncomeSheetState();
+}
+
+class _IncomeSheetState extends State<_IncomeSheet> {
+  late IncomeCategory _category;
+  late final TextEditingController _labelCtrl;
+  late final TextEditingController _amountCtrl;
+  late final TextEditingController _receivedByCtrl;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final i = widget.existing;
+    _category = i?.category ?? IncomeCategory.cabin;
+    _labelCtrl = TextEditingController(text: i?.label ?? '');
+    _amountCtrl = TextEditingController(
+      text: (i?.amount ?? 0) == 0 ? '' : i!.amount.toStringAsFixed(0),
+    );
+    _receivedByCtrl = TextEditingController(text: i?.receivedBy ?? '');
+  }
+
+  @override
+  void dispose() {
+    _labelCtrl.dispose();
+    _amountCtrl.dispose();
+    _receivedByCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+    if (amount <= 0) {
+      AppSnackBar.error(tr('handler_chart.error_amount_zero'));
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await widget.onSave(
+        _category,
+        _labelCtrl.text.trim(),
+        amount,
+        _receivedByCtrl.text.trim(),
+      );
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+      AppSnackBar.error(tr('handler_chart.error_save_income'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('handler_chart.category'),
+            style: UgamText.micro.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          Wrap(
+            spacing: UgamSpacing.sm,
+            runSpacing: UgamSpacing.sm,
+            children: IncomeCategory.values.map((cat) {
+              final active = cat == _category;
+              return GestureDetector(
+                onTap: () => setState(() => _category = cat),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.lg,
+                    vertical: UgamSpacing.sm + 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: active ? c.accentFill : c.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    border: Border.all(color: active ? c.accent : c.border),
+                  ),
+                  child: Text(
+                    cat.displayName,
+                    style: UgamText.caption.copyWith(
+                      color: active ? c.accent : c.ink2,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('handler_chart.field_what_for'),
+            controller: _labelCtrl,
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          UgamInput(
+            label: tr('handler_chart.field_amount'),
+            controller: _amountCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          UgamInput(
+            label: tr('handler_chart.field_received_by'),
+            controller: _receivedByCtrl,
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamCTA(
+            label: _saving
+                ? tr('handler_chart.saving')
+                : tr('handler_chart.save_income'),
             onPressed: _saving ? null : _save,
           ),
         ],

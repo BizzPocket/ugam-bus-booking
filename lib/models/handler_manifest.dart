@@ -2,6 +2,7 @@ import 'attendance.dart';
 import 'bus_details.dart';
 import 'collection.dart';
 import 'expense.dart';
+import 'income_entry.dart';
 import 'passenger.dart';
 import 'seat_assignment.dart';
 
@@ -10,8 +11,8 @@ import 'seat_assignment.dart';
 ///
 /// Produced by the `handler_tour_manifest` RPC, which returns a single json
 /// object `{buses: [...], passengers: [...], collections: [...],
-/// expenses: [...]}`. Only the tour handler is authorized to receive it (see
-/// [CustomerRequestsStore.isRequestHandler]).
+/// expenses: [...], incomes: [...]}`. Only the tour handler is authorized to
+/// receive it (see [CustomerRequestsStore.isRequestHandler]).
 class HandlerManifest {
   final List<Bus> buses;
   final List<Passenger> passengers;
@@ -20,6 +21,11 @@ class HandlerManifest {
   /// Every expense logged against any bus on this tour. Surfaced so the handler
   /// can review the bus's running costs and reconcile cash on the ground.
   final List<Expense> expenses;
+
+  /// Every income entry logged against any bus on this tour. Surfaced so the
+  /// handler can review the bus's incoming money and reconcile cash on the
+  /// ground.
+  final List<IncomeEntry> incomes;
 
   /// Every attendance row logged against any bus on this tour. Surfaced so the
   /// handler can see who boarded each leg and reconcile the manifest on the
@@ -31,6 +37,7 @@ class HandlerManifest {
     this.passengers = const [],
     this.collections = const [],
     this.expenses = const [],
+    this.incomes = const [],
     this.attendance = const [],
   });
 
@@ -40,6 +47,7 @@ class HandlerManifest {
       passengers: _parsePassengers(json['passengers']),
       collections: _parseCollections(json['collections']),
       expenses: _parseExpenses(json['expenses']),
+      incomes: _parseIncomes(json['incomes']),
       attendance: _parseAttendance(json['attendance']),
     );
   }
@@ -73,6 +81,14 @@ class HandlerManifest {
     return value
         .whereType<Map>()
         .map((m) => Expense.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  static List<IncomeEntry> _parseIncomes(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((m) => IncomeEntry.fromMap(Map<String, dynamic>.from(m)))
         .toList();
   }
 

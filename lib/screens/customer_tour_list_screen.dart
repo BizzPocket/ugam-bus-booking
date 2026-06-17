@@ -263,7 +263,12 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
     );
   }
 
-  /// Public + non-completed, future-dated only.
+  /// Public + non-completed, visible until the whole trip is over.
+  ///
+  /// A customer keeps seeing a tour until its END date passes — the end is the
+  /// return date when there is one, otherwise the departure date. This mirrors
+  /// the admin-side archive cutoff in TourController (`returnDate ?? departureDate`)
+  /// so a round trip that departed yesterday but returns next week stays visible.
   List<Tour> _visibleTours(List<Tour> all) {
     final today = DateTime.now();
     final cutoff = DateTime(today.year, today.month, today.day);
@@ -272,7 +277,7 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
           (t) =>
               t.isPublic &&
               t.status != TourStatus.completed &&
-              !t.departureDate.isBefore(cutoff),
+              !(t.returnDate ?? t.departureDate).isBefore(cutoff),
         )
         .toList();
   }

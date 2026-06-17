@@ -443,7 +443,8 @@
     "empty_body": "આ નંબર સાથે હજુ કોઈ સીટ જોડાયેલ નથી. ઑર્ગેનાઇઝર ટૂર લૉક કરે પછી સીટ અહીં દેખાશે.",
     "your_seats": "તમારી સીટ: {seats}",
     "layout_unavailable": "બસનો નકશો હજુ ઉપલબ્ધ નથી.",
-    "driver": "ડ્રાઇવર"
+    "driver": "ડ્રાઇવર",
+    "manage_as_handler": "હેન્ડલર તરીકે મેનેજ કરો"
   },
   "customer_my_requests": {
     "title": "મારી વિનંતીઓ",
@@ -1722,6 +1723,21 @@
     "stat_to_collect": "વસૂલવાના",
     "stat_spent": "ખર્ચ્યા",
     "stat_in_hand": "હાથમાં",
+    "stat_income": "આવક",
+    "bus_income": "બસની આવક",
+    "bus_income_total": "{bus} · {amount} કમાણી",
+    "no_income": "હજી કોઈ આવક નોંધાઈ નથી.",
+    "add_income": "આવક ઉમેરો",
+    "edit_income": "આવક સંપાદિત કરો",
+    "save_income": "આવક સાચવો",
+    "delete_income": "આવક કાઢી નાખો",
+    "delete_income_title": "આવક કાઢી નાખવી?",
+    "delete_income_msg_category": "આ {category} આવક {amount} કાઢી નાખવી?",
+    "delete_income_msg_label": "\"{label}\" ({amount}) કાઢી નાખવી?",
+    "error_save_income": "આવક સાચવી શકાઈ નહીં. ફરી પ્રયાસ કરો.",
+    "error_delete_income": "આવક કાઢી શકાઈ નહીં. ફરી પ્રયાસ કરો.",
+    "received_by": "{name} દ્વારા મળેલ",
+    "field_received_by": "કોણે મેળવ્યું",
     "bus_expenses": "બસ ખર્ચ",
     "bus_expenses_total": "{bus} · {amount} ખર્ચ્યા",
     "no_expenses": "આ બસ માટે હજી કોઈ ખર્ચ નોંધ્યો નથી. ઈંધણ, ટોલ, ખાવાનું વગેરે નોંધવા ઉમેરો ટૅપ કરો.",
@@ -2063,6 +2079,11 @@
       "food": "ભોજન",
       "toll": "ટોલ/પાર્કિંગ",
       "busOwner": "બસ માલિક",
+      "other": "અન્ય"
+    },
+    "income_category": {
+      "cabin": "કેબિન",
+      "gallery": "ગેલેરી",
       "other": "અન્ય"
     },
     "booking_status": {

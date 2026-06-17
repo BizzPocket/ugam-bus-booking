@@ -443,7 +443,8 @@
     "empty_body": "इस नंबर से अभी कोई सीट लिंक नहीं है. आयोजक द्वारा टूर लॉक करने के बाद सीट यहाँ दिखेगी.",
     "your_seats": "आपकी सीटें: {seats}",
     "layout_unavailable": "बस का नक्शा अभी उपलब्ध नहीं है.",
-    "driver": "ड्राइवर"
+    "driver": "ड्राइवर",
+    "manage_as_handler": "हैंडलर के रूप में प्रबंधित करें"
   },
   "customer_my_requests": {
     "title": "मेरी अनुरोध",
@@ -1739,7 +1740,22 @@
     "field_paid_by": "किसने चुकाया",
     "save_expense": "खर्च सहेजें",
     "error_amount_zero": "शून्य से अधिक राशि दर्ज करें।",
-    "error_save_expense": "खर्च सहेजा नहीं जा सका। कृपया पुनः प्रयास करें।"
+    "error_save_expense": "खर्च सहेजा नहीं जा सका। कृपया पुनः प्रयास करें।",
+    "stat_income": "आय",
+    "bus_income": "बस आय",
+    "bus_income_total": "{bus} · {amount} कमाई",
+    "no_income": "अभी तक कोई आय दर्ज नहीं।",
+    "add_income": "आय जोड़ें",
+    "edit_income": "आय संपादित करें",
+    "save_income": "आय सहेजें",
+    "delete_income": "आय हटाएं",
+    "delete_income_title": "आय हटाएं?",
+    "delete_income_msg_category": "यह {category} आय {amount} हटाएं?",
+    "delete_income_msg_label": "\"{label}\" ({amount}) हटाएं?",
+    "error_save_income": "आय सहेजी नहीं जा सकी। पुनः प्रयास करें।",
+    "error_delete_income": "आय हटाई नहीं जा सकी। पुनः प्रयास करें।",
+    "received_by": "{name} ने प्राप्त किया",
+    "field_received_by": "किसने प्राप्त किया"
   },
   "seat_legend": {
     "free": "खाली",
@@ -2063,6 +2079,11 @@
       "food": "भोजन",
       "toll": "टोल/पार्किंग",
       "busOwner": "बस मालिक",
+      "other": "अन्य"
+    },
+    "income_category": {
+      "cabin": "केबिन",
+      "gallery": "गैलरी",
       "other": "अन्य"
     },
     "booking_status": {

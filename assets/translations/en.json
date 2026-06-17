@@ -443,7 +443,8 @@
     "empty_body": "No seat is linked to this number yet. Seats appear here once your organiser locks the tour.",
     "your_seats": "Your seats: {seats}",
     "layout_unavailable": "The bus diagram isn't available yet.",
-    "driver": "Driver"
+    "driver": "Driver",
+    "manage_as_handler": "Manage as handler"
   },
   "customer_my_requests": {
     "title": "My Requests",
@@ -1738,6 +1739,21 @@
     "field_amount": "Amount",
     "field_paid_by": "Paid by",
     "save_expense": "Save expense",
+    "stat_income": "Income",
+    "bus_income": "Bus income",
+    "bus_income_total": "{bus} · {amount} earned",
+    "no_income": "No income logged yet.",
+    "add_income": "Add income",
+    "edit_income": "Edit income",
+    "save_income": "Save income",
+    "delete_income": "Delete income",
+    "delete_income_title": "Delete income?",
+    "delete_income_msg_category": "Remove this {category} income of {amount}?",
+    "delete_income_msg_label": "Remove \"{label}\" ({amount})?",
+    "error_save_income": "Could not save income. Try again.",
+    "error_delete_income": "Could not delete income. Try again.",
+    "received_by": "Received by {name}",
+    "field_received_by": "Received by",
     "error_amount_zero": "Enter an amount greater than zero.",
     "error_save_expense": "Couldn't save the expense. Please try again."
   },
@@ -2063,6 +2079,11 @@
       "food": "Food",
       "toll": "Toll/Parking",
       "busOwner": "Bus owner",
+      "other": "Other"
+    },
+    "income_category": {
+      "cabin": "Cabin",
+      "gallery": "Gallery",
       "other": "Other"
     },
     "booking_status": {

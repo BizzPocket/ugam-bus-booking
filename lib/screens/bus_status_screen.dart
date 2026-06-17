@@ -16,6 +16,7 @@ import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
+import '../widgets/occupant_action_sheet.dart';
 import 'add_bus_screen.dart';
 import 'bus_money_screen.dart';
 import 'collection_screen.dart';
@@ -139,9 +140,10 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                         layout: layout,
                         assignments: assignments,
                         groupColors: tourGroupColors(tour),
-                        onSeatTap: (passenger) => _showPassengerSheet(
+                        onSeatTap: (seatId, occupants) => _showSeatOccupants(
                           context,
-                          passenger,
+                          seatId,
+                          occupants,
                           bus,
                           tour.id,
                         ),
@@ -233,6 +235,39 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
   /// Bottom sheet that shows passenger details when a booked seat is
   /// tapped. Business logic preserved verbatim — same seat-list build,
   /// same handler-badge surfacing, same phone-call CTA.
+  /// Routes a seat tap by how many DISTINCT riders sit there. A Double Sofa can
+  /// carry up to four (two berths × GO+RET), so a lone rider opens their detail
+  /// sheet as before, while a shared seat opens the canonical read-only
+  /// [OccupantActionSheet] listing everyone (with per-person call) — the same
+  /// sheet the Charts screen uses, so no rider is hidden behind `.first`.
+  void _showSeatOccupants(
+    BuildContext context,
+    String seatId,
+    List<Passenger> occupants,
+    Bus bus,
+    String tourId,
+  ) {
+    final seen = <String>{};
+    final distinct = [
+      for (final p in occupants)
+        if (seen.add(p.id)) p,
+    ];
+    if (distinct.isEmpty) return;
+    if (distinct.length == 1) {
+      _showPassengerSheet(context, distinct.first, bus, tourId);
+      return;
+    }
+    OccupantActionSheet.show(
+      context,
+      occupants: distinct,
+      tourId: bus.tourId?.isNotEmpty == true ? bus.tourId! : tourId,
+      busId: bus.id,
+      seatId: seatId,
+      busName: bus.name,
+      mode: OccupantSheetMode.readOnly,
+    );
+  }
+
   void _showPassengerSheet(
     BuildContext context,
     Passenger passenger,
@@ -427,7 +462,11 @@ class _SeatChartCard extends StatelessWidget {
   final BusLayout layout;
   final Map<String, List<Passenger>> assignments;
   final GroupColorResolver groupColors;
-  final ValueChanged<Passenger> onSeatTap;
+
+  /// The tapped seat's id + its occupants (berth-accurate, so a whole double
+  /// held solo arrives as the rider twice) — the handler de-dupes and shows one
+  /// or all.
+  final void Function(String seatId, List<Passenger> occupants) onSeatTap;
 
   const _SeatChartCard({
     required this.layout,
@@ -482,7 +521,7 @@ class _SeatChartCard extends StatelessWidget {
                 // seat is inert here (re-seating lives in the unified grid).
                 onTapBooked: occupants.isEmpty
                     ? null
-                    : () => onSeatTap(occupants.first),
+                    : () => onSeatTap(cell.seatId!, occupants),
               ),
             );
           },

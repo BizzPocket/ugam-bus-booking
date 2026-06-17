@@ -186,6 +186,17 @@ class SeatChartTile extends StatelessWidget {
     return free < 0 ? 0 : free;
   }
 
+  /// Riders BEYOND the two the tile can draw. A Double Sofa is two berths, each
+  /// reusable across legs, so up to four distinct one-way riders can share it;
+  /// the tile only ever shows two (a shared split or a GO/RET stack), so a
+  /// small "+N" badge flags the rest — the full roster is one tap away in the
+  /// occupant sheet. Zero for non-doubles and for two-or-fewer riders.
+  int get _extraOccupants {
+    if (cell.seatType != SeatType.doubleSofa) return 0;
+    final extra = _occ.length - 2;
+    return extra > 0 ? extra : 0;
+  }
+
   /// When this seat is reused across disjoint legs — an outbound-only GO holder
   /// AND a return-only RETURN holder — returns that pair (GO first). Otherwise
   /// null. A round-trip occupant holds BOTH legs exclusively, so a pair of
@@ -566,6 +577,7 @@ class SeatChartTile extends StatelessWidget {
             ),
           if (moneyDotColor != null)
             Positioned(bottom: 3, right: 4, child: _dot(moneyDotColor!, 7)),
+          if (_extraOccupants > 0) _extraBadge(c),
         ],
       ),
     );
@@ -625,6 +637,7 @@ class SeatChartTile extends StatelessWidget {
             ),
           if (moneyDotColor != null)
             Positioned(bottom: 3, right: 4, child: _dot(moneyDotColor!, 7)),
+          if (_extraOccupants > 0) _extraBadge(c),
         ],
       ),
     );
@@ -713,6 +726,7 @@ class SeatChartTile extends StatelessWidget {
             ),
           if (moneyDotColor != null)
             Positioned(bottom: 4, right: 4, child: _dot(moneyDotColor!, 8)),
+          if (_extraOccupants > 0) _extraBadge(c),
         ],
       ),
     );
@@ -832,6 +846,29 @@ class SeatChartTile extends StatelessWidget {
       child: Icon(Icons.event_seat_outlined, size: 16, color: c.ink3),
     );
   }
+
+  /// A small "+N" pill (bottom-left) flagging riders the tile can't draw — see
+  /// [_extraOccupants]. Bottom-left keeps it clear of the seat id (top-left),
+  /// the priority star (top-right) and the money dot (bottom-right).
+  Widget _extraBadge(UgamColorSet c) => Positioned(
+    bottom: 3,
+    left: 4,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+      decoration: BoxDecoration(
+        color: c.ink.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Text(
+        '+$_extraOccupants',
+        style: UgamText.micro.copyWith(
+          color: c.onAccent,
+          fontSize: 7.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    ),
+  );
 
   static Widget _dot(Color color, double size) => Container(
     width: size,

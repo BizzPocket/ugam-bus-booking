@@ -78,14 +78,51 @@ Map<String, SeatOccupancy> seatOccupantsForBus(
   return out;
 }
 
-/// Flat distinct-occupant list per seat for callers that only render names.
-/// Returns `occ.all` per seat — the de-duped, GO-first, leg-aware list that
-/// replaces the flat `Map<String, List<Passenger>>` maps built ad-hoc by the
-/// read-only Charts screen.
+/// EVERY distinct rider on each seat of [busId], keyed by seatId, in stable
+/// GO-first order (outbound + round-trip riders first, then return-only).
+///
+/// Unlike [seatOccupantsForBus] — which keeps ONE holder per leg so the tile
+/// can draw its GO/RET split — this keeps ALL of them. A Double Sofa is two
+/// berths, and each berth may be reused across legs, so one sofa can legally
+/// seat up to FOUR distinct one-way riders (two outbound + two return). The
+/// older `SeatOccupancy.all` (one GO + one RET) silently dropped the second
+/// same-leg rider, so a sofa booked by two return-only riders showed only one
+/// of them on every read-only chart, its tap sheet, and the chart PDF. This is
+/// the single source those surfaces share, so the full set surfaces everywhere.
+///
+/// De-duped by passenger id: a whole double held solo by one round-trip rider
+/// (two assignment entries on the same seatId) collapses to a single entry, and
+/// a rider listed twice on one seat counts once.
 Map<String, List<Passenger>> occupantListForBus(
   Iterable<Passenger> passengers,
   String busId,
-) => {
-  for (final e in seatOccupantsForBus(passengers, busId).entries)
-    e.key: e.value.all,
-};
+) {
+  // Partition by leg exactly as [seatOccupantsForBus] does (so GO-first
+  // ordering matches the tile), but accumulate the FULL list per leg instead of
+  // keeping only the first. A round-trip rider uses both legs; bucket them with
+  // GO so they are never counted on both sides.
+  final go = <String, List<Passenger>>{};
+  final ret = <String, List<Passenger>>{};
+  for (final p in passengers) {
+    final seenSeats = <String>{}; // one seat counts a rider once, not per berth
+    for (final a in p.assignedSeats) {
+      if (a.busId != busId) continue;
+      if (!seenSeats.add(a.seatId)) continue;
+      if (p.tripType.usesOutbound) {
+        (go[a.seatId] ??= <Passenger>[]).add(p);
+      } else if (p.tripType.usesReturn) {
+        (ret[a.seatId] ??= <Passenger>[]).add(p);
+      }
+    }
+  }
+  final out = <String, List<Passenger>>{};
+  for (final seatId in {...go.keys, ...ret.keys}) {
+    final list = <Passenger>[];
+    final ids = <String>{};
+    for (final p in [...?go[seatId], ...?ret[seatId]]) {
+      if (ids.add(p.id)) list.add(p);
+    }
+    out[seatId] = list;
+  }
+  return out;
+}
