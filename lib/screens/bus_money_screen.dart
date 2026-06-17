@@ -8,6 +8,7 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/bus_handover.dart';
 import '../models/expense.dart';
+import '../models/income_entry.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
 import '../utils/formatters.dart';
@@ -63,6 +64,9 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                 final handovers = controller.handovers
                     .where((h) => h.busId == widget.bus.id)
                     .toList();
+                final incomes = controller.incomes
+                    .where((i) => i.busId == widget.bus.id)
+                    .toList();
                 final t = controller.tourSummary();
 
                 return ListView(
@@ -90,6 +94,15 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                             icon: Icons.payments_rounded,
                             value: Formatters.formatMoneyInr(s.collected),
                             label: tr('bus_money.stat_collected'),
+                            variant: UgamStatVariant.good,
+                          ),
+                        ),
+                        const SizedBox(width: UgamSpacing.md),
+                        Expanded(
+                          child: UgamStatTile(
+                            icon: Icons.savings_rounded,
+                            value: Formatters.formatMoneyInr(s.income),
+                            label: tr('bus_money.stat_income'),
                             variant: UgamStatVariant.good,
                           ),
                         ),
@@ -190,6 +203,35 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                         ),
                       ),
                     ],
+                    const SizedBox(height: UgamSpacing.xl),
+
+                    // ── Extra income (read-only) ───────────────────────
+                    // Handler logs Cabin/Gallery/Other extra cash on the
+                    // ground; the admin only views it here (no add/edit).
+                    Text(
+                      tr('bus_money.section_income'),
+                      style: UgamText.titleM.copyWith(color: c.ink),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    if (incomes.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: UgamSpacing.lg,
+                        ),
+                        child: UgamEmpty(
+                          icon: Icons.savings_outlined,
+                          title: tr('bus_money.income_empty'),
+                        ),
+                      )
+                    else
+                      ...incomes.map(
+                        (i) => Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.sm,
+                          ),
+                          child: _IncomeRow(income: i),
+                        ),
+                      ),
                     const SizedBox(height: UgamSpacing.xl),
 
                     // ── Handover ───────────────────────────────────────
@@ -664,6 +706,76 @@ class _BusOwnerRentRow extends StatelessWidget {
   }
 }
 
+/// A single handler-entered income entry, shown read-only on the admin's
+/// money screen. Mirrors [_ExpenseRow] styling but has no edit/delete — the
+/// handler logs this extra cash (Cabin/Gallery/Other) on the ground.
+class _IncomeRow extends StatelessWidget {
+  final IncomeEntry income;
+
+  const _IncomeRow({required this.income});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final receivedBy = income.receivedBy?.trim() ?? '';
+    final label = income.label.isEmpty
+        ? income.category.displayName
+        : income.label;
+    return UgamCard.plain(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.gutter,
+        vertical: UgamSpacing.md,
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: c.cardElev,
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+            ),
+            child: Text(
+              income.category.displayName,
+              style: UgamText.micro.copyWith(color: c.ink2),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (receivedBy.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    receivedBy,
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Text(
+            Formatters.formatMoneyInr(income.amount),
+            style: UgamText.tabular(
+              UgamText.bodyStrong.copyWith(color: c.good),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HandoverRow extends StatelessWidget {
   final BusHandover handover;
   final VoidCallback onTap;
@@ -701,8 +813,12 @@ class _HandoverRow extends StatelessWidget {
                     tr(
                       'bus_money.handed_of',
                       namedArgs: {
-                        'handed': Formatters.formatMoneyInr(handover.handedOverAmount),
-                        'expected': Formatters.formatMoneyInr(handover.expectedAmount),
+                        'handed': Formatters.formatMoneyInr(
+                          handover.handedOverAmount,
+                        ),
+                        'expected': Formatters.formatMoneyInr(
+                          handover.expectedAmount,
+                        ),
                       },
                     ),
                     style: UgamText.bodyStrong.copyWith(color: c.ink),
@@ -747,6 +863,10 @@ class _TourRollupCard extends StatelessWidget {
           _RollupRow(
             label: tr('bus_money.rollup_total_collected'),
             value: Formatters.formatMoneyInr(summary.totalCollected),
+          ),
+          _RollupRow(
+            label: tr('bus_money.rollup_total_income'),
+            value: Formatters.formatMoneyInr(summary.totalIncome),
           ),
           _RollupRow(
             label: tr('bus_money.rollup_total_expenses'),

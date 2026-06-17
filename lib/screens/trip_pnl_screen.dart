@@ -94,8 +94,9 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                 // Touch the obs lists so Obx re-runs on any money change.
                 final total = _money.tourSummary();
                 final handlers = _money.handlerSummaries();
-                final busSummaries =
-                    _money.summariesForBuses(buses.map((b) => b.id));
+                final busSummaries = _money.summariesForBuses(
+                  buses.map((b) => b.id),
+                );
                 final busById = {for (final b in buses) b.id: b};
 
                 return ListView(
@@ -114,13 +115,16 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                       const SizedBox(height: UgamSpacing.sm),
                       for (final h in handlers)
                         Padding(
-                          padding: const EdgeInsets.only(bottom: UgamSpacing.md),
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.md,
+                          ),
                           child: _PnlCard(
                             title: _handlerName(tour, h.handlerPassengerId),
                             subtitle: _busCount(h.busIds.length),
                             revenueBilled: h.revenueBilled,
                             collected: h.collected,
                             costs: h.expensesTotal,
+                            income: h.income,
                             netBilled: h.netBilled,
                             netCollected: h.netCollected,
                             c: c,
@@ -135,13 +139,18 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                         padding: const EdgeInsets.only(bottom: UgamSpacing.md),
                         child: _PnlCard(
                           title: busById[s.busId]?.name ?? '',
-                          subtitle: tr('trip_pnl.rent', namedArgs: {
-                            'n': Formatters.formatMoneyInr(
-                                busById[s.busId]?.busPrice ?? 0)
-                          }),
+                          subtitle: tr(
+                            'trip_pnl.rent',
+                            namedArgs: {
+                              'n': Formatters.formatMoneyInr(
+                                busById[s.busId]?.busPrice ?? 0,
+                              ),
+                            },
+                          ),
                           revenueBilled: s.revenueBilled,
                           collected: s.collected,
                           costs: s.expensesTotal,
+                          income: s.income,
                           netBilled: s.netBilled,
                           netCollected: s.netCollected,
                           c: c,
@@ -175,9 +184,7 @@ class _TripTotalCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            billed >= 0
-                ? tr('trip_pnl.net_profit')
-                : tr('trip_pnl.net_loss'),
+            billed >= 0 ? tr('trip_pnl.net_profit') : tr('trip_pnl.net_loss'),
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
           const SizedBox(height: UgamSpacing.xs),
@@ -196,6 +203,14 @@ class _TripTotalCard extends StatelessWidget {
             value: total.totalNet,
             c: c,
           ),
+          if (total.totalIncome != 0) ...[
+            const SizedBox(height: UgamSpacing.xs),
+            _NetLine(
+              label: tr('bus_money.stat_income'),
+              value: total.totalIncome,
+              c: c,
+            ),
+          ],
           const Divider(height: UgamSpacing.lg),
           Row(
             children: [
@@ -239,6 +254,7 @@ class _PnlCard extends StatelessWidget {
   final double revenueBilled;
   final double collected;
   final double costs;
+  final double income;
   final double netBilled;
   final double netCollected;
   final UgamColorSet c;
@@ -249,6 +265,7 @@ class _PnlCard extends StatelessWidget {
     required this.revenueBilled,
     required this.collected,
     required this.costs,
+    required this.income,
     required this.netBilled,
     required this.netCollected,
     required this.c,
@@ -268,15 +285,19 @@ class _PnlCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(title,
-                        style: UgamText.titleS.copyWith(color: c.ink),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      title,
+                      style: UgamText.titleS.copyWith(color: c.ink),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     const SizedBox(height: 2),
-                    Text(subtitle,
-                        style: UgamText.caption.copyWith(color: c.ink3),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                    Text(
+                      subtitle,
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
@@ -330,6 +351,10 @@ class _PnlCard extends StatelessWidget {
               ),
             ],
           ),
+          if (income != 0) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            _NetLine(label: tr('bus_money.stat_income'), value: income, c: c),
+          ],
         ],
       ),
     );
@@ -376,15 +401,19 @@ class _MiniStat extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(value,
-            style: UgamText.bodyStrong.copyWith(color: tone),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis),
+        Text(
+          value,
+          style: UgamText.bodyStrong.copyWith(color: tone),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         const SizedBox(height: 2),
-        Text(label,
-            style: UgamText.micro.copyWith(color: c.ink3),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis),
+        Text(
+          label,
+          style: UgamText.micro.copyWith(color: c.ink3),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }

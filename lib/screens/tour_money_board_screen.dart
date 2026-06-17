@@ -84,8 +84,9 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
               final title = _tours.getTour(widget.tourId)?.title ?? '';
               return UgamAppBar(
                 eyebrow: tr('tour_money_board.eyebrow'),
-                title:
-                    title.isEmpty ? tr('tour_money_board.tour_money') : title,
+                title: title.isEmpty
+                    ? tr('tour_money_board.tour_money')
+                    : title,
               );
             }),
             Expanded(
@@ -102,8 +103,9 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
 
                 final buses = tour.buses;
                 // Touch the money obs lists so Obx re-renders on any change.
-                final summaries =
-                    _money.summariesForBuses(buses.map((b) => b.id));
+                final summaries = _money.summariesForBuses(
+                  buses.map((b) => b.id),
+                );
 
                 if (buses.isEmpty) {
                   return UgamEmpty(
@@ -134,8 +136,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                     const SizedBox(height: UgamSpacing.sm),
                     for (var i = 0; i < buses.length; i++)
                       Padding(
-                        padding:
-                            const EdgeInsets.only(bottom: UgamSpacing.md),
+                        padding: const EdgeInsets.only(bottom: UgamSpacing.md),
                         child: _BusMoneyRow(
                           bus: buses[i],
                           summary: summaries[i],
@@ -203,11 +204,15 @@ class _PnlEntryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(tr('trip_pnl.title'),
-                    style: UgamText.titleS.copyWith(color: c.ink)),
+                Text(
+                  tr('trip_pnl.title'),
+                  style: UgamText.titleS.copyWith(color: c.ink),
+                ),
                 const SizedBox(height: 2),
-                Text(tr('trip_pnl.entry_sub'),
-                    style: UgamText.caption.copyWith(color: c.ink3)),
+                Text(
+                  tr('trip_pnl.entry_sub'),
+                  style: UgamText.caption.copyWith(color: c.ink3),
+                ),
               ],
             ),
           ),
@@ -216,8 +221,10 @@ class _PnlEntryCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(Formatters.formatMoneyInr(billed.abs()),
-                  style: UgamText.titleS.copyWith(color: tone)),
+              Text(
+                Formatters.formatMoneyInr(billed.abs()),
+                style: UgamText.titleS.copyWith(color: tone),
+              ),
               Text(
                 billed >= 0 ? tr('trip_pnl.profit') : tr('trip_pnl.loss'),
                 style: UgamText.micro.copyWith(color: tone),
@@ -255,35 +262,38 @@ class _BusMoneyRow extends StatelessWidget {
   Widget build(BuildContext context) {
     // warm = needs action (outstanding handover / shortfall) — attention only.
     // good = settled. neutral = nothing has moved yet → no tint.
-    final (UgamCardTone cardTone, UgamStatusTone tone, String statusLabel) =
-        switch (state) {
+    final (
+      UgamCardTone cardTone,
+      UgamStatusTone tone,
+      String statusLabel,
+    ) = switch (state) {
       BusMoneyState.actionNeeded => (
-          UgamCardTone.warm,
-          UgamStatusTone.warm,
-          summary.outstandingHandover > 0.005
-              ? tr(
-                  'tour_money_board.handover_due',
-                  namedArgs: {
-                    'n': Formatters.formatMoneyInr(summary.outstandingHandover)
-                  },
-                )
-              : tr(
-                  'tour_money_board.to_collect_amount',
-                  namedArgs: {
-                    'n': Formatters.formatMoneyInr(summary.toCollectTotal)
-                  },
-                ),
-        ),
+        UgamCardTone.warm,
+        UgamStatusTone.warm,
+        summary.outstandingHandover > 0.005
+            ? tr(
+                'tour_money_board.handover_due',
+                namedArgs: {
+                  'n': Formatters.formatMoneyInr(summary.outstandingHandover),
+                },
+              )
+            : tr(
+                'tour_money_board.to_collect_amount',
+                namedArgs: {
+                  'n': Formatters.formatMoneyInr(summary.toCollectTotal),
+                },
+              ),
+      ),
       BusMoneyState.settled => (
-          UgamCardTone.good,
-          UgamStatusTone.good,
-          tr('tour_money_board.settled'),
-        ),
+        UgamCardTone.good,
+        UgamStatusTone.good,
+        tr('tour_money_board.settled'),
+      ),
       BusMoneyState.neutral => (
-          UgamCardTone.none,
-          UgamStatusTone.neutral,
-          tr('tour_money_board.no_activity'),
-        ),
+        UgamCardTone.none,
+        UgamStatusTone.neutral,
+        tr('tour_money_board.no_activity'),
+      ),
     };
 
     return UgamCard.plain(
@@ -330,6 +340,25 @@ class _BusMoneyRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    // Extra income the handler holds (cabin/gallery/other).
+                    // It already folds into the headline outstanding figure
+                    // above; surface it compactly so the row shows WHERE the
+                    // extra cash came from. Only when there is income.
+                    if (summary.income > 0.005) ...[
+                      const SizedBox(height: UgamSpacing.xs),
+                      Text(
+                        '+${Formatters.formatMoneyInr(summary.income)} '
+                        '${tr('bus_money.stat_income')}',
+                        style: UgamText.tabular(
+                          UgamText.micro.copyWith(
+                            color: c.good,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -410,8 +439,9 @@ class _BusMoneyRow extends StatelessWidget {
                 child: _Metric(
                   label: tr('tour_money_board.to_collect'),
                   value: Formatters.formatMoneyInr(summary.toCollectTotal),
-                  valueColor:
-                      summary.toCollectTotal > 0.005 ? c.danger : c.ink2,
+                  valueColor: summary.toCollectTotal > 0.005
+                      ? c.danger
+                      : c.ink2,
                   c: c,
                 ),
               ),
@@ -419,8 +449,7 @@ class _BusMoneyRow extends StatelessWidget {
                 child: _Metric(
                   label: tr('tour_money_board.to_return'),
                   value: Formatters.formatMoneyInr(summary.toReturnTotal),
-                  valueColor:
-                      summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
+                  valueColor: summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
                   c: c,
                 ),
               ),
@@ -484,8 +513,9 @@ class _Metric extends StatelessWidget {
         const SizedBox(height: UgamSpacing.xs),
         Text(
           value,
-          style:
-              UgamText.tabular(UgamText.bodyStrong.copyWith(color: valueColor)),
+          style: UgamText.tabular(
+            UgamText.bodyStrong.copyWith(color: valueColor),
+          ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -526,9 +556,7 @@ class _TotalsCapsule extends StatelessWidget {
                   label: settled
                       ? tr('tour_money_board.all_settled')
                       : tr('tour_money_board.open'),
-                  tone: settled
-                      ? UgamStatusTone.good
-                      : UgamStatusTone.warm,
+                  tone: settled ? UgamStatusTone.good : UgamStatusTone.warm,
                 ),
               ],
             ),
@@ -574,9 +602,7 @@ class _TotalsCapsule extends StatelessWidget {
                 Text(
                   Formatters.formatMoneyInr(outstanding),
                   style: UgamText.tabular(
-                    UgamText.titleS.copyWith(
-                      color: settled ? c.good : c.warm,
-                    ),
+                    UgamText.titleS.copyWith(color: settled ? c.good : c.warm),
                   ),
                 ),
               ],
@@ -612,7 +638,8 @@ class _TotalCol extends StatelessWidget {
         Text(
           value,
           style: UgamText.tabular(
-              UgamText.numLg.copyWith(color: color, fontSize: 17)),
+            UgamText.numLg.copyWith(color: color, fontSize: 17),
+          ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

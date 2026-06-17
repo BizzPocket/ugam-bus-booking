@@ -114,4 +114,55 @@ void main() {
       expect(map, isEmpty);
     });
   });
+
+  // occupantListForBus is the FULL-roster resolver: unlike SeatOccupancy (one
+  // holder per leg), it keeps every rider on a seat. A Double Sofa is two
+  // berths, each reusable across legs, so up to FOUR distinct one-way riders
+  // can share one sofa — the read-only charts, their tap sheets, and the chart
+  // PDF must show them all, which the old `.all` (capped to one GO + one RET)
+  // silently dropped.
+  group('occupantListForBus (full roster)', () {
+    test('two RETURN-only riders on one double return BOTH (the dropped case)',
+        () {
+      // The live regression: a Double Sofa booked by two return-only riders.
+      // SeatOccupancy keeps only the first on the RET leg; the full roster keeps
+      // both.
+      final a = _p('a', trip: TripType.returnOnly, seats: ['DU3']);
+      final b = _p('b', trip: TripType.returnOnly, seats: ['DU3']);
+
+      expect(occupantListForBus([a, b], _bus)['DU3']!.map((p) => p.id),
+          ['a', 'b']);
+      // Contrast: the leg-capped resolver drops the second same-leg rider.
+      expect(seatOccupantsForBus([a, b], _bus)['DU3']!.all.map((p) => p.id),
+          ['a']);
+    });
+
+    test('two ROUND-TRIP riders sharing one double return BOTH', () {
+      final a = _p('a', trip: TripType.roundTrip, seats: ['DS1']);
+      final b = _p('b', trip: TripType.roundTrip, seats: ['DS1']);
+
+      expect(occupantListForBus([a, b], _bus)['DS1']!.map((p) => p.id),
+          ['a', 'b']);
+    });
+
+    test('four one-way riders on one double (2 GO + 2 RET) return all, GO-first',
+        () {
+      final g1 = _p('g1', trip: TripType.outboundOnly, seats: ['DU6']);
+      final g2 = _p('g2', trip: TripType.outboundOnly, seats: ['DU6']);
+      final r1 = _p('r1', trip: TripType.returnOnly, seats: ['DU6']);
+      final r2 = _p('r2', trip: TripType.returnOnly, seats: ['DU6']);
+
+      expect(
+        occupantListForBus([g1, r1, g2, r2], _bus)['DU6']!.map((p) => p.id),
+        ['g1', 'g2', 'r1', 'r2'], // GO riders first, then RET
+      );
+    });
+
+    test('whole double held solo (two entries) collapses to ONE rider', () {
+      final solo = _p('solo', trip: TripType.roundTrip, seats: ['DS9', 'DS9']);
+
+      expect(occupantListForBus([solo], _bus)['DS9']!.map((p) => p.id),
+          ['solo']);
+    });
+  });
 }

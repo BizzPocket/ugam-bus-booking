@@ -16,8 +16,9 @@ import 'tour_controller.dart';
 /// are read straight from the already-loaded [TourController]; only the per-tour
 /// money sums are fetched here.
 ///
-/// Aggregation runs client-side: we page through `collections` and `expenses`
-/// (both RLS-scoped to the owner's tours) and fold them into per-tour maps.
+/// Aggregation runs client-side: we page through `collections`, `expenses` and
+/// `incomes` (all RLS-scoped to the owner's tours) and fold them into per-tour
+/// maps.
 /// Paging past the [SyncService] 500-row cap keeps the totals correct once an
 /// agent has run enough trips to exceed it.
 class FinanceController extends GetxController {
@@ -87,6 +88,18 @@ class FinanceController extends GetxController {
           expenses[tid] = (expenses[tid] ?? 0) + rent;
         },
       );
+      await _pageThrough(
+        table: 'incomes',
+        columns: 'tour_id, amount',
+        onRow: (row) {
+          final tid = row['tour_id'] as String?;
+          if (tid == null) return;
+          final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+          // Extra income (cabin/gallery/other) is real earned revenue — fold it
+          // into the tour's revenue so the cross-tour net P&L isn't understated.
+          revenue[tid] = (revenue[tid] ?? 0) + amount;
+        },
+      );
 
       _revenueByTour
         ..clear()
@@ -113,11 +126,13 @@ class FinanceController extends GetxController {
     final client = SupabaseService.instance.client;
     var from = 0;
     while (true) {
-      final rows = await client
-          .from(table)
-          .select(columns)
-          .order('id', ascending: true)
-          .range(from, from + _pageSize - 1) as List;
+      final rows =
+          await client
+                  .from(table)
+                  .select(columns)
+                  .order('id', ascending: true)
+                  .range(from, from + _pageSize - 1)
+              as List;
       for (final r in rows) {
         onRow(Map<String, dynamic>.from(r as Map));
       }
@@ -155,8 +170,7 @@ class FinanceController extends GetxController {
       FinanceTotals.from(financesFor(period, completedOnly: completedOnly));
 
   /// Lifetime realised net across all completed tours — for the Settings card.
-  double get lifetimeNet =>
-      totalsFor(FinancePeriod.allTime).net;
+  double get lifetimeNet => totalsFor(FinancePeriod.allTime).net;
 
   bool _inPeriod(DateTime date, FinancePeriod period, DateTime now) {
     switch (period) {

@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 
 import '../models/collection.dart';
 import '../models/expense.dart';
+import '../models/income_entry.dart';
 import '../models/bus_handover.dart';
 import '../models/money_summary.dart';
 import '../services/sync_service.dart';
@@ -13,8 +14,8 @@ import '../utils/app_snackbar.dart';
 import 'tour_controller.dart';
 
 /// Loads & persists the money tables (`collections`, `expenses`,
-/// `bus_handovers`) for a single tour via [SyncService], and exposes
-/// aggregation summaries built from the locally held rows.
+/// `bus_handovers`, `incomes`) for a single tour via [SyncService], and
+/// exposes aggregation summaries built from the locally held rows.
 ///
 /// CRUD follows the same shape as [TourController]: mutate local state
 /// optimistically so the UI feels instant, await the server write, and on
@@ -27,6 +28,7 @@ class MoneyController extends GetxController {
   final collections = <Collection>[].obs;
   final expenses = <Expense>[].obs;
   final handovers = <BusHandover>[].obs;
+  final incomes = <IncomeEntry>[].obs;
   final isLoading = false.obs;
 
   /// Which tour the lists currently hold data for. Used to scope cache
@@ -38,6 +40,7 @@ class MoneyController extends GetxController {
   String _collectionsKey(String tourId) => 'collections_$tourId';
   String _expensesKey(String tourId) => 'expenses_$tourId';
   String _handoversKey(String tourId) => 'handovers_$tourId';
+  String _incomesKey(String tourId) => 'incomes_$tourId';
 
   // ── Load / refresh ────────────────────────────────────────
 
@@ -64,11 +67,18 @@ class MoneyController extends GetxController {
           filters: {'tour_id': tourId},
           orderBy: 'created_at',
         ),
+        _sync.smartFetch(
+          table: 'incomes',
+          cacheKey: _incomesKey(tourId),
+          filters: {'tour_id': tourId},
+          orderBy: 'created_at',
+        ),
       ]);
 
       collections.assignAll(results[0].map(Collection.fromMap).toList());
       expenses.assignAll(results[1].map(Expense.fromMap).toList());
       handovers.assignAll(results[2].map(BusHandover.fromMap).toList());
+      incomes.assignAll(results[3].map(IncomeEntry.fromMap).toList());
     } catch (e, st) {
       // Leave whatever we already hold in place — a transient fetch
       // failure shouldn't blank the money screen.
@@ -87,6 +97,7 @@ class MoneyController extends GetxController {
     await _sync.invalidateCache(_collectionsKey(tourId));
     await _sync.invalidateCache(_expensesKey(tourId));
     await _sync.invalidateCache(_handoversKey(tourId));
+    await _sync.invalidateCache(_incomesKey(tourId));
     await loadForTour(tourId);
   }
 
@@ -297,6 +308,7 @@ class MoneyController extends GetxController {
     collections: collections.toList(),
     expenses: expenses.toList(),
     handovers: handovers.toList(),
+    incomes: incomes.toList(),
     busRent: _busRents()[busId] ?? 0,
     revenueBilled: _billedRevenues()[busId] ?? 0,
   );
@@ -305,9 +317,9 @@ class MoneyController extends GetxController {
     collections: collections.toList(),
     expenses: expenses.toList(),
     handovers: handovers.toList(),
+    incomes: incomes.toList(),
     busRentsTotal: _busRents().values.fold(0.0, (sum, r) => sum + r),
-    totalRevenueBilled:
-        _billedRevenues().values.fold(0.0, (sum, r) => sum + r),
+    totalRevenueBilled: _billedRevenues().values.fold(0.0, (sum, r) => sum + r),
   );
 
   /// Read-only summaries for every bus id in [busIds], in the order given.
@@ -318,6 +330,7 @@ class MoneyController extends GetxController {
     final cols = collections.toList();
     final exps = expenses.toList();
     final hands = handovers.toList();
+    final incs = incomes.toList();
     final rents = _busRents();
     final billed = _billedRevenues();
     return [
@@ -327,6 +340,7 @@ class MoneyController extends GetxController {
           collections: cols,
           expenses: exps,
           handovers: hands,
+          incomes: incs,
           busRent: rents[id] ?? 0,
           revenueBilled: billed[id] ?? 0,
         ),

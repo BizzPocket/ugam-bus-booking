@@ -1,5 +1,6 @@
 import 'collection.dart';
 import 'expense.dart';
+import 'income_entry.dart';
 import 'bus_handover.dart';
 
 /// Aggregated money figures for a single bus on a tour.
@@ -19,6 +20,11 @@ class BusMoneySummary {
   final double toReturnTotal;
   final double toCollectTotal;
 
+  /// Extra income logged against this bus (cabin / gallery / other) — cash the
+  /// handler takes in OUTSIDE passenger fares. It adds to what they hold and
+  /// must hand over, and to both profit figures.
+  final double income;
+
   const BusMoneySummary({
     required this.busId,
     required this.collected,
@@ -27,47 +33,58 @@ class BusMoneySummary {
     required this.toReturnTotal,
     required this.toCollectTotal,
     this.revenueBilled = 0,
+    this.income = 0,
   });
 
-  /// Net cash the bus should hand over (collections minus expenses).
-  double get expectedHandover => collected - expensesTotal;
+  /// Net cash the bus should hand over (collections + extra income − expenses).
+  /// Mirrors the handler's "in hand" = collected + income − spent, so the
+  /// admin's settlement expectation matches what the handler is actually holding.
+  double get expectedHandover => collected + income - expensesTotal;
 
   /// Still-owed handover (expected minus what was actually handed over).
   double get outstandingHandover => expectedHandover - handedOver;
 
-  /// TRUE profit/loss for the bus: fares billed − (rent + expenses). Reflects
-  /// the trip's real result even before every passenger has paid.
-  double get netBilled => revenueBilled - expensesTotal;
+  /// TRUE profit/loss for the bus: fares billed + extra income − (rent +
+  /// expenses). Reflects the trip's real result even before every passenger
+  /// has paid.
+  double get netBilled => revenueBilled + income - expensesTotal;
 
-  /// CASH profit/loss so far: money actually collected − (rent + expenses).
-  /// Same figure as [expectedHandover]; named for the P&L view.
-  double get netCollected => collected - expensesTotal;
+  /// CASH profit/loss so far: money actually collected + extra income − (rent +
+  /// expenses). Same figure as [expectedHandover]; named for the P&L view.
+  double get netCollected => collected + income - expensesTotal;
 
   factory BusMoneySummary.compute({
     required String busId,
     required List<Collection> collections,
     required List<Expense> expenses,
     required List<BusHandover> handovers,
+    List<IncomeEntry> incomes = const [],
     double busRent = 0,
     double revenueBilled = 0,
   }) {
     final busCollections = collections.where((c) => c.busId == busId);
     final busExpenses = expenses.where((e) => e.busId == busId);
     final busHandovers = handovers.where((h) => h.busId == busId);
+    final busIncomes = incomes.where((i) => i.busId == busId);
 
     return BusMoneySummary(
       busId: busId,
       collected: busCollections.fold(0.0, (sum, c) => sum + c.netCollected),
+      income: busIncomes.fold(0.0, (sum, i) => sum + i.amount),
       revenueBilled: revenueBilled,
       // The bus owner's rent is the single source of truth (not a DB expense
       // row), so it is added to the expense rows here rather than counted twice.
       expensesTotal:
           busExpenses.fold(0.0, (sum, e) => sum + e.amount) + busRent,
       handedOver: busHandovers.fold(0.0, (sum, h) => sum + h.handedOverAmount),
-      toReturnTotal:
-          busCollections.fold(0.0, (sum, c) => sum + c.changeToReturn),
-      toCollectTotal:
-          busCollections.fold(0.0, (sum, c) => sum + c.stillToCollect),
+      toReturnTotal: busCollections.fold(
+        0.0,
+        (sum, c) => sum + c.changeToReturn,
+      ),
+      toCollectTotal: busCollections.fold(
+        0.0,
+        (sum, c) => sum + c.stillToCollect,
+      ),
     );
   }
 }
@@ -89,6 +106,9 @@ class HandlerMoneySummary {
   final double toCollectTotal;
   final double toReturnTotal;
 
+  /// Extra income (cabin / gallery / other) across this handler's buses.
+  final double income;
+
   const HandlerMoneySummary({
     required this.handlerPassengerId,
     required this.busIds,
@@ -98,10 +118,11 @@ class HandlerMoneySummary {
     required this.handedOver,
     required this.toCollectTotal,
     required this.toReturnTotal,
+    this.income = 0,
   });
 
-  double get netBilled => revenueBilled - expensesTotal;
-  double get netCollected => collected - expensesTotal;
+  double get netBilled => revenueBilled + income - expensesTotal;
+  double get netCollected => collected + income - expensesTotal;
   double get outstandingHandover => netCollected - handedOver;
 
   /// Roll a set of per-bus summaries up into one handler total.
@@ -114,6 +135,7 @@ class HandlerMoneySummary {
       busIds: [for (final b in buses) b.busId],
       revenueBilled: buses.fold(0.0, (s, b) => s + b.revenueBilled),
       collected: buses.fold(0.0, (s, b) => s + b.collected),
+      income: buses.fold(0.0, (s, b) => s + b.income),
       expensesTotal: buses.fold(0.0, (s, b) => s + b.expensesTotal),
       handedOver: buses.fold(0.0, (s, b) => s + b.handedOver),
       toCollectTotal: buses.fold(0.0, (s, b) => s + b.toCollectTotal),
@@ -133,6 +155,9 @@ class TourMoneySummary {
   final double totalToReturn;
   final double totalToCollect;
 
+  /// Total extra income (cabin / gallery / other) across every bus on the tour.
+  final double totalIncome;
+
   const TourMoneySummary({
     required this.totalCollected,
     required this.totalExpenses,
@@ -140,13 +165,15 @@ class TourMoneySummary {
     required this.totalToReturn,
     required this.totalToCollect,
     this.totalRevenueBilled = 0,
+    this.totalIncome = 0,
   });
 
-  /// Net cash for the tour (collections minus expenses).
-  double get totalNet => totalCollected - totalExpenses;
+  /// Net cash for the tour (collections + extra income − expenses).
+  double get totalNet => totalCollected + totalIncome - totalExpenses;
 
-  /// TRUE profit/loss for the tour: fares billed − (rents + expenses).
-  double get totalNetBilled => totalRevenueBilled - totalExpenses;
+  /// TRUE profit/loss for the tour: fares billed + extra income − (rents +
+  /// expenses).
+  double get totalNetBilled => totalRevenueBilled + totalIncome - totalExpenses;
 
   /// Still-owed handover across the whole tour.
   double get totalOutstandingHandover => totalNet - totalHandedOver;
@@ -155,23 +182,24 @@ class TourMoneySummary {
     required List<Collection> collections,
     required List<Expense> expenses,
     required List<BusHandover> handovers,
+    List<IncomeEntry> incomes = const [],
     double busRentsTotal = 0,
     double totalRevenueBilled = 0,
   }) {
     return TourMoneySummary(
-      totalCollected:
-          collections.fold(0.0, (sum, c) => sum + c.netCollected),
+      totalCollected: collections.fold(0.0, (sum, c) => sum + c.netCollected),
+      totalIncome: incomes.fold(0.0, (sum, i) => sum + i.amount),
       totalRevenueBilled: totalRevenueBilled,
       // Bus owner rents are the single source of truth (not DB expense rows),
       // so they are folded into the expense total here rather than double-counted.
       totalExpenses:
           expenses.fold(0.0, (sum, e) => sum + e.amount) + busRentsTotal,
-      totalHandedOver:
-          handovers.fold(0.0, (sum, h) => sum + h.handedOverAmount),
-      totalToReturn:
-          collections.fold(0.0, (sum, c) => sum + c.changeToReturn),
-      totalToCollect:
-          collections.fold(0.0, (sum, c) => sum + c.stillToCollect),
+      totalHandedOver: handovers.fold(
+        0.0,
+        (sum, h) => sum + h.handedOverAmount,
+      ),
+      totalToReturn: collections.fold(0.0, (sum, c) => sum + c.changeToReturn),
+      totalToCollect: collections.fold(0.0, (sum, c) => sum + c.stillToCollect),
     );
   }
 }
