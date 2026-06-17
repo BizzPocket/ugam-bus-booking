@@ -11,7 +11,7 @@
 //      handler passenger's id — i.e. the handler may only message a bus they own.
 //
 // On success it sends the WhatsAppCloudConfig.busMessageTemplate
-// ('bus_announcement', body var {{1}} = the free-text message) to every
+// ('bus_msg', body var {{1}} = the free-text message) to every
 // passenger seated on that bus (their assigned_seats jsonb contains the busId),
 // reusing the exact Graph API call shape as quick-action (same secrets, version
 // handling, buildComponents).
@@ -39,9 +39,10 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Approved Meta template for a free-text bus announcement (body var {{1}} = the
-// message). Mirrors WhatsAppCloudConfig.busMessageTemplate on the app side.
-const BUS_MESSAGE_TEMPLATE = "bus_announcement";
+// Approved Meta template for a free-text per-bus message (body var {{1}} = the
+// message). Named `bus_msg` (NOT `bus_announcement`) so Meta keeps it UTILITY,
+// not MARKETING. Mirrors WhatsAppCloudConfig.busMessageTemplate on the app side.
+const BUS_MESSAGE_TEMPLATE = "bus_msg";
 // Default template language — matches WhatsAppCloudConfig.defaultLanguage ('gu').
 const TEMPLATE_LANGUAGE = "gu";
 

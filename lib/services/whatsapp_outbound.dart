@@ -4,6 +4,9 @@ import '../config/whatsapp_cloud_config.dart';
 import '../models/chart_footer.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
+import '../models/tour_status.dart';
+import '../utils/passenger_display.dart';
+import '../utils/seat_grid_placement.dart';
 import '../utils/time_format.dart';
 import 'chart_footer_store.dart';
 import 'seat_chart_pdf.dart';
@@ -13,7 +16,9 @@ import 'whatsapp_cloud_service.dart';
 ///   * the PRE-LOCK greeting ([sendSeatConfirmed] / [sendConfirmed]) — the
 ///     `seat_allocation` template (body {{1}} = name, {{2}} = tour title),
 ///   * the AFTER-LOCK details ([sendSeatAllocations]) — the `seat_allotment`
-///     template (tour, seats, bus, date, name in its body).
+///     template (image header = the passenger's highlighted seat chart; body =
+///     passenger name, tour, bus, boarding place, departure date, departure
+///     time, handler contact).
 /// Builds each template payload (matching the variable contract in
 /// [WhatsAppCloudConfig]) and routes it through [WhatsAppCloudService] →
 /// the `quick-action` Edge Function.
@@ -27,6 +32,17 @@ class WhatsAppOutbound {
 
   static String _fmtDate(DateTime d) =>
       '${d.day} ${_months[d.month - 1]} ${d.year}';
+
+  /// Whether a "notify again" for [passenger] should deliver the FULL
+  /// after-lock seat-allotment (highlighted chart image + boarding place +
+  /// departure + handler contact) rather than the lighter pre-lock "seat
+  /// confirmed" greeting. True only once the tour is LOCKED (or completed) —
+  /// before lock the seat numbers are provisional and stay hidden — AND the
+  /// passenger actually holds seats to draw on a chart.
+  static bool shouldSendFullAllotment(Tour tour, Passenger passenger) =>
+      passenger.assignedSeats.isNotEmpty &&
+      (tour.status == TourStatus.locked ||
+          tour.status == TourStatus.completed);
 
   /// PRE-LOCK greeting for ONE passenger with an assigned (not-yet-locked) seat.
   /// The `seat_allocation` template has a static header and a BODY with two
@@ -61,8 +77,11 @@ class WhatsAppOutbound {
   }
 
   /// AFTER-LOCK details: sends each seated passenger the `seat_allotment`
-  /// template. Body variables, IN ORDER (must match the approved body):
-  ///   {{1}} tour title  {{2}} seat numbers  {{3}} bus  {{4}} date  {{5}} name
+  /// template. The seat numbers are NOT in the text any more — each passenger's
+  /// own seats are highlighted on the chart IMAGE header instead. Body variables,
+  /// IN ORDER (must match the approved body):
+  ///   {{1}} passenger name  {{2}} tour title  {{3}} bus  {{4}} boarding place
+  ///   {{5}} departure date  {{6}} departure time  {{7}} handler contact
   ///
   /// Each passenger's IMAGE-header chart is built + uploaded CONCURRENTLY (a
   /// bounded pool of [concurrency] at a time — the per-passenger PDF render +
@@ -123,9 +142,11 @@ class WhatsAppOutbound {
   }
 
   /// Builds ONE passenger's `seat_allotment` message — renders + uploads their
-  /// seat-chart image header (handler gets the full bus chart, everyone else
-  /// their own seats highlighted) and assembles the body params. A failed chart
-  /// upload degrades to a no-image message rather than dropping the recipient.
+  /// seat-chart image header (each recipient gets their own bus with their own
+  /// seats highlighted) and assembles the body params. The seat
+  /// numbers live ONLY on the highlighted chart now; the body carries the
+  /// departure details + handler contact. A failed chart upload degrades to a
+  /// no-image message rather than dropping the recipient.
   Future<WaMessage> _buildAllocationMessage(
     Tour tour,
     Passenger p,
@@ -135,27 +156,57 @@ class WhatsAppOutbound {
     final busId = p.assignedSeats.first.busId;
     final busMatch = tour.buses.where((b) => b.id == busId).toList();
     final bus = busMatch.isEmpty ? null : busMatch.first;
-    final busLabel = bus == null
-        ? ''
-        : (bus.busNumber.isNotEmpty ? bus.busNumber : bus.name);
+    // The customer's bus line ({{3}}) is the bus NAME only (e.g. "Raj") via the
+    // shared [Bus.customerLabel] — no registration number, no internal "Bus N"
+    // slot. The plate is an agent-only detail (it stays on the admin screens'
+    // [Bus.displayLabel]); the customer just needs the name.
+    final busLabel = _orDash(bus == null ? '' : bus.customerLabel);
     // Template variable order (must match the approved `seat_allotment` body):
-    //   {{1}} tour  {{2}} seats  {{3}} bus  {{4}} departure date (+ time when
-    //   set)  {{5}} departure PLACE = the bus's boarding point — NOT the name.
-    final time = formatHhMm(bus?.departureTime) ?? '';
-    final dateLabel = time.trim().isNotEmpty ? '$date · $time' : date;
-    final place = bus?.boardingPoint.trim() ?? '';
-    final seatNumbers = p.assignedSeats.map((a) => a.seatId).join(', ');
+    //   {{1}} passenger name  {{2}} tour (in the greeting "{name}, {tour} માટે
+    //   …")  {{3}} bus  {{4}} boarding place  {{5}} departure date
+    //   {{6}} departure time  {{7}} handler contact (name + phone).
+    //   Tour appears only in the greeting now — no separate "પ્રવાસ:" line. The
+    //   seat numbers are intentionally gone — highlighted on the chart image.
+    //
+    // Departure date is the tour date; time + place come from the passenger's
+    // bus, falling back to the tour-level chart footer (mirrors what the chart
+    // image footer prints).
+    final timeLabel = _orDash(formatHhMm(bus?.departureTime) ??
+        (footer.departureTime.trim().isNotEmpty
+            ? footer.departureTime.trim()
+            : ''));
+    final place = _orDash(
+      (bus?.boardingPoint.trim().isNotEmpty ?? false)
+          ? bus!.boardingPoint.trim()
+          : footer.boardingPlace.trim(),
+    );
+
+    // Handler contact for THIS passenger's bus (per-bus handler wins, else the
+    // tour handler) — so the customer has someone to reach on the day.
+    // displayPhone trims the +91 down to a clean 10-digit number.
+    final handlerId = bus?.handlerPassengerId ?? tour.handlerId;
+    final handlerMatch = handlerId == null
+        ? const <Passenger>[]
+        : tour.passengers.where((hp) => hp.id == handlerId).toList();
+    final handler = handlerMatch.isNotEmpty ? handlerMatch.first : tour.handler;
+    final handlerPhone = displayPhone(handler?.phone) ?? '';
+    final handlerContact = _orDash(
+      handler == null
+          ? ''
+          : (handlerPhone.isNotEmpty
+              ? '${handler.displayName} – $handlerPhone'
+              : handler.displayName),
+    );
 
     String? chartUrl;
     try {
-      final isHandler = tour.handlerId != null && p.id == tour.handlerId;
-      final images = isHandler
-          ? await SeatChartPdf.buildTourChartImages(tour: tour, footer: footer)
-          : await SeatChartPdf.buildPassengerChartImages(
-              tour: tour,
-              passenger: p,
-              footer: footer,
-            );
+      // Every recipient — handler included — gets THEIR OWN bus chart with
+      // their seats highlighted (one image per occupied bus; we send the first).
+      final images = await SeatChartPdf.buildPassengerChartImages(
+        tour: tour,
+        passenger: p,
+        footer: footer,
+      );
       if (images.isNotEmpty) {
         chartUrl = await _cloud.uploadSigned(
           bucket: WhatsAppCloudConfig.seatChartBucket,
@@ -172,9 +223,21 @@ class WhatsAppOutbound {
       to: WhatsAppCloudService.graphPhone(p.phone),
       template: WhatsAppCloudConfig.seatAllocationTemplate,
       headerImageUrl: chartUrl,
-      bodyParams: [tour.title, seatNumbers, busLabel, dateLabel, place],
+      bodyParams: [
+        _orDash(p.name),
+        tour.title, // {{2}} greeting: "{name}, {tour} માટે …"
+        busLabel,
+        place,
+        date,
+        timeLabel,
+        handlerContact,
+      ],
     );
   }
+
+  /// Meta rejects empty body parameters, so coerce blanks to a dash. Callers
+  /// pass already-trimmed text; this is the last guard before a value is sent.
+  static String _orDash(String s) => s.trim().isEmpty ? '—' : s.trim();
 
   /// Per-bus free-text announcement (F4 — ADMIN path). The signed-in agent
   /// types one [messageText] and it goes to every passenger seated on [busId]

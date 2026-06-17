@@ -8,6 +8,7 @@ import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/passenger_group.dart';
 import '../models/tour.dart';
+import '../routes/app_routes.dart';
 import '../utils/app_snackbar.dart';
 
 /// Small colour dot for a cross-booking group. Uses the app-wide golden-angle
@@ -26,6 +27,102 @@ class GroupDot extends StatelessWidget {
       shape: BoxShape.circle,
     ),
   );
+}
+
+/// Rounded-square numbered badge in the group's golden-angle colour. [number]
+/// is the group's 1-based order on the tour (so the colour reads as "group #1"),
+/// and the hue matches the SAME group on every seat chart. Used as the group
+/// card's avatar and, shrunk down, inside [GroupTag].
+class GroupNumberBadge extends StatelessWidget {
+  final int number;
+  final int colorIndex;
+  final double size;
+  final double radius;
+  final double fontSize;
+
+  const GroupNumberBadge({
+    super.key,
+    required this.number,
+    required this.colorIndex,
+    this.size = 28,
+    this.radius = 9,
+    this.fontSize = 14,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: groupColor(colorIndex),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: Text(
+        '$number',
+        style: UgamText.bodyStrong.copyWith(
+          color: Colors.white,
+          fontSize: fontSize,
+          fontWeight: FontWeight.w800,
+          height: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact group tag for a passenger row: a tiny numbered colour square + the
+/// group label in one pill, meant to sit BESIDE the passenger's name. Reads the
+/// same number + colour as the group's card, so the two never drift.
+class GroupTag extends StatelessWidget {
+  final int number;
+  final int colorIndex;
+  final String label;
+
+  const GroupTag({
+    super.key,
+    required this.number,
+    required this.colorIndex,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(3, 3, 8, 3),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GroupNumberBadge(
+            number: number,
+            colorIndex: colorIndex,
+            size: 16,
+            radius: 5,
+            fontSize: 9,
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              style: UgamText.caption.copyWith(
+                color: c.ink2,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Capacity facts for a cross-booking group measured against ONE bus. A group
@@ -397,6 +494,342 @@ class _SheetSearchField extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Sheet 3 — assign ONE passenger to an EXISTING group (from a request card).
+//
+// Group CREATION stays in the Groups & Priority manager (its single home);
+// this sheet only ATTACHES an existing group to the passenger, or removes
+// their current one. That keeps group-management logic in one place — no
+// duplicated create flow on the requests screen.
+// ───────────────────────────────────────────────────────────────────────────
+
+class AssignGroupSheet extends StatelessWidget {
+  final String tourId;
+  final String passengerId;
+
+  const AssignGroupSheet({
+    super.key,
+    required this.tourId,
+    required this.passengerId,
+  });
+
+  static Future<void> show(
+    BuildContext context, {
+    required Tour tour,
+    required Passenger passenger,
+  }) {
+    return UgamSheet.show<void>(
+      context,
+      title: tr('tour_groups.assign_title',
+          namedArgs: {'name': _displayName(passenger)}),
+      builder: (_) =>
+          AssignGroupSheet(tourId: tour.id, passengerId: passenger.id),
+    );
+  }
+
+  TourController get _ctrl => Get.find<TourController>();
+
+  static String _label(PassengerGroup g) =>
+      g.label.trim().isEmpty ? tr('tour_groups.group') : g.label.trim();
+
+  Future<void> _assign(
+      BuildContext context, PassengerGroup g, Passenger p) async {
+    await _ctrl.setPassengerGroup(tourId, passengerId, g.id);
+    if (context.mounted) Navigator.of(context).pop();
+    AppSnackBar.success(tr('tour_groups.assigned',
+        namedArgs: {'name': _displayName(p), 'group': _label(g)}));
+  }
+
+  Future<void> _remove(BuildContext context, Passenger p) async {
+    await _ctrl.setPassengerGroup(tourId, passengerId, null);
+    if (context.mounted) Navigator.of(context).pop();
+    AppSnackBar.success(
+        tr('tour_groups.removed', namedArgs: {'name': _displayName(p)}));
+  }
+
+  void _openManager(BuildContext context) {
+    Navigator.of(context).pop();
+    Get.toNamed(AppRoutes.tourGroups, arguments: {'tourId': tourId});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Obx(() {
+      final tour = _ctrl.getTour(tourId);
+      final p = tour?.passengers.firstWhereOrNull((x) => x.id == passengerId);
+      if (tour == null || p == null) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xl),
+          child: Text(tr('tour_groups.tour_not_found'),
+              style: UgamText.body.copyWith(color: c.ink2)),
+        );
+      }
+
+      final groups = tour.groups;
+      final currentId = p.groupId;
+      final current = groups.firstWhereOrNull((g) => g.id == currentId);
+      final others = groups.where((g) => g.id != currentId).toList();
+
+      final children = <Widget>[];
+
+      // Current group (if any), with a remove affordance.
+      if (current != null) {
+        children.add(_CurrentGroupRow(
+          label: _label(current),
+          colorIndex: current.colorIndex,
+          onRemove: () => _remove(context, p),
+          c: c,
+        ));
+        children.add(const SizedBox(height: UgamSpacing.md));
+      }
+
+      if (groups.isEmpty) {
+        // No groups exist yet — point to the single manager to create one.
+        children.add(_ManagerLink(
+          text: tr('tour_groups.no_groups_note'),
+          c: c,
+          onTap: () => _openManager(context),
+        ));
+      } else if (others.isEmpty) {
+        // Already in the only group there is.
+        children.add(_ManagerLink(
+          text: tr('tour_groups.only_group'),
+          c: c,
+          onTap: () => _openManager(context),
+        ));
+      } else {
+        children.add(Flexible(
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const BouncingScrollPhysics(),
+            itemCount: others.length,
+            separatorBuilder: (_, _) => const SizedBox(height: UgamSpacing.sm),
+            itemBuilder: (_, i) {
+              final g = others[i];
+              final fit = GroupFit.of(tour, g.id);
+              final canAdd = fit.fits(p.seatBerths);
+              return _GroupOptionRow(
+                label: _label(g),
+                colorIndex: g.colorIndex,
+                fit: fit,
+                enabled: canAdd,
+                blockedReason:
+                    canAdd ? null : tr('tour_groups.member_wont_fit'),
+                onTap: () => _assign(context, g, p),
+                c: c,
+              );
+            },
+          ),
+        ));
+        children.add(const SizedBox(height: UgamSpacing.md));
+        children.add(_ManagerLink(
+          text: tr('tour_groups.open_manager'),
+          c: c,
+          onTap: () => _openManager(context),
+          leading: Icons.open_in_new_rounded,
+        ));
+      }
+
+      return ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.6,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
+      );
+    });
+  }
+}
+
+/// A selectable existing-group row in [AssignGroupSheet]: colour dot + label +
+/// one-bus capacity line. Disabled (with a "won't fit" chip) when adding this
+/// passenger would push the group past its largest bus.
+class _GroupOptionRow extends StatelessWidget {
+  final String label;
+  final int colorIndex;
+  final GroupFit fit;
+  final bool enabled;
+  final String? blockedReason;
+  final VoidCallback onTap;
+  final UgamColorSet c;
+
+  const _GroupOptionRow({
+    required this.label,
+    required this.colorIndex,
+    required this.fit,
+    required this.enabled,
+    required this.blockedReason,
+    required this.onTap,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: GestureDetector(
+        onTap: enabled ? onTap : null,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.lg,
+            vertical: UgamSpacing.md,
+          ),
+          decoration: BoxDecoration(
+            color: c.cardElev,
+            borderRadius: BorderRadius.circular(UgamRadius.row),
+          ),
+          child: Row(
+            children: [
+              GroupDot(colorIndex: colorIndex, size: 12),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label,
+                        style: UgamText.titleS.copyWith(color: c.ink),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 2),
+                    Text(
+                      fit.hasBus
+                          ? tr('tour_groups.seats_summary', namedArgs: {
+                              'used': '${fit.used}',
+                              'cap': '${fit.capacity}',
+                            })
+                          : tr('tour_groups.seats_plain',
+                              namedArgs: {'n': '${fit.used}'}),
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              if (blockedReason != null)
+                UgamReqChip(
+                  label: blockedReason!.toUpperCase(),
+                  variant: UgamChipVariant.warm,
+                )
+              else
+                Icon(Icons.add_circle_outline_rounded,
+                    size: 20, color: c.accent),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The passenger's current group, shown at the top of [AssignGroupSheet] with a
+/// "Remove from group" action (ungroups via `setPassengerGroup(.., null)`).
+class _CurrentGroupRow extends StatelessWidget {
+  final String label;
+  final int colorIndex;
+  final VoidCallback onRemove;
+  final UgamColorSet c;
+
+  const _CurrentGroupRow({
+    required this.label,
+    required this.colorIndex,
+    required this.onRemove,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+          UgamSpacing.lg, UgamSpacing.md, UgamSpacing.sm, UgamSpacing.md),
+      decoration: BoxDecoration(
+        color: c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        border: Border.all(color: c.accent.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        children: [
+          GroupDot(colorIndex: colorIndex, size: 12),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(tr('tour_groups.current_group'),
+                    style: UgamText.micro.copyWith(color: c.ink3)),
+                const SizedBox(height: 2),
+                Text(label,
+                    style: UgamText.titleS.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          TextButton.icon(
+            onPressed: onRemove,
+            icon: Icon(Icons.close_rounded, size: 16, color: c.danger),
+            label: Text(tr('tour_groups.remove_from_group'),
+                style: UgamText.caption.copyWith(color: c.danger)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A tappable link to the single Groups & Priority manager — used for the
+/// empty/only-group states and as a "create more / open manager" footer so the
+/// sheet never dead-ends.
+class _ManagerLink extends StatelessWidget {
+  final String text;
+  final VoidCallback onTap;
+  final UgamColorSet c;
+  final IconData leading;
+
+  const _ManagerLink({
+    required this.text,
+    required this.onTap,
+    required this.c,
+    this.leading = Icons.groups_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.md, vertical: UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+        ),
+        child: Row(
+          children: [
+            Icon(leading, size: 16, color: c.accent),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: Text(text,
+                  style:
+                      UgamText.caption.copyWith(color: c.ink2, fontSize: 12)),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+          ],
+        ),
       ),
     );
   }

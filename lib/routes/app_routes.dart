@@ -12,7 +12,6 @@ import '../screens/tour_groups_screen.dart';
 import '../screens/tour_money_board_screen.dart';
 import '../screens/account_details_screen.dart';
 import '../screens/whatsapp_settings_screen.dart';
-import '../screens/payment_settings_screen.dart';
 import '../screens/notifications_settings_screen.dart';
 import '../screens/finance_screen.dart';
 
@@ -31,7 +30,6 @@ class AppRoutes {
   static const String tourMoney = '/tour-money';
   static const String accountDetails = '/settings/account';
   static const String whatsappSettings = '/settings/whatsapp';
-  static const String paymentSettings = '/settings/payment';
   static const String notificationsSettings = '/settings/notifications';
   static const String finance = '/settings/finance';
 
@@ -102,10 +100,6 @@ class AppRoutes {
     GetPage(
       name: whatsappSettings,
       page: () => const WhatsAppSettingsScreen(),
-    ),
-    GetPage(
-      name: paymentSettings,
-      page: () => const PaymentSettingsScreen(),
     ),
     GetPage(
       name: notificationsSettings,

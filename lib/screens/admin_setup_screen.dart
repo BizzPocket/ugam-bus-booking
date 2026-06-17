@@ -1,6 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../design/ugam.dart';
@@ -42,6 +42,13 @@ class AdminSetupScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _copyEmail() async {
+    await Clipboard.setData(const ClipboardData(text: _supportEmail));
+    AppSnackBar.info(
+      tr('admin_setup.email_copied', namedArgs: {'email': _supportEmail}),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -51,42 +58,9 @@ class AdminSetupScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.md,
-                UgamSpacing.sm,
-                UgamSpacing.md,
-                UgamSpacing.sm,
-              ),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => Get.back(),
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: c.cardElev,
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.arrow_back_rounded,
-                        size: 19,
-                        color: c.ink,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  Expanded(
-                    child: Text(
-                      tr('admin_setup.title'),
-                      style: UgamText.titleM.copyWith(color: c.ink),
-                    ),
-                  ),
-                ],
-              ),
+            UgamAppBar(
+              title: tr('admin_setup.title'),
+              showBack: true,
             ),
             Expanded(
               child: SingleChildScrollView(
@@ -96,95 +70,91 @@ class AdminSetupScreen extends StatelessWidget {
                   UgamSpacing.gutter,
                   UgamSpacing.xxl,
                 ),
-                child: UgamCard.media(
+                child: UgamCard.plain(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(UgamRadius.photo),
-                        child: const SizedBox(
-                          height: 120,
-                          width: double.infinity,
-                          child: UgamBusBackdrop(seed: 'admin-setup'),
+                      // Clean tokenized header — the lone champagne signal:
+                      // a large support-agent mark on an elevated tile.
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          color: c.cardElev,
+                          borderRadius: BorderRadius.circular(UgamRadius.card),
+                          border: Border.all(
+                            color: c.accent.withValues(alpha: 0.30),
+                          ),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.support_agent_rounded,
+                          size: 36,
+                          color: c.accent,
                         ),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          UgamSpacing.md,
-                          UgamSpacing.lg,
-                          UgamSpacing.md,
-                          UgamSpacing.md,
+                      const SizedBox(height: UgamSpacing.lg),
+                      Text(
+                        tr('admin_setup.support_heading'),
+                        style: UgamText.titleL.copyWith(
+                          color: c.ink,
+                          fontSize: 20,
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 48,
-                              height: 48,
-                              decoration: BoxDecoration(
-                                color: c.accentFill,
-                                shape: BoxShape.circle,
-                              ),
-                              alignment: Alignment.center,
-                              child: Icon(
-                                Icons.support_agent_rounded,
-                                size: 24,
-                                color: c.accent,
-                              ),
+                      ),
+                      const SizedBox(height: UgamSpacing.sm),
+                      Text(
+                        tr('admin_setup.support_body'),
+                        style: UgamText.body.copyWith(
+                          color: c.ink2,
+                          fontSize: 14,
+                          height: 1.55,
+                        ),
+                      ),
+                      const SizedBox(height: UgamSpacing.md),
+                      // Email chip: tap to open mail, long-press to copy.
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _contactSupport,
+                        onLongPress: _copyEmail,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: UgamSpacing.md,
+                            vertical: UgamSpacing.sm,
+                          ),
+                          decoration: BoxDecoration(
+                            color: c.cardElev,
+                            borderRadius: BorderRadius.circular(
+                              UgamRadius.input,
                             ),
-                            const SizedBox(height: UgamSpacing.md),
-                            Text(
-                              tr('admin_setup.support_heading'),
-                              style: UgamText.titleL.copyWith(
-                                color: c.ink,
-                                fontSize: 20,
-                              ),
-                            ),
-                            const SizedBox(height: UgamSpacing.sm),
-                            Text(
-                              tr('admin_setup.support_body'),
-                              style: UgamText.body.copyWith(
+                            border: Border.all(color: c.border),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.mail_outline_rounded,
+                                size: 16,
                                 color: c.ink2,
-                                fontSize: 14,
-                                height: 1.55,
                               ),
-                            ),
-                            const SizedBox(height: UgamSpacing.md),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: UgamSpacing.md,
-                                vertical: UgamSpacing.sm,
-                              ),
-                              decoration: BoxDecoration(
-                                color: c.cardElev,
-                                borderRadius: BorderRadius.circular(
-                                  UgamRadius.input,
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  _supportEmail,
+                                  style: UgamText.bodyStrong.copyWith(
+                                    color: c.ink,
+                                    fontSize: 13,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.mail_outline_rounded,
-                                    size: 16,
-                                    color: c.ink2,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Flexible(
-                                    child: Text(
-                                      _supportEmail,
-                                      style: UgamText.bodyStrong.copyWith(
-                                        color: c.ink,
-                                        fontSize: 13,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ],
+                              const SizedBox(width: 8),
+                              Icon(
+                                Icons.copy_rounded,
+                                size: 14,
+                                color: c.ink3,
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ],

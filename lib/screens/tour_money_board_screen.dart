@@ -11,6 +11,8 @@ import '../models/tour.dart';
 import '../utils/formatters.dart';
 import 'bus_money_screen.dart';
 import 'collection_screen.dart';
+import 'main_shell.dart';
+import 'trip_pnl_screen.dart';
 
 /// TOUR MONEY BOARD — a scannable, mostly read-only roll-up of every bus on
 /// a tour. Each row shows that bus's money summary (collected / to-collect /
@@ -51,6 +53,13 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
     );
   }
 
+  void _openPnl() {
+    Get.to(
+      () => TripPnlScreen(tourId: widget.tourId),
+      transition: Transition.cupertino,
+    );
+  }
+
   /// Shortcut into the existing per-bus [CollectionScreen] — the same
   /// destination [BusMoneyScreen]'s "Collect from passengers" CTA reaches,
   /// but jumped to in one tap from the board (no detour through BusMoney).
@@ -66,6 +75,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
+      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -111,6 +121,12 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                   ),
                   physics: const BouncingScrollPhysics(),
                   children: [
+                    _PnlEntryCard(
+                      summary: _money.tourSummary(),
+                      onTap: _openPnl,
+                      c: c,
+                    ),
+                    const SizedBox(height: UgamSpacing.md),
                     Text(
                       tr('tour_money_board.per_bus'),
                       style: UgamText.micro.copyWith(color: c.ink3),
@@ -143,6 +159,74 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
             }),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Profit & Loss entry card ───────────────────────────────────────────────
+
+/// Tappable banner at the top of the board → opens the per-trip [TripPnlScreen]
+/// (per-bus + per-handler P&L). Previews the trip's TRUE net (billed − costs)
+/// so the headline answer is visible before tapping in.
+class _PnlEntryCard extends StatelessWidget {
+  final TourMoneySummary summary;
+  final VoidCallback onTap;
+  final UgamColorSet c;
+
+  const _PnlEntryCard({
+    required this.summary,
+    required this.onTap,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final billed = summary.totalNetBilled;
+    final tone = billed >= 0 ? c.good : c.danger;
+    return UgamCard.plain(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: c.accentFill,
+              borderRadius: BorderRadius.circular(UgamRadius.stat),
+            ),
+            child: Icon(Icons.insights_rounded, size: 20, color: c.accent),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(tr('trip_pnl.title'),
+                    style: UgamText.titleS.copyWith(color: c.ink)),
+                const SizedBox(height: 2),
+                Text(tr('trip_pnl.entry_sub'),
+                    style: UgamText.caption.copyWith(color: c.ink3)),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(Formatters.formatMoneyInr(billed.abs()),
+                  style: UgamText.titleS.copyWith(color: tone)),
+              Text(
+                billed >= 0 ? tr('trip_pnl.profit') : tr('trip_pnl.loss'),
+                style: UgamText.micro.copyWith(color: tone),
+              ),
+            ],
+          ),
+          const SizedBox(width: UgamSpacing.xs),
+          Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+        ],
       ),
     );
   }
@@ -254,14 +338,57 @@ class _BusMoneyRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: UgamSpacing.md),
-          // ── Headline money pair: collected + expected handover ─────
+          // ── Headline: the ONE action number for this bus ───────────
+          // Outstanding handover when there's cash still owed to admin,
+          // else what's still to collect — shown large and tabular so the
+          // row's action lands first. Quiet ink when nothing's due.
+          Builder(
+            builder: (_) {
+              final hasHandoverDue = summary.outstandingHandover > 0.005;
+              final hasToCollect = summary.toCollectTotal > 0.005;
+              final actionAmount = hasHandoverDue
+                  ? summary.outstandingHandover
+                  : summary.toCollectTotal;
+              final actionLabel = hasHandoverDue
+                  ? tr('tour_money_board.outstanding_handover')
+                  : tr('tour_money_board.to_collect');
+              final figureColor = hasHandoverDue
+                  ? c.warm
+                  : (hasToCollect ? c.danger : c.ink2);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    actionLabel.toUpperCase(),
+                    style: UgamText.micro.copyWith(
+                      color: c.ink3,
+                      letterSpacing: 0.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    Formatters.formatMoneyInr(actionAmount),
+                    style: UgamText.tabular(
+                      UgamText.numLg.copyWith(color: figureColor, fontSize: 24),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          // ── Supporting money pair: collected + handover ────────────
           Row(
             children: [
               Expanded(
                 child: _Metric(
                   label: tr('tour_money_board.collected'),
                   value: Formatters.formatMoneyInr(summary.collected),
-                  valueColor: c.ink,
+                  valueColor: c.ink2,
                   c: c,
                 ),
               ),
@@ -269,7 +396,7 @@ class _BusMoneyRow extends StatelessWidget {
                 child: _Metric(
                   label: tr('tour_money_board.handover'),
                   value: Formatters.formatMoneyInr(summary.handedOver),
-                  valueColor: c.ink,
+                  valueColor: c.ink2,
                   c: c,
                 ),
               ),
@@ -310,27 +437,11 @@ class _BusMoneyRow extends StatelessWidget {
           const SizedBox(height: UgamSpacing.md),
           Divider(height: 1, color: c.border),
           const SizedBox(height: UgamSpacing.md),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              UgamStatusDot(label: statusLabel, tone: tone),
-              Text(
-                tr(
-                  'tour_money_board.outstanding_amount',
-                  namedArgs: {
-                    'n': Formatters.formatMoneyInr(summary.outstandingHandover)
-                  },
-                ),
-                style: UgamText.tabular(
-                  UgamText.caption.copyWith(
-                    color: summary.outstandingHandover > 0.005
-                        ? c.warm
-                        : c.ink3,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+          // Status dot only — the outstanding figure now leads the row as the
+          // headline, so the trailing amount duplicate is dropped here.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: UgamStatusDot(label: statusLabel, tone: tone),
           ),
           const SizedBox(height: UgamSpacing.md),
           // One-tap shortcut straight into this bus's CollectionScreen —

@@ -58,7 +58,14 @@ class _SheetShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Container(
+    // A Material ancestor is required so Text widgets get proper styling
+    // instead of the yellow "no Material" debug underlines. The Cupertino
+    // presentation path (showCupertinoModalPopup) provides no Material, so
+    // we add a transparent one here that doesn't alter the existing visual
+    // (no background, elevation, or clip of its own).
+    return Material(
+      type: MaterialType.transparency,
+      child: Container(
       decoration: BoxDecoration(
         color: c.card,
         borderRadius: const BorderRadius.vertical(
@@ -139,6 +146,7 @@ class _SheetShell extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

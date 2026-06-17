@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:easy_localization/easy_localization.dart';
 // ignore: unnecessary_import
@@ -15,6 +16,7 @@ import '../models/seat_layout.dart';
 import '../models/tour.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_grid_placement.dart';
+import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
 
 /// Builds the printable A4 seating chart PDF and the per-passenger highlighted
@@ -116,7 +118,6 @@ class SeatChartPdf {
     final theme = await _resolveTheme();
     final doc = pw.Document(theme: theme);
 
-    final occupants = occupantsByBus(tour);
     final buses = onlyBusId == null
         ? tour.buses
         : tour.buses.where((b) => b.id == onlyBusId).toList();
@@ -125,7 +126,7 @@ class SeatChartPdf {
       final layout = bus.layout;
       if (layout == null) continue;
       final highlight = highlightByBus[bus.id] ?? const <String>{};
-      final byId = occupants[bus.id] ?? const <String, SeatOccupant>{};
+      final byId = _occupantsForBus(tour, bus.id);
 
       doc.addPage(
         pw.Page(
@@ -192,21 +193,6 @@ class SeatChartPdf {
     return images;
   }
 
-  /// Full tour chart (every bus, NO highlight) rasterised to PNGs — one image
-  /// per bus. Used to send the handler the complete chart of everyone, since the
-  /// handler coordinates the whole bus and should not get a self-highlighted view.
-  static Future<List<Uint8List>> buildTourChartImages({
-    required Tour tour,
-    required ChartFooter footer,
-  }) async {
-    final bytes = await buildTourChartPdf(tour: tour, footer: footer);
-    final images = <Uint8List>[];
-    await for (final page in Printing.raster(bytes, dpi: 150)) {
-      images.add(await page.toPng());
-    }
-    return images;
-  }
-
   // ── Header / footer building ──────────────────────────────
 
   static pw.Widget _busTitle(Tour tour, Bus bus) {
@@ -248,9 +234,12 @@ class SeatChartPdf {
           ),
         );
 
-    // ગાડી નંબર – <bus number or name>
-    final vehicle = bus.busNumber.isNotEmpty ? bus.busNumber : bus.name;
-    lines.add(line('${tr('chart.gaadi_number')} – $vehicle', bold: true));
+    // ગાડી નંબર – <bus name>. This chart is recipient-facing (it's the image
+    // attached to each passenger's WhatsApp confirmation), so it uses the
+    // customer label — the NAME only, matching the "બસ: {name}" message body.
+    // The registration plate is an agent-only detail; it stays on the admin
+    // screens' [Bus.displayLabel].
+    lines.add(line('${tr('chart.gaadi_number')} – ${bus.customerLabel}', bold: true));
 
     // સ્થળ.. <boarding place> — per-bus boarding point overrides the tour footer.
     final place =
@@ -272,26 +261,32 @@ class SeatChartPdf {
     dateLine.write(' — ${tr('chart.depart_reminder')}');
     lines.add(line(dateLine.toString()));
 
-    // <note> — or fall back to the handler name when the note is empty.
+    // THIS bus's handler is the on-the-ground contact (per-bus handler wins,
+    // else the tour-level handler). The admin/organiser phone is intentionally
+    // NOT printed — passengers should reach their bus handler, not the office.
+    final handlerId = bus.handlerPassengerId ?? tour.handlerId;
+    final handlerMatch = handlerId == null
+        ? const <Passenger>[]
+        : tour.passengers.where((p) => p.id == handlerId).toList();
+    final handler = handlerMatch.isNotEmpty ? handlerMatch.first : tour.handler;
+    final handlerName = handler?.displayName.trim() ?? '';
+    final handlerPhone = handler?.phone.trim() ?? '';
+
+    // Optional free-text note from the agent.
     if (footer.note.isNotEmpty) {
       lines.add(line(footer.note));
-    } else {
-      final handler = tour.handler?.displayName;
-      if (handler != null && handler.isNotEmpty) {
-        lines.add(line(handler));
-      }
     }
 
-    // Contact – organiser phone, plus the handler's phone if present & different.
-    final phones = <String>[];
-    final organiser = tour.createdBy?.trim() ?? '';
-    if (organiser.isNotEmpty) phones.add(organiser);
-    final handlerPhone = tour.handler?.phone.trim() ?? '';
-    if (handlerPhone.isNotEmpty && handlerPhone != organiser) {
-      phones.add(handlerPhone);
-    }
-    if (phones.isNotEmpty) {
-      lines.add(line('${tr('chart.contact')}: ${phones.join(', ')}'));
+    // Contact – the per-bus HANDLER (name + phone), never the admin. ALWAYS
+    // shown so the passenger has a number to reach on the day, even when the
+    // handler is also seated on this bus. Falls back to the name alone if the
+    // handler has no phone on file.
+    if (handlerPhone.isNotEmpty) {
+      final label =
+          handlerName.isNotEmpty ? '$handlerName – $handlerPhone' : handlerPhone;
+      lines.add(line('${tr('chart.contact')}: $label'));
+    } else if (handlerName.isNotEmpty) {
+      lines.add(line(handlerName));
     }
 
     return pw.Container(
@@ -303,11 +298,47 @@ class SeatChartPdf {
     );
   }
 
+  // ── Occupant resolution (leg-aware) ───────────────────────
+  //
+  // A single physical seat can be LEG-SHARED: a GO-only rider and a different
+  // RET-only rider both hold it on disjoint legs. The chart must print BOTH —
+  // otherwise a one-leg booker never sees their own name on the per-person
+  // chart. We resolve through the shared leg-aware [occupantListForBus] (the
+  // same truth the on-screen handler chart uses) which yields the de-duped,
+  // GO-first occupant list per seat — a whole double held solo still collapses
+  // to one name.
+
+  static Map<String, List<SeatOccupant>> _occupantsForBus(
+    Tour tour,
+    String busId,
+  ) {
+    return {
+      for (final e in occupantListForBus(tour.passengers, busId).entries)
+        e.key: [
+          for (final p in e.value)
+            SeatOccupant(name: p.displayName, phone: displayPhone(p.phone)),
+        ],
+    };
+  }
+
+  /// Test seam: the exact per-seat occupant NAMES the chart will draw for
+  /// [busId], GO-leg first. Used to lock leg-shared rendering without needing
+  /// the pdfium rasterizer (unavailable under `flutter test`).
+  @visibleForTesting
+  static Map<String, List<String>> debugOccupantNamesForBus(
+    Tour tour,
+    String busId,
+  ) =>
+      {
+        for (final e in _occupantsForBus(tour, busId).entries)
+          e.key: [for (final o in e.value) o.name],
+      };
+
   // ── Table building ────────────────────────────────────────
 
   static pw.Widget _chartTable(
     BusLayout layout,
-    Map<String, SeatOccupant> byId,
+    Map<String, List<SeatOccupant>> byId,
     Set<String> highlight,
   ) {
     final columns = SeatGridPlacement.columns(layout);
@@ -400,10 +431,11 @@ class SeatChartPdf {
     );
   }
 
-  /// A lane (non-aisle) body cell: occupant name + phone, blank, or reserved "—".
+  /// A lane (non-aisle) body cell: occupant name(s) + phone, blank, or
+  /// reserved "—". A leg-shared seat carries BOTH the GO and RET occupant.
   static pw.Widget _bodyCell(
     SeatCell? cell,
-    Map<String, SeatOccupant> byId,
+    Map<String, List<SeatOccupant>> byId,
     Set<String> highlight,
   ) {
     if (cell == null || cell.isEmpty || cell.seatId == null) {
@@ -412,9 +444,9 @@ class SeatChartPdf {
     if (cell.reserved) {
       return _reservedCell();
     }
-    final occupant = byId[cell.seatId];
+    final occupants = byId[cell.seatId] ?? const <SeatOccupant>[];
     final highlighted = highlight.contains(cell.seatId);
-    return _occupantCell(occupant, highlighted: highlighted);
+    return _occupantCell(occupants, highlighted: highlighted);
   }
 
   /// The aisle cell. On a balcony row it stacks the upper/lower pair occupants;
@@ -423,7 +455,7 @@ class SeatChartPdf {
     BusLayout layout,
     int row, {
     required bool isMidRow,
-    required Map<String, SeatOccupant> byId,
+    required Map<String, List<SeatOccupant>> byId,
     required Set<String> highlight,
   }) {
     final pair = layout.balconyPair(row);
@@ -468,10 +500,11 @@ class SeatChartPdf {
     );
   }
 
-  /// One stacked occupant entry inside the balcony aisle cell.
+  /// One stacked occupant entry inside the balcony aisle cell. A leg-shared
+  /// seat lists both the GO and RET occupant.
   static pw.Widget _stackedBalconyEntry(
     SeatCell cell,
-    Map<String, SeatOccupant> byId,
+    Map<String, List<SeatOccupant>> byId,
     Set<String> highlight,
   ) {
     if (cell.reserved) {
@@ -481,10 +514,12 @@ class SeatChartPdf {
             style: pw.TextStyle(fontSize: 9, color: _reserved)),
       );
     }
-    final occupant = byId[cell.seatId];
+    final occupants = byId[cell.seatId] ?? const <SeatOccupant>[];
     final highlighted = cell.seatId != null && highlight.contains(cell.seatId);
     final fill = highlighted ? _accentFill : null;
-    if (occupant == null) return pw.SizedBox();
+    if (occupants.isEmpty) return pw.SizedBox();
+    // Tighten the name font when two leg-shared riders must share the cell.
+    final nameSize = occupants.length > 1 ? 10.0 : 11.5;
     return pw.Container(
       margin: const pw.EdgeInsets.symmetric(vertical: 1),
       padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 2),
@@ -497,32 +532,41 @@ class SeatChartPdf {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
-          pw.Text(
-            occupant.name,
-            textAlign: pw.TextAlign.center,
-            style: pw.TextStyle(
-              fontSize: 11.5,
-              fontWeight: pw.FontWeight.bold,
-              color: highlighted ? _accent : _ink,
-            ),
-          ),
-          if (occupant.phone != null && occupant.phone!.isNotEmpty)
+          for (final occupant in occupants) ...[
             pw.Text(
-              occupant.phone!,
+              occupant.name,
               textAlign: pw.TextAlign.center,
-              style: pw.TextStyle(fontSize: 9.5, color: _ink),
+              style: pw.TextStyle(
+                fontSize: nameSize,
+                fontWeight: pw.FontWeight.bold,
+                color: highlighted ? _accent : _ink,
+              ),
             ),
+            if (occupant.phone != null && occupant.phone!.isNotEmpty)
+              pw.Text(
+                occupant.phone!,
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 9.5, color: _ink),
+              ),
+          ],
         ],
       ),
     );
   }
 
+  /// A lane body cell's occupant block. Lists every distinct occupant on the
+  /// seat (GO first); a leg-shared seat shows both riders so neither leg's
+  /// booker is dropped from the per-person chart.
   static pw.Widget _occupantCell(
-    SeatOccupant? occupant, {
+    List<SeatOccupant> occupants, {
     required bool highlighted,
   }) {
-    if (occupant == null) return _emptyCell(highlighted: highlighted);
+    if (occupants.isEmpty) return _emptyCell(highlighted: highlighted);
     final fill = highlighted ? _accentFill : null;
+    // Two leg-shared riders share one cell — shrink the name/phone so both fit.
+    final shared = occupants.length > 1;
+    final nameSize = shared ? 12.5 : 16.0;
+    final phoneSize = shared ? 10.0 : 12.0;
     return pw.Container(
       alignment: pw.Alignment.center,
       padding: const pw.EdgeInsets.symmetric(vertical: 9, horizontal: 3),
@@ -531,24 +575,27 @@ class SeatChartPdf {
         mainAxisAlignment: pw.MainAxisAlignment.center,
         crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
-          pw.Text(
-            occupant.name,
-            textAlign: pw.TextAlign.center,
-            style: pw.TextStyle(
-              fontSize: 16,
-              fontWeight: pw.FontWeight.bold,
-              color: highlighted ? _accent : _ink,
-            ),
-          ),
-          if (occupant.phone != null && occupant.phone!.isNotEmpty)
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(top: 2),
-              child: pw.Text(
-                occupant.phone!,
-                textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 12, color: _ink),
+          for (var i = 0; i < occupants.length; i++) ...[
+            if (i > 0) pw.SizedBox(height: 3),
+            pw.Text(
+              occupants[i].name,
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(
+                fontSize: nameSize,
+                fontWeight: pw.FontWeight.bold,
+                color: highlighted ? _accent : _ink,
               ),
             ),
+            if (occupants[i].phone != null && occupants[i].phone!.isNotEmpty)
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(top: 2),
+                child: pw.Text(
+                  occupants[i].phone!,
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(fontSize: phoneSize, color: _ink),
+                ),
+              ),
+          ],
         ],
       ),
     );

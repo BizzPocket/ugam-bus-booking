@@ -45,10 +45,11 @@ class FullscreenChartScreen extends StatelessWidget {
   /// same price stripes as the inline grid; other callers leave it null.
   final Color? Function(SeatCell cell)? bandColorFor;
 
-  /// When true, the handler's one-way emphasis is applied: RET reads its distinct
-  /// violet (vs GO cyan) and one-way leg pills carry a "½" half-fare marker — the
-  /// at-a-glance "collect a different amount" cue. Off for non-handler callers.
-  final bool emphasizeOneWay;
+  /// Render a half-taken Double Sofa as a split (filled + empty) tile. Safe ONLY
+  /// when [occupantsBySeat] is berth-accurate (a whole double held solo appears
+  /// as the passenger twice). Callers that pass a leg-deduped map — where a whole
+  /// double is a single entry — must leave this off. See [SeatChartTile.markHalfDouble].
+  final bool markHalfDouble;
 
   const FullscreenChartScreen({
     super.key,
@@ -58,7 +59,7 @@ class FullscreenChartScreen extends StatelessWidget {
     this.title,
     this.driverLabel,
     this.bandColorFor,
-    this.emphasizeOneWay = false,
+    this.markHalfDouble = false,
   });
 
   /// Push the full-screen chart over the current route.
@@ -70,7 +71,7 @@ class FullscreenChartScreen extends StatelessWidget {
     String? title,
     String? driverLabel,
     Color? Function(SeatCell cell)? bandColorFor,
-    bool emphasizeOneWay = false,
+    bool markHalfDouble = false,
   }) {
     HapticFeedback.selectionClick();
     return Get.to<void>(
@@ -81,7 +82,7 @@ class FullscreenChartScreen extends StatelessWidget {
         title: title,
         driverLabel: driverLabel,
         bandColorFor: bandColorFor,
-        emphasizeOneWay: emphasizeOneWay,
+        markHalfDouble: markHalfDouble,
       ),
       fullscreenDialog: true,
       transition: Transition.downToUp,
@@ -142,7 +143,7 @@ class FullscreenChartScreen extends StatelessWidget {
                                     occupants: occupants,
                                     groupColors: groupColors,
                                     bandColor: bandColorFor?.call(cell),
-                                    emphasizeOneWay: emphasizeOneWay,
+                                    markHalfDouble: markHalfDouble,
                                   ),
                                 );
                               },

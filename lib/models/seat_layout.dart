@@ -164,17 +164,22 @@ class BusLayout {
   ///   - [singleSofaCount]  — how many sleeper berths should be Single Sofa
   ///     (1-person berth). The remaining sleeper berths become Double Sofa
   ///     (2-person shared berth). Defaults to 0 so legacy callers get the
-  ///     previous all-double-sofa behaviour.
-  ///   - [hasBalcony]       — when true, fills the aisle column of the LAST seat
-  ///     row with an upper + lower Single Sofa pair (the "balcony" / back bench),
-  ///     so it renders as a full-width back row rather than a separate line.
-  ///     These 2 berths are added on top of the requested sleeper berths.
-  ///     Ignored for pure seater buses.
+  ///     all-double-sofa behaviour.
+  ///   - [allDoubleBackRow] — the create-bus "all-double last row" toggle. It
+  ///     fixes the shape of the LAST (back) row for ANY total seat count:
+  ///       • true  → the back row is 4 DOUBLE sofas (all-double).
+  ///       • false → the back row is 3 SINGLE + 2 DOUBLE sofas (singles on the
+  ///                 left, doubles on the right). This is the default.
+  ///     The back row is laid first and the remaining berths fill the rows
+  ///     above; the seat count is conserved exactly. Ignored for seater buses.
+  ///   - [hasBalcony]       — DEPRECATED no-op, kept so old callers still
+  ///     compile. The back row is now controlled by [allDoubleBackRow].
   factory BusLayout.generate({
     required BusType busType,
     required int totalSeats,
     int seaterCount = 0,
     int singleSofaCount = 0,
+    bool allDoubleBackRow = false,
     bool hasBalcony = false,
   }) {
     int sleeperTotal;
@@ -194,25 +199,53 @@ class BusLayout {
         break;
     }
 
-    // A Double Sofa physically seats TWO people. The berths left after the
-    // single sofas are therefore paired up 2-for-1 into double cells — a 40-seat
-    // bus with 10 singles has 30 berths left, which is 15 doubles, NOT 30.
-    // If that leftover is odd, the spare berth becomes one extra single sofa so
-    // no seat is lost (the add-bus screen warns the agent when this happens).
     final requestedSingles = singleSofaCount.clamp(0, sleeperTotal);
-    final doubleBerths = sleeperTotal - requestedSingles;
-    final doubleTotal = doubleBerths ~/ 2;
-    final singleTotal = requestedSingles + (doubleBerths.isOdd ? 1 : 0);
+    final isSleeperish = busType != BusType.seater;
 
-    // An unpaired single (odd single count) can't sit beside a lane partner, so
-    // it rides in the balcony aisle of the back row instead of dangling alone in
-    // a half-empty row. The lane keeps an even number, split evenly.
-    final orphanSingle = singleTotal.isOdd && busType != BusType.seater;
-    final laneSingles = orphanSingle ? singleTotal - 1 : singleTotal;
-    final upperSingles = laneSingles ~/ 2;
-    final lowerSingles = laneSingles ~/ 2;
-    final upperDoubles = (doubleTotal / 2).ceil();
-    final lowerDoubles = doubleTotal - upperDoubles;
+    // ── The "all-double last row" toggle ───────────────────────────────────
+    // The bus's WHOLE composition — the back row INCLUDED — is fixed by the seat
+    // count + single-sofa count. A double sofa seats two, so the berths left
+    // after the requested singles pair 2-for-1 into doubles; an odd leftover
+    // berth can't pair, so it is one more single.
+    //   e.g. 37 seats, 13 singles → 24 double-berths = 12 doubles → 13S + 12D.
+    final doubleBerthsRaw = sleeperTotal - requestedSingles;
+    final totalDoubleCells = doubleBerthsRaw ~/ 2;
+    final totalSingleCells = requestedSingles + (doubleBerthsRaw.isOdd ? 1 : 0);
+
+    // The toggle only shapes the LAST row, and its berths are DRAWN FROM that
+    // composition — never added on top:
+    //   • allDoubleBackRow == true  → last row is 4 double         (needs ≥4 D)
+    //   • allDoubleBackRow == false → last row is 3 single+2 double (needs ≥3 S,
+    //                                  ≥2 D)
+    // so 37/13 OFF → back row 3S+2D, body 10S+10D — still 13S + 12D total.
+    final wantBackSingles = allDoubleBackRow ? 0 : 3;
+    final wantBackDoubles = allDoubleBackRow ? 4 : 2;
+    // A bus whose composition pairs perfectly — both the single AND the double
+    // cell counts are even — lays flat into full [single | double] rows with no
+    // leftover, so it needs NO rear bench. Carving a 3S+2D bench out of such a
+    // bus is exactly what left a hole in the last body row (e.g. 36 seats / 12
+    // singles → bench takes 3S+2D, leaving body 9S+10D, so the single lane
+    // splits 5-upper/4-lower and the 5th lower single is missing). Only the
+    // mixed OFF bench is suppressed; the explicit all-double back row (toggle
+    // ON) is always honoured.
+    final pairsCleanly = !allDoubleBackRow &&
+        totalSingleCells.isEven &&
+        totalDoubleCells.isEven;
+    final hasBackRow = isSleeperish &&
+        !pairsCleanly &&
+        totalDoubleCells >= wantBackDoubles &&
+        totalSingleCells >= wantBackSingles;
+    final backSingles = hasBackRow ? wantBackSingles : 0;
+    final backDoubles = hasBackRow ? wantBackDoubles : 0;
+
+    // The body lanes get everything the back row didn't take.
+    final bodySingleCells = totalSingleCells - backSingles;
+    final bodyDoubleCells = totalDoubleCells - backDoubles;
+
+    final upperSingles = (bodySingleCells / 2).ceil();
+    final lowerSingles = bodySingleCells - upperSingles;
+    final upperDoubles = (bodyDoubleCells / 2).ceil();
+    final lowerDoubles = bodyDoubleCells - upperDoubles;
 
     final grid = <SeatCell>[];
 
@@ -231,16 +264,72 @@ class BusLayout {
     addLane(lowerDoubles, SeatGridCols.doubleLower, SeatType.doubleSofa,
         SeatPosition.lower);
 
-    final sleeperRows = [
+    final laneRows = [
       upperSingles,
       lowerSingles,
       upperDoubles,
       lowerDoubles,
     ].fold<int>(0, (m, v) => v > m ? v : m);
 
-    // Seaters fill cols 0,1,3,4 — from row 0 on a pure seater bus, or below the
-    // sleeper rows on a mixed bus.
-    final seaterStartRow = busType == BusType.seater ? 0 : sleeperRows;
+    // The dedicated back row sits just below the body lanes.
+    final benchRow = laneRows;
+    if (hasBackRow) {
+      // Doubles always sit on the RIGHT (lane cols + aisle).
+      grid.add(SeatCell(
+        row: benchRow,
+        col: SeatGridCols.doubleUpper,
+        seatType: SeatType.doubleSofa,
+        position: SeatPosition.upper,
+      ));
+      grid.add(SeatCell(
+        row: benchRow,
+        col: SeatGridCols.doubleLower,
+        seatType: SeatType.doubleSofa,
+        position: SeatPosition.lower,
+      ));
+      if (allDoubleBackRow) {
+        // ON → the aisle/balcony berths are a DOUBLE pair too (4 doubles).
+        grid.add(SeatCell(
+          row: benchRow,
+          col: SeatGridCols.aisle,
+          seatType: SeatType.doubleSofa,
+          position: SeatPosition.upper,
+        ));
+        grid.add(SeatCell(
+          row: benchRow,
+          col: SeatGridCols.aisle,
+          seatType: SeatType.doubleSofa,
+          position: SeatPosition.lower,
+        ));
+      } else {
+        // OFF → 3 SINGLE sofas on the LEFT: a single column (cols 0/1) plus one
+        // in the aisle, with the doubles already placed on the right.
+        grid.add(SeatCell(
+          row: benchRow,
+          col: SeatGridCols.singleUpper,
+          seatType: SeatType.singleSofa,
+          position: SeatPosition.upper,
+        ));
+        grid.add(SeatCell(
+          row: benchRow,
+          col: SeatGridCols.singleLower,
+          seatType: SeatType.singleSofa,
+          position: SeatPosition.lower,
+        ));
+        grid.add(SeatCell(
+          row: benchRow,
+          col: SeatGridCols.aisle,
+          seatType: SeatType.singleSofa,
+          position: SeatPosition.lower,
+        ));
+      }
+    }
+
+    // Seaters fill cols 0,1,3,4 — from row 0 on a pure seater bus, or BELOW the
+    // whole sleeper cabin (including its back row) on a mixed bus.
+    final seaterStartRow = busType == BusType.seater
+        ? 0
+        : benchRow + (hasBackRow ? 1 : 0);
     for (var i = 0; i < seaterTotal; i++) {
       grid.add(SeatCell(
         row: seaterStartRow + i ~/ 4,
@@ -254,40 +343,11 @@ class BusLayout {
       if (c.row > maxRow) maxRow = c.row;
     }
 
-    // Back bench (full-width last row). The leftover berths — an unpaired single
-    // and/or the explicit balcony pair — ride the aisle column of the LAST seat
-    // row rather than spawning their own near-empty row. The renderer draws any
-    // row carrying aisle seats as a flat, full-width bench (no centre gap, full
-    // size), so the remainder reads as a real back bench instead of a tiny
-    // half-height middle sofa stranded on its own line.
-    final wantsPair = hasBalcony && busType != BusType.seater;
-    final hasBalconyResult = orphanSingle || wantsPair;
-    if (hasBalconyResult) {
-      final benchRow = maxRow < 0 ? 0 : maxRow;
-      // Lower slot — the relocated orphan, or a toggle-added berth.
-      grid.add(SeatCell(
-        row: benchRow,
-        col: SeatGridCols.aisle,
-        seatType: SeatType.singleSofa,
-        position: SeatPosition.lower,
-      ));
-      // Upper slot — only the explicit toggle adds this.
-      if (wantsPair) {
-        grid.add(SeatCell(
-          row: benchRow,
-          col: SeatGridCols.aisle,
-          seatType: SeatType.singleSofa,
-          position: SeatPosition.upper,
-        ));
-      }
-      maxRow = benchRow;
-    }
-
     return BusLayout(
       rows: maxRow < 0 ? 1 : maxRow + 1,
       cols: SeatGridCols.count,
       grid: grid,
-      hasBalcony: hasBalconyResult,
+      hasBalcony: hasBackRow,
     )._regenerateIds();
   }
 

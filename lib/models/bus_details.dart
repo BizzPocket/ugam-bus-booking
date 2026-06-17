@@ -188,6 +188,24 @@ class Bus {
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? DateTime.now();
 
+  /// Human-facing label for this bus: the NAME leads, with the registration
+  /// number appended as a secondary detail when present — e.g.
+  /// `"Bus 1 · GJ05LE9510"`. Falls back to just the name when no registration
+  /// has been entered. This is the single source of truth for every place that
+  /// shows a bus as a title/identifier, so the convention can't drift per screen.
+  String get displayLabel {
+    final reg = busNumber.trim();
+    return reg.isEmpty ? name : '$name · $reg';
+  }
+
+  /// Customer-facing bus label — the NAME only, never the registration number.
+  /// The plate is an operational detail the agent needs to identify the physical
+  /// vehicle ([displayLabel]); customers just need the name (e.g. "Raj"). This is
+  /// the single source for every customer surface (WhatsApp confirmation, their
+  /// seat-chart image, Find-my-seat, customer tour detail), so the convention
+  /// can't drift per screen the way a hand-rolled "name only" would.
+  String get customerLabel => name.trim().isEmpty ? displayLabel : name.trim();
+
   /// Parsed bus type enum. The underlying `busType` string is kept on the
   /// Appwrite document for forward compatibility with arbitrary type names
   /// the agent may have used previously (e.g. "Semi-Sleeper").

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import 'charts_screen.dart';
 import 'dashboard_screen.dart';
@@ -13,6 +14,82 @@ import 'settings_screen.dart';
 class ShellController extends GetxController {
   final currentIndex = 0.obs;
   void switchTab(int i) => currentIndex.value = i;
+}
+
+/// The five admin dock tabs, built once so the shell's bottom dock and the
+/// [UgamWorkspaceDock] (shown over pushed tour screens) can never drift apart.
+/// Read inside an Obx — the requests badge observes [TourController].
+List<UgamDockItem> buildAdminDockItems() => [
+      UgamDockItem(
+        icon: Icons.home_rounded,
+        label: tr('main_shell.tab_home'),
+        tooltip: tr('main_shell.tab_home'),
+      ),
+      UgamDockItem(
+        icon: Icons.location_on_rounded,
+        label: tr('main_shell.tab_tour'),
+        tooltip: tr('main_shell.tab_tour'),
+      ),
+      UgamDockItem(
+        icon: Icons.table_chart_rounded,
+        label: tr('main_shell.tab_charts'),
+        tooltip: tr('main_shell.tab_charts'),
+      ),
+      UgamDockItem(
+        icon: Icons.chat_bubble_rounded,
+        label: tr('main_shell.tab_requests'),
+        tooltip: tr('main_shell.tab_requests'),
+        // Live count of NEW (un-actioned) booking requests across active
+        // tours. Read inside an Obx so the badge updates reactively.
+        badgeCount: Get.find<TourController>().pendingRequestCount,
+      ),
+      UgamDockItem(
+        icon: Icons.settings_rounded,
+        label: tr('main_shell.tab_settings'),
+        tooltip: tr('main_shell.tab_settings'),
+      ),
+    ];
+
+/// The persistent bottom dock for screens pushed *over* the shell (the tour
+/// workspace: Tour Detail → buses → seat chart → assignment). Tapping a tab
+/// pops back to the shell and selects that tab, so the dock behaves the same
+/// in here as it does on the home surfaces. Defaults to highlighting Tours,
+/// since all tour work lives under that section.
+///
+/// Drop it in as a screen's `bottomNavigationBar`. When the screen already has
+/// a sticky CTA, stack them: `Column(mainAxisSize: MainAxisSize.min, children:
+/// [theCTA, const UgamWorkspaceDock()])`.
+class UgamWorkspaceDock extends StatelessWidget {
+  /// Tab to render as active while in the workspace. Defaults to Tours (1).
+  final int activeTab;
+  const UgamWorkspaceDock({super.key, this.activeTab = 1});
+
+  @override
+  Widget build(BuildContext context) {
+    final shell = Get.find<ShellController>();
+    return Align(
+      alignment: Alignment.center,
+      heightFactor: 1.0,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
+        // Obx so the requests badge stays live while drilled into a tour.
+        child: Obx(() {
+          // Touch the badge source so Obx re-runs when it changes.
+          final _ = Get.find<TourController>().pendingRequestCount;
+          return UgamDockNav(
+            currentIndex: activeTab,
+            onTap: (i) {
+              // Pop the whole tour-workspace stack back to the shell, then
+              // select the tapped tab.
+              Get.until((route) => route.isFirst);
+              shell.switchTab(i);
+            },
+            items: buildAdminDockItems(),
+          );
+        }),
+      ),
+    );
+  }
 }
 
 /// Max body width for the admin shell. The app is designed phone-first, so
@@ -106,28 +183,7 @@ class _MainShellState extends State<MainShell> {
             child: UgamDockNav(
               currentIndex: shell.currentIndex.value,
               onTap: shell.switchTab,
-              items: [
-                UgamDockItem(
-                  icon: Icons.home_rounded,
-                  tooltip: tr('main_shell.tab_home'),
-                ),
-                UgamDockItem(
-                  icon: Icons.location_on_rounded,
-                  tooltip: tr('main_shell.tab_tour'),
-                ),
-                UgamDockItem(
-                  icon: Icons.table_chart_rounded,
-                  tooltip: tr('main_shell.tab_charts'),
-                ),
-                UgamDockItem(
-                  icon: Icons.chat_bubble_rounded,
-                  tooltip: tr('main_shell.tab_requests'),
-                ),
-                UgamDockItem(
-                  icon: Icons.settings_rounded,
-                  tooltip: tr('main_shell.tab_settings'),
-                ),
-              ],
+              items: buildAdminDockItems(),
             ),
           ),
         ),

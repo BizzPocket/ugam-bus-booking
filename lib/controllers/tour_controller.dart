@@ -14,6 +14,7 @@ import '../models/payment_status.dart';
 import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
+import '../models/seat_type.dart';
 import '../models/trip_type.dart';
 import '../services/group_cascade.dart';
 import '../services/realtime_service.dart';
@@ -634,6 +635,16 @@ class TourController extends GetxController {
 
   // Passenger Management
   Future<void> addPassenger(String tourId, Passenger passenger) async {
+    // Bookings close once the tour is locked/completed. This is the single
+    // server-write chokepoint for every admin/handler "Add request" path
+    // (Requests screen, tour workspace, future callers), so the guard lives
+    // here rather than at each button — no new request can be created from
+    // anywhere once the allocation is final.
+    final existing = getTour(tourId);
+    if (existing != null && !existing.acceptsBookings) {
+      AppSnackBar.error(tr('errors.bookings_closed'));
+      return;
+    }
     await _write(
       optimistic: () => _updateTourLocal(
         tourId,
@@ -1309,6 +1320,76 @@ class TourController extends GetxController {
     );
   }
 
+  /// Exchange the FULL contents of two seats on one bus — every occupant of
+  /// [seatAId] moves to [seatBId] and vice versa, each keeping their berth count
+  /// and leg. Used by the drag grid for a pair-for-pair Double Sofa swap (two
+  /// couples exchange sofas) where a one-for-one [swapSeats] can't express the
+  /// multi-occupant exchange. Same-bus only, so no group can be split.
+  Future<void> swapSeatContents({
+    required String tourId,
+    required String busId,
+    required String seatAId,
+    required String seatBId,
+  }) async {
+    if (seatAId == seatBId) return;
+    final tour = getTour(tourId);
+    if (tour == null) return;
+    // Everyone holding a berth on EITHER seat is affected (a passenger can't be
+    // on both distinct cells, so the two sides never overlap on one person).
+    final affected = tour.passengers
+        .where(
+          (p) => p.assignedSeats.any(
+            (a) => a.busId == busId && (a.seatId == seatAId || a.seatId == seatBId),
+          ),
+        )
+        .toList();
+    if (affected.isEmpty) return;
+
+    final changed = <Passenger>[];
+    await _write(
+      optimistic: () {
+        for (final m in affected) {
+          Passenger? updated;
+          _updatePassengerLocal(tourId, m.id, (p) {
+            final onA = p.assignedSeats
+                .where((a) => a.busId == busId && a.seatId == seatAId)
+                .length;
+            final onB = p.assignedSeats
+                .where((a) => a.busId == busId && a.seatId == seatBId)
+                .length;
+            if (onA == 0 && onB == 0) {
+              updated = p;
+              return p;
+            }
+            final next = p.assignedSeats
+                .where((a) => !(a.busId == busId &&
+                    (a.seatId == seatAId || a.seatId == seatBId)))
+                .toList();
+            for (var i = 0; i < onA; i++) {
+              next.add(SeatAssignment(busId: busId, seatId: seatBId));
+            }
+            for (var i = 0; i < onB; i++) {
+              next.add(SeatAssignment(busId: busId, seatId: seatAId));
+            }
+            updated = p.copyWith(assignedSeats: next);
+            return updated!;
+          });
+          if (updated != null) changed.add(updated!);
+        }
+      },
+      persist: () async {
+        for (final p in changed) {
+          await _sync.smartUpdate(
+            table: 'passengers',
+            entityId: p.id,
+            data: p.toMap(),
+          );
+        }
+      },
+      failure: tr('errors.move_seat'),
+    );
+  }
+
   /// Exchange seats between two passengers on the same bus. Used by the
   /// drag-and-drop overview when one occupied seat is dropped onto
   /// another occupied seat.
@@ -1338,6 +1419,7 @@ class TourController extends GetxController {
     required String passengerBId,
     required String seatBId,
     String? busBId,
+    List<({String passengerId, String busId, String seatId})> bump = const [],
   }) async {
     if (passengerAId == passengerBId) return;
     final busAId = busId;
@@ -1379,6 +1461,55 @@ class TourController extends GetxController {
         return;
       }
     }
+
+    // Capacity backstop (defense-in-depth): never write more berths onto a cell
+    // than it can hold. A whole double (2 berths) must not land on a single, nor
+    // vice-versa — that silently over-books the cell and corrupts the chart.
+    // Callers SHOULD already gate this (the drag engine and SwapCandidateFinder
+    // both do), but this is the last line before persistence — and the only one
+    // that also covers cross-bus swaps.
+    {
+      final tour = getTour(tourId);
+      if (tour != null) {
+        int capOf(String bId, String sId) {
+          for (final b in tour.buses) {
+            if (b.id != bId) continue;
+            for (final cl in b.layout?.grid ?? const <SeatCell>[]) {
+              if (cl.seatId == sId) {
+                return cl.seatType == SeatType.doubleSofa ? 2 : 1;
+              }
+            }
+          }
+          return 1;
+        }
+
+        int berthsOn(String pid, String bId, String sId) =>
+            tour.passengers
+                .firstWhereOrNull((x) => x.id == pid)
+                ?.assignedSeats
+                .where((a) => a.busId == bId && a.seatId == sId)
+                .length ??
+            0;
+
+        final bA = berthsOn(passengerAId, busAId, seatAId);
+        final bB = berthsOn(passengerBId, bBusId, seatBId);
+        if (bB > capOf(busAId, seatAId) || bA > capOf(bBusId, seatBId)) {
+          AppSnackBar.error(tr('errors.move_seat'));
+          return;
+        }
+      }
+    }
+
+    // Leg-conflict resolution (set by the UI guard): occupants to bump OFF a
+    // seat so the incoming passenger doesn't over-book a shared leg. Each is
+    // cleared from its (busId, seatId) — requestLines are kept, so they return
+    // to the unseated pool rather than losing their booking. Keyed by passenger
+    // → the set of "busId|seatId" berths to drop.
+    final bumpBySeat = <String, Set<String>>{};
+    for (final x in bump) {
+      (bumpBySeat[x.passengerId] ??= <String>{}).add('${x.busId}|${x.seatId}');
+    }
+    final updatedBumped = <Passenger>[];
 
     Passenger? updatedA;
     Passenger? updatedB;
@@ -1422,6 +1553,15 @@ class TourController extends GetxController {
           updatedB = p.copyWith(assignedSeats: next);
           return updatedB!;
         }
+        final dropSeats = bumpBySeat[p.id];
+        if (dropSeats != null && dropSeats.isNotEmpty) {
+          final next = p.assignedSeats
+              .where((a) => !dropSeats.contains('${a.busId}|${a.seatId}'))
+              .toList();
+          final u = p.copyWith(assignedSeats: next);
+          updatedBumped.add(u);
+          return u;
+        }
         return p;
       }).toList();
       return t.copyWith(passengers: newPassengers);
@@ -1432,6 +1572,15 @@ class TourController extends GetxController {
     if (a == null || b == null) return;
 
     try {
+      // Persist any bumped occupants first so the freed leg is real before the
+      // incoming passenger lands on it.
+      for (final u in updatedBumped) {
+        await _sync.smartUpdate(
+          table: 'passengers',
+          entityId: u.id,
+          data: u.toMap(),
+        );
+      }
       try {
         // Atomic: both rows move in one server transaction (no double-booked
         // berth window). DI-1.
@@ -1902,6 +2051,26 @@ class TourController extends GetxController {
   List<Tour> get completedTours =>
       tours.where((t) => t.status == TourStatus.completed).toList();
 
+  /// Live count of NEW (un-actioned) booking requests across all active tours.
+  ///
+  /// Mirrors exactly the "New" filter pill in RequestsScreen: a passenger is
+  /// New when their journey isn't done and they are neither waitlisted,
+  /// confirmed, nor fully assigned. Derived from the existing `tours`
+  /// observable (via [activeTours]) so reading it inside an Obx is reactive;
+  /// adds no persisted state. Used to badge the Requests dock-nav tab.
+  int get pendingRequestCount {
+    var count = 0;
+    for (final tour in activeTours) {
+      for (final p in tour.passengers) {
+        if (p.journeyDone) continue;
+        if (!p.isWaitlisted && !p.isConfirmed && !p.isFullyAssigned) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
   // Groups (cross-booking)
   //
   // Groups live in their own `passenger_groups` table (one row per group,
@@ -2236,7 +2405,17 @@ class TourController extends GetxController {
       await persist();
     } catch (e) {
       await refreshTours();
-      AppSnackBar.error('$failure $e', title: tr('errors.save_failed'));
+      // A Postgres unique-violation (code 23505) — e.g. the same bus
+      // registration twice on one tour — is an expected conflict, not a crash.
+      // Show a clean, localized message instead of dumping the raw
+      // PostgrestException text at the agent.
+      final raw = e.toString().toLowerCase();
+      final isDuplicate =
+          raw.contains('23505') || raw.contains('duplicate key');
+      AppSnackBar.error(
+        isDuplicate ? tr('errors.duplicate') : '$failure $e',
+        title: tr('errors.save_failed'),
+      );
       rethrow;
     }
   }

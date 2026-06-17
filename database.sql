@@ -582,6 +582,79 @@ revoke all on function public.bus_layouts_for_request(uuid) from public;
 grant execute on function public.bus_layouts_for_request(uuid)
   to anon, authenticated;
 
+-- READ: "Find my seat by phone" — every seat held under a mobile number on a
+-- LOCKED/completed tour, with the bus diagram(s). Bypasses booking_requests so
+-- manually-added passengers (who have no in-app ticket) can still see their
+-- seat. Phone is matched on the LAST 10 DIGITS so +91/spaces never miss. See
+-- migration 027_seat_lookup_by_phone.sql for full notes.
+create or replace function public.seat_lookup_by_phone(p_phone text)
+returns jsonb
+language sql security definer set search_path = public
+as $$
+  with norm as (
+    select right(regexp_replace(coalesce(p_phone, ''), '\D', '', 'g'), 10) as last10
+  ),
+  pax as (
+    select p.id, p.tour_id, p.name, p.assigned_seats
+      from public.passengers p
+      join public.tours t on t.id = p.tour_id
+      cross join norm
+     where norm.last10 <> ''
+       and right(regexp_replace(p.phone, '\D', '', 'g'), 10) = norm.last10
+       and t.status in ('locked', 'completed')
+       and p.assigned_seats is not null
+       and p.assigned_seats <> '[]'::jsonb
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'tour_id',        t.id,
+        'tour_title',     t.title,
+        'from_city',      t.from_city,
+        'to_city',        t.to_city,
+        'departure_date', t.departure_date,
+        'status',         t.status,
+        'passenger_name', pax.name,
+        'assigned_seats', pax.assigned_seats,
+        'buses', (
+          select coalesce(
+            jsonb_agg(
+              jsonb_build_object(
+                'id',              b.id,
+                'tour_id',         b.tour_id,
+                'name',            b.name,
+                'registration_no', b.registration_no,
+                'bus_type',        b.bus_type,
+                'total_seats',     b.total_seats,
+                'layout',          b.layout,
+                'boarding_point',  b.boarding_point,
+                'departure_time',  b.departure_time
+              )
+              order by b.name
+            ),
+            '[]'::jsonb
+          )
+            from public.buses b
+           where b.tour_id = t.id
+             and b.id::text in (
+               select distinct seat ->> 'busId'
+                 from jsonb_array_elements(pax.assigned_seats) seat
+                where seat ? 'busId'
+             )
+        )
+      )
+      order by t.departure_date desc
+    ),
+    '[]'::jsonb
+  )
+    from pax
+    join public.tours t on t.id = pax.tour_id;
+$$;
+
+revoke all on function public.seat_lookup_by_phone(text) from public;
+grant execute on function public.seat_lookup_by_phone(text)
+  to anon, authenticated;
+
 -- READ: is the caller's booking request owned by a tour handler?
 -- A handler is a passenger (matched by tour_id + customer_phone) flagged
 -- is_handler = true. Returns false (never errors) for unknown request ids.

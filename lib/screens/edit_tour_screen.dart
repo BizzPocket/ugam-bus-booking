@@ -706,6 +706,14 @@ class _TourPreviewCard extends StatelessWidget {
     required this.price,
   });
 
+  /// Route-initials monogram for the graphite backdrop, e.g. "S→M".
+  String? _routeLabel() {
+    final f = fromCity.trim();
+    final t = toCity.trim();
+    if (f.isEmpty || t.isEmpty) return null;
+    return '${f[0].toUpperCase()}→${t[0].toUpperCase()}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final shownTitle = title.isNotEmpty ? title : tr('edit_tour.preview.untitled');
@@ -738,7 +746,10 @@ class _TourPreviewCard extends StatelessWidget {
             child: SizedBox(
               width: 64,
               height: 64,
-              child: UgamBusBackdrop(seed: 'preview-${fromCity}_$toCity'),
+              child: UgamBusBackdrop(
+                seed: 'preview-${fromCity}_$toCity',
+                label: _routeLabel(),
+              ),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),

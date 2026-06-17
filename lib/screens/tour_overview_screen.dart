@@ -6,9 +6,9 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/seat_type.dart';
-import '../models/tour.dart';
 import '../routes/app_routes.dart';
 import '../services/seating_engine.dart';
+import '../utils/tour_capacity.dart';
 import 'manage_buses_screen.dart';
 import 'requests_screen.dart';
 
@@ -70,21 +70,24 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
 
   TourController get _ctrl => Get.find<TourController>();
 
-  /// Assigned berths per bus across every passenger. A whole double sofa
-  /// (two assignment entries on one seatId) correctly counts as 2 berths
-  /// because we count entries, not distinct seats.
-  Map<String, int> _assignedBerthsByBus(Tour tour) {
-    final out = <String, int>{};
-    for (final p in tour.passengers) {
-      for (final a in p.assignedSeats) {
-        out[a.busId] = (out[a.busId] ?? 0) + 1;
-      }
-    }
-    return out;
-  }
-
   Future<void> _fill() async {
     if (_filling) return;
+    // First fill on a tour runs immediately. Every RE-generate (seats already
+    // placed) asks first — a re-run discards the current arrangement and
+    // re-assigns everyone, so it should never fire on a stray tap.
+    final tour = _ctrl.getTour(widget.tourId);
+    if ((tour?.totalSeatsAssigned ?? 0) > 0) {
+      final ok = await UgamDialog.confirm(
+        context,
+        title: tr('tour_overview.regenerate_confirm_title'),
+        message: tr('tour_overview.regenerate_confirm_body'),
+        confirmLabel: tr('tour_overview.cta_regenerate'),
+        cancelLabel: tr('app.action.cancel'),
+        confirmIcon: Icons.auto_awesome_rounded,
+      );
+      if (!ok) return;
+    }
+    if (!mounted) return;
     setState(() => _filling = true);
     try {
       await _ctrl.fillTour(widget.tourId);
@@ -144,8 +147,11 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                 }
 
                 final exceptions = _ctrl.exceptionsForTour(tour.id);
-                final assignedByBus = _assignedBerthsByBus(tour);
-                final placed = tour.totalSeatsAssigned;
+                // Leg-aware occupancy: a berth shared by two opposite one-way
+                // riders is ONE physical seat, not two. Counting raw entries
+                // here let a bus read "38/37 · full" while a seat sat empty.
+                final assignedByBus = tour.occupiedBerthsByBus();
+                final placed = tour.occupiedBerths;
                 final total = tour.totalBusSeats;
 
                 // Demand summary: how many of each seat type the passengers
@@ -183,9 +189,17 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                     .where((e) =>
                         e.type == SeatingExceptionType.overflowWaitlist)
                     .length;
-                final shortfall = demandBerths - total;
-                final showCapacity =
-                    overflowCount > 0 || (total > 0 && shortfall > 0);
+                // Pre-fill shortfall is ENGINE truth, not the leg-agnostic
+                // `demandBerths − total`. The raw subtraction overstated the gap
+                // because it ignored leg-sharing (two opposite one-way riders
+                // reuse one berth), so it claimed "6 short" while the engine can
+                // actually seat all but 3. Routing through [computeTourCapacity]
+                // makes "may not fit" agree with the same plan the chart and the
+                // Requests banner use — over-demand surfaces as needsDecision,
+                // never a phantom number. See [TourCapacity.freeByType].
+                final shortfall =
+                    total > 0 ? computeTourCapacity(tour).needsDecision : 0;
+                final showCapacity = overflowCount > 0 || shortfall > 0;
 
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(
@@ -196,13 +210,20 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                   ),
                   physics: const BouncingScrollPhysics(),
                   children: [
-                    _SeatStat(
+                    // One compact summary: seats-placed + the bus requirements
+                    // (what to book), on the 8pt grid — replaces the two tall
+                    // stat/requirements cards.
+                    _SummaryCard(
                       placed: placed,
                       total: total,
+                      singles: reqSingles,
+                      doubles: reqDoubles,
+                      seaters: reqSeaters,
+                      onEditRequests: _onEditRequests,
                       c: c,
                     ),
                     if (showCapacity) ...[
-                      const SizedBox(height: UgamSpacing.md),
+                      const SizedBox(height: UgamSpacing.sm),
                       _CapacityBanner(
                         overflowCount: overflowCount,
                         demandBerths: demandBerths,
@@ -215,37 +236,54 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                         c: c,
                       ),
                     ],
-                    const SizedBox(height: UgamSpacing.md),
-                    _RequirementsCard(
-                      singles: reqSingles,
-                      doubles: reqDoubles,
-                      seaters: reqSeaters,
-                      onTap: _onEditRequests,
-                      c: c,
-                    ),
-                    if (exceptions.isNotEmpty) ...[
-                      const SizedBox(height: UgamSpacing.md),
+                    // Collapse to ONE warm attention surface: the capacity
+                    // banner already carries a "review waitlist" action into
+                    // the same exceptions route, so the decision chip only
+                    // appears when the banner is NOT shown — never both warm
+                    // blocks at once.
+                    if (exceptions.isNotEmpty && !showCapacity) ...[
+                      const SizedBox(height: UgamSpacing.sm),
                       _DecisionChip(
                         count: exceptions.length,
                         onTap: _onExceptionsTap,
                         c: c,
                       ),
                     ],
-                    const SizedBox(height: UgamSpacing.xl),
+                    const SizedBox(height: UgamSpacing.md),
+                    // Buses are slim list rows inside ONE card (hairline
+                    // dividers between), so several fit without the old
+                    // card-per-bus gaps.
                     if (tour.buses.isEmpty)
                       _NoBuses(c: c)
                     else
-                      ...tour.buses.map(
-                        (bus) => Padding(
-                          padding:
-                              const EdgeInsets.only(bottom: UgamSpacing.md),
-                          child: _BusCard(
-                            bus: bus,
-                            assigned: assignedByBus[bus.id] ?? 0,
-                            hasExceptions: exceptions.isNotEmpty,
-                            onTap: () => _onBusTap(bus),
-                            c: c,
-                          ),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: c.card,
+                          borderRadius:
+                              BorderRadius.circular(UgamRadius.card),
+                          border: Border.all(color: c.border),
+                        ),
+                        child: Column(
+                          children: [
+                            for (var i = 0; i < tour.buses.length; i++) ...[
+                              if (i > 0)
+                                Divider(
+                                  height: 1,
+                                  thickness: 1,
+                                  color: c.border,
+                                  indent: UgamSpacing.md,
+                                  endIndent: UgamSpacing.md,
+                                ),
+                              _BusRow(
+                                bus: tour.buses[i],
+                                assigned:
+                                    assignedByBus[tour.buses[i].id] ?? 0,
+                                hasExceptions: exceptions.isNotEmpty,
+                                onTap: () => _onBusTap(tour.buses[i]),
+                                c: c,
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                   ],
@@ -263,31 +301,46 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
               final fillLabel = placed > 0
                   ? tr('tour_overview.regenerate_plan')
                   : tr('tour_overview.fill_bus');
+              // Concise labels for the half-width row so they never ellipsize.
+              final fillLabelShort = placed > 0
+                  ? tr('tour_overview.cta_regenerate')
+                  : tr('tour_overview.fill_bus');
               final onEdit = widget.onEditByHand;
+              // Two CTAs share ONE component (UgamButton) so they read as a
+              // matched pair — identical height + corner radius — laid out in a
+              // single row. "Edit by hand" stays the lone champagne focal
+              // (primary); "Re-generate" is the neutral sibling. Text-only so
+              // the longer labels never truncate at half-width. Standalone (no
+              // onEditByHand) collapses to a single full-width primary button.
               return UgamStickyCTA(
                 child: onEdit == null
-                    ? UgamCTA(
+                    ? UgamButton(
                         label: fillLabel,
-                        leadingIcon: Icons.auto_awesome_rounded,
+                        icon: Icons.auto_awesome_rounded,
+                        kind: UgamButtonKind.primary,
+                        expand: true,
                         loading: _filling,
                         onPressed: hasBuses ? _fill : null,
                       )
-                    : Column(
-                        mainAxisSize: MainAxisSize.min,
+                    : Row(
                         children: [
-                          UgamCTA(
-                            label: tr('seats.edit_by_hand'),
-                            leadingIcon: Icons.touch_app_rounded,
-                            onPressed: hasBuses ? onEdit : null,
+                          Expanded(
+                            child: UgamButton(
+                              label: tr('tour_overview.cta_edit_by_hand'),
+                              kind: UgamButtonKind.primary,
+                              expand: true,
+                              onPressed: hasBuses ? onEdit : null,
+                            ),
                           ),
-                          const SizedBox(height: UgamSpacing.sm),
-                          UgamButton(
-                            label: fillLabel,
-                            icon: Icons.auto_awesome_rounded,
-                            kind: UgamButtonKind.neutral,
-                            expand: true,
-                            loading: _filling,
-                            onPressed: hasBuses ? _fill : null,
+                          const SizedBox(width: UgamSpacing.sm),
+                          Expanded(
+                            child: UgamButton(
+                              label: fillLabelShort,
+                              kind: UgamButtonKind.neutral,
+                              expand: true,
+                              loading: _filling,
+                              onPressed: hasBuses ? _fill : null,
+                            ),
                           ),
                         ],
                       ),
@@ -305,117 +358,44 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
   }
 }
 
-// ─── Placed / total seat stat ────────────────────────────────────────────
+// ─── Summary card (seats placed + bus requirements) ──────────────────────
 
-class _SeatStat extends StatelessWidget {
+/// One compact card on the 8pt grid: the seats-placed progress on top, a
+/// hairline divider, then what the agent still has to book (single/double/
+/// seater counts + total). Replaces the two tall stat + requirements cards.
+class _SummaryCard extends StatelessWidget {
   final int placed;
   final int total;
+  final int singles;
+  final int doubles;
+  final int seaters;
+  final VoidCallback onEditRequests;
   final UgamColorSet c;
 
-  const _SeatStat({
+  const _SummaryCard({
     required this.placed,
     required this.total,
+    required this.singles,
+    required this.doubles,
+    required this.seaters,
+    required this.onEditRequests,
     required this.c,
   });
 
   @override
   Widget build(BuildContext context) {
     final complete = total > 0 && placed >= total;
-    return UgamCard.plain(
-      padding: const EdgeInsets.all(UgamSpacing.lg),
-      radius: UgamRadius.stat,
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: complete ? c.goodFill : c.accentFill,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              complete
-                  ? Icons.event_seat_rounded
-                  : Icons.grid_view_rounded,
-              size: 20,
-              color: complete ? c.good : c.accent,
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr('tour_overview.seats_placed'),
-                  style: UgamText.micro.copyWith(color: c.ink3),
-                ),
-                const SizedBox(height: 4),
-                RichText(
-                  text: TextSpan(
-                    style: UgamText.numXl.copyWith(color: c.ink),
-                    children: [
-                      TextSpan(text: '$placed'),
-                      TextSpan(
-                        text: ' / $total',
-                        style: UgamText.tabular(
-                          UgamText.body.copyWith(
-                            color: c.ink2,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+    final ratio = total == 0 ? 0.0 : (placed / total).clamp(0.0, 1.0);
+    final barColor = complete ? c.good : c.accent;
+    final units = singles + doubles + seaters;
+    final chips = <String>[
+      '$singles ${tr('tour_overview.single_sofa')}',
+      '$doubles ${tr('tour_overview.double_sofa')}',
+      if (seaters > 0) '$seaters ${tr('tour_overview.seater')}',
+    ].join('  ·  ');
 
-// ─── "N need your decision" chip ─────────────────────────────────────────
-
-/// Demand summary for the active tour: how many Single Sofas, Double Sofas
-/// (counted as ONE unit each, not two berths), and Seaters the passengers
-/// have requested — what the agent books buses against.
-class _RequirementsCard extends StatelessWidget {
-  final int singles;
-  final int doubles;
-  final int seaters;
-
-  /// Tapping the card opens the requests list so the agent can edit what was
-  /// asked for. Null leaves the card inert.
-  final VoidCallback? onTap;
-  final UgamColorSet c;
-
-  const _RequirementsCard({
-    required this.singles,
-    required this.doubles,
-    required this.seaters,
-    required this.c,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final total = singles + doubles + seaters;
-    final items = <(String, int)>[
-      (tr('tour_overview.single_sofa'), singles),
-      (tr('tour_overview.double_sofa'), doubles),
-      if (seaters > 0) (tr('tour_overview.seater'), seaters),
-    ];
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-      padding: const EdgeInsets.all(UgamSpacing.lg),
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.md),
       decoration: BoxDecoration(
         color: c.card,
         borderRadius: BorderRadius.circular(UgamRadius.card),
@@ -424,6 +404,51 @@ class _RequirementsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Seats placed — eyebrow + tabular count.
+          Row(
+            children: [
+              Text(
+                tr('tour_overview.seats_placed'),
+                style: UgamText.micro.copyWith(color: c.ink3),
+              ),
+              const Spacer(),
+              RichText(
+                text: TextSpan(
+                  style: UgamText.tabular(
+                    UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
+                  ),
+                  children: [
+                    TextSpan(text: '$placed'),
+                    TextSpan(
+                      text: ' / $total',
+                      style: UgamText.body.copyWith(
+                        color: c.ink2,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(UgamRadius.chip),
+            child: Stack(
+              children: [
+                Container(height: 6, color: c.cardElev),
+                FractionallySizedBox(
+                  widthFactor: ratio == 0 ? 0.001 : ratio,
+                  child: Container(height: 6, color: barColor),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          Container(height: 1, color: c.border),
+          const SizedBox(height: UgamSpacing.md),
+          // Bus requirements — eyebrow + Edit, then the chips + total.
           Row(
             children: [
               Text(
@@ -431,53 +456,44 @@ class _RequirementsCard extends StatelessWidget {
                 style: UgamText.micro.copyWith(color: c.ink3),
               ),
               const Spacer(),
-              if (onTap != null) ...[
-                Text(
-                  tr('app.action.edit'),
-                  style: UgamText.micro.copyWith(color: c.accent),
+              GestureDetector(
+                onTap: onEditRequests,
+                behavior: HitTestBehavior.opaque,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      tr('app.action.edit'),
+                      style: UgamText.micro.copyWith(color: c.accent),
+                    ),
+                    Icon(Icons.chevron_right_rounded,
+                        size: 14, color: c.accent),
+                  ],
                 ),
-                Icon(Icons.chevron_right_rounded, size: 14, color: c.accent),
-              ],
+              ),
             ],
           ),
-          const SizedBox(height: UgamSpacing.md),
-          Row(
-            children: [
-              for (final it in items)
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${it.$2}',
-                        style: UgamText.tabular(
-                          UgamText.titleL
-                              .copyWith(color: c.ink, fontSize: 26),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        it.$1,
-                        style: UgamText.caption.copyWith(color: c.ink2),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Container(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.sm + 2),
+          const SizedBox(height: UgamSpacing.xs),
           Text(
-            tr('tour_overview.total_to_book', namedArgs: {'n': '$total'}),
-            style: UgamText.caption.copyWith(color: c.ink3),
+            chips,
+            style: UgamText.caption.copyWith(color: c.ink),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            tr('tour_overview.total_to_book', namedArgs: {'n': '$units'}),
+            style: UgamText.micro.copyWith(color: c.ink3),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
-      ),
       ),
     );
   }
 }
+
+// ─── "N need your decision" chip ─────────────────────────────────────────
 
 class _DecisionChip extends StatelessWidget {
   final int count;
@@ -674,22 +690,31 @@ class _BannerAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = filled ? c.onAccent : c.warm;
+    // Both banner actions are now WARM TONAL — mirroring [UgamButton]'s tonal
+    // geometry (50-h, input radius, fill + hairline border) but tinted warm so
+    // the attention surface stays a single warm signal. The "primary" remedy
+    // ([filled]) reads a touch stronger via a denser warm fill; the secondary
+    // shares the same warm-tonal shape so the pair looks like one component
+    // family instead of a solid-slab + outline mix.
+    final bg = filled
+        ? c.warm.withValues(alpha: 0.20)
+        : c.warm.withValues(alpha: 0.10);
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        height: 40,
+        height: 48,
         alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
         decoration: BoxDecoration(
-          color: filled ? c.warm : Colors.transparent,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
-          border: filled ? null : Border.all(color: c.warm),
+          color: bg,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+          border: Border.all(color: c.warm.withValues(alpha: 0.40)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: fg),
+            Icon(icon, size: 16, color: c.warm),
             const SizedBox(width: 6),
             Flexible(
               child: Text(
@@ -697,7 +722,7 @@ class _BannerAction extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: UgamText.caption.copyWith(
-                  color: fg,
+                  color: c.warm,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -709,20 +734,23 @@ class _BannerAction extends StatelessWidget {
   }
 }
 
-// ─── Bus card ────────────────────────────────────────────────────────────
+// ─── Bus row ─────────────────────────────────────────────────────────────
 
-class _BusCard extends StatelessWidget {
+/// A slim, tappable bus row inside the shared buses card: name · type, a
+/// status dot + leg-aware count, and a thin fill bar. The dot/bar colour is
+/// the status (good = full & clean, warm = unplaced or needs review), so no
+/// separate status line is needed — keeps several buses visible at once.
+class _BusRow extends StatelessWidget {
   final Bus bus;
   final int assigned;
 
-  /// True when the last generated plan has unresolved exceptions on this
-  /// tour. Exceptions are passenger/group-scoped, so we surface them at the
-  /// bus level by flagging any not-yet-full bus warm while issues exist.
+  /// True when the last generated plan has unresolved exceptions on this tour
+  /// — flags any not-yet-full bus warm while issues remain.
   final bool hasExceptions;
   final VoidCallback onTap;
   final UgamColorSet c;
 
-  const _BusCard({
+  const _BusRow({
     required this.bus,
     required this.assigned,
     required this.hasExceptions,
@@ -734,91 +762,74 @@ class _BusCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = bus.totalSeats;
     final full = total > 0 && assigned >= total;
-    // good = full and the plan is clean; warm = not full, or the plan still
-    // has exceptions the agent must resolve.
     final clean = full && !hasExceptions;
-    final tone = clean ? UgamStatusTone.good : UgamStatusTone.warm;
-    final barColor = clean ? c.good : c.warm;
+    final tone = clean ? c.good : c.warm;
     final ratio = total == 0 ? 0.0 : (assigned / total).clamp(0.0, 1.0);
 
-    return UgamCard.plain(
+    return GestureDetector(
       onTap: onTap,
-      padding: const EdgeInsets.all(UgamSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: c.cardElev,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  Icons.directions_bus_filled_rounded,
-                  size: 18,
-                  color: c.ink2,
-                ),
-              ),
-              const SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      bus.name,
-                      style: UgamText.titleS.copyWith(color: c.ink),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      bus.busType,
-                      style: UgamText.caption.copyWith(color: c.ink3),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: UgamSpacing.sm),
-              Text(
-                '$assigned/$total',
-                style: UgamText.tabular(
-                  UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 14),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          // Thin fill bar.
-          ClipRRect(
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-            child: Stack(
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
               children: [
-                Container(height: 6, color: c.cardElev),
-                FractionallySizedBox(
-                  widthFactor: ratio == 0 ? 0.001 : ratio,
-                  child: Container(height: 6, color: barColor),
+                Icon(Icons.directions_bus_filled_rounded,
+                    size: 16, color: c.ink3),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(
+                  child: RichText(
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    text: TextSpan(
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.ink, fontSize: 14),
+                      children: [
+                        TextSpan(text: bus.name),
+                        TextSpan(
+                          text: '  ·  ${bus.busType}',
+                          style:
+                              UgamText.caption.copyWith(color: c.ink3),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
+                const SizedBox(width: UgamSpacing.sm),
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(color: tone, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '$assigned/$total',
+                  style: UgamText.tabular(
+                    UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 14),
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(Icons.chevron_right_rounded, size: 16, color: c.ink3),
               ],
             ),
-          ),
-          const SizedBox(height: UgamSpacing.sm + 2),
-          UgamStatusDot(
-            label: clean
-                ? tr('tour_overview.status_full')
-                : full
-                    ? tr('tour_overview.status_needs_review')
-                    : tr('tour_overview.status_unplaced'),
-            tone: tone,
-          ),
-        ],
+            const SizedBox(height: UgamSpacing.sm),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+              child: Stack(
+                children: [
+                  Container(height: 5, color: c.cardElev),
+                  FractionallySizedBox(
+                    widthFactor: ratio == 0 ? 0.001 : ratio,
+                    child: Container(height: 5, color: tone),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

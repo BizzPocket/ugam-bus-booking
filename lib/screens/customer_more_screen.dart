@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../components/ugam_logo.dart';
 import '../config/i18n_config.dart';
 import '../content/legal_content.dart';
 import '../design/ugam.dart';
 import '../widgets/language_picker_sheet.dart';
+import 'find_my_seat_screen.dart';
 import 'legal_document_screen.dart';
 
 /// Customer-facing "More" menu — opened from the explore-tours top bar.
@@ -30,7 +32,7 @@ class CustomerMoreScreen extends StatelessWidget {
         bottom: false,
         child: Column(
           children: [
-            _TopBar(c: c),
+            UgamAppBar(showBack: true, title: tr('customer_more.title')),
             Expanded(
               child: ListView(
                 physics: const BouncingScrollPhysics(),
@@ -43,6 +45,30 @@ class CustomerMoreScreen extends StatelessWidget {
                 children: [
                   _BrandHero(c: c),
                   const SizedBox(height: UgamSpacing.xl),
+
+                  // ── Your trip ──
+                  _SectionLabel(
+                    c: c,
+                    label: tr('customer_more.section_my_trip'),
+                  ),
+                  UgamCard.plain(
+                    padding: EdgeInsets.zero,
+                    child: _MoreRow(
+                      c: c,
+                      icon: Icons.event_seat_rounded,
+                      tone: UgamStatVariant.accent,
+                      title: tr('customer_more.find_seat'),
+                      subtitle: tr('customer_more.find_seat_subtitle'),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        Get.to(
+                          () => const FindMySeatScreen(),
+                          transition: Transition.cupertino,
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: UgamSpacing.lg),
 
                   // ── Preferences ──
                   _SectionLabel(
@@ -124,48 +150,6 @@ class CustomerMoreScreen extends StatelessWidget {
 
 // ─── pieces ─────────────────────────────────────────────────────────────
 
-class _TopBar extends StatelessWidget {
-  final UgamColorSet c;
-  const _TopBar({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              tr('customer_more.title'),
-              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 24),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _BrandHero extends StatelessWidget {
   final UgamColorSet c;
   const _BrandHero({required this.c});
@@ -175,20 +159,7 @@ class _BrandHero extends StatelessWidget {
     return UgamCard.plain(
       child: Row(
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: c.accentFill,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            alignment: Alignment.center,
-            padding: const EdgeInsets.all(10),
-            child: Image.asset(
-              'assets/icon/ugam_logo.png',
-              fit: BoxFit.contain,
-            ),
-          ),
+          const UgamLogo(size: 56),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
             child: Column(

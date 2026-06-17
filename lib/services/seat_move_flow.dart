@@ -7,7 +7,9 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
+import '../models/seat_type.dart';
 import '../services/group_cascade.dart';
+import '../services/seat_swap_guard.dart';
 import '../services/swap_candidate_finder.dart';
 import '../utils/passenger_display.dart';
 
@@ -29,35 +31,65 @@ class SeatMoveFlow {
 
   /// Entry point. [sourceBusId] is the bus the mover currently sits on (where
   /// [fromSeatId] lives). A single-bus tour skips the picker.
+  ///
+  /// When [onRelocateToBus] is supplied, picking a destination bus DOES NOT open
+  /// the auto swap-assistant; instead it calls back so the caller (the seat
+  /// chart) can switch to that bus and let the agent tap the exact target seat
+  /// by hand — tap a free seat to move, tap an occupied seat to swap/free. The
+  /// callback receives the destination plus the mover's source identity so the
+  /// chart can drive the cross-bus [TourController.moveSeat] / [swapSeats]
+  /// itself. Without it, the legacy swap-assistant flow runs.
   static void start(
     BuildContext context, {
     required String tourId,
     required String sourceBusId,
     required Passenger mover,
     required String fromSeatId,
+    void Function(
+      Bus destination,
+      Passenger mover,
+      String sourceBusId,
+      String fromSeatId,
+    )? onRelocateToBus,
   }) {
     final tour = _ctrl.getTour(tourId);
     if (tour == null) return;
     final buses = tour.buses;
     if (buses.isEmpty) return;
 
-    void run(Bus destination) => _openSwapAssist(
-      context,
-      tourId: tourId,
-      sourceBusId: sourceBusId,
-      mover: mover,
-      fromSeatId: fromSeatId,
-      destination: destination,
-    );
+    // Callers (e.g. the occupant action sheet) typically POP their own sheet
+    // immediately before calling start, so [context] is already being torn
+    // down. The destination picker still opens (the popped sheet is mid-exit
+    // animation), but the swap assistant is launched LATER from the picker's
+    // onPick — by then [context] is deactivated and opening a sheet against it
+    // throws "deactivated widget's ancestor is unsafe", silently killing the
+    // (cross-bus) move. Anchor the whole flow to the ROOT navigator's context,
+    // which outlives every sheet we pop.
+    final flowContext = Navigator.of(context, rootNavigator: true).context;
+
+    void run(Bus destination) {
+      if (onRelocateToBus != null) {
+        onRelocateToBus(destination, mover, sourceBusId, fromSeatId);
+        return;
+      }
+      _openSwapAssist(
+        flowContext,
+        tourId: tourId,
+        sourceBusId: sourceBusId,
+        mover: mover,
+        fromSeatId: fromSeatId,
+        destination: destination,
+      );
+    }
 
     if (buses.length == 1) {
       run(buses.first);
       return;
     }
 
-    final c = UgamColors.of(context);
+    final c = UgamColors.of(flowContext);
     showModalBottomSheet<void>(
-      context: context,
+      context: flowContext,
       backgroundColor: c.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -89,11 +121,37 @@ class SeatMoveFlow {
     final tour = _ctrl.getTour(tourId);
     if (tour == null) return;
 
+    // Resolve the mover's CURRENT seat class + berth count on the SOURCE bus so
+    // the finder can offer a physical swap on ANY bus — including a cross-bus
+    // swap, where the mover doesn't sit on the destination layout and a
+    // need-already-satisfied passenger would otherwise surface no candidates.
+    final sourceBus = tour.buses.firstWhereOrNull((b) => b.id == sourceBusId);
+    SeatType? moverSeatType;
+    final sourceGrid = sourceBus?.layout?.grid;
+    if (sourceGrid != null) {
+      for (final cell in sourceGrid) {
+        if (cell.seatId == fromSeatId) {
+          moverSeatType = cell.seatType;
+          break;
+        }
+      }
+    }
+    final moverBerths = mover.assignedSeats
+        .where((a) => a.busId == sourceBusId && a.seatId == fromSeatId)
+        .length;
+
     final assist = SwapCandidateFinder.find(
       mover: mover,
       destinationBus: destination,
       passengers: tour.passengers,
       sourceBusId: sourceBusId,
+      // Tell the finder where the mover currently sits so a swap is offered on
+      // physical feasibility, not just on an outstanding request — a seated
+      // passenger can swap with any compatible allocated seat, same OR another
+      // bus.
+      moverFromSeatId: destination.id == sourceBusId ? fromSeatId : null,
+      moverFromSeatType: moverSeatType,
+      moverFromBerths: moverBerths,
     );
 
     final c = UgamColors.of(context);
@@ -159,6 +217,20 @@ class SeatMoveFlow {
       return;
     }
 
+    // Capacity guard (data-corruption fix): a SUBSTITUTE whole-double mover holds
+    // 2 berths on the source cell. If the chosen FREE seat is a 1-capacity cell
+    // (Single Sofa / Seater), moving BOTH berths would over-stuff that cell.
+    // Compute the target cell's capacity (Double = 2, else 1) from the
+    // destination layout and the mover's current berth count on the source cell,
+    // then cap [berths] so moveSeat PEELS a single berth — matching the drag
+    // engine's splitToSingle. When the mover fits (moverBerths <= targetCap) we
+    // pass null and move every berth (a whole-double crosses intact).
+    final targetCap = _seatCapacity(destination, toSeatId);
+    final moverBerths = mover.assignedSeats
+        .where((a) => a.busId == sourceBusId && a.seatId == fromSeatId)
+        .length;
+    final berthsCap = moverBerths > targetCap ? targetCap : null;
+
     await _ctrl.moveSeat(
       tourId: tourId,
       passengerId: mover.id,
@@ -166,7 +238,23 @@ class SeatMoveFlow {
       fromSeatId: fromSeatId,
       toSeatId: toSeatId,
       toBusId: destination.id,
+      berths: berthsCap,
     );
+  }
+
+  /// Berth capacity of [seatId] on [bus]: a Double Sofa holds 2, every other
+  /// seat class holds 1. Reads the destination layout grid; defaults to 1 when
+  /// the cell can't be resolved (the safe floor — never over-assign).
+  static int _seatCapacity(Bus bus, String seatId) {
+    final base = seatId.split('#').first;
+    final grid = bus.layout?.grid;
+    if (grid == null) return 1;
+    for (final cell in grid) {
+      if (cell.seatId == base) {
+        return cell.seatType == SeatType.doubleSofa ? 2 : 1;
+      }
+    }
+    return 1;
   }
 
   /// Swap [mover] with a chosen movable [candidate] on [destination]. A grouped
@@ -190,9 +278,11 @@ class SeatMoveFlow {
       return;
     }
 
-    await _ctrl.swapSeats(
+    if (!context.mounted) return;
+    await SeatSwapGuard.run(
+      context,
       tourId: tourId,
-      busId: sourceBusId,
+      busAId: sourceBusId,
       passengerAId: mover.id,
       seatAId: fromSeatId,
       passengerBId: candidate.passengerId,

@@ -381,33 +381,85 @@ class _SummaryHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final c = UgamColors.of(context);
+    final settled = toCollect.abs() <= 0.005;
+    final figureColor = settled ? c.good : c.accent;
+    return Column(
       children: [
-        Expanded(
-          child: UgamStatTile(
-            icon: Icons.payments_rounded,
-            value: Formatters.formatMoneyInr(collected),
-            label: tr('collection.collected'),
-            variant: UgamStatVariant.good,
+        // ── Hero figure: the ONE action number (still to collect) ──────
+        // Leads as a large tabular number — the cash the handler still has to
+        // gather. Collected / to-return are demoted to the quiet row below.
+        UgamCard.plain(
+          elev: true,
+          padding: const EdgeInsets.all(UgamSpacing.lg),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: settled ? c.goodFill : c.accentFill,
+                  borderRadius: BorderRadius.circular(UgamRadius.seat),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.account_balance_wallet_rounded,
+                  size: 20,
+                  color: figureColor,
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      tr('collection.filter_to_collect').toUpperCase(),
+                      style: UgamText.micro.copyWith(
+                        color: c.ink3,
+                        letterSpacing: 0.6,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: UgamSpacing.xs),
+                    Text(
+                      Formatters.formatMoneyInr(toCollect),
+                      style: UgamText.tabular(
+                        UgamText.numLg
+                            .copyWith(color: figureColor, fontSize: 30),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: UgamSpacing.md),
-        Expanded(
-          child: UgamStatTile(
-            icon: Icons.undo_rounded,
-            value: Formatters.formatMoneyInr(toReturn),
-            label: tr('collection.filter_to_return'),
-            variant: UgamStatVariant.warm,
-          ),
-        ),
-        const SizedBox(width: UgamSpacing.md),
-        Expanded(
-          child: UgamStatTile(
-            icon: Icons.account_balance_wallet_rounded,
-            value: Formatters.formatMoneyInr(toCollect),
-            label: tr('collection.filter_to_collect'),
-            variant: UgamStatVariant.accent,
-          ),
+        const SizedBox(height: UgamSpacing.md),
+        // ── Supporting pair (demoted) ──────────────────────────────────
+        Row(
+          children: [
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.payments_rounded,
+                value: Formatters.formatMoneyInr(collected),
+                label: tr('collection.collected'),
+                variant: UgamStatVariant.good,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.undo_rounded,
+                value: Formatters.formatMoneyInr(toReturn),
+                label: tr('collection.filter_to_return'),
+                variant: UgamStatVariant.warm,
+              ),
+            ),
+          ],
         ),
       ],
     );

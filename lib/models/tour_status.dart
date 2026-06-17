@@ -78,6 +78,16 @@ enum TourStatus {
   /// Whether the tour is in an active (non-completed) state.
   bool get isActive => this != TourStatus.completed;
 
+  /// Whether the tour still accepts NEW booking requests / passengers.
+  ///
+  /// Single source of truth for every book/add-request entry point (customer
+  /// list, customer detail, customer booking form, admin/handler "Add
+  /// request"). Bookings close the moment the organiser LOCKS the tour — at
+  /// that point seats are assigned and notifications sent, so the allocation is
+  /// final — and stay closed through the terminal [completed] state.
+  bool get acceptsBookings =>
+      this != TourStatus.locked && this != TourStatus.completed;
+
   /// Whether bus layout editing is allowed in this status.
   bool get allowsLayoutEdit =>
       this == TourStatus.planning ||

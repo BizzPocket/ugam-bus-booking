@@ -34,6 +34,12 @@ class CombinedSeatGrid extends StatelessWidget {
   final bool showDriver;
   final String? driverLabel;
 
+  /// Reserve a full 44 px header band above the seats so a top-anchored overlay
+  /// control (the [ChartExpandButton], pinned top-left) clears the first seat
+  /// instead of bleeding onto it. Opt-in: read-only charts with no overlay keep
+  /// the slim driver strip. Only takes effect when [showDriver] is true.
+  final bool reserveTopAction;
+
   // ── Optional drag-to-move/swap + edit-flags hooks ──────────────────────────
   // All default off/null so existing (read-only) call sites are unaffected: the
   // grid wraps tiles in a [SeatDragWrapper] ONLY when [enableDrag] is true.
@@ -89,6 +95,7 @@ class CombinedSeatGrid extends StatelessWidget {
     this.rowGap = 6,
     this.showDriver = true,
     this.driverLabel,
+    this.reserveTopAction = false,
     this.enableDrag = false,
     this.onSeatDraggedToSeat,
     this.canDragSeat,
@@ -123,26 +130,33 @@ class CombinedSeatGrid extends StatelessWidget {
       if (_rowHasSeats(r)) rowsWithSeats.add(r);
     }
     final usedCols = _usedLaneCols;
-    final hasLeft = usedCols.contains(SeatGridCols.singleUpper) ||
+    final hasLeft =
+        usedCols.contains(SeatGridCols.singleUpper) ||
         usedCols.contains(SeatGridCols.singleLower);
-    final hasRight = usedCols.contains(SeatGridCols.doubleUpper) ||
+    final hasRight =
+        usedCols.contains(SeatGridCols.doubleUpper) ||
         usedCols.contains(SeatGridCols.doubleLower);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (showDriver) ...[
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Icon(Icons.account_circle_rounded, size: 16, color: c.ink3),
-              const SizedBox(width: 6),
-              Text(
-                (driverLabel ?? tr('seat_ui.driver')).toUpperCase(),
-                style: UgamText.micro.copyWith(letterSpacing: 1, color: c.ink3),
+          // When an overlay control (expand-to-fullscreen) is pinned top-left,
+          // reserve a fixed 44 px band so the seats start below it; the driver
+          // label stays right-aligned and centres within that band. Without an
+          // overlay, the slim intrinsic-height row is kept (the grid lives in an
+          // unbounded scroll view, so a bare Row — not a stretched Align — is
+          // what's safe there).
+          if (reserveTopAction)
+            SizedBox(
+              height: 44,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _driverRow(c),
               ),
-            ],
-          ),
+            )
+          else
+            _driverRow(c),
           const SizedBox(height: UgamSpacing.sm),
           Divider(height: 1, color: c.border),
           const SizedBox(height: UgamSpacing.md),
@@ -158,6 +172,22 @@ class CombinedSeatGrid extends StatelessWidget {
               ],
             ],
           ),
+        ),
+      ],
+    );
+  }
+
+  /// The right-aligned driver indicator (icon + label). Kept as one builder so
+  /// the slim and the reserved-band paths render an identical row.
+  Widget _driverRow(UgamColorSet c) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Icon(Icons.account_circle_rounded, size: 16, color: c.ink3),
+        const SizedBox(width: 6),
+        Text(
+          (driverLabel ?? tr('seat_ui.driver')).toUpperCase(),
+          style: UgamText.micro.copyWith(letterSpacing: 1, color: c.ink3),
         ),
       ],
     );
@@ -219,29 +249,31 @@ class CombinedSeatGrid extends StatelessWidget {
   /// [FittedBox] scales every tile down a touch to fit, exactly like the snug
   /// back row of a real coach.
   Widget _benchRow(BuildContext context, int row) {
-    final seats = layout.grid.where((c) => c.row == row && c.hasSeat).toList()
-      ..sort((a, b) {
-        if (a.col != b.col) return a.col.compareTo(b.col);
-        return _posRank(a.position) - _posRank(b.position);
-      });
     final cols = <Widget>[];
-    for (final cell in seats) {
+    void add(SeatCell cell) {
+      if (!cell.hasSeat) return;
       if (cols.isNotEmpty) cols.add(SizedBox(width: colGap));
       cols.add(_slot(context, cell));
     }
+
+    // Same left-to-right structure as a normal row, so the bench lines up with
+    // the body above: single column on the LEFT, the aisle/balcony berth(s) in
+    // the CENTRE (the gap on normal rows), then the doubles on the RIGHT drawn
+    // Lower-then-Upper (lowers toward the centre) exactly like _row().
+    add(layout.cellAt(row, SeatGridCols.singleUpper));
+    add(layout.cellAt(row, SeatGridCols.singleLower));
+    final pair = layout.balconyPair(row);
+    add(pair.upper);
+    add(pair.lower);
+    add(layout.cellAt(row, SeatGridCols.doubleLower));
+    add(layout.cellAt(row, SeatGridCols.doubleUpper));
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: cols,
     );
   }
-
-  /// Stable ordering for two berths sharing the aisle column: upper before lower.
-  static int _posRank(SeatPosition? p) => switch (p) {
-        SeatPosition.upper => 0,
-        SeatPosition.lower => 1,
-        null => 2,
-      };
 
   /// A fixed lane slot. Empty cells render as blank space so columns align.
   /// Non-empty tiles are wrapped with the optional drag / flag affordances when
@@ -345,8 +377,8 @@ class CombinedSeatGrid extends StatelessWidget {
 
   /// Short uppercase label for a seat type ("SINGLE" / "DOUBLE" / "SEATER").
   static String shortType(SeatType t) => switch (t) {
-        SeatType.singleSofa => tr('seat_ui.type_single'),
-        SeatType.doubleSofa => tr('seat_ui.type_double'),
-        SeatType.seater => tr('seat_ui.type_seater'),
-      };
+    SeatType.singleSofa => tr('seat_ui.type_single'),
+    SeatType.doubleSofa => tr('seat_ui.type_double'),
+    SeatType.seater => tr('seat_ui.type_seater'),
+  };
 }

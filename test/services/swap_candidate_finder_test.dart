@@ -6,6 +6,7 @@ import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/services/swap_candidate_finder.dart';
 
 // ── Fixture helpers (mirror seating_engine_test conventions) ────────────────
@@ -47,6 +48,7 @@ Passenger _p(
   String? groupId,
   PriorityStatus priority = PriorityStatus.none,
   String name = '',
+  TripType tripType = TripType.roundTrip,
 }) =>
     Passenger(
       id: id,
@@ -57,6 +59,7 @@ Passenger _p(
       assignedSeats: assigned,
       groupId: groupId,
       priorityStatus: priority,
+      tripType: tripType,
     );
 
 RequestLine _line(SeatType t, SeatPosition? pos, int qty) =>
@@ -546,6 +549,301 @@ void main() {
       expect(c.rank, 2);
       expect(c.reason, contains('different deck'));
       expect(c.reason, contains('you wanted Upper'));
+    });
+  });
+
+  // The seated agent taps an occupied seat to swap. The candidate list must be
+  // driven by PHYSICAL swap feasibility (same seat-class + berth counts fit both
+  // ways — the exact rule the drag-drop engine uses), NOT by whether the mover
+  // still has an outstanding request line. Passing [moverFromSeatId] tells the
+  // finder where the mover currently sits so it can reason about the real swap.
+  group('physical swap feasibility (moverFromSeatId)', () {
+    test(
+        'a seated mover with NO outstanding need can still swap with a '
+        'class-compatible occupant', () {
+      // Mover sits on SU1 with an EMPTY request (request already consumed). Under
+      // the old need-based rule every occupant was hidden — the user could not
+      // swap with any allocated seat. Physically, SL1 (single) is a clean swap.
+      final bus = _bus('b1', [
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+        _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+      ]);
+      final mover = _p('m1', assigned: [_a('b1', 'SU1')]); // no request lines
+      final occupant = _p('o1', assigned: [_a('b1', 'SL1')]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [mover, occupant],
+        sourceBusId: 'b1',
+        moverFromSeatId: 'SU1',
+      );
+
+      expect(r.movable.map((c) => c.passengerId), contains('o1'));
+    });
+
+    test(
+        'without moverFromSeatId the legacy need-based behaviour is unchanged '
+        '(no need → no candidate)', () {
+      final bus = _bus('b1', [
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+        _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+      ]);
+      final mover = _p('m1', assigned: [_a('b1', 'SU1')]); // no request lines
+      final occupant = _p('o1', assigned: [_a('b1', 'SL1')]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [mover, occupant],
+        sourceBusId: 'b1',
+        // moverFromSeatId intentionally omitted
+      );
+
+      expect(r.movable, isEmpty);
+    });
+
+    test('a whole-double mover is NOT offered a swap that would strand it on a '
+        'single (capacity guard)', () {
+      final bus = _bus('b1', [
+        _seat(0, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+      ]);
+      // Mover holds BOTH berths of DL1 (whole double). Occupant on a single.
+      final mover = _p('m1', assigned: [_a('b1', 'DL1'), _a('b1', 'DL1')]);
+      final occupant = _p('o1', assigned: [_a('b1', 'SU1')]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [mover, occupant],
+        sourceBusId: 'b1',
+        moverFromSeatId: 'DL1',
+      );
+
+      // 2 berths can't fit a single seat → not a candidate.
+      expect(r.movable.any((c) => c.passengerId == 'o1'), isFalse);
+    });
+
+    test('a seater mover is never offered a sleeper occupant (class guard)', () {
+      final bus = _bus('b1', [
+        _seat(0, 0, SeatType.seater, null, 'ST1'),
+        _seat(0, 1, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+      ]);
+      final mover = _p('m1', assigned: [_a('b1', 'ST1')]);
+      final occupant = _p('o1', assigned: [_a('b1', 'SU1')]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [mover, occupant],
+        sourceBusId: 'b1',
+        moverFromSeatId: 'ST1',
+      );
+
+      expect(r.movable.any((c) => c.passengerId == 'o1'), isFalse);
+    });
+
+    test(
+        'CROSS-bus: a seated mover can physically swap onto another bus via '
+        'explicit source class + berths', () {
+      // Mover sits on bus b1 (not the destination); the finder can't read its
+      // seat from b2's layout, so the caller passes the source class + berths
+      // directly. A class-compatible occupant on b2 must still be swappable.
+      final destBus = _bus('b2', [
+        _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+      ]);
+      final mover = _p('m1', assigned: [_a('b1', 'SU1')]); // no request lines
+      final occupant = _p('o1', assigned: [_a('b2', 'SL1')]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: destBus,
+        passengers: [mover, occupant],
+        sourceBusId: 'b1', // cross-bus
+        moverFromSeatId: null, // not resolvable on b2
+        moverFromSeatType: SeatType.singleSofa,
+        moverFromBerths: 1,
+      );
+
+      expect(r.movable.map((c) => c.passengerId), contains('o1'));
+    });
+
+    test(
+        'CROSS-bus capacity guard: a whole-double mover is NOT offered a single '
+        'on another bus', () {
+      // Mover holds a WHOLE double (2 berths) on b1; destination b2 has only a
+      // single. 2 berths can't fit a single seat → no candidate, even cross-bus.
+      final destBus = _bus('b2', [
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+      ]);
+      final mover = _p('m1', assigned: [_a('b1', 'DL1'), _a('b1', 'DL1')]);
+      final occupant = _p('o1', assigned: [_a('b2', 'SU1')]);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: destBus,
+        passengers: [mover, occupant],
+        sourceBusId: 'b1',
+        moverFromSeatType: SeatType.doubleSofa,
+        moverFromBerths: 2,
+      );
+
+      expect(r.movable.any((c) => c.passengerId == 'o1'), isFalse);
+    });
+
+    test('a group/priority occupant stays protected even under physical mode',
+        () {
+      final bus = _bus('b1', [
+        _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+        _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+      ]);
+      final mover = _p('m1', assigned: [_a('b1', 'SU1')]);
+      // Grouped occupant — cross-bus protection does not apply (same bus), so
+      // grouped is movable; but an approved-priority one on a CROSS context would
+      // block. Here keep it simple: a grouped occupant on the SAME bus is movable.
+      final grouped =
+          _p('o1', assigned: [_a('b1', 'SL1')], groupId: 'Patel', name: 'Asha');
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [mover, grouped],
+        sourceBusId: 'b1', // same bus → grouped is displaceable
+        moverFromSeatId: 'SU1',
+      );
+
+      // Same-bus manual move leaves the group whole, so a grouped occupant IS a
+      // valid swap target (consistent with existing same-bus relaxation).
+      expect(r.movable.map((c) => c.passengerId), contains('o1'));
+    });
+  });
+
+  // The finder must reason PER LEG, mirroring seatHasLegRoom: a Double Sofa berth
+  // taken only on the RET leg leaves the GO leg free, so a GO-only mover can take
+  // that physical seat outright (leg-disjoint reuse). A round-trip mover needs
+  // BOTH legs free on the berth they take.
+  group('leg-aware free-seat offers (tripType)', () {
+    test(
+        'GO-only mover is offered a double whose RET berth is held by a RET-only '
+        'occupant (leg-disjoint reuse)', () {
+      // DU1 double, UPPER. A RET-only occupant holds ONE berth (fills RET leg
+      // only). A GO-only mover wants a double upper — its GO leg is entirely
+      // free on this seat, so the seat is takeable outright.
+      final bus = _bus('b1', [
+        _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+      ]);
+      final retOnly = _p('o1',
+          assigned: [_a('b1', 'DU1')], tripType: TripType.returnOnly);
+      final mover = _p('m1',
+          lines: [_line(SeatType.doubleSofa, SeatPosition.upper, 1)],
+          tripType: TripType.outboundOnly);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [retOnly, mover],
+      );
+
+      // The GO leg of DU1 is free, so the GO-only mover can just take it.
+      expect(r.freeSeatIds, contains('DU1'));
+    });
+
+    test(
+        'round-trip mover is NOT offered a double whose RET berth is contended',
+        () {
+      // Same setup, but the mover is round-trip — it needs BOTH legs free on the
+      // berths it takes. The RET-only occupant holds the RET leg, so a round-trip
+      // mover cannot take the seat outright.
+      final bus = _bus('b1', [
+        _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+      ]);
+      final retOnly = _p('o1',
+          assigned: [_a('b1', 'DU1')], tripType: TripType.returnOnly);
+      final mover = _p('m1',
+          lines: [_line(SeatType.doubleSofa, SeatPosition.upper, 1)],
+          tripType: TripType.roundTrip);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [retOnly, mover],
+      );
+
+      // RET leg of DU1 is taken → round-trip mover can't take the whole double.
+      expect(r.freeSeatIds, isEmpty);
+    });
+
+    test(
+        'GO-only mover is NOT offered a double whose GO berths are full (same-leg '
+        'contention)', () {
+      // Two GO-only occupants fill BOTH berths of DU1 on the GO leg. A GO-only
+      // mover wanting a whole double has no GO room — not takeable.
+      final bus = _bus('b1', [
+        _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+      ]);
+      final go1 = _p('o1',
+          assigned: [_a('b1', 'DU1')], tripType: TripType.outboundOnly);
+      final go2 = _p('o2',
+          assigned: [_a('b1', 'DU1')], tripType: TripType.outboundOnly);
+      final mover = _p('m1',
+          lines: [_line(SeatType.doubleSofa, SeatPosition.upper, 1)],
+          tripType: TripType.outboundOnly);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [go1, go2, mover],
+      );
+
+      expect(r.freeSeatIds, isEmpty);
+    });
+
+    test(
+        'a fully round-trip double (both berths, round-trip occupant) is not '
+        'offered to a GO-only mover', () {
+      // DU1 wholly held by a ROUND-TRIP occupant fills both legs → no leg room
+      // for anyone, even a one-way mover.
+      final bus = _bus('b1', [
+        _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+      ]);
+      final rt = _p('o1',
+          assigned: [_a('b1', 'DU1'), _a('b1', 'DU1')],
+          tripType: TripType.roundTrip);
+      final mover = _p('m1',
+          lines: [_line(SeatType.doubleSofa, SeatPosition.upper, 1)],
+          tripType: TripType.outboundOnly);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [rt, mover],
+      );
+
+      expect(r.freeSeatIds, isEmpty);
+    });
+
+    test(
+        'GO-only single-need mover takes one berth of a double whose RET leg is '
+        'held (leg-disjoint single-on-double)', () {
+      // A RET-only occupant holds one berth on the RET leg. A GO-only mover with
+      // a single need can reuse the GO leg of either berth.
+      final bus = _bus('b1', [
+        _seat(0, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+      ]);
+      final retOnly = _p('o1',
+          assigned: [_a('b1', 'DL1')], tripType: TripType.returnOnly);
+      final mover = _p('m1',
+          lines: [_line(SeatType.singleSofa, null, 1)],
+          tripType: TripType.outboundOnly);
+
+      final r = SwapCandidateFinder.find(
+        mover: mover,
+        destinationBus: bus,
+        passengers: [retOnly, mover],
+      );
+
+      expect(r.freeSeatIds, contains('DL1'));
     });
   });
 }

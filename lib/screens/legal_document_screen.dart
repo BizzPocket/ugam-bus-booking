@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:get/get.dart';
 
+import '../components/ugam_logo.dart';
 import '../content/legal_content.dart';
 import '../design/ugam.dart';
 
@@ -21,7 +21,7 @@ class LegalDocumentScreen extends StatelessWidget {
         bottom: false,
         child: Column(
           children: [
-            _TopBar(c: c, title: doc.title),
+            UgamAppBar(title: doc.title),
             Expanded(
               child: ListView(
                 physics: const BouncingScrollPhysics(),
@@ -33,22 +33,7 @@ class LegalDocumentScreen extends StatelessWidget {
                 ),
                 children: [
                   if (doc.showLogo) ...[
-                    Center(
-                      child: Container(
-                        width: 84,
-                        height: 84,
-                        decoration: BoxDecoration(
-                          color: c.accentFill,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        alignment: Alignment.center,
-                        padding: const EdgeInsets.all(14),
-                        child: Image.asset(
-                          'assets/icon/ugam_logo.png',
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-                    ),
+                    const Center(child: UgamLogo(size: 84)),
                     const SizedBox(height: UgamSpacing.lg),
                   ],
                   Text(
@@ -92,7 +77,11 @@ class _Block extends StatelessWidget {
           padding: const EdgeInsets.only(top: UgamSpacing.xl, bottom: UgamSpacing.sm),
           child: Text(
             block.text!,
-            style: UgamText.titleM.copyWith(color: c.accent, fontSize: 17),
+            style: UgamText.titleM.copyWith(
+              color: c.ink,
+              fontWeight: FontWeight.w700,
+              fontSize: 17,
+            ),
           ),
         );
       case LegalBlockKind.sub:
@@ -144,7 +133,7 @@ class _Block extends StatelessWidget {
                           width: 5,
                           height: 5,
                           decoration: BoxDecoration(
-                            color: c.accent,
+                            color: c.ink3,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -169,44 +158,3 @@ class _Block extends StatelessWidget {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  final UgamColorSet c;
-  final String title;
-  const _TopBar({required this.c, required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              title,
-              style: UgamText.titleL.copyWith(color: c.ink),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

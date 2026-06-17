@@ -5,6 +5,7 @@ import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
+import '../models/seat_type.dart';
 import '../models/trip_type.dart';
 import '../utils/passenger_display.dart';
 import '../widgets/seat_occupant_label.dart';
@@ -28,9 +29,8 @@ const double kSeatTileH = 60;
 ///   * RESERVED    — dimmed card fill, struck lock glyph, "Held" label.
 ///   * BOOKED      — occupant initials/name on a card fill. A deterministic
 ///     group-colour RING (via [groupColors]) when grouped; a WARM ring + star
-///     when priority/forward; a one-way corner + "GO"/"RET" pill when the
-///     occupant travels a single leg (GO cyan [kOneWayTint]; RET violet
-///     [kReturnTint] only under [emphasizeOneWay] — the handler view — else cyan).
+///     when priority/forward. A one-way leg is marked by tile COLOUR alone
+///     (GO cyan [kOneWayTint]; RET violet [kReturnTint]) — no "GO"/"RET" chip.
 ///   * SHARED double — two unrelated passengers on one `doubleSofa` seatId,
 ///     split left/right.
 ///   * LEG-SHARED  — a GO (outbound-only) holder and a RET (return-only) holder
@@ -65,12 +65,32 @@ class SeatChartTile extends StatelessWidget {
   /// priority ring and trip tint still render on top. Null = no band wash.
   final Color? bandColor;
 
-  /// When true, the tile applies the HANDLER's one-way emphasis: the RETURN leg
-  /// renders in its distinct violet [kReturnTint] (instead of sharing the GO
-  /// cyan), and one-way leg pills carry a "½" half-fare marker so the handler
-  /// sees at a glance that the seat pays HALF fare. Handler chart only; the agent
-  /// charts leave it off, so there a one-way leg stays plain cyan with no ½.
-  final bool emphasizeOneWay;
+  /// When true, a Double Sofa holding only ONE of its two berths renders as a
+  /// split tile (occupant + empty placeholder) instead of a fully-booked tile,
+  /// so a half-taken sofa never reads as full. Requires [occupants] to be
+  /// BERTH-ACCURATE — one entry per assignment, so a whole double held solo
+  /// arrives as the passenger twice. Charts that pass a leg-DEDUPED occupant
+  /// list (e.g. the handler manifest, where a round-trip whole double is a
+  /// single `sole` entry) MUST leave this off, else a whole double would be
+  /// mistaken for a half-share. Off by default.
+  final bool markHalfDouble;
+
+  /// PRIVACY mode for the customer-facing chart. When true the tile keeps the
+  /// canonical look (size, seat id in the corner, rounded surface) but NEVER
+  /// shows occupant identity: every seat renders as a neutral anonymous fill
+  /// with the seat id only — no name, phone, group ring, leg tint or money dot,
+  /// so the customer cannot learn who (or whether anyone) is on each seat.
+  /// [occupants] is ignored in this mode (callers pass an empty list).
+  ///
+  /// Pair with [mine] to highlight the viewer's OWN seats: an anonymous tile
+  /// that is [mine] fills with the accent colour ([UgamColorSet.accent] /
+  /// [UgamColorSet.onAccent]) instead of the neutral surface. Off by default so
+  /// every existing (admin/handler) caller is untouched.
+  final bool anonymous;
+
+  /// Highlights this seat as the viewer's own (accent fill) in [anonymous] mode.
+  /// Ignored unless [anonymous] is true. Off by default.
+  final bool mine;
 
   const SeatChartTile({
     super.key,
@@ -84,7 +104,9 @@ class SeatChartTile extends StatelessWidget {
     this.editMode = false,
     this.moneyDotColor,
     this.bandColor,
-    this.emphasizeOneWay = false,
+    this.markHalfDouble = false,
+    this.anonymous = false,
+    this.mine = false,
   });
 
   /// Occupants deduped by passenger id. A WHOLE double held by one person
@@ -105,27 +127,88 @@ class SeatChartTile extends StatelessWidget {
 
   bool get _isBooked => _occ.isNotEmpty;
 
-  /// A genuine SHARED-double split: two DISTINCT passengers on one seatId that
-  /// is NOT a clean disjoint GO/RETURN leg reuse. Leg reuse is rendered by the
-  /// leg-aware path instead.
-  bool get _isShared => _occ.length > 1 && _legShare == null;
+  /// A genuine SHARED-double split: two DISTINCT passengers sitting side-by-side
+  /// on one seatId that is NOT a clean disjoint GO/RETURN leg reuse. Leg reuse
+  /// is rendered by the leg-aware path instead.
+  ///
+  /// Gated to [SeatType.doubleSofa]: a side-by-side split is only physically
+  /// meaningful for a TWO-berth sofa. A SINGLE sofa is one berth — it can only
+  /// ever be held by one person, or REUSED across disjoint legs (one GO + one
+  /// RET), which is the stacked leg-share tile, never a same-time side split. So
+  /// a single (or seater) cell never renders the split share even if stale data
+  /// somehow lists two same-leg holders; it falls through to the leg-share or
+  /// single booked tile, keeping "a single sofa is one person per leg" true on
+  /// screen.
+  bool get _isShared =>
+      cell.seatType == SeatType.doubleSofa &&
+      _occ.length > 1 &&
+      _legShare == null;
 
-  /// When this seat is reused across disjoint legs — exactly one outbound-only
-  /// GO holder and one return-only RETURN holder — returns that pair. Otherwise
-  /// null. A round-trip occupant holds BOTH legs exclusively, so its presence
-  /// rules out leg reuse.
+  /// A HALF-occupied Double Sofa: one person holding a SINGLE berth of a
+  /// two-berth sofa (a single-on-double / half-share), so the other berth is
+  /// still free. Detected by the RAW berth count — a WHOLE double held solo
+  /// arrives as the same passenger twice ([occupants].length == 2), while a
+  /// half-share is a single berth entry ([occupants].length == 1). Rendered as
+  /// a split tile: the occupant on one half, an empty placeholder on the other,
+  /// so the chart never reads a half-taken sofa as fully booked.
+  bool get _isHalfDouble =>
+      markHalfDouble &&
+      cell.seatType == SeatType.doubleSofa &&
+      _occ.length == 1 &&
+      occupants.length == 1;
+
+  /// Free physical berths still bookable on this Double Sofa, under the
+  /// leg-aware capacity model (a seat = its BUSIER leg, so berths used =
+  /// max(GO, RET) — see project seat-leg-counting). Counts RAW berth entries:
+  /// a whole double held solo is the same passenger twice; a round-trip berth
+  /// consumes BOTH legs. Returns 0 for non-doubles and whenever [markHalfDouble]
+  /// is off (leg-DEDUPED charts can't count berths, so they must never split).
+  ///
+  /// A GO-only + RET-only leg-share is one berth's worth (go=1, ret=1 →
+  /// max=1 → one berth free), so it still has a half to draw empty — the case
+  /// that previously read as a fully-booked leg-share.
+  int get _freeDoubleBerths {
+    if (!markHalfDouble || cell.seatType != SeatType.doubleSofa) return 0;
+    var go = 0, ret = 0;
+    for (final p in occupants) {
+      switch (p.tripType) {
+        case TripType.outboundOnly:
+          go++;
+        case TripType.returnOnly:
+          ret++;
+        case TripType.roundTrip:
+          go++;
+          ret++;
+      }
+    }
+    final used = go > ret ? go : ret;
+    final free = 2 - used;
+    return free < 0 ? 0 : free;
+  }
+
+  /// When this seat is reused across disjoint legs — an outbound-only GO holder
+  /// AND a return-only RETURN holder — returns that pair (GO first). Otherwise
+  /// null. A round-trip occupant holds BOTH legs exclusively, so a pair of
+  /// round-trips (or any same-leg pair) is NOT a leg reuse and returns null.
+  ///
+  /// Tolerant of a stray extra occupant: it scans for the FIRST outbound-only
+  /// and FIRST return-only holder rather than requiring exactly two entries, so
+  /// a legitimate GO/RET reuse on a single sofa still resolves cleanly even if
+  /// an over-capacity stale berth (the kind that inflates a "38/37" tally) also
+  /// lists a third holder. The leg-share is what the seat actually IS; the extra
+  /// is dropped from view.
   ({Passenger go, Passenger ret})? get _legShare {
-    if (_occ.length != 2) return null;
-    final a = _occ[0];
-    final b = _occ[1];
-    if (a.tripType == TripType.outboundOnly &&
-        b.tripType == TripType.returnOnly) {
-      return (go: a, ret: b);
+    if (_occ.length < 2) return null;
+    Passenger? go;
+    Passenger? ret;
+    for (final p in _occ) {
+      if (p.tripType == TripType.outboundOnly) {
+        go ??= p;
+      } else if (p.tripType == TripType.returnOnly) {
+        ret ??= p;
+      }
     }
-    if (a.tripType == TripType.returnOnly &&
-        b.tripType == TripType.outboundOnly) {
-      return (go: b, ret: a);
-    }
+    if (go != null && ret != null) return (go: go, ret: ret);
     return null;
   }
 
@@ -137,19 +220,6 @@ class SeatChartTile extends StatelessWidget {
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
     }
     return parts.first[0].toUpperCase();
-  }
-
-  /// Short leg badge for a one-way occupant: "GO" (outbound-only) or "RET"
-  /// (return-only). Null for round-trip (no badge).
-  static String? legBadge(TripType t) {
-    switch (t) {
-      case TripType.outboundOnly:
-        return 'GO';
-      case TripType.returnOnly:
-        return 'RET';
-      case TripType.roundTrip:
-        return null;
-    }
   }
 
   /// Soft BACKGROUND fill marking a one-way leg by colour instead of a chip:
@@ -178,14 +248,40 @@ class SeatChartTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
+    // PRIVACY path: the customer chart shows only WHERE seats are, never WHO.
+    // Every seat reads as the same neutral (or accent, if [mine]) anonymous
+    // tile with the seat id alone — the customer has no booked/free signal and
+    // must not learn one. None of the identity / leg / money branches below run,
+    // and [occupants] is ignored (callers pass an empty list).
+    if (anonymous) {
+      final tile = _anonymousTile(c);
+      if (onTapBooked == null) return tile;
+      return GestureDetector(
+        onTap: onTapBooked,
+        behavior: HitTestBehavior.opaque,
+        child: tile,
+      );
+    }
+
     final legShare = _legShare;
+    final hasFreeHalf = _freeDoubleBerths >= 1;
     final Widget tile;
     final VoidCallback? onTap;
     if (legShare != null) {
-      tile = _legShareTile(c, legShare.go, legShare.ret);
+      // A GO+RET leg-share on a DOUBLE only consumes one berth's worth of
+      // capacity (max(GO,RET) == 1), so the other berth is still bookable —
+      // draw that half empty instead of reading the whole sofa as full. On a
+      // SINGLE sofa the same reuse fills the one berth, so [hasFreeHalf] is
+      // false there (the getter is doubleSofa-only) and it stays a full tile.
+      tile = hasFreeHalf
+          ? _legShareHalfTile(c, legShare.go, legShare.ret)
+          : _legShareTile(c, legShare.go, legShare.ret);
       onTap = onTapBooked;
     } else if (_isShared) {
       tile = _sharedTile(c);
+      onTap = onTapBooked;
+    } else if (_isHalfDouble) {
+      tile = _halfDoubleTile(c, _occ.first);
       onTap = onTapBooked;
     } else if (_isBooked) {
       tile = _bookedTile(c, _occ.first);
@@ -326,8 +422,10 @@ class SeatChartTile extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        // One-way legs are now marked by the TILE COLOUR (GO cyan / RET violet)
-        // instead of a corner + chip; round-trip stays the plain card fill.
+        // One-way legs are marked by the tile COLOUR alone (GO cyan / RET
+        // violet); round-trip stays the plain card fill. No "GO"/"RET" text
+        // chip — the colour already says the leg, and the chip just cluttered
+        // tiles that also carry a name + mobile.
         color: _fill(_legBgFill(c, p.tripType) ?? c.cardElev),
         borderRadius: BorderRadius.circular(UgamRadius.seat),
         border: Border.all(color: ringColor, width: ringWidth),
@@ -383,6 +481,48 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
+  // ANONYMOUS — privacy tile for the customer chart: a seat with the seat id
+  // only, no occupant identity. Neutral card fill for OTHER seats; accent fill
+  // (matching the legend "your seat" swatch) when [mine]. Reuses the canonical
+  // surface + corner-id placement of [_bookedTile] so the chart reads
+  // identically to the rest of the app, minus the name/phone/ring/leg/money.
+  Widget _anonymousTile(UgamColorSet c) {
+    final bg = mine ? c.accent : c.cardElev;
+    final ringColor = mine ? c.accent : c.border;
+    final idColor = mine ? c.onAccent : c.ink3;
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
+        border: Border.all(color: ringColor, width: mine ? 1.5 : 1),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Center(
+            child: Icon(
+              Icons.event_seat_rounded,
+              size: 16,
+              color: mine ? c.onAccent : c.ink3,
+            ),
+          ),
+          Positioned(
+            top: 4,
+            left: 5,
+            child: Text(
+              cell.seatId ?? '',
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(color: idColor, fontSize: 8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // LEG-SHARED — one GO holder + one RETURN holder reuse the same physical seat
   // across disjoint legs. Stacked top (GO) / bottom (RET).
   Widget _legShareTile(UgamColorSet c, Passenger go, Passenger ret) {
@@ -431,36 +571,97 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
+  // LEG-SHARED on a DOUBLE that still has a free berth — the GO/RET reuse
+  // occupies ONE berth (stacked GO over RET on the left), the other berth shows
+  // an EMPTY placeholder on the right so the sofa reads "half taken, half free"
+  // rather than fully booked. Mirrors [_halfDoubleTile]'s split, but the filled
+  // half is the leg-reuse pair instead of a single occupant.
+  Widget _legShareHalfTile(UgamColorSet c, Passenger go, Passenger ret) {
+    final priority =
+        go.isPriorityApproved || ret.isPriorityApproved || cell.forward;
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
+        border: Border.all(
+          color: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
+          width: priority ? 2 : 1.5,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  children: [
+                    Expanded(child: _legHalf(c, go)),
+                    Container(height: 1, color: c.border),
+                    Expanded(child: _legHalf(c, ret)),
+                  ],
+                ),
+              ),
+              Container(width: 1, color: c.border),
+              Expanded(child: _emptyHalf(c)),
+            ],
+          ),
+          Positioned(
+            top: 3,
+            left: 4,
+            child: Text(
+              cell.seatId ?? '',
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(color: c.ink3, fontSize: 7.5),
+              ),
+            ),
+          ),
+          if (priority)
+            Positioned(
+              top: 3,
+              right: 3,
+              child: Icon(Icons.star_rounded, size: 11, color: c.warm),
+            ),
+          if (moneyDotColor != null)
+            Positioned(bottom: 3, right: 4, child: _dot(moneyDotColor!, 7)),
+        ],
+      ),
+    );
+  }
+
   Widget _legHalf(UgamColorSet c, Passenger p) {
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
     final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
     return Container(
-      // The half's COLOUR marks the leg (GO cyan / RET violet) — no chip.
+      // The half's COLOUR marks the leg (GO cyan / RET violet) — no text chip.
       color: _fill(_legBgFill(c, p.tripType) ?? c.cardElev),
-      alignment: Alignment.center,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Flexible(
-            child: SeatOccupantLabel(
-              name: p.displayName,
-              phone: p.phone,
-              nameColor: c.ink,
-              phoneColor: c.ink2,
-              nameSize: 11,
-              phoneSize: 8,
+      child: Center(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: SeatOccupantLabel(
+                name: p.displayName,
+                phone: p.phone,
+                nameColor: c.ink,
+                phoneColor: c.ink2,
+                nameSize: 12.5,
+                phoneSize: 8,
+              ),
             ),
-          ),
-          if (gColor != null) ...[
-            const SizedBox(width: 4),
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: gColor, shape: BoxShape.circle),
-            ),
+            if (gColor != null) ...[
+              const SizedBox(width: 4),
+              Container(
+                width: 6,
+                height: 6,
+                decoration:
+                    BoxDecoration(color: gColor, shape: BoxShape.circle),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -521,10 +722,9 @@ class SeatChartTile extends StatelessWidget {
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
     final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
     return Container(
-      // A one-way occupant's half is tinted by leg (GO cyan / RET violet); the
-      // chip is gone. Round-trip stays the plain card fill.
+      // A one-way occupant's half is tinted by leg (GO cyan / RET violet) — the
+      // colour alone marks the leg, no text chip. Round-trip stays plain fill.
       color: _fill(_legBgFill(c, p.tripType) ?? c.cardElev),
-      alignment: Alignment.center,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(2, 12, 2, 4),
         child: Column(
@@ -539,7 +739,7 @@ class SeatChartTile extends StatelessWidget {
               phone: null,
               nameColor: c.ink,
               phoneColor: c.ink2,
-              nameSize: 12,
+              nameSize: 13,
               phoneSize: 8,
             ),
             if (gColor != null) ...[
@@ -556,6 +756,80 @@ class SeatChartTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  // HALF DOUBLE — one person on a single berth of a two-berth sofa. Split tile:
+  // the occupant on the left half, an EMPTY placeholder on the right so the seat
+  // visibly reads "half taken, half free" instead of fully booked.
+  Widget _halfDoubleTile(UgamColorSet c, Passenger p) {
+    final priority = p.isPriorityApproved || cell.forward;
+    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
+    final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
+
+    final Color ringColor;
+    final double ringWidth;
+    if (priority) {
+      ringColor = c.warm;
+      ringWidth = 2;
+    } else if (gColor != null) {
+      ringColor = gColor;
+      ringWidth = 2;
+    } else {
+      ringColor = c.border;
+      ringWidth = 1;
+    }
+
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
+        border: Border.all(color: ringColor, width: ringWidth),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Row(
+            children: [
+              Expanded(child: _half(c, p)),
+              Container(width: 1, color: c.border),
+              Expanded(child: _emptyHalf(c)),
+            ],
+          ),
+          Positioned(
+            top: 4,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                cell.seatId ?? '',
+                style: UgamText.tabular(
+                  UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
+                ),
+              ),
+            ),
+          ),
+          if (priority)
+            Positioned(
+              top: 3,
+              right: 3,
+              child: Icon(Icons.star_rounded, size: 12, color: c.warm),
+            ),
+          if (moneyDotColor != null)
+            Positioned(bottom: 4, right: 4, child: _dot(moneyDotColor!, 8)),
+        ],
+      ),
+    );
+  }
+
+  /// The free half of a half-occupied Double Sofa — a faint seat glyph on the
+  /// dimmed surface so the empty berth reads as "available".
+  Widget _emptyHalf(UgamColorSet c) {
+    return Container(
+      color: c.cardElev.withValues(alpha: 0.4),
+      alignment: Alignment.center,
+      child: Icon(Icons.event_seat_outlined, size: 16, color: c.ink3),
     );
   }
 
@@ -689,7 +963,11 @@ class SeatDragWrapper extends StatelessWidget {
         if (draggable) {
           content = LongPressDraggable<SeatDragData>(
             data: SeatDragData(seatId),
-            delay: const Duration(milliseconds: 220),
+            // Short hold so a seat lifts quickly. A longer window lets early
+            // finger drift inside the scrolling chart lose the gesture arena to
+            // the scroll recognizer ("drag won't start"); 150ms balances that
+            // against accidental lifts while scrolling.
+            delay: const Duration(milliseconds: 150),
             hapticFeedbackOnStart: true,
             feedback: _SeatDragChip(label: dragLabel ?? '', seatId: seatId),
             childWhenDragging: Opacity(opacity: 0.25, child: content),

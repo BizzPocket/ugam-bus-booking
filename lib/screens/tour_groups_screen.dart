@@ -61,12 +61,27 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  /// Whether the search pill is revealed under the app bar. Search lives in
+  /// the app-bar chrome (a toggle action) — same pattern as the Requests
+  /// screen — instead of floating in the middle of the scroll list.
+  bool _searchVisible = false;
+
   TourController get _ctrl => Get.find<TourController>();
 
   @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searchVisible = !_searchVisible;
+      if (!_searchVisible) {
+        _searchCtrl.clear();
+        _query = '';
+      }
+    });
   }
 
   void _enterSelect() {
@@ -202,8 +217,25 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
   Future<void> _removeMember(String passengerId) =>
       _ctrl.setPassengerGroup(widget.tourId, passengerId, null);
 
-  Future<void> _deleteGroup(String groupId) =>
-      _ctrl.deleteGroup(widget.tourId, groupId);
+  /// Delete the whole group after a confirm. Deleting only ungroups the
+  /// members (they are NOT removed from the tour), so the copy says so.
+  Future<void> _deleteGroup(PassengerGroup group) async {
+    final label =
+        group.label.trim().isEmpty ? tr('tour_groups.group') : group.label.trim();
+    final memberCount =
+        _ctrl.getTour(widget.tourId)?.passengers.where((p) => p.groupId == group.id).length ?? 0;
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('tour_groups.delete_group_title', namedArgs: {'name': label}),
+      message: tr('tour_groups.delete_group_body', namedArgs: {'n': '$memberCount'}),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('tour_groups.delete_group'),
+      destructive: true,
+      confirmIcon: Icons.delete_outline_rounded,
+    );
+    if (!ok) return;
+    await _ctrl.deleteGroup(widget.tourId, group.id);
+  }
 
   /// Open the add-member picker for [group] — an ungrouped-passenger roster
   /// with search; candidates that would overflow one bus are blocked there.
@@ -227,6 +259,15 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                   ? tr('tour_groups.select_passengers')
                   : tr('tour_groups.title'),
               actions: [
+                if (!_selecting)
+                  UgamAppBarAction(
+                    icon: _searchVisible
+                        ? Icons.search_off_rounded
+                        : Icons.search_rounded,
+                    active: _searchVisible,
+                    onTap: _toggleSearch,
+                    tooltip: tr('tour_groups.search_hint'),
+                  ),
                 UgamAppBarAction(
                   icon: _selecting
                       ? Icons.close_rounded
@@ -238,6 +279,29 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                       : tr('tour_groups.new_group'),
                 ),
               ],
+            ),
+            // Search lives in the app-bar chrome: revealed as a pinned pill
+            // right below the bar, never scrolling away inside the list.
+            AnimatedSize(
+              duration: UgamMotion.tab,
+              curve: UgamMotion.easeOut,
+              child: (_searchVisible && !_selecting)
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        UgamSpacing.gutter,
+                        0,
+                        UgamSpacing.gutter,
+                        UgamSpacing.sm,
+                      ),
+                      child: UgamSearchField(
+                        controller: _searchCtrl,
+                        hint: tr('tour_groups.search_hint'),
+                        autofocus: true,
+                        onChanged: (v) => setState(() => _query = v.trim()),
+                        onClear: () => setState(() => _query = ''),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
             ),
             Expanded(
               child: Obx(() {
@@ -252,9 +316,14 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                 }
 
                 final groups = _ctrl.groupsForTour(widget.tourId);
-                // Quick lookup: group id → group, for the per-row chip.
+                // Quick lookup: group id → group, for the per-row tag.
                 final groupById = <String, PassengerGroup>{
                   for (final g in groups) g.id: g,
+                };
+                // Group id → 1-based order, so a passenger's tag shows the SAME
+                // number as that group's card badge.
+                final groupNumberById = <String, int>{
+                  for (var i = 0; i < groups.length; i++) groups[i].id: i + 1,
                 };
 
                 return ListView(
@@ -279,7 +348,7 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                           onApply: () => _applySuggestion(cluster),
                           c: c,
                         ),
-                        const SizedBox(height: UgamSpacing.md),
+                        const SizedBox(height: UgamSpacing.sm),
                       ],
                     ],
 
@@ -291,20 +360,21 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                         c: c,
                       ),
                       const SizedBox(height: UgamSpacing.sm),
-                      for (final g in groups)
+                      for (var i = 0; i < groups.length; i++)
                         Padding(
                           padding: const EdgeInsets.only(
-                            bottom: UgamSpacing.md,
+                            bottom: UgamSpacing.sm,
                           ),
                           child: _GroupCard(
-                            group: g,
+                            group: groups[i],
+                            number: i + 1,
                             members: tour.passengers
-                                .where((p) => p.groupId == g.id)
+                                .where((p) => p.groupId == groups[i].id)
                                 .toList(),
-                            fit: GroupFit.of(tour, g.id),
-                            onDelete: () => _deleteGroup(g.id),
+                            fit: GroupFit.of(tour, groups[i].id),
+                            onDelete: () => _deleteGroup(groups[i]),
                             onRemoveMember: _removeMember,
-                            onAddMember: () => _openAddMember(g),
+                            onAddMember: () => _openAddMember(groups[i]),
                             c: c,
                           ),
                         ),
@@ -321,15 +391,6 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                     if (tour.passengers.isEmpty)
                       const _NoPassengers()
                     else ...[
-                      // Search the full roster by name / phone, so the agent
-                      // can jump to a person on a long tour.
-                      UgamSearchField(
-                        controller: _searchCtrl,
-                        hint: tr('tour_groups.search_hint'),
-                        onChanged: (v) => setState(() => _query = v.trim()),
-                        onClear: () => setState(() => _query = ''),
-                      ),
-                      const SizedBox(height: UgamSpacing.sm),
                       ...() {
                         final q = _query.toLowerCase();
                         final roster = q.isEmpty
@@ -348,12 +409,15 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                             .map<Widget>(
                               (p) => Padding(
                                 padding: const EdgeInsets.only(
-                                  bottom: UgamSpacing.sm,
+                                  bottom: UgamSpacing.xs + 2,
                                 ),
                                 child: _PassengerRow(
                                   passenger: p,
                                   group: p.groupId != null
                                       ? groupById[p.groupId]
+                                      : null,
+                                  groupNumber: p.groupId != null
+                                      ? groupNumberById[p.groupId]
                                       : null,
                                   selecting: _selecting,
                                   selected: _selected.contains(p.id),
@@ -451,6 +515,7 @@ class _SectionHeader extends StatelessWidget {
 class _PassengerRow extends StatelessWidget {
   final Passenger passenger;
   final PassengerGroup? group;
+  final int? groupNumber;
   final bool selecting;
   final bool selected;
   final VoidCallback onSelectToggle;
@@ -460,6 +525,7 @@ class _PassengerRow extends StatelessWidget {
   const _PassengerRow({
     required this.passenger,
     required this.group,
+    required this.groupNumber,
     required this.selecting,
     required this.selected,
     required this.onSelectToggle,
@@ -476,19 +542,19 @@ class _PassengerRow extends StatelessWidget {
       onTap: selecting ? onSelectToggle : null,
       radius: UgamRadius.row,
       padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.md,
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm + 2,
       ),
       child: Row(
         children: [
           if (selecting) ...[
             _Checkbox(checked: selected, c: c),
-            const SizedBox(width: UgamSpacing.md),
+            const SizedBox(width: UgamSpacing.sm),
           ],
           // Avatar with the passenger's initial.
           Container(
-            width: 38,
-            height: 38,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: c.cardElev,
               shape: BoxShape.circle,
@@ -499,19 +565,36 @@ class _PassengerRow extends StatelessWidget {
               style: UgamText.bodyStrong.copyWith(color: c.ink2),
             ),
           ),
-          const SizedBox(width: UgamSpacing.md),
+          const SizedBox(width: UgamSpacing.sm + 2),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  passenger.name.isEmpty
-                      ? tr('tour_groups.unnamed')
-                      : passenger.name,
-                  style: UgamText.titleS.copyWith(color: c.ink),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                // Name + group tag share one line (tag sits BESIDE the name).
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        passenger.name.isEmpty
+                            ? tr('tour_groups.unnamed')
+                            : passenger.name,
+                        style: UgamText.titleS.copyWith(color: c.ink),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (group != null && groupNumber != null) ...[
+                      const SizedBox(width: UgamSpacing.sm),
+                      GroupTag(
+                        number: groupNumber!,
+                        colorIndex: group!.colorIndex,
+                        label: group!.label.isEmpty
+                            ? tr('tour_groups.group')
+                            : group!.label,
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -520,22 +603,18 @@ class _PassengerRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (group != null) ...[
-                  const SizedBox(height: UgamSpacing.sm),
-                  _GroupChip(group: group!, c: c),
-                ],
               ],
             ),
           ),
-          const SizedBox(width: UgamSpacing.sm),
+          const SizedBox(width: UgamSpacing.xs),
           // Priority star — warm is the sanctioned attention colour here.
           if (!selecting)
             GestureDetector(
               onTap: onPriorityToggle,
               behavior: HitTestBehavior.opaque,
               child: Container(
-                width: 40,
-                height: 40,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   color: approved ? c.warmFill : Colors.transparent,
                   shape: BoxShape.circle,
@@ -607,20 +686,20 @@ class _SuggestionCard extends StatelessWidget {
     return UgamCard.plain(
       tone: UgamCardTone.accent,
       radius: UgamRadius.row,
-      padding: const EdgeInsets.all(UgamSpacing.lg),
+      padding: const EdgeInsets.all(UgamSpacing.md),
       child: Row(
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
               color: c.accent.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(11),
+              borderRadius: BorderRadius.circular(10),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.history_rounded, size: 19, color: c.accent),
+            child: Icon(Icons.history_rounded, size: 18, color: c.accent),
           ),
-          const SizedBox(width: UgamSpacing.md),
+          const SizedBox(width: UgamSpacing.sm + 2),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -654,50 +733,11 @@ class _SuggestionCard extends StatelessWidget {
   }
 }
 
-// ─── Group chip (per-row, neutral / palette dot) ───────────────────────────
-
-class _GroupChip extends StatelessWidget {
-  final PassengerGroup group;
-  final UgamColorSet c;
-
-  const _GroupChip({required this.group, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.sm + 2,
-        vertical: 3,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GroupDot(colorIndex: group.colorIndex),
-          const SizedBox(width: UgamSpacing.xs + 2),
-          Text(
-            group.label.isEmpty ? tr('tour_groups.group') : group.label,
-            style: UgamText.caption.copyWith(
-              color: c.ink2,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Existing-group card ───────────────────────────────────────────────────
 
 class _GroupCard extends StatelessWidget {
   final PassengerGroup group;
+  final int number;
   final List<Passenger> members;
   final GroupFit fit;
   final VoidCallback onDelete;
@@ -707,6 +747,7 @@ class _GroupCard extends StatelessWidget {
 
   const _GroupCard({
     required this.group,
+    required this.number,
     required this.members,
     required this.fit,
     required this.onDelete,
@@ -723,16 +764,29 @@ class _GroupCard extends StatelessWidget {
         : fit.isFull
             ? c.warm
             : c.good;
+    final seatsText = fit.hasBus
+        ? tr('tour_groups.seats_summary', namedArgs: {
+            'used': '${fit.used}',
+            'cap': '${fit.capacity}',
+          })
+        : tr('tour_groups.seats_plain', namedArgs: {'n': '${fit.used}'});
     return UgamCard.plain(
-      padding: const EdgeInsets.all(UgamSpacing.lg),
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm + 2,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // ── Header: numbered colour badge · name · seats · delete ────────
           Row(
             children: [
-              GroupDot(colorIndex: group.colorIndex),
-              const SizedBox(width: UgamSpacing.sm),
+              GroupNumberBadge(
+                number: number,
+                colorIndex: group.colorIndex,
+              ),
+              const SizedBox(width: UgamSpacing.md),
               Expanded(
                 child: Text(
                   group.label.isEmpty ? tr('tour_groups.group') : group.label,
@@ -750,103 +804,63 @@ class _GroupCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(UgamRadius.chip),
                 ),
                 child: Text(
-                  fit.hasBus
-                      ? tr('tour_groups.seats_summary', namedArgs: {
-                          'used': '${fit.used}',
-                          'cap': '${fit.capacity}',
-                        })
-                      : tr('tour_groups.seats_plain',
-                          namedArgs: {'n': '${fit.used}'}),
+                  seatsText,
                   style: UgamText.micro.copyWith(
                     color: tone,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-              const SizedBox(width: UgamSpacing.sm),
-              // Delete the whole group.
+              const SizedBox(width: UgamSpacing.xs),
+              // Delete the whole group — compact danger button (confirms first).
               UgamIconButton(
                 icon: Icons.delete_outline_rounded,
                 tone: UgamIconButtonTone.danger,
+                size: 32,
+                iconSize: 17,
                 onTap: onDelete,
                 semanticLabel: tr('tour_groups.delete_group'),
               ),
             ],
           ),
-          // Over / full banner so the agent sees a group that can't ride one bus.
-          if (fit.hasBus && (fit.isOver || fit.isFull)) ...[
-            const SizedBox(height: UgamSpacing.sm),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.md,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: tone.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(UgamRadius.input),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    fit.isOver
-                        ? Icons.error_outline_rounded
-                        : Icons.info_outline_rounded,
-                    size: 15,
-                    color: tone,
+          // Over-capacity warning only — a compact inline note, no banner slab.
+          if (fit.isOver) ...[
+            const SizedBox(height: UgamSpacing.xs + 2),
+            Row(
+              children: [
+                Icon(Icons.error_outline_rounded, size: 13, color: c.danger),
+                const SizedBox(width: UgamSpacing.xs),
+                Expanded(
+                  child: Text(
+                    tr('tour_groups.wont_fit', namedArgs: {
+                      'used': '${fit.used}',
+                      'cap': '${fit.capacity}',
+                    }),
+                    style:
+                        UgamText.micro.copyWith(color: c.danger, height: 1.2),
                   ),
-                  const SizedBox(width: UgamSpacing.sm),
-                  Expanded(
-                    child: Text(
-                      fit.isOver
-                          ? tr('tour_groups.wont_fit', namedArgs: {
-                              'used': '${fit.used}',
-                              'cap': '${fit.capacity}',
-                            })
-                          : tr('tour_groups.full_for_bus'),
-                      style: UgamText.caption.copyWith(color: tone, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
-          const SizedBox(height: UgamSpacing.md),
-          if (members.isEmpty)
-            Text(
-              tr('tour_groups.no_members_yet'),
-              style: UgamText.caption.copyWith(color: c.ink3),
-            )
-          else
-            ...members.map(
-              (m) => Padding(
-                padding: const EdgeInsets.only(bottom: UgamSpacing.xs),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        m.name.isEmpty ? tr('tour_groups.unnamed') : m.name,
-                        style: UgamText.body.copyWith(color: c.ink2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    UgamIconButton(
-                      icon: Icons.close_rounded,
-                      iconSize: 16,
-                      onTap: () => onRemoveMember(m.id),
-                      semanticLabel: tr('tour_groups.remove_member'),
-                    ),
-                  ],
+          const SizedBox(height: UgamSpacing.sm + 2),
+          // ── Members as removable chips + an inline add chip ──────────────
+          Wrap(
+            spacing: UgamSpacing.sm,
+            runSpacing: UgamSpacing.sm,
+            children: [
+              for (final m in members)
+                _MemberChip(
+                  name: m.name.isEmpty ? tr('tour_groups.unnamed') : m.name,
+                  onRemove: () => onRemoveMember(m.id),
+                  c: c,
                 ),
+              _AddChip(
+                enabled: !fit.isFull,
+                onTap: onAddMember,
+                c: c,
               ),
-            ),
-          const SizedBox(height: UgamSpacing.md),
-          // Add a new member — disabled once the group is full for one bus.
-          _AddMemberButton(
-            enabled: !fit.isFull,
-            onTap: onAddMember,
-            c: c,
+            ],
           ),
         ],
       ),
@@ -854,15 +868,71 @@ class _GroupCard extends StatelessWidget {
   }
 }
 
-/// Tonal "Add member" action on a group card. Disabled (and relabelled) when
-/// the group already fills the biggest bus — the capacity block from the
-/// user's "41 in a 36-seat bus" rule.
-class _AddMemberButton extends StatelessWidget {
+/// A single group member rendered as a compact removable pill: name + a small
+/// × that ungroups it. Replaces the old full-width member row with its giant
+/// circular delete button.
+class _MemberChip extends StatelessWidget {
+  final String name;
+  final VoidCallback onRemove;
+  final UgamColorSet c;
+
+  const _MemberChip({
+    required this.name,
+    required this.onRemove,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.only(left: UgamSpacing.md, right: UgamSpacing.xs),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 150),
+            child: Text(
+              name,
+              style: UgamText.caption.copyWith(
+                color: c.ink2,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onRemove,
+            child: Semantics(
+              button: true,
+              label: tr('tour_groups.remove_member'),
+              child: Padding(
+                padding: const EdgeInsets.all(UgamSpacing.xs + 1),
+                child: Icon(Icons.close_rounded, size: 14, color: c.ink3),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tonal "+ Add" chip that sits inline at the end of the member chips.
+/// Disabled (and relabelled) when the group already fills the biggest bus —
+/// the capacity block from the user's "41 in a 36-seat bus" rule.
+class _AddChip extends StatelessWidget {
   final bool enabled;
   final VoidCallback onTap;
   final UgamColorSet c;
 
-  const _AddMemberButton({
+  const _AddChip({
     required this.enabled,
     required this.onTap,
     required this.c,
@@ -870,14 +940,42 @@ class _AddMemberButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return UgamButton(
-      label: enabled
-          ? tr('tour_groups.add_member')
-          : tr('tour_groups.full_for_bus'),
-      icon: enabled ? Icons.person_add_alt_rounded : Icons.block_rounded,
-      kind: UgamButtonKind.tonal,
-      expand: true,
-      onPressed: enabled ? onTap : null,
+    final fg = enabled ? c.accent : c.ink3;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: enabled ? onTap : null,
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+          decoration: BoxDecoration(
+            color: enabled ? c.accentFill : c.cardElev,
+            borderRadius: BorderRadius.circular(UgamRadius.chip),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                enabled ? Icons.person_add_alt_rounded : Icons.block_rounded,
+                size: 15,
+                color: fg,
+              ),
+              const SizedBox(width: UgamSpacing.xs + 2),
+              Text(
+                enabled
+                    ? tr('tour_groups.add_member')
+                    : tr('tour_groups.full_for_bus'),
+                style: UgamText.caption.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

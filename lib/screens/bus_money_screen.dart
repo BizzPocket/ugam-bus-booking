@@ -73,7 +73,16 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                     UgamSpacing.huge,
                   ),
                   children: [
-                    // ── Stat grid ──────────────────────────────────────
+                    // ── Hero figure: the ONE action number ─────────────
+                    // Outstanding handover leads as a large tabular figure —
+                    // it's what the agent must act on. Everything else is
+                    // demoted to a quiet supporting row below.
+                    _OutstandingHero(
+                      amount: s.outstandingHandover,
+                      expected: s.expectedHandover,
+                    ),
+                    const SizedBox(height: UgamSpacing.md),
+                    // ── Supporting stat grid (demoted) ─────────────────
                     Row(
                       children: [
                         Expanded(
@@ -91,28 +100,6 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                             value: Formatters.formatMoneyInr(s.expensesTotal),
                             label: tr('bus_money.stat_expenses'),
                             variant: UgamStatVariant.warm,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: UgamSpacing.md),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: UgamStatTile(
-                            icon: Icons.account_balance_rounded,
-                            value: Formatters.formatMoneyInr(s.expectedHandover),
-                            label: tr('bus_money.stat_expected_handover'),
-                            variant: UgamStatVariant.accent,
-                          ),
-                        ),
-                        const SizedBox(width: UgamSpacing.md),
-                        Expanded(
-                          child: UgamStatTile(
-                            icon: Icons.pending_actions_rounded,
-                            value: Formatters.formatMoneyInr(s.outstandingHandover),
-                            label: tr('bus_money.stat_outstanding'),
-                            variant: UgamStatVariant.neutral,
                           ),
                         ),
                       ],
@@ -449,6 +436,70 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// The screen's single focal figure: the outstanding handover this bus still
+/// owes the admin, shown as a large tabular number. Expected handover sits
+/// beneath it as quiet context. Carries the view's one champagne signal when
+/// money is still owed; settles to a calm `good` tone at zero.
+class _OutstandingHero extends StatelessWidget {
+  final double amount;
+  final double expected;
+
+  const _OutstandingHero({required this.amount, required this.expected});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final settled = amount.abs() <= 0.005;
+    final figureColor = settled ? c.good : c.accent;
+    return UgamCard.plain(
+      elev: true,
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr('bus_money.stat_outstanding').toUpperCase(),
+                  style: UgamText.micro.copyWith(
+                    color: c.ink3,
+                    letterSpacing: 0.6,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: UgamSpacing.xs),
+                Text(
+                  Formatters.formatMoneyInr(amount),
+                  style: UgamText.tabular(
+                    UgamText.numLg.copyWith(color: figureColor, fontSize: 30),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tr('bus_money.stat_expected_handover'),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Text(
+            Formatters.formatMoneyInr(expected),
+            style: UgamText.tabular(
+              UgamText.bodyStrong.copyWith(color: c.ink2),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

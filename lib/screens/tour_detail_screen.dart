@@ -7,7 +7,6 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
-import '../models/payment_status.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/trip_type.dart';
@@ -18,6 +17,8 @@ import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
 import 'add_bus_screen.dart';
 import 'edit_tour_screen.dart';
+import 'bus_status_screen.dart';
+import 'main_shell.dart';
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
 import 'requests_screen.dart';
@@ -124,11 +125,19 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
             ],
           ),
         ),
-        bottomNavigationBar: _StickyAction(
-          tour: tour,
-          tab: _tabIndex,
-          c: c,
-          onSwitchTab: (i) => setState(() => _tabIndex = i),
+        // Sticky tab action stacked above the persistent workspace dock, so
+        // the bottom nav stays reachable throughout the tour workspace.
+        bottomNavigationBar: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _StickyAction(
+              tour: tour,
+              tab: _tabIndex,
+              c: c,
+              onSwitchTab: (i) => setState(() => _tabIndex = i),
+            ),
+            const UgamWorkspaceDock(),
+          ],
         ),
       );
     });
@@ -231,7 +240,31 @@ class _HeroSection extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Positioned.fill(child: UgamBusBackdrop(seed: tour.id)),
+          Positioned.fill(
+            child: UgamBusBackdrop(
+              seed: tour.id,
+              label: _routeInitials(tour),
+            ),
+          ),
+          // Top scrim — keeps the white floating chrome (back / status / more)
+          // legible over the graphite backdrop's lighter top band.
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            height: topInset + 96,
+            child: const IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x4D000000), Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+          ),
           // Top chrome row.
           Positioned(
             left: UgamSpacing.gutter,
@@ -388,6 +421,21 @@ class _HeroSection extends StatelessWidget {
     );
   }
 
+  /// Short route monogram for the hero backdrop, e.g. `"S→M"` from the from/to
+  /// city initials. Returns null when either city is blank so the backdrop
+  /// falls back to the bare bus glyph.
+  String? _routeInitials(Tour t) {
+    String first(String s) {
+      final v = s.trim();
+      return v.isEmpty ? '' : v[0].toUpperCase();
+    }
+
+    final from = first(t.fromCity);
+    final to = first(t.toCity);
+    if (from.isEmpty || to.isEmpty) return null;
+    return '$from→$to';
+  }
+
   String _durationLabel(BuildContext context, Tour t) {
     final r = t.returnDate;
     final locale = context.locale.toString();
@@ -513,13 +561,6 @@ class _OverviewTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final action = _nextActionFor(tour);
-    final paid = tour.passengers
-        .where((p) => p.paymentStatus == PaymentStatus.paid)
-        .length;
-    final pending = tour.passengers
-        .where((p) => p.paymentStatus == PaymentStatus.notPaid)
-        .length;
-    final revenue = paid * tour.pricePerSeat;
 
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
@@ -528,56 +569,6 @@ class _OverviewTab extends StatelessWidget {
           action: action,
           c: c,
           onSwitchTab: onSwitchTab,
-        ),
-        const SizedBox(height: UgamSpacing.lg),
-        _SectionEyebrow(label: tr('tour_detail.at_a_glance'), c: c),
-        const SizedBox(height: UgamSpacing.md),
-        Row(
-          children: [
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.check_circle_rounded,
-                value: '$paid',
-                label: tr('app.label.booked'),
-                variant: UgamStatVariant.good,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.access_time_rounded,
-                value: '$pending',
-                label: tr('tour_detail.stat_pending_pay'),
-                variant: UgamStatVariant.warm,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: UgamSpacing.md),
-        Row(
-          children: [
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.event_seat_rounded,
-                value: tour.totalBusSeats > 0
-                    ? '${tour.totalSeatsAssigned}'
-                    : '—',
-                ofTotal: tour.totalBusSeats > 0
-                    ? '/${tour.totalBusSeats}'
-                    : null,
-                label: tr('tour_detail.stat_assigned'),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.currency_rupee_rounded,
-                value: Formatters.formatMoneyInrCompact(revenue),
-                label: tr('tour_detail.stat_revenue'),
-                variant: UgamStatVariant.accent,
-              ),
-            ),
-          ],
         ),
         const SizedBox(height: UgamSpacing.xl),
         _SectionEyebrow(label: tr('tour_detail.manage'), c: c),
@@ -1179,10 +1170,14 @@ class _BusListItem extends StatelessWidget {
     return UgamCard.plain(
       elev: true,
       padding: const EdgeInsets.all(UgamSpacing.sm),
+      // Tapping a bus opens its seat chart directly — the most common action.
+      // Bus management (edit/delete/handler/add) stays reachable via the tour
+      // actions + the per-bus "more" menu inside ManageBuses, so we skip the
+      // ManageBuses hop that previously forced a second tap to reach the chart.
       onTap: () {
         HapticFeedback.selectionClick();
         Get.to(
-          () => ManageBusesScreen(tourId: bus.tourId ?? ''),
+          () => BusStatusScreen(tourId: bus.tourId ?? '', busId: bus.id),
           transition: Transition.cupertino,
         );
       },
@@ -1203,7 +1198,7 @@ class _BusListItem extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    bus.busNumber.isNotEmpty ? bus.busNumber : bus.name,
+                    bus.displayLabel,
                     style:
                         UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
                     maxLines: 1,
@@ -1221,6 +1216,15 @@ class _BusListItem extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (bus.driverPhone.trim().isNotEmpty)
+                    Text(
+                      bus.driverPhone,
+                      style: UgamText.tabular(
+                        UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   const SizedBox(height: UgamSpacing.sm),
                   Row(
                     children: [
@@ -1661,10 +1665,12 @@ class _SectionEyebrow extends StatelessWidget {
 }
 
 /// Always-visible tour-action tiles. The tour-first nav removed the global
-/// Notify/Money tabs, so every tour function must be reachable here from the
-/// tour home: Seats, Lock & notify, Money, Groups. The Lock tile is highlighted
-/// once the tour is ready to lock (all seats assigned + handler set) and flips
-/// to "Send" after it's locked.
+/// Notify/Money tabs, so EVERY tour area must be reachable here from the tour
+/// hub in ONE tap — Seats, Buses, Money, Groups, Requests, and Notify — each
+/// pointing straight at its destination screen (no intermediate forwarding
+/// hop). Laid out as a labeled 3-up grid so the hub is a true fan-out, not a
+/// lateral dead-end. The Notify tile is highlighted (and flips Lock→Send) once
+/// the tour is ready to lock (all seats assigned + handler set) or is locked.
 class _TourTools extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
@@ -1679,58 +1685,100 @@ class _TourTools extends StatelessWidget {
         tour.allSeatsAssigned &&
         tour.handlerId != null;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: _TourToolTile(
-            icon: Icons.event_seat_rounded,
-            label: tr('tour_detail.tool_seats'),
-            c: c,
-            onTap: () => Get.toNamed(
-              AppRoutes.tourOverview,
-              arguments: {'tourId': tour.id},
-            ),
+    // Dedupe the Seats entry: when "Seats" is already the headline next-action
+    // (mirrored by the Overview's Next-Action card AND the sticky CTA), drop the
+    // redundant Seats tile from this grid so the entry appears at most twice.
+    final seatsIsNextAction =
+        _nextActionFor(tour).kind == _NextActionKind.assignSeats;
+
+    // One-tap-direct destinations. Each tile lands on its real workspace
+    // screen; none route through an intermediate forwarding screen.
+    final tiles = <Widget>[
+      if (!seatsIsNextAction)
+        _TourToolTile(
+          icon: Icons.event_seat_rounded,
+          label: tr('tour_detail.tool_seats'),
+          c: c,
+          // Seats SUMMARY (tourOverview), never the bare grid.
+          onTap: () => Get.toNamed(
+            AppRoutes.tourOverview,
+            arguments: {'tourId': tour.id},
           ),
         ),
-        const SizedBox(width: UgamSpacing.sm + 2),
-        Expanded(
-          child: _TourToolTile(
-            icon: locked ? Icons.send_rounded : Icons.lock_rounded,
-            label: locked ? tr('tour_detail.tool_send') : tr('tour_detail.tool_lock'),
-            c: c,
-            highlight: readyToLock || locked,
-            onTap: () => Get.to(
-              () => NotifyScreen(tourId: tour.id),
-              transition: Transition.cupertino,
-            ),
-          ),
+      _TourToolTile(
+        icon: Icons.directions_bus_rounded,
+        label: tr('tour_detail.tab_buses'),
+        c: c,
+        onTap: () => Get.to(
+          () => ManageBusesScreen(tourId: tour.id),
+          transition: Transition.cupertino,
         ),
-        const SizedBox(width: UgamSpacing.sm + 2),
-        Expanded(
-          child: _TourToolTile(
-            icon: Icons.account_balance_wallet_rounded,
-            label: tr('tour_detail.tool_money'),
-            c: c,
-            onTap: () => Get.toNamed(
-              AppRoutes.tourMoney,
-              arguments: {'tourId': tour.id},
-            ),
-          ),
+      ),
+      _TourToolTile(
+        icon: Icons.account_balance_wallet_rounded,
+        label: tr('tour_detail.tool_money'),
+        c: c,
+        onTap: () => Get.toNamed(
+          AppRoutes.tourMoney,
+          arguments: {'tourId': tour.id},
         ),
-        const SizedBox(width: UgamSpacing.sm + 2),
-        Expanded(
-          child: _TourToolTile(
-            icon: Icons.groups_rounded,
-            label: tr('tour_detail.tool_groups'),
-            c: c,
-            onTap: () => Get.toNamed(
-              AppRoutes.tourGroups,
-              arguments: {'tourId': tour.id},
-            ),
-          ),
+      ),
+      _TourToolTile(
+        icon: Icons.groups_rounded,
+        label: tr('tour_detail.tool_groups'),
+        c: c,
+        onTap: () => Get.toNamed(
+          AppRoutes.tourGroups,
+          arguments: {'tourId': tour.id},
         ),
-      ],
+      ),
+      _TourToolTile(
+        icon: Icons.edit_note_rounded,
+        label: tr('requests.title'),
+        c: c,
+        onTap: () => Get.to(
+          () => RequestsScreen(initialTourId: tour.id),
+          transition: Transition.cupertino,
+        ),
+      ),
+      _TourToolTile(
+        icon: locked ? Icons.send_rounded : Icons.lock_rounded,
+        label: locked ? tr('notify.title') : tr('tour_detail.tool_lock'),
+        c: c,
+        highlight: readyToLock || locked,
+        onTap: () => Get.to(
+          () => NotifyScreen(tourId: tour.id),
+          transition: Transition.cupertino,
+        ),
+      ),
+    ];
+
+    // 3-up grid: pad the last partial row with invisible placeholders so the
+    // tiles keep a uniform width (Expanded inside each Row).
+    const perRow = 3;
+    const gap = UgamSpacing.sm + 2;
+    final rows = <Widget>[];
+    for (var i = 0; i < tiles.length; i += perRow) {
+      final slice = tiles.sublist(i, (i + perRow).clamp(0, tiles.length));
+      final children = <Widget>[];
+      for (var j = 0; j < perRow; j++) {
+        if (j > 0) children.add(const SizedBox(width: gap));
+        children.add(
+          Expanded(
+            child: j < slice.length ? slice[j] : const SizedBox.shrink(),
+          ),
+        );
+      }
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: gap));
+      rows.add(Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ));
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: rows,
     );
   }
 }
@@ -1755,8 +1803,12 @@ class _TourToolTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = highlight ? c.good : c.accent;
-    final fill = highlight ? c.goodFill : c.accentFill;
+    // Accent-rationing: ordinary tool tiles are NEUTRAL (graphite chip + muted
+    // ink) so the only champagne signal on the Overview is the single next
+    // action card / sticky CTA. The "good" highlight (ready-to-lock / locked)
+    // is a distinct semantic green, not the rationed gold, so it stays.
+    final iconColor = highlight ? c.good : c.ink2;
+    final fill = highlight ? c.goodFill : c.cardElev;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -1778,7 +1830,7 @@ class _TourToolTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               alignment: Alignment.center,
-              child: Icon(icon, size: 20, color: accent),
+              child: Icon(icon, size: 20, color: iconColor),
             ),
             const SizedBox(height: 6),
             Text(

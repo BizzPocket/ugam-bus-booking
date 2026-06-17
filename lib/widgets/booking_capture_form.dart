@@ -190,7 +190,8 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   TripType _tripType = TripType.roundTrip;
 
   bool _showNote = false;
-  bool _showOneWay = false; // GO/RET options expanded (round-trip-default-invisible)
+  bool _showOneWay =
+      false; // GO/RET options expanded (round-trip-default-invisible)
 
   String? _nameError;
   String? _phoneError;
@@ -391,9 +392,10 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     final entered = await UgamDialog.show<int>(
       context,
       title: title,
-      message: tr('booking_form.qty_dialog_hint', namedArgs: {
-        'max': '${widget.maxPerType}',
-      }),
+      message: tr(
+        'booking_form.qty_dialog_hint',
+        namedArgs: {'max': '${widget.maxPerType}'},
+      ),
       content: TextField(
         controller: controller,
         autofocus: true,
@@ -420,9 +422,9 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
         UgamButton(
           label: tr('booking_form.qty_dialog_set'),
           icon: Icons.check_rounded,
-          onPressed: () => Navigator.of(ctx).pop(
-            int.tryParse(controller.text.trim()) ?? current,
-          ),
+          onPressed: () => Navigator.of(
+            ctx,
+          ).pop(int.tryParse(controller.text.trim()) ?? current),
         ),
       ],
     );
@@ -713,7 +715,10 @@ class _PickContactButton extends StatelessWidget {
             const SizedBox(width: UgamSpacing.sm),
             Text(
               tr('booking_form.pick_contact'),
-              style: UgamText.bodyStrong.copyWith(color: c.accent, fontSize: 13),
+              style: UgamText.bodyStrong.copyWith(
+                color: c.accent,
+                fontSize: 13,
+              ),
             ),
           ],
         ),
@@ -932,7 +937,10 @@ class _TripChip extends StatelessWidget {
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11),
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),
@@ -1007,7 +1015,10 @@ class _TripTypeOption extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11),
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),
@@ -1119,9 +1130,7 @@ class _SeatTile extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: selected
-                      ? c.accent.withValues(alpha: 0.4)
-                      : c.border,
+                  color: selected ? c.accent.withValues(alpha: 0.4) : c.border,
                 ),
               ),
               child: Text(
@@ -1252,7 +1261,10 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
               SizedBox(
                 width: 22,
                 height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2, color: c.accent),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: c.accent,
+                ),
               ),
               const SizedBox(height: UgamSpacing.md),
               Text(
@@ -1288,8 +1300,7 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
         ? _all
         : _all
               .where(
-                (e) =>
-                    e.name.toLowerCase().contains(q) || e.phone.contains(q),
+                (e) => e.name.toLowerCase().contains(q) || e.phone.contains(q),
               )
               .toList();
 
@@ -1315,67 +1326,76 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
             ),
           )
         else
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: ListView.builder(
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              itemCount: filtered.length,
-              itemBuilder: (_, i) {
-                final e = filtered[i];
-                return InkWell(
-                  onTap: () => Navigator.of(context).pop(e),
-                  borderRadius: BorderRadius.circular(UgamRadius.input),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: UgamSpacing.sm + 2,
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: c.accentFill,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Text(
-                            _initials(e.name),
-                            style: UgamText.bodyStrong
-                                .copyWith(color: c.accent, fontSize: 12),
-                          ),
-                        ),
-                        const SizedBox(width: UgamSpacing.md),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                e.name,
-                                style: UgamText.body.copyWith(color: c.ink),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+          // Flexible (not a bare ConstrainedBox) so the list YIELDS to the
+          // space the sheet actually has: on shorter screens the fixed 360
+          // height + search field + sheet chrome overflowed the bottom. It
+          // still caps at 360 and scrolls internally when there's room.
+          Flexible(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 360),
+              child: ListView.builder(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: filtered.length,
+                itemBuilder: (_, i) {
+                  final e = filtered[i];
+                  return InkWell(
+                    onTap: () => Navigator.of(context).pop(e),
+                    borderRadius: BorderRadius.circular(UgamRadius.input),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: UgamSpacing.sm + 2,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: c.accentFill,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              _initials(e.name),
+                              style: UgamText.bodyStrong.copyWith(
+                                color: c.accent,
+                                fontSize: 12,
                               ),
-                              Text(
-                                e.phone,
-                                style:
-                                    UgamText.caption.copyWith(color: c.ink2),
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 20,
-                          color: c.ink3,
-                        ),
-                      ],
+                          const SizedBox(width: UgamSpacing.md),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  e.name,
+                                  style: UgamText.body.copyWith(color: c.ink),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  e.phone,
+                                  style: UgamText.caption.copyWith(
+                                    color: c.ink2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 20,
+                            color: c.ink3,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
       ],

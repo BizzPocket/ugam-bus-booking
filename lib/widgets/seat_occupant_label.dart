@@ -27,7 +27,7 @@ class SeatOccupantLabel extends StatelessWidget {
     required this.phone,
     required this.nameColor,
     required this.phoneColor,
-    this.nameSize = 13,
+    this.nameSize = 15,
     this.phoneSize = 10,
   });
 

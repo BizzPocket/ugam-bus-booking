@@ -8,6 +8,7 @@ import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/services/seat_chart_pdf.dart';
 
 // ── Page counting ───────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ Passenger _p(
   required String name,
   String phone = '+919879600000',
   List<SeatAssignment> assigned = const [],
+  TripType tripType = TripType.roundTrip,
 }) =>
     Passenger(
       id: id,
@@ -73,6 +75,7 @@ Passenger _p(
       name: name,
       phone: phone,
       assignedSeats: assigned,
+      tripType: tripType,
     );
 
 /// A 2-bus tour with a Gujarati passenger name and a whole double-sofa holder.
@@ -161,6 +164,55 @@ void main() {
 
       expect(bytes, isNotEmpty);
       expect(_pageCount(bytes), 1);
+    });
+  });
+
+  // ── Leg-shared seat occupants (the per-person chart bug) ────────────────────
+  //
+  // When a GO-only passenger and a different RET-only passenger share the SAME
+  // physical seat across legs, BOTH names must appear on the chart. The old
+  // builder kept a single occupant per seat (last writer wins), so the chart
+  // dropped one leg — a one-leg booker never saw their own name. These tests
+  // lock the rendered per-seat occupant names the PDF draws.
+  group('SeatChartPdf occupant names per seat', () {
+    Tour legSharedTour() {
+      final b1 = _balconyBus('b1');
+      return Tour(
+        title: 'Leg Share',
+        fromCity: 'Surat',
+        toCity: 'Dwarka',
+        departureDate: DateTime(2026, 6, 16),
+        pricePerSeat: 0,
+        buses: [b1],
+        passengers: [
+          // GO leg of SU1.
+          _p('go', name: 'GoRider',
+              tripType: TripType.outboundOnly,
+              assigned: const [SeatAssignment(busId: 'b1', seatId: 'b1_SU1')]),
+          // RETURN leg of the SAME seat, a different person.
+          _p('ret', name: 'RetRider',
+              tripType: TripType.returnOnly,
+              assigned: const [SeatAssignment(busId: 'b1', seatId: 'b1_SU1')]),
+          // A whole double sofa held solo (two entries, same seatId) must stay
+          // a SINGLE name — the fix must not double-list a solo owner.
+          _p('solo', name: 'SoloOwner', assigned: const [
+            SeatAssignment(busId: 'b1', seatId: 'b1_DL1'),
+            SeatAssignment(busId: 'b1', seatId: 'b1_DL1'),
+          ]),
+        ],
+      );
+    }
+
+    test('leg-shared seat lists BOTH occupants, GO first', () {
+      final names =
+          SeatChartPdf.debugOccupantNamesForBus(legSharedTour(), 'b1');
+      expect(names['b1_SU1'], ['GoRider', 'RetRider']);
+    });
+
+    test('whole double held solo lists a single occupant', () {
+      final names =
+          SeatChartPdf.debugOccupantNamesForBus(legSharedTour(), 'b1');
+      expect(names['b1_DL1'], ['SoloOwner']);
     });
   });
 }

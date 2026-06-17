@@ -70,17 +70,6 @@ class AdminAuthService {
   /// Sign out — clears the Supabase session.
   Future<void> signOut() async => _client.auth.signOut();
 
-  /// Permanently deletes the signed-in admin's account and all data they
-  /// own. Calls the `delete_my_account` SECURITY DEFINER RPC, which removes
-  /// the caller's `auth.users` row — that cascades (ON DELETE CASCADE) to
-  /// the admins, tours, buses, admin_contacts, passengers and
-  /// booking_requests rows owned by this user. Signs out afterwards so no
-  /// stale session lingers. Throws on failure.
-  Future<void> deleteAccount() async {
-    await _client.rpc('delete_my_account');
-    await _client.auth.signOut();
-  }
-
   /// True when at least one admin row exists. Returns false when not
   /// authenticated (RLS denies the read) or when truly empty.
   Future<bool> anyAdminExists() async {

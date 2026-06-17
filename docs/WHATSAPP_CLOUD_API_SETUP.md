@@ -38,16 +38,21 @@ In [Meta Business Manager](https://business.facebook.com/) → WhatsApp:
   | {{4}} | Price per seat | ₹450 |
   | {{5}} | Broadcast description | Bus leaves 6 AM sharp from… |
 
-**Template 2 — `seat_allocation`** (category: UTILITY)
-- **Header:** Document (the seat-chart PDF)
-- **Body variables:**
+**Template 2 — `seat_allotment`** (category: UTILITY) — sent on tour lock, one per seated passenger
+- **Header:** **Image** (the passenger's own seat chart, with THEIR seats highlighted; the tour handler gets the full bus chart). The chart footer already prints the vehicle, boarding place and departure date/time.
+- **Body variables:** (seat numbers are NOT here — they're highlighted on the image)
   | # | Meaning | Example |
   |---|---------|---------|
   | {{1}} | Passenger name | Ramesh Patel |
-  | {{2}} | Tour title | Rajkot → Goa Express |
-  | {{3}} | Seat numbers | A3, A4 |
-  | {{4}} | Bus | GJ05HU7162 |
+  | {{2}} | Tour title (in the greeting line) | Rajkot → Goa Express |
+  | {{3}} | Bus **name** only (no reg. plate) | Raj |
+  | {{4}} | Boarding place | Rajkot, Limda Chowk |
   | {{5}} | Departure date | 12 Jun 2026 |
+  | {{6}} | Departure time | સવારે 6:00 |
+  | {{7}} | Handler contact (name + phone) | Mahesh – 9876543210 |
+
+  The tour title lives in the line-2 greeting (`{{1}}, {{2}} માટે …`) — there is
+  no separate `પ્રવાસ:` line.
 
 Template names + default language live in `lib/config/whatsapp_cloud_config.dart`
 (`broadcastTemplate`, `seatAllocationTemplate`, `defaultLanguage`). Change them there if your
@@ -86,9 +91,12 @@ so it can't be called anonymously.
   to the public `tour-broadcasts` Storage bucket.
 - **Send broadcast:** Tour detail → Overview → **“Send broadcast on WhatsApp”**
   sends `tour_broadcast` to all saved contacts (`admin_contacts`).
-- **Seat allocation:** locking a tour (Notify tab) offers to send `seat_allocation`
-  to every seated passenger. One seat-chart PDF is generated per bus, uploaded to
-  the public `seat-charts` bucket, and attached as the template's document header.
+- **Seat allocation:** locking a tour (Notify tab) sends `seat_allotment` to every
+  seated passenger, one message each. A per-passenger seat-chart **image** (their
+  seats highlighted; the handler gets the full chart) is rendered, uploaded to the
+  public `seat-charts` bucket, and attached as the template's image header. The
+  body carries tour, bus, boarding place, departure date/time and the handler's
+  contact — no seat-number text.
 
 ---
 

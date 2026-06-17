@@ -106,11 +106,36 @@ class Passenger {
     (sum, l) => sum + l.qty * (l.seatType == SeatType.doubleSofa ? 2 : 1),
   );
 
+  /// Trip-aware seat *weight*. A physical seat spans the whole trip, so a
+  /// round-trip booking weighs a full seat (1.0 per single berth) while a
+  /// one-leg booking weighs HALF (0.5) — the other leg of that seat stays
+  /// bookable for an opposite-leg rider. A Double Sofa weighs twice a single
+  /// (round-trip double = 2.0, one-way double = 1.0). Used for demand display
+  /// and the "0.5 / 1.0" per-passenger label — NOT for assignment completeness
+  /// (which stays physical, see [isFullyAssigned]).
+  double get seatLoad => seatBerths * (tripType.isOneWay ? 0.5 : 1.0);
+
+  /// Berths this passenger loads on the OUTBOUND (GO) leg — [seatBerths] if they
+  /// ride outbound, else 0. The per-leg counterpart that makes capacity honest:
+  /// each physical seat offers one GO slot + one RET slot, so a one-way rider
+  /// consumes only their leg and frees the other for someone else.
+  int get goBerths => tripType.usesOutbound ? seatBerths : 0;
+
+  /// Berths this passenger loads on the RETURN (RET) leg — [seatBerths] if they
+  /// ride the return, else 0.
+  int get retBerths => tripType.usesReturn ? seatBerths : 0;
+
   /// Total number of seats actually assigned.
   int get totalSeatsAssigned => assignedSeats.length;
 
-  /// Whether all requested seats have been assigned.
-  bool get isFullyAssigned => totalSeatsAssigned >= totalSeatsRequested;
+  /// Whether all requested seats have been assigned. Measured in physical
+  /// *berths*, not request units: a whole Double Sofa is two berths (two
+  /// [SeatAssignment] entries) and must be matched against [seatBerths], which
+  /// also counts a double as two. Comparing against [totalSeatsRequested]
+  /// (where a double counts as one) made a passenger holding several doubles
+  /// read as fully assigned after only some sofas were freed, so they never
+  /// re-entered the pending dock until EVERY sofa was freed.
+  bool get isFullyAssigned => totalSeatsAssigned >= seatBerths;
 
   /// Whether at least one seat is assigned but not all.
   bool get isPartiallyAssigned => totalSeatsAssigned > 0 && !isFullyAssigned;
@@ -121,9 +146,12 @@ class Passenger {
     return requestLines.map((l) => l.shortLabel).join(' + ');
   }
 
-  /// Progress string like "2/4" or "✓ 4/4".
+  /// Progress string like "2/4" or "✓ 4/4". Counted in berths (a Double Sofa
+  /// is two) so the fraction and the ✓ stay in lock-step with [isFullyAssigned]
+  /// — otherwise a passenger who freed one of several doubles would still read
+  /// "✓ 2/2".
   String get progressLabel {
-    final total = totalSeatsRequested;
+    final total = seatBerths;
     final assigned = totalSeatsAssigned;
     if (assigned >= total && total > 0) return '✓ $total/$total';
     return '$assigned/$total';

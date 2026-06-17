@@ -7,6 +7,7 @@ import '../design/ugam.dart';
 import '../routes/app_routes.dart';
 import '../services/seating_engine.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/tour_capacity.dart';
 import '../widgets/edit_request_sheet.dart';
 
 /// SLICE 2 of the smart-seat UI: the short "needs your decision" list.
@@ -149,24 +150,17 @@ class SeatingExceptionsScreen extends StatelessWidget {
             UgamAppBar(title: tr('seating_exceptions.title')),
             Expanded(
               child: Obx(() {
-                // Touch lastPlanByTour so this rebuilds when a fresh fill
-                // caches a new plan; exceptionsForTour reads from it.
-                _ctrl.lastPlanByTour; // ignore: unnecessary_statements
                 // getTour reads the reactive `tours` list, so holding a
-                // passenger (which mutates that list) also rebuilds here.
+                // passenger (which mutates that list) rebuilds here.
                 final tour = _ctrl.getTour(tourId);
-                // An overflow passenger the agent has since HELD no longer
-                // needs a decision — drop their card instantly, before any
-                // re-generate, so "Hold" feels immediate.
-                final exceptions =
-                    _ctrl.exceptionsForTour(tourId).where((ex) {
-                  if (ex.type != SeatingExceptionType.overflowWaitlist) {
-                    return true;
-                  }
-                  final p = tour?.passengers
-                      .firstWhereOrNull((x) => x.id == ex.passengerId);
-                  return !(p?.isWaitlisted ?? false);
-                }).toList();
+                // SINGLE SOURCE with the Dashboard/Requests badge — the same
+                // live, non-mutating helper the needsDecision count uses, so the
+                // number you see on those surfaces equals the cards here. Pure:
+                // never fillTour (which would assign + persist seats just to
+                // view), and an overflow rider already HELD is dropped instantly.
+                final exceptions = tour == null
+                    ? const <SeatingException>[]
+                    : seatingDecisionExceptions(tour);
 
                 if (exceptions.isEmpty) {
                   return UgamEmpty(

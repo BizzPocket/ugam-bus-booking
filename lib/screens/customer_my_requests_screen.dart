@@ -8,6 +8,7 @@ import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
+import '../utils/app_snackbar.dart';
 import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
 import 'handler_bus_chart_screen.dart';
@@ -158,11 +159,16 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
         bottom: false,
         child: Column(
           children: [
-            _TopBar(
-              c: c,
-              refreshing: _refreshing,
-              onRefresh: _refreshing ? null : _refresh,
-              onBack: () => Get.back(),
+            UgamAppBar(
+              showBack: true,
+              title: tr('customer_my_requests.title'),
+              actions: [
+                _RefreshAction(
+                  c: c,
+                  refreshing: _refreshing,
+                  onRefresh: _refreshing ? null : _refresh,
+                ),
+              ],
             ),
             if (!_loading && live.isNotEmpty) ...[
               Padding(
@@ -254,8 +260,13 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
 
   void _onRowTap(CustomerRequestEntry entry) {
     HapticFeedback.selectionClick();
-    if (entry.hasSeatsAssigned) {
+    // Seats are only viewable once the tour is locked — until then assignments
+    // are provisional, so we neither open the layout sheet nor reveal numbers.
+    if (entry.seatsVisible) {
       showCustomerSeatLayoutSheet(context, entry: entry);
+    } else if (entry.hasSeatsAssigned) {
+      // Assigned but not yet locked: explain why seats stay hidden for now.
+      AppSnackBar.info(tr('customer_my_requests.seats_pending_toast'));
     } else if (entry.canEdit) {
       _openEdit(entry);
     }
@@ -271,79 +282,39 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   }
 }
 
-// ─── TOP BAR ──────────────────────────────────────────────────────────
+// ─── REFRESH ACTION (UgamAppBar trailing slot) ────────────────────────
 
-class _TopBar extends StatelessWidget {
+/// Trailing refresh affordance for the shared [UgamAppBar]. Matches the
+/// [UgamAppBarAction] circle styling, but swaps the glyph for a spinner while
+/// a refresh is in flight (so the customer sees the pull is working).
+class _RefreshAction extends StatelessWidget {
   final UgamColorSet c;
   final bool refreshing;
   final VoidCallback? onRefresh;
-  final VoidCallback onBack;
 
-  const _TopBar({
+  const _RefreshAction({
     required this.c,
     required this.refreshing,
     required this.onRefresh,
-    required this.onBack,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: onBack,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              tr('customer_my_requests.title'),
-              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 24),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: onRefresh,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: refreshing
-                  ? SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: c.ink2,
-                      ),
-                    )
-                  : Icon(Icons.refresh_rounded, size: 19, color: c.ink),
-            ),
-          ),
-        ],
+    if (!refreshing) {
+      return UgamAppBarAction(
+        icon: Icons.refresh_rounded,
+        onTap: onRefresh ?? () {},
+      );
+    }
+    return Container(
+      width: 42,
+      height: 42,
+      decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2, color: c.ink2),
       ),
     );
   }
@@ -395,7 +366,13 @@ class _RequestRow extends StatelessWidget {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        UgamBusBackdrop(seed: entry.tourId),
+                        UgamBusBackdrop(
+                          seed: entry.tourId,
+                          label: _routeInitials(
+                            entry.tourFromCity,
+                            entry.tourToCity,
+                          ),
+                        ),
                         Positioned(
                           left: 4,
                           top: 4,
@@ -405,14 +382,14 @@ class _RequestRow extends StatelessWidget {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.5),
+                              color: c.cardElev,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               _formatDate(entry.tourDepartureDate),
                               style: UgamText.tabular(
                                 UgamText.micro.copyWith(
-                                  color: Colors.white,
+                                  color: c.ink,
                                   fontSize: 9.5,
                                 ),
                               ),
@@ -507,10 +484,18 @@ class _RequestRow extends StatelessWidget {
   }
 
   (String, UgamStatusTone) _statusFor(CustomerRequestEntry e) {
-    if (e.hasSeatsAssigned) {
+    // Reveal "Seats assigned" only once the tour is locked. While assignments
+    // are still provisional, show a neutral "being finalized" state instead.
+    if (e.seatsVisible) {
       return (
         tr('customer_my_requests.chip_seats_assigned'),
         UgamStatusTone.good,
+      );
+    }
+    if (e.hasSeatsAssigned) {
+      return (
+        tr('customer_my_requests.chip_seats_finalizing'),
+        UgamStatusTone.warm,
       );
     }
     if (e.status == 'accepted') {
@@ -606,7 +591,10 @@ class _RowFooter extends StatelessWidget {
         ),
       );
     }
-    if (entry.hasSeatsAssigned) {
+    // Seat NUMBERS are revealed only after the tour locks. Before that, show a
+    // neutral "being finalized" chip so the customer knows seats are coming but
+    // never sees provisional numbers that may still change.
+    if (entry.seatsVisible) {
       widgets.add(
         UgamReqChip(
           label: tr(
@@ -616,6 +604,13 @@ class _RowFooter extends StatelessWidget {
             },
           ),
           variant: UgamChipVariant.good,
+        ),
+      );
+    } else if (entry.hasSeatsAssigned) {
+      widgets.add(
+        UgamReqChip(
+          label: tr('customer_my_requests.chip_seats_finalizing'),
+          variant: UgamChipVariant.neutral,
         ),
       );
     }
@@ -734,4 +729,18 @@ class _LoadingShimmer extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Route monogram (e.g. `"S→M"`) from the from/to city initials, for the
+/// graphite UgamBusBackdrop tile. Matches the sibling customer screens.
+String _routeInitials(String from, String to) {
+  String first(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '' : t.characters.first.toUpperCase();
+  }
+
+  final f = first(from);
+  final t = first(to);
+  if (f.isEmpty && t.isEmpty) return '';
+  return '$f→$t';
 }

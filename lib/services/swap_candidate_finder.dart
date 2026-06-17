@@ -15,6 +15,8 @@ import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
+import '../models/trip_type.dart';
+import '../utils/seat_leg_capacity.dart';
 
 /// One occupant of the destination bus the mover COULD displace (swap with).
 class SwapCandidate {
@@ -112,6 +114,9 @@ class SwapCandidateFinder {
     required Bus destinationBus,
     required List<Passenger> passengers,
     String? sourceBusId,
+    String? moverFromSeatId,
+    SeatType? moverFromSeatType,
+    int? moverFromBerths,
   }) {
     final sameBus = sourceBusId != null && sourceBusId == destinationBus.id;
     final manual = sourceBusId != null;
@@ -127,29 +132,61 @@ class SwapCandidateFinder {
       if (sid != null && c.seatType != null) cellById[sid] = c;
     }
 
+    // ── Mover's CURRENT holding on this bus (for physical-swap reasoning) ──
+    // When [moverFromSeatId] is supplied and resolves on THIS bus, we know the
+    // exact seat the mover sits on and how many berths they hold there. That
+    // lets a candidate be offered on physical swap feasibility (same seat-class
+    // + berth counts fit both ways — the same rule the drag-drop engine uses),
+    // independent of whether the mover still has an outstanding request line. A
+    // seated passenger whose request is already satisfied can then still swap
+    // with any compatible allocated seat.
+    //
+    // For a CROSS-bus move the mover doesn't sit on THIS bus, so [moverFromSeatId]
+    // can't resolve here. The caller instead passes the mover's source-seat CLASS
+    // + berth count directly ([moverFromSeatType] / [moverFromBerths]) — all the
+    // physical-swap rule needs — so a seated passenger can swap onto ANOTHER bus's
+    // compatible allocated seat too. Absent both, need-based candidacy only.
+    final _MoverHolding? moverHolding =
+        (moverFromSeatType != null && (moverFromBerths ?? 0) > 0)
+        ? _MoverHolding(seatType: moverFromSeatType, berths: moverFromBerths!)
+        : _moverHoldingOn(
+            mover: mover,
+            busId: destinationBus.id,
+            seatId: moverFromSeatId,
+            cellById: cellById,
+          );
+
     // What the mover still needs to place (their full request lines). We work
     // off requestLines because that is what the mover wants on this bus.
     final needs = _needSummary(mover.requestLines);
 
-    // ── Berth occupancy on the destination bus ───────────────────────────
-    // seatId -> berths currently taken on that cell (1 for most; up to 2 for a
-    // double sofa that is shared or wholly held). seatId -> set of occupant ids.
-    final berthsTaken = <String, int>{};
-    final occupantsBySeat = <String, Set<String>>{};
+    // ── Berth occupancy on the destination bus, tracked PER LEG ──────────
+    // The finder must mirror seatHasLegRoom: a one-way occupant fills only its
+    // own leg, leaving the opposite leg free for a leg-disjoint rider on the
+    // SAME physical seat. So instead of a flat berth count we record, per seat,
+    // the (tripType, berths) of every occupant berth — then judge availability
+    // for the MOVER's specific legs via [seatHasLegRoom].
+    //
+    // seatId -> list of (trip, berths-on-this-berth-entry). Each assignment row
+    // is one berth held by that occupant on that leg-set.
+    final legHoldersBySeat = <String, List<SeatLegHolder>>{};
     for (final p in passengers) {
       for (final a in p.assignedSeats) {
         if (a.busId != destinationBus.id) continue;
         if (!cellById.containsKey(a.seatId)) continue;
-        berthsTaken[a.seatId] = (berthsTaken[a.seatId] ?? 0) + 1;
-        (occupantsBySeat[a.seatId] ??= <String>{}).add(p.id);
+        (legHoldersBySeat[a.seatId] ??= <SeatLegHolder>[])
+            .add((trip: p.tripType, berths: 1));
       }
     }
 
     // ── (a) Free seats the mover could just take ─────────────────────────
+    // Availability is judged from the MOVER's legs: a GO-only mover only needs
+    // GO room, so a seat whose RET leg is taken (but GO free) is still takeable.
     final freeSeatIds = _freeSeatsFor(
       needs: needs,
+      moverTrip: mover.tripType,
       cellById: cellById,
-      berthsTaken: berthsTaken,
+      legHoldersBySeat: legHoldersBySeat,
     );
 
     // ── (b)/(c) Walk occupants, split movable vs blocked ─────────────────
@@ -223,8 +260,8 @@ class SwapCandidateFinder {
         continue;
       }
 
-      // Movable only if their held seat-type can satisfy something the mover
-      // needs (exact match, or cross-fill compatible). The occupant's own berth
+      // A candidate's held seat-type may satisfy a mover NEED (exact / type /
+      // cross-fill — ranked and labelled by [_fitFor]). The occupant's own berth
       // count on this cell decides whether displacing them frees a WHOLE double
       // (both berths) or only one berth of a shared double.
       final occupantBerths = ownBerths['${p.id}|${row.seatId}'] ?? 1;
@@ -233,14 +270,48 @@ class SwapCandidateFinder {
         cell: row.cell,
         occupantBerths: occupantBerths,
       );
-      if (fit == null) continue;
-      movable.add(SwapCandidate(
-        passengerId: p.id,
-        passengerName: _name(p),
-        seatId: row.seatId,
-        rank: fit.rank,
-        reason: fit.reason,
-      ));
+      if (fit != null) {
+        // A need match must STILL be a physically valid exchange when we know
+        // where the mover sits: displacing this occupant must not strand their
+        // berths on a seat too small for them — e.g. a single-seated mover that
+        // "matches" a WHOLE-double occupant would, on swap, cram two berths onto
+        // their single (an over-booked cell). Mirror the drag engine's capacity
+        // gate. With no known holding (cross-bus) we can't check here; the
+        // controller's swapSeats enforces the capacity guard as the backstop.
+        final physicallyOk = moverHolding == null ||
+            _physicallySwappable(
+              holding: moverHolding,
+              candidateCell: row.cell,
+              candidateBerths: occupantBerths,
+            );
+        if (physicallyOk) {
+          movable.add(SwapCandidate(
+            passengerId: p.id,
+            passengerName: _name(p),
+            seatId: row.seatId,
+            rank: fit.rank,
+            reason: fit.reason,
+          ));
+        }
+        continue;
+      }
+      // No request match — but a SEATED mover can still swap on physical
+      // feasibility: same seat-class and berth loads that fit both seats. This
+      // is what lets the agent swap with any compatible allocated seat even when
+      // their own request is already satisfied. Ranks below every need match.
+      if (_physicallySwappable(
+        holding: moverHolding,
+        candidateCell: row.cell,
+        candidateBerths: occupantBerths,
+      )) {
+        movable.add(SwapCandidate(
+          passengerId: p.id,
+          passengerName: _name(p),
+          seatId: row.seatId,
+          rank: _kSwapOnlyRank,
+          reason: 'swap seats: ${seatTypeLabel(row.cell.seatType!, row.cell.position)}',
+        ));
+      }
     }
 
     // Deterministic ordering: by rank, then passengerId, then seatId.
@@ -311,21 +382,34 @@ class SwapCandidateFinder {
   }
 
   /// Free (unoccupied) compatible cells the mover could take outright, in
-  /// row-major-then-seatId order. A double cell counts as free only when BOTH
-  /// berths are free; otherwise its remaining berth is offered for a single/
-  /// cross-fill need.
+  /// row-major-then-seatId order.
+  ///
+  /// Availability is judged PER LEG from the MOVER's perspective via
+  /// [seatHasLegRoom]: a one-way mover only needs room on its own leg, so a
+  /// Double Sofa whose OTHER leg is occupied (e.g. a RET berth held by a RET-only
+  /// rider) is still a clean whole-double take for a GO-only mover — leg-disjoint
+  /// reuse of the same physical seat. A round-trip mover still needs BOTH legs
+  /// free on the berths it takes.
   static List<String> _freeSeatsFor({
     required _NeedSummary needs,
+    required TripType moverTrip,
     required Map<String, SeatCell> cellById,
-    required Map<String, int> berthsTaken,
+    required Map<String, List<SeatLegHolder>> legHoldersBySeat,
   }) {
     final cells = cellById.values.toList()..sort(_cellOrder);
     final out = <String>[];
     for (final c in cells) {
       final cap = c.seatType == SeatType.doubleSofa ? 2 : 1;
-      final free = cap - (berthsTaken[c.seatId] ?? 0);
-      if (free <= 0) continue;
-      if (needs.acceptsFreeCell(c, freeBerths: free)) {
+      final occ = legHoldersBySeat[c.seatId] ?? const <SeatLegHolder>[];
+      // Can the mover take a WHOLE cell (both berths on a double, the single on
+      // a single/seater)? And can it take at LEAST one berth? Both judged on the
+      // mover's own legs only.
+      final wholeFree =
+          seatHasLegRoom(activeTrip: moverTrip, need: cap, cap: cap, occupants: occ);
+      final anyFree =
+          seatHasLegRoom(activeTrip: moverTrip, need: 1, cap: cap, occupants: occ);
+      if (!anyFree) continue;
+      if (needs.acceptsFreeCell(c, wholeFree: wholeFree, anyFree: anyFree)) {
         out.add(c.seatId!);
       }
     }
@@ -453,6 +537,58 @@ class SwapCandidateFinder {
     }
   }
 
+  /// Rank for a physically-valid swap that matches no request line. Sits below
+  /// every need-based match (ranks 0–2) so useful swaps surface first.
+  static const int _kSwapOnlyRank = 5;
+
+  static int _cap(SeatType? type) => type == SeatType.doubleSofa ? 2 : 1;
+
+  static bool _isSleeper(SeatType? t) =>
+      t == SeatType.singleSofa || t == SeatType.doubleSofa;
+
+  /// Same seat-CLASS gate — a sleeper berth and a seater chair never interchange
+  /// (mirrors the drag-drop engine's class gate).
+  static bool _sameClass(SeatType? a, SeatType? b) =>
+      (_isSleeper(a) && _isSleeper(b)) ||
+      (a == SeatType.seater && b == SeatType.seater);
+
+  /// The mover's current holding on [busId]/[seatId], or null when it can't be
+  /// resolved on this bus (cross-bus move, or no seat supplied) — in which case
+  /// physical-swap reasoning is skipped and only need-based matches are offered.
+  static _MoverHolding? _moverHoldingOn({
+    required Passenger mover,
+    required String busId,
+    required String? seatId,
+    required Map<String, SeatCell> cellById,
+  }) {
+    if (seatId == null) return null;
+    final cell = cellById[seatId];
+    if (cell == null) return null;
+    var berths = 0;
+    for (final a in mover.assignedSeats) {
+      if (a.busId == busId && a.seatId == seatId) berths++;
+    }
+    if (berths == 0) return null;
+    return _MoverHolding(seatType: cell.seatType, berths: berths);
+  }
+
+  /// Whether the mover (given their current [holding]) could physically SWAP
+  /// with an occupant holding [candidateBerths] berths on [candidateCell]:
+  /// the two seats share a class AND each side's berth load fits the other's
+  /// cell capacity, so the swap never strands a whole-double on a single. Same
+  /// rule the drag-drop engine applies for a release-to-swap.
+  static bool _physicallySwappable({
+    required _MoverHolding? holding,
+    required SeatCell candidateCell,
+    required int candidateBerths,
+  }) {
+    if (holding == null) return false;
+    if (!_sameClass(holding.seatType, candidateCell.seatType)) return false;
+    final moverCap = _cap(holding.seatType);
+    final candidateCap = _cap(candidateCell.seatType);
+    return holding.berths <= candidateCap && candidateBerths <= moverCap;
+  }
+
   static int _cellOrder(SeatCell a, SeatCell b) {
     if (a.row != b.row) return a.row.compareTo(b.row);
     if (a.col != b.col) return a.col.compareTo(b.col);
@@ -488,6 +624,16 @@ class _Fit {
   const _Fit({required this.rank, required this.reason});
 }
 
+/// The mover's current seat CLASS plus how many berths they hold there — the
+/// minimum needed to judge a physical swap against an occupant. Stored as the
+/// bare [seatType] (not the full cell) so it can be built from a cross-bus
+/// source seat the destination layout doesn't contain.
+class _MoverHolding {
+  final SeatType? seatType;
+  final int berths;
+  const _MoverHolding({required this.seatType, required this.berths});
+}
+
 /// Bucketed view of the mover's outstanding seat needs.
 class _NeedSummary {
   final bool seater;
@@ -511,12 +657,21 @@ class _NeedSummary {
   bool get _wantsSingle => singleUpper || singleLower || singleAny;
   bool get _wantsDouble => doubleUpper || doubleLower || doubleAny;
 
-  /// Whether a FREE [cell] (with [freeBerths] free) can satisfy any mover need.
-  bool acceptsFreeCell(SeatCell cell, {required int freeBerths}) {
+  /// Whether a FREE [cell] can satisfy any mover need, given leg-aware
+  /// availability for the MOVER's legs: [wholeFree] means the mover can take the
+  /// cell's full capacity (both berths of a double), [anyFree] means at least one
+  /// berth is takeable. These already account for leg-disjoint reuse — a one-way
+  /// mover sees a leg whose opposite is occupied as free.
+  bool acceptsFreeCell(
+    SeatCell cell, {
+    required bool wholeFree,
+    required bool anyFree,
+  }) {
     switch (cell.seatType) {
       case SeatType.seater:
-        return seater;
+        return seater && anyFree;
       case SeatType.singleSofa:
+        if (!anyFree) return false;
         // A free single can serve a single need (any matching deck) or be a
         // cross-fill berth toward a double need.
         if (_wantsSingle) {
@@ -529,15 +684,17 @@ class _NeedSummary {
         }
         return _wantsDouble; // cross-fill berth toward a Double Sofa line.
       case SeatType.doubleSofa:
-        // A WHOLE free double (both berths) serves a double need directly.
-        if (freeBerths >= 2 && _wantsDouble) {
+        // A WHOLE-double need is served only when the mover can take BOTH berths
+        // on its legs (leg-disjoint reuse already folded into [wholeFree]).
+        if (wholeFree && _wantsDouble) {
           final pos = cell.position;
           if (doubleAny) return true;
           if (pos == SeatPosition.upper && doubleUpper) return true;
           if (pos == SeatPosition.lower && doubleLower) return true;
         }
-        // A single berth of a double can host a single need (single-on-double).
-        if (freeBerths >= 1 && _wantsSingle) return true;
+        // A single berth of a double can host a single need (single-on-double)
+        // as long as the mover has room for one berth on its legs.
+        if (anyFree && _wantsSingle) return true;
         return false;
       case null:
         return false;

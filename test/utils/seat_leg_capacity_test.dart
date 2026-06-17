@@ -100,6 +100,82 @@ void main() {
     });
   });
 
+  group('legOverbookedOccupants — swap leg-conflict detection', () {
+    test('round-trip swapped onto a leg-shared single flags the remaining sharer',
+        () {
+      // The reported bug: a single sofa (cap 1) holds a return-only sharer.
+      // Swapping a round-trip passenger in (the other sharer leaves) would put
+      // BOTH on the RET leg → over-book. The return-only sharer is flagged.
+      final out = legOverbookedOccupants(
+        incomingTrip: TripType.roundTrip,
+        incomingBerths: 1,
+        cap: 1,
+        remaining: [(id: 'R', trip: TripType.returnOnly, berths: 1)],
+      );
+      expect(out.map((o) => o.id), ['R']);
+    });
+
+    test('round-trip swapped onto a single held by an outbound sharer flags it',
+        () {
+      final out = legOverbookedOccupants(
+        incomingTrip: TripType.roundTrip,
+        incomingBerths: 1,
+        cap: 1,
+        remaining: [(id: 'G', trip: TripType.outboundOnly, berths: 1)],
+      );
+      expect(out.map((o) => o.id), ['G']);
+    });
+
+    test('a legal leg-disjoint reuse flags nobody', () {
+      // outbound-only incoming, return-only sharer remains → opposite legs fit.
+      final out = legOverbookedOccupants(
+        incomingTrip: TripType.outboundOnly,
+        incomingBerths: 1,
+        cap: 1,
+        remaining: [(id: 'R', trip: TripType.returnOnly, berths: 1)],
+      );
+      expect(out, isEmpty);
+    });
+
+    test('round-trip onto a double with one return-only sharer still fits', () {
+      // cap 2: GO used 0, RET used 1; round-trip needs 1 on each → fits.
+      final out = legOverbookedOccupants(
+        incomingTrip: TripType.roundTrip,
+        incomingBerths: 1,
+        cap: 2,
+        remaining: [(id: 'R', trip: TripType.returnOnly, berths: 1)],
+      );
+      expect(out, isEmpty);
+    });
+
+    test('a physical over-book (berths > cap) is NOT a leg conflict', () {
+      // A whole-double (2 berths) landing on a single (cap 1) — no occupant can
+      // be bumped to fix it; the controller capacity backstop owns this case.
+      final out = legOverbookedOccupants(
+        incomingTrip: TripType.outboundOnly,
+        incomingBerths: 2,
+        cap: 1,
+        remaining: const [],
+      );
+      expect(out, isEmpty);
+    });
+
+    test('every sharer on the over-booked leg is flagged', () {
+      // cap 2 double already RET-full with two return-only sharers; a round-trip
+      // incoming over-books RET → both return-only sharers are flagged.
+      final out = legOverbookedOccupants(
+        incomingTrip: TripType.roundTrip,
+        incomingBerths: 1,
+        cap: 2,
+        remaining: [
+          (id: 'R1', trip: TripType.returnOnly, berths: 1),
+          (id: 'R2', trip: TripType.returnOnly, berths: 1),
+        ],
+      );
+      expect(out.map((o) => o.id).toList(), ['R1', 'R2']);
+    });
+  });
+
   group('seatHasLegRoom — same-leg double-sofa split still works', () {
     test('two round-trip singles split a double sofa (both berths, both legs)',
         () {

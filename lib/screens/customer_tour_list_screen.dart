@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
+import '../utils/formatters.dart';
 import '../models/tour_status.dart';
 import '../routes/app_routes.dart';
 import '../services/customer_requests_store.dart';
@@ -599,7 +600,10 @@ class _TourRow extends StatelessWidget {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        UgamBusBackdrop(seed: tour.id),
+                        UgamBusBackdrop(
+                          seed: tour.id,
+                          label: _routeInitials(tour.fromCity, tour.toCity),
+                        ),
                         Positioned(
                           left: 6,
                           top: 6,
@@ -609,14 +613,14 @@ class _TourRow extends StatelessWidget {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.5),
+                              color: c.cardElev,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               _formatDate(tour.departureDate),
                               style: UgamText.tabular(
                                 UgamText.micro.copyWith(
-                                  color: Colors.white,
+                                  color: c.ink,
                                   fontSize: 9.5,
                                 ),
                               ),
@@ -662,6 +666,35 @@ class _TourRow extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          if (tour.pricePerSeat > 0) ...[
+                            const SizedBox(width: UgamSpacing.sm),
+                            Text(
+                              '·',
+                              style: UgamText.caption.copyWith(
+                                color: c.ink3,
+                                fontSize: 11,
+                              ),
+                            ),
+                            const SizedBox(width: UgamSpacing.sm),
+                            Text(
+                              tr(
+                                'customer_tour_list.price_per_seat',
+                                namedArgs: {
+                                  'price': Formatters.formatMoneyInr(
+                                    tour.pricePerSeat,
+                                  ).replaceFirst('₹', ''),
+                                },
+                              ),
+                              style: UgamText.tabular(
+                                UgamText.caption.copyWith(
+                                  color: c.ink2,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ],
                       ),
                       const SizedBox(height: UgamSpacing.sm + 2),
@@ -692,6 +725,7 @@ class _TourRow extends StatelessWidget {
                           _BookPill(
                             c: c,
                             full: hasCapacity && seatsLeft <= 0,
+                            closed: !tour.acceptsBookings,
                             onTap: onBook,
                           ),
                         ],
@@ -726,19 +760,52 @@ class _TourRow extends StatelessWidget {
   }
 }
 
+/// Route monogram for the bus backdrop, e.g. "S→M" from "Surat"/"Mumbai".
+/// Uses the first letter of each city; returns empty when neither is set so
+/// the backdrop simply shows the bus motif.
+String _routeInitials(String from, String to) {
+  String first(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '' : t.characters.first.toUpperCase();
+  }
+
+  final f = first(from);
+  final t = first(to);
+  if (f.isEmpty && t.isEmpty) return '';
+  return '$f→$t';
+}
+
 /// Trailing "Book" pill on a tour row. Its own gesture (so it doesn't bubble up
 /// to the row's tap-to-detail) takes the customer straight to the booking form.
-/// When the bus is full it renders as a muted, non-actionable arrow chip — the
-/// row still opens detail, but there's no tappable "Book" affordance.
+/// When the bus is full it renders as a muted, non-actionable arrow chip, and
+/// once the tour is locked it renders a non-actionable lock chip — in both
+/// cases the row still opens detail, but there's no tappable "Book" affordance.
 class _BookPill extends StatelessWidget {
   final UgamColorSet c;
   final bool full;
+  final bool closed;
   final VoidCallback onTap;
 
-  const _BookPill({required this.c, required this.full, required this.onTap});
+  const _BookPill({
+    required this.c,
+    required this.full,
+    required this.closed,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    if (closed) {
+      // Bookings closed (tour locked/completed) — no "Book" affordance; the
+      // row still opens detail, which explains the closed state.
+      return Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
+        alignment: Alignment.center,
+        child: Icon(Icons.lock_outline_rounded, size: 14, color: c.ink3),
+      );
+    }
     if (full) {
       // Non-actionable arrow — booking a full bus isn't offered from the row.
       return Container(

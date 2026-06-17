@@ -5,10 +5,23 @@ import 'package:get/get.dart';
 import '../components/seat_chart_tile.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
+import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../services/seat_move_flow.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import 'edit_request_sheet.dart';
+
+/// How much the occupant sheet may do.
+///
+/// [action] is the full agent sheet (call / move-or-swap / edit / priority /
+/// handler / free / seat-here). [readOnly] is the viewer sheet used by the
+/// read-only Charts browser: the SAME header (drag handle, person toggle for a
+/// shared sofa, avatar + name + seat subtitle) and the call row, but NO
+/// mutating actions. Both render the identical header, which is what makes the
+/// shared-double bug fix visible — a leg-shared/shared sofa surfaces BOTH names
+/// via the person toggle on either mode.
+enum OccupantSheetMode { readOnly, action }
 
 /// The one occupant action sheet, shared by every seating screen.
 ///
@@ -20,6 +33,10 @@ import '../utils/phone_dialer.dart';
 class OccupantActionSheet extends StatefulWidget {
   /// Distinct occupants on the tapped seat (1, or 2 for a shared sofa).
   final List<Passenger> occupants;
+
+  /// Whether mutating actions are offered. Defaults to [OccupantSheetMode.action]
+  /// so every existing caller keeps the full agent sheet unchanged.
+  final OccupantSheetMode mode;
   final String tourId;
   final String busId;
   final String seatId;
@@ -31,6 +48,23 @@ class OccupantActionSheet extends StatefulWidget {
   final Passenger? placing;
   final VoidCallback? onSeatHere;
 
+  /// Swap [placing] INTO this seat by bumping the leg-conflicting occupant back
+  /// to the pending pool. Offered (with [placing]) only when the seat is full on
+  /// [placing]'s leg so a plain share isn't possible — the dead-end that used to
+  /// leave the agent stuck.
+  final VoidCallback? onSwapIn;
+
+  /// Forwarded to [SeatMoveFlow.start] from the "move or swap" action. When set,
+  /// picking a destination bus hands control back to the seat chart (tap the
+  /// target seat by hand) instead of opening the auto swap-assistant. See
+  /// [SeatMoveFlow.start].
+  final void Function(
+    Bus destination,
+    Passenger mover,
+    String sourceBusId,
+    String fromSeatId,
+  )? onRelocateToBus;
+
   const OccupantActionSheet({
     super.key,
     required this.occupants,
@@ -38,8 +72,11 @@ class OccupantActionSheet extends StatefulWidget {
     required this.busId,
     required this.seatId,
     required this.busName,
+    this.mode = OccupantSheetMode.action,
     this.placing,
     this.onSeatHere,
+    this.onSwapIn,
+    this.onRelocateToBus,
   });
 
   static Future<void> show(
@@ -49,8 +86,16 @@ class OccupantActionSheet extends StatefulWidget {
     required String busId,
     required String seatId,
     required String busName,
+    OccupantSheetMode mode = OccupantSheetMode.action,
     Passenger? placing,
     VoidCallback? onSeatHere,
+    VoidCallback? onSwapIn,
+    void Function(
+      Bus destination,
+      Passenger mover,
+      String sourceBusId,
+      String fromSeatId,
+    )? onRelocateToBus,
   }) {
     if (occupants.isEmpty) return Future.value();
     final c = UgamColors.of(context);
@@ -69,8 +114,11 @@ class OccupantActionSheet extends StatefulWidget {
         busId: busId,
         seatId: seatId,
         busName: busName,
+        mode: mode,
         placing: placing,
         onSeatHere: onSeatHere,
+        onSwapIn: onSwapIn,
+        onRelocateToBus: onRelocateToBus,
       ),
     );
   }
@@ -108,6 +156,20 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
     try {
       await _ctrl.assignSeats(widget.tourId, occ.id, next);
     } catch (_) {}
+  }
+
+  /// Open the full edit-request sheet for this occupant so the agent can fix
+  /// their name, quantities or trip type without first making them the active
+  /// passenger. Closes this sheet, then opens the editor on the live tour.
+  Future<void> _editRequest() async {
+    final tour = _ctrl.getTour(widget.tourId);
+    if (tour == null) return;
+    Navigator.of(context).pop();
+    await EditRequestSheet.show(
+      context: context,
+      tour: tour,
+      passenger: _occ,
+    );
   }
 
   /// Toggle this occupant's approved priority. Turning priority ON confirms
@@ -235,7 +297,8 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
           ),
           const SizedBox(height: UgamSpacing.lg),
 
-          // Actions for the selected occupant.
+          // Call row — offered in BOTH modes (Charts is tap-to-call too). The
+          // markup/padding is reused identically across read-only and action.
           if (phone.isNotEmpty)
             _ActionRow(
               icon: Icons.call_rounded,
@@ -243,76 +306,110 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
               c: c,
               onTap: () => PhoneDialer.call(phone),
             ),
-          _ActionRow(
-            icon: Icons.swap_horiz_rounded,
-            label: tr('occupant_sheet.move_or_swap'),
-            c: c,
-            onTap: () {
-              Navigator.of(context).pop();
-              SeatMoveFlow.start(
-                context,
-                tourId: widget.tourId,
-                sourceBusId: widget.busId,
-                mover: occ,
-                fromSeatId: widget.seatId,
-              );
-            },
-          ),
 
-          // In-context ★ priority toggle — stays open so the agent can keep
-          // working on the same occupant.
-          _ActionRow(
-            icon: priorityOn
-                ? Icons.star_rounded
-                : Icons.star_outline_rounded,
-            label: priorityOn
-                ? tr('occupant.remove_priority')
-                : tr('occupant.make_priority'),
-            c: c,
-            accent: priorityOn,
-            onTap: _togglePriority,
-          ),
-
-          // In-context handler toggle for the bus this seat sits on.
-          _ActionRow(
-            icon: handlerOfThisBus
-                ? Icons.verified_user_rounded
-                : Icons.shield_outlined,
-            label: handlerOfThisBus
-                ? tr('occupant.is_handler')
-                : tr('occupant.make_handler'),
-            c: c,
-            accent: handlerOfThisBus,
-            onTap: _toggleHandler,
-          ),
-
-          _ActionRow(
-            icon: Icons.person_remove_rounded,
-            label: tr('occupant_sheet.free'),
-            c: c,
-            danger: true,
-            onTap: () {
-              Navigator.of(context).pop();
-              _free();
-            },
-          ),
-
-          // Share with the passenger currently being placed.
-          if (widget.placing != null && widget.onSeatHere != null) ...[
-            const SizedBox(height: UgamSpacing.sm),
+          // Mutating actions — ACTION mode only. Gated as one block so the
+          // read-only Charts sheet can never expose an edit affordance.
+          if (widget.mode == OccupantSheetMode.action) ...[
             _ActionRow(
-              icon: Icons.person_add_alt_1_rounded,
-              label: tr(
-                'occupant_sheet.seat_here',
-                namedArgs: {'name': widget.placing!.displayName},
-              ),
+              icon: Icons.swap_horiz_rounded,
+              label: tr('occupant_sheet.move_or_swap'),
               c: c,
-              accent: true,
               onTap: () {
                 Navigator.of(context).pop();
-                widget.onSeatHere!();
+                SeatMoveFlow.start(
+                  context,
+                  tourId: widget.tourId,
+                  sourceBusId: widget.busId,
+                  mover: occ,
+                  fromSeatId: widget.seatId,
+                  onRelocateToBus: widget.onRelocateToBus,
+                );
               },
             ),
+
+            // Edit the underlying booking request (name / quantities / trip).
+            _ActionRow(
+              icon: Icons.edit_outlined,
+              label: tr('occupant_sheet.edit_request'),
+              c: c,
+              onTap: _editRequest,
+            ),
+
+            // In-context ★ priority toggle — stays open so the agent can keep
+            // working on the same occupant.
+            _ActionRow(
+              icon: priorityOn
+                  ? Icons.star_rounded
+                  : Icons.star_outline_rounded,
+              label: priorityOn
+                  ? tr('occupant.remove_priority')
+                  : tr('occupant.make_priority'),
+              c: c,
+              accent: priorityOn,
+              onTap: _togglePriority,
+            ),
+
+            // In-context handler toggle for the bus this seat sits on.
+            _ActionRow(
+              icon: handlerOfThisBus
+                  ? Icons.verified_user_rounded
+                  : Icons.shield_outlined,
+              label: handlerOfThisBus
+                  ? tr('occupant.is_handler')
+                  : tr('occupant.make_handler'),
+              c: c,
+              accent: handlerOfThisBus,
+              onTap: _toggleHandler,
+            ),
+
+            _ActionRow(
+              icon: Icons.person_remove_rounded,
+              label: tr('occupant_sheet.free'),
+              c: c,
+              danger: true,
+              onTap: () {
+                Navigator.of(context).pop();
+                _free();
+              },
+            ),
+
+            // Share with the passenger currently being placed.
+            if (widget.placing != null && widget.onSeatHere != null) ...[
+              const SizedBox(height: UgamSpacing.sm),
+              _ActionRow(
+                icon: Icons.person_add_alt_1_rounded,
+                label: tr(
+                  'occupant_sheet.seat_here',
+                  namedArgs: {'name': widget.placing!.displayName},
+                ),
+                c: c,
+                accent: true,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onSeatHere!();
+                },
+              ),
+            ],
+
+            // Swap the placing passenger IN — the seat is full on their leg so a
+            // share isn't possible; this bumps the leg-conflicting occupant back
+            // to pending and seats the placing passenger here instead.
+            if (widget.placing != null && widget.onSwapIn != null) ...[
+              const SizedBox(height: UgamSpacing.sm),
+              _ActionRow(
+                icon: Icons.swap_vert_rounded,
+                label: tr(
+                  'occupant_sheet.swap_in',
+                  namedArgs: {'name': widget.placing!.displayName},
+                ),
+                c: c,
+                accent: true,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onSwapIn!();
+                },
+              ),
+            ],
           ],
         ],
       ),

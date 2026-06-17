@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/components/combined_seat_grid.dart';
 import 'package:occubusbooking/models/bus_type.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
+import 'package:occubusbooking/models/seat_type.dart';
 
 Widget _harness(BusLayout layout, {double width = 320}) {
   return MaterialApp(
@@ -56,20 +57,60 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('sleeper with balcony renders the aisle pair', (tester) async {
+    testWidgets('all-double back row with body singles renders the aisle pair',
+        (tester) async {
       final layout = BusLayout.generate(
         busType: BusType.sleeper,
         totalSeats: 30,
         singleSofaCount: 8,
-        hasBalcony: true,
+        allDoubleBackRow: true,
       );
       await tester.pumpWidget(_harness(layout));
       expect(tester.takeException(), isNull);
 
-      // Both balcony seat IDs should be present on screen.
+      // Both aisle (balcony) seat IDs should be present on screen.
       final pair = layout.balconyPair(layout.rows - 1);
       expect(find.text(pair.upper.seatId!), findsOneWidget);
       expect(find.text(pair.lower.seatId!), findsOneWidget);
+    });
+
+    testWidgets('toggle ON: all-double back row renders the double aisle pair',
+        (tester) async {
+      final layout = BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: 36,
+        allDoubleBackRow: true,
+      );
+      final pair = layout.balconyPair(layout.rows - 1);
+      expect(pair.upper.seatType, SeatType.doubleSofa);
+      expect(pair.lower.seatType, SeatType.doubleSofa);
+
+      await tester.pumpWidget(_harness(layout));
+      expect(tester.takeException(), isNull);
+      expect(find.text(pair.upper.seatId!), findsOneWidget);
+      expect(find.text(pair.lower.seatId!), findsOneWidget);
+    });
+
+    testWidgets('toggle OFF: 3 single + 2 double back row renders flat',
+        (tester) async {
+      // OFF with singles → the back row is 3 single + 2 double sofas;
+      // everything must render flat on one bench row with no overflow.
+      final layout = BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: 35,
+        singleSofaCount: 13,
+      );
+      final benchRow = layout.rows - 1;
+      final back = layout.grid.where((c) => c.row == benchRow && c.hasSeat);
+      expect(back.where((c) => c.seatType == SeatType.singleSofa).length, 3);
+      expect(back.where((c) => c.seatType == SeatType.doubleSofa).length, 2);
+
+      await tester.pumpWidget(_harness(layout));
+      expect(tester.takeException(), isNull);
+      // Every bench seat id is on screen.
+      for (final cell in back) {
+        expect(find.text(cell.seatId!), findsOneWidget);
+      }
     });
   });
 }

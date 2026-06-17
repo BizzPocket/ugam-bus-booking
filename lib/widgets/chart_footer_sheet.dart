@@ -66,7 +66,7 @@ class _ChartFooterSheetState extends State<_ChartFooterSheet> {
     final c = UgamColors.of(context);
 
     final busNumbers = widget.tour.buses
-        .map((b) => b.busNumber.trim().isNotEmpty ? b.busNumber : b.name)
+        .map((b) => b.displayLabel)
         .where((s) => s.isNotEmpty)
         .join(', ');
     final dateText =

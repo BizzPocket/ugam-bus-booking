@@ -2,6 +2,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../components/combined_seat_grid.dart';
+import '../components/seat_chart_tile.dart';
+import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../services/customer_requests_store.dart';
@@ -180,21 +182,22 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
               ),
               child: CombinedSeatGrid(
                 layout: layout,
+                cellWidth: kSeatTileW,
+                cellHeight: kSeatTileH,
                 driverLabel: tr('customer_my_requests.layout_driver'),
                 tileBuilder: (ctx, cell) {
-                  final cc = UgamColors.of(ctx);
+                  // Render the canonical app seat tile in PRIVACY mode: same
+                  // size + corner seat id as every other chart, but identity is
+                  // never shown. The customer's own seats highlight in accent;
+                  // all other seats read as a neutral anonymous tile.
                   final isMine = cell.seatId != null &&
                       widget.mySeatIds.contains(cell.seatId);
-                  return CombinedSeatGrid.seatTile(
-                    ctx,
-                    label: cell.seatId ?? '',
-                    subLabel: cell.seatType != null
-                        ? CombinedSeatGrid.shortType(cell.seatType!)
-                        : null,
-                    background: isMine ? cc.accent : cc.card,
-                    border: isMine ? cc.accent : cc.border,
-                    foreground: isMine ? cc.onAccent : cc.ink2,
-                    borderWidth: isMine ? 1.5 : 1,
+                  return SeatChartTile(
+                    cell: cell,
+                    occupants: const [],
+                    groupColors: const GroupColorResolver({}),
+                    anonymous: true,
+                    mine: isMine,
                   );
                 },
               ),
@@ -223,9 +226,7 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                widget.bus.busNumber.isNotEmpty
-                    ? '${widget.bus.name} · ${widget.bus.busNumber}'
-                    : widget.bus.name,
+                widget.bus.customerLabel,
                 style: UgamText.titleS.copyWith(color: c.ink),
               ),
               if (mine.isNotEmpty)

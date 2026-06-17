@@ -18,7 +18,9 @@ import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
 import 'add_bus_screen.dart';
 import 'bus_money_screen.dart';
+import 'collection_screen.dart';
 import 'fullscreen_chart_screen.dart';
+import 'main_shell.dart';
 import 'seats_screen.dart';
 
 /// Read-only seat layout for a single bus on a tour. Renders each seat
@@ -49,6 +51,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
+      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         child: Obx(() {
           final tour = tourCtrl.getTour(widget.tourId);
@@ -101,7 +104,11 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
 
           return Column(
             children: [
-              _StatusAppBar(bus: bus, tourTitle: tour.title),
+              _StatusAppBar(
+                bus: bus,
+                tourTitle: tour.title,
+                onMoney: () => _openMoneyMenu(context, tour.id, bus),
+              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   UgamSpacing.gutter,
@@ -148,6 +155,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                             groupColors: tourGroupColors(tour),
                             title: bus.name,
                             driverLabel: tr('bus_status.driver_label'),
+                            markHalfDouble: true,
                           ),
                         ),
                     ],
@@ -155,13 +163,69 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                 ),
               ),
               const SizedBox(height: UgamSpacing.sm),
-              const _Legend(),
+              UgamSeatChartLegend(c: c),
               const SizedBox(height: UgamSpacing.sm + 2),
               _BottomActions(tourId: tour.id, bus: bus),
               const SizedBox(height: UgamSpacing.md),
             ],
           );
         }),
+      ),
+    );
+  }
+
+  /// Money actions sheet — surfaced from the app-bar so the fixed below-bar
+  /// body no longer has to carry a second row of buttons (it overflowed on
+  /// small phones). "Collect" jumps straight into the per-bus CollectionScreen
+  /// (the SAME canonical destination the Tour money board's "Collect" shortcut
+  /// uses) and "Bus money" opens the per-bus ledger. Navigation logic is
+  /// preserved verbatim.
+  void _openMoneyMenu(BuildContext context, String tourId, Bus bus) {
+    UgamSheet.show<void>(
+      context,
+      title: tr('bus_status.action.collection_money'),
+      builder: (sheetCtx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          UgamButton(
+            kind: UgamButtonKind.tonal,
+            expand: true,
+            icon: Icons.groups_rounded,
+            label: tr('tour_money_board.collect'),
+            onPressed: () {
+              Navigator.of(sheetCtx).pop();
+              final tour = Get.find<TourController>().getTour(tourId);
+              if (tour == null) {
+                AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
+                return;
+              }
+              Get.to(
+                () => CollectionScreen(tour: tour, bus: bus),
+                transition: Transition.cupertino,
+              );
+            },
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          UgamButton(
+            kind: UgamButtonKind.neutral,
+            expand: true,
+            icon: Icons.payments_rounded,
+            label: tr('bus_status.action.collection_money'),
+            onPressed: () {
+              Navigator.of(sheetCtx).pop();
+              final tour = Get.find<TourController>().getTour(tourId);
+              if (tour == null) {
+                AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
+                return;
+              }
+              Get.to(
+                () => BusMoneyScreen(tour: tour, bus: bus),
+                transition: Transition.cupertino,
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -253,7 +317,15 @@ class _StatusAppBar extends StatelessWidget {
   final Bus bus;
   final String tourTitle;
 
-  const _StatusAppBar({required this.bus, required this.tourTitle});
+  /// Opens the money actions sheet (Collect / Bus money). Null hides the action
+  /// (e.g. the not-found / no-layout app bars that reuse this widget elsewhere).
+  final VoidCallback? onMoney;
+
+  const _StatusAppBar({
+    required this.bus,
+    required this.tourTitle,
+    this.onMoney,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -262,6 +334,14 @@ class _StatusAppBar extends StatelessWidget {
       subtitle:
           '$tourTitle'
           '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
+      actions: [
+        if (onMoney != null)
+          UgamAppBarAction(
+            icon: Icons.payments_rounded,
+            onTap: onMoney!,
+            tooltip: tr('bus_status.action.collection_money'),
+          ),
+      ],
     );
   }
 }
@@ -386,6 +466,8 @@ class _SeatChartCard extends StatelessWidget {
           colGap: 6,
           rowGap: 6,
           driverLabel: tr('bus_status.driver_label'),
+          // Header band so the top-left expand button clears the first seat.
+          reserveTopAction: true,
           tileBuilder: (ctx, cell) {
             final occupants = cell.seatId != null
                 ? (assignments[cell.seatId] ?? const <Passenger>[])
@@ -395,6 +477,7 @@ class _SeatChartCard extends StatelessWidget {
                 cell: cell,
                 occupants: occupants,
                 groupColors: groupColors,
+                markHalfDouble: true,
                 // Read-only: a booked seat surfaces the passenger sheet; a free
                 // seat is inert here (re-seating lives in the unified grid).
                 onTapBooked: occupants.isEmpty
@@ -405,132 +488,6 @@ class _SeatChartCard extends StatelessWidget {
           },
         ),
       ),
-    );
-  }
-}
-
-/// Bottom-of-screen legend — the SHARED seat-chart legend (Free / Booked /
-/// Priority-forward / One-way / Held) so the status screen reads exactly like
-/// the rest of the app's charts.
-class _Legend extends StatelessWidget {
-  const _Legend();
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-      child: Wrap(
-        spacing: UgamSpacing.md,
-        runSpacing: 6,
-        alignment: WrapAlignment.center,
-        children: [
-          _LegendItem(
-            swatch: _LegendSwatch.dashed,
-            label: tr('seat_detail.legend.free'),
-            c: c,
-          ),
-          _LegendItem(
-            swatch: _LegendSwatch.filled,
-            label: tr('app.label.booked'),
-            c: c,
-          ),
-          _LegendItem(
-            swatch: _LegendSwatch.warmRing,
-            label: tr('seat_detail.legend.priority_forward'),
-            c: c,
-          ),
-          _LegendItem(
-            swatch: _LegendSwatch.oneWay,
-            label: tr('seat_detail.legend.one_way'),
-            c: c,
-          ),
-          _LegendItem(
-            swatch: _LegendSwatch.held,
-            label: tr('seat_detail.legend.held'),
-            c: c,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-enum _LegendSwatch { dashed, filled, warmRing, oneWay, held }
-
-class _LegendItem extends StatelessWidget {
-  final _LegendSwatch swatch;
-  final String label;
-  final UgamColorSet c;
-
-  const _LegendItem({
-    required this.swatch,
-    required this.label,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Widget dot;
-    switch (swatch) {
-      case _LegendSwatch.dashed:
-        dot = CustomPaint(
-          painter: SeatDashedBorderPainter(
-            color: c.ink3.withValues(alpha: 0.7),
-            radius: 3,
-          ),
-          child: const SizedBox(width: 12, height: 12),
-        );
-      case _LegendSwatch.filled:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.border),
-          ),
-        );
-      case _LegendSwatch.warmRing:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.warm, width: 2),
-          ),
-        );
-      case _LegendSwatch.oneWay:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: kOneWayTint.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: kOneWayTint, width: 1.5),
-          ),
-        );
-      case _LegendSwatch.held:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: c.cardElev.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.border),
-          ),
-          alignment: Alignment.center,
-          child: Icon(Icons.lock_outline_rounded, size: 8, color: c.ink3),
-        );
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        dot,
-        const SizedBox(width: 6),
-        Text(label, style: UgamText.micro.copyWith(color: c.ink2)),
-      ],
     );
   }
 }
@@ -617,7 +574,7 @@ class _DriverHeroCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+                  bus.displayLabel,
                   style: UgamText.titleM.copyWith(color: c.ink),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -752,22 +709,58 @@ class _BottomActions extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          UgamButton(
-            kind: UgamButtonKind.neutral,
-            expand: true,
-            icon: Icons.payments_rounded,
-            label: tr('bus_status.action.collection_money'),
-            onPressed: () {
-              final tour = Get.find<TourController>().getTour(tourId);
-              if (tour == null) {
-                AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
-                return;
-              }
-              Get.to(
-                () => BusMoneyScreen(tour: tour, bus: bus),
-                transition: Transition.cupertino,
-              );
-            },
+          // Money/collection actions reachable in ONE push each (no longer
+          // chained Bus money → Collect): "Collect" jumps straight into the
+          // per-bus CollectionScreen — the SAME canonical destination the
+          // Tour money board's "Collect" shortcut uses — and "Bus money"
+          // opens the per-bus ledger directly. Both are demoted to neutral
+          // (not solid champagne) per the accent-rationing law.
+          Row(
+            children: [
+              Expanded(
+                child: UgamButton(
+                  kind: UgamButtonKind.neutral,
+                  expand: true,
+                  icon: Icons.groups_rounded,
+                  label: tr('tour_money_board.collect'),
+                  onPressed: () {
+                    final tour = Get.find<TourController>().getTour(tourId);
+                    if (tour == null) {
+                      AppSnackBar.error(
+                        tr('bus_status.tour_not_found_refresh'),
+                      );
+                      return;
+                    }
+                    Get.to(
+                      () => CollectionScreen(tour: tour, bus: bus),
+                      transition: Transition.cupertino,
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: UgamButton(
+                  kind: UgamButtonKind.neutral,
+                  expand: true,
+                  icon: Icons.payments_rounded,
+                  label: tr('bus_status.action.collection_money'),
+                  onPressed: () {
+                    final tour = Get.find<TourController>().getTour(tourId);
+                    if (tour == null) {
+                      AppSnackBar.error(
+                        tr('bus_status.tour_not_found_refresh'),
+                      );
+                      return;
+                    }
+                    Get.to(
+                      () => BusMoneyScreen(tour: tour, bus: bus),
+                      transition: Transition.cupertino,
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ],
       ),

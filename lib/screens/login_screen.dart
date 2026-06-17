@@ -1,8 +1,9 @@
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../components/ugam_logo.dart';
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
 import '../services/supabase_service.dart';
@@ -15,6 +16,11 @@ class LoginScreen extends GetView<AuthController> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
+    // LoginScreen is usually the root, but it can be pushed (e.g. via the
+    // hidden long-press on customer-home). When it sits on the stack, give
+    // the user a visible way back so they are never stranded.
+    final canPop = Navigator.canPop(context);
+
     return Scaffold(
       backgroundColor: c.bg,
       body: SafeArea(
@@ -23,16 +29,20 @@ class LoginScreen extends GetView<AuthController> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: UgamSpacing.lg),
-              // Hero illustration — deterministic gradient + bus silhouette.
-              ClipRRect(
-                borderRadius: BorderRadius.circular(UgamRadius.card),
-                child: const SizedBox(
-                  height: 200,
-                  width: double.infinity,
-                  child: UgamBusBackdrop(seed: 'ugam-login'),
+              if (canPop) ...[
+                const SizedBox(height: UgamSpacing.sm),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: UgamIconButton(
+                    icon: Icons.close_rounded,
+                    onTap: Get.back,
+                    semanticLabel: tr('app.action.back'),
+                  ),
                 ),
-              ),
+              ],
+              const SizedBox(height: UgamSpacing.xl),
+              // Brand logo + a clean graphite headline block (no fake hero).
+              const UgamLogo(size: 56),
               const SizedBox(height: UgamSpacing.xxl),
               Text(
                 'UGAM',
@@ -89,19 +99,6 @@ class LoginScreen extends GetView<AuthController> {
                 );
               }),
               Obx(() {
-                final showPasswordStep = controller.awaitingAdminPassword.value;
-                final loading = controller.isLoading.value;
-                return UgamCTA(
-                  label: showPasswordStep
-                      ? tr('login.btn_sign_in')
-                      : tr('app.action.continue_'),
-                  loading: loading,
-                  onPressed: showPasswordStep
-                      ? controller.verifyAdminPassword
-                      : controller.submitPhone,
-                );
-              }),
-              Obx(() {
                 if (!controller.awaitingAdminPassword.value) {
                   return const SizedBox.shrink();
                 }
@@ -122,65 +119,81 @@ class LoginScreen extends GetView<AuthController> {
                   child: Text(tr('login.btn_setup')),
                 ),
               ),
-              const SizedBox(height: UgamSpacing.xs),
-              Center(
-                child: OutlinedButton.icon(
-                  onPressed: () => _sendPing(context),
-                  icon: const Icon(Icons.network_check_rounded, size: 16),
-                  label: Text(tr('login.btn_ping')),
-                ),
-              ),
               const SizedBox(height: UgamSpacing.lg),
-              Center(
+              // The network-check 'Ping' is a developer affordance. It is no
+              // longer a first-class button — it only surfaces in debug builds
+              // and behind a long-press on the terms text, so production users
+              // never see it.
+              GestureDetector(
+                onLongPress: kDebugMode ? () => _sendPing(context) : null,
                 child: Text(
                   tr('login.terms'),
                   textAlign: TextAlign.center,
                   style: UgamText.caption.copyWith(color: c.ink3, height: 1.5),
                 ),
               ),
+              if (kDebugMode) ...[
+                const SizedBox(height: UgamSpacing.sm),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () => _sendPing(context),
+                    icon: const Icon(Icons.network_check_rounded, size: 14),
+                    label: Text(
+                      tr('login.btn_ping'),
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: UgamSpacing.huge),
             ],
           ),
         ),
+      ),
+      bottomNavigationBar: UgamStickyCTA(
+        child: Obx(() {
+          final showPasswordStep = controller.awaitingAdminPassword.value;
+          final loading = controller.isLoading.value;
+          return UgamCTA(
+            label: showPasswordStep
+                ? tr('login.btn_sign_in')
+                : tr('app.action.continue_'),
+            loading: loading,
+            onPressed: showPasswordStep
+                ? controller.verifyAdminPassword
+                : controller.submitPhone,
+          );
+        }),
       ),
     );
   }
 
   Future<void> _sendPing(BuildContext context) async {
     final c = UgamColors.of(context);
-    showDialog(
-      context: context,
+    UgamDialog.show<void>(
+      context,
+      title: tr('login.ping_loading'),
       barrierDismissible: false,
-      builder: (_) => Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: UgamSpacing.xl,
-            vertical: UgamSpacing.lg,
+      content: Row(
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              valueColor: AlwaysStoppedAnimation(c.accent),
+            ),
           ),
-          decoration: BoxDecoration(
-            color: c.card,
-            borderRadius: BorderRadius.circular(UgamRadius.card),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Text(
+              tr('login.btn_ping'),
+              style: UgamText.body.copyWith(color: c.ink2),
+            ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  valueColor: AlwaysStoppedAnimation(c.accent),
-                ),
-              ),
-              const SizedBox(width: UgamSpacing.md),
-              Text(
-                tr('login.ping_loading'),
-                style: UgamText.bodyStrong.copyWith(color: c.ink),
-              ),
-            ],
-          ),
-        ),
+        ],
       ),
+      actions: (_) => const [SizedBox.shrink()],
     );
     try {
       final result = await SupabaseService.instance.ping();
@@ -207,9 +220,3 @@ class LoginScreen extends GetView<AuthController> {
     }
   }
 }
-
-// Suppress unused-import lint for `services.dart` since other parts of
-// this file may evolve to need its formatters. Kept local so tooling
-// stays quiet while the surface settles.
-// ignore: unused_element
-void _kKeepServices() => FilteringTextInputFormatter.digitsOnly;

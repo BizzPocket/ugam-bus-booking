@@ -73,6 +73,20 @@ class FinanceController extends GetxController {
           expenses[tid] = (expenses[tid] ?? 0) + amount;
         },
       );
+      // Bus rent (`buses.bus_price`) is a real cost but is NEVER stored as an
+      // expense row — it's the single source of truth on the bus. The per-tour
+      // money board already folds it into expenses; fold it in here too, or the
+      // cross-tour P&L silently OVERSTATES profit by the total of all bus rents.
+      await _pageThrough(
+        table: 'buses',
+        columns: 'tour_id, bus_price',
+        onRow: (row) {
+          final tid = row['tour_id'] as String?;
+          if (tid == null) return;
+          final rent = (row['bus_price'] as num?)?.toDouble() ?? 0;
+          expenses[tid] = (expenses[tid] ?? 0) + rent;
+        },
+      );
 
       _revenueByTour
         ..clear()

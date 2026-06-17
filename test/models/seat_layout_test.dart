@@ -4,75 +4,184 @@ import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 
 void main() {
-  group('BusLayout.generate — column placement', () {
-    test('sleeper all-double places doubles in cols 3/4, none in 0/1', () {
-      final l = BusLayout.generate(busType: BusType.sleeper, totalSeats: 40);
-      // 40 berths, all doubles => 20 double sofas (each seats 2).
+  group('BusLayout.generate — back-row toggle ON (all double)', () {
+    BusLayout gen(int n, {int singles = 0}) => BusLayout.generate(
+          busType: BusType.sleeper,
+          totalSeats: n,
+          singleSofaCount: singles,
+          allDoubleBackRow: true,
+        );
+
+    test('last row is 4 double sofas, aisle is a double pair', () {
+      final l = gen(40);
       expect(l.totalSeats, 40);
+      final backRow = l.rows - 1;
+      final back = l.grid.where((c) => c.row == backRow && c.hasSeat).toList();
+      expect(back.where((c) => c.seatType == SeatType.doubleSofa).length, 4,
+          reason: '4 doubles in the back row');
+      expect(back.where((c) => c.seatType == SeatType.singleSofa), isEmpty);
+      final pair = l.balconyPair(backRow);
+      expect(pair.upper.seatType, SeatType.doubleSofa);
+      expect(pair.lower.seatType, SeatType.doubleSofa);
+      // All-double bus: zero singles anywhere, 20 double sofas.
+      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa), isEmpty);
       expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 20);
-      for (final c in l.grid) {
-        expect(c.col == SeatGridCols.doubleUpper || c.col == SeatGridCols.doubleLower,
-            isTrue,
-            reason: 'double cell at unexpected col ${c.col}');
+    });
+
+    test('requested singles fill the front, never the all-double back row', () {
+      final l = gen(14, singles: 6);
+      final backRow = l.rows - 1;
+      expect(
+          l.grid.where((c) =>
+              c.row == backRow && c.seatType == SeatType.singleSofa),
+          isEmpty,
+          reason: 'all-double back row holds no single');
+      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 6);
+      expect(l.totalSeats, 14);
+    });
+
+    test('applies for any length, count conserved', () {
+      for (final n in [20, 21, 36, 37, 51]) {
+        final l = gen(n);
+        expect(l.totalSeats, n, reason: 'n=$n conserved');
+        final back = l.grid.where((c) => c.row == l.rows - 1 && c.hasSeat);
+        expect(back.where((c) => c.seatType == SeatType.doubleSofa).length, 4,
+            reason: 'n=$n back row 4 doubles');
+        expect(back.where((c) => c.seatType == SeatType.singleSofa), isEmpty,
+            reason: 'n=$n no single in back row');
       }
     });
+  });
 
-    test('sleeper with singles uses single lane cols 0/1', () {
-      final l = BusLayout.generate(
-        busType: BusType.sleeper,
-        totalSeats: 30,
-        singleSofaCount: 10,
-      );
-      final singles = l.grid.where((c) => c.seatType == SeatType.singleSofa);
-      expect(singles.length, 10);
-      for (final c in singles) {
-        expect(c.col == SeatGridCols.singleUpper || c.col == SeatGridCols.singleLower,
-            isTrue);
-      }
-      // 30 - 10 singles = 20 double-berths = 10 double sofas. Total 10 + 20 = 30.
-      expect(l.totalSeats, 30);
-    });
-
-    test('odd leftover berth becomes an extra single, no seat lost', () {
-      // 21 sleeper, 0 requested singles => 21 double-berths is odd => 1 single.
-      final l = BusLayout.generate(busType: BusType.sleeper, totalSeats: 21);
-      expect(l.totalSeats, 21);
-      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 1);
-      expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 10);
-    });
-
-    test('unpaired single joins the last row as a full-width back bench', () {
-      // 37 seats, 13 singles (odd) => 12 doubles. The 13th single can't pair in
-      // the lane, so it rides the aisle column of the LAST seat row — merged into
-      // a full-width back bench, never an appended aisle-only line.
+  group('BusLayout.generate — back-row toggle OFF (3 single + 2 double)', () {
+    test('the 37 / 13-single example: back 3S+2D drawn from 13S + 12D total', () {
+      // 37 seats, 13 single sofas → 12 doubles. The back row's 3 single + 2
+      // double are DRAWN FROM that composition (not added), so the totals stay
+      // exactly 13 singles + 12 doubles.
       final l = BusLayout.generate(
         busType: BusType.sleeper,
         totalSeats: 37,
         singleSofaCount: 13,
       );
-      final laneSingles = l.grid.where((c) =>
-          c.seatType == SeatType.singleSofa && c.col != SeatGridCols.aisle);
-      final aisleSingles = l.grid.where((c) =>
-          c.seatType == SeatType.singleSofa && c.col == SeatGridCols.aisle);
-      expect(laneSingles.length, 12, reason: 'lanes hold an even count');
-      expect(aisleSingles.length, 1, reason: 'one orphan in the aisle');
-      // The orphan sits in the very last row (the back bench), lower slot.
-      final orphan = aisleSingles.single;
-      expect(orphan.row, l.rows - 1);
-      expect(orphan.position, SeatPosition.lower);
-      expect(orphan.seatId, 'SL7');
-      expect(l.hasBalcony, isTrue);
-      // The bench is a real full-width row: the orphan shares its line with lane
-      // berths rather than dangling alone on an appended row.
-      final benchRowCells =
-          l.grid.where((c) => c.row == orphan.row && c.hasSeat);
-      expect(benchRowCells.any((c) => c.col != SeatGridCols.aisle), isTrue,
-          reason: 'back bench is a full row, not an aisle-only line');
-      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 13);
-      expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 12);
       expect(l.totalSeats, 37);
+      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 13,
+          reason: 'no extra singles added');
+      expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 12);
+
+      final back = l.grid.where((c) => c.row == l.rows - 1 && c.hasSeat).toList();
+      final backSingles =
+          back.where((c) => c.seatType == SeatType.singleSofa).toList();
+      final backDoubles =
+          back.where((c) => c.seatType == SeatType.doubleSofa).toList();
+      expect(backSingles.length, 3, reason: '3 single sofas');
+      expect(backDoubles.length, 2, reason: '2 double sofas');
+      // Singles on the left (single lanes + aisle), doubles on the right.
+      expect(backSingles.every((c) => c.col <= SeatGridCols.aisle), isTrue);
+      expect(
+          backDoubles.every((c) =>
+              c.col == SeatGridCols.doubleUpper ||
+              c.col == SeatGridCols.doubleLower),
+          isTrue);
     });
 
+    test('OFF back row is 3S+2D when the composition does NOT pair cleanly', () {
+      // A bench is only carved when the bus can't lay flat into full rows — i.e.
+      // an odd single OR odd double cell count. singles=8 with these lengths
+      // leaves an odd double count (38→15D, 50→21D), so the 3S+2D bench applies.
+      for (final n in [38, 50]) {
+        final l = BusLayout.generate(
+          busType: BusType.sleeper,
+          totalSeats: n,
+          singleSofaCount: 8,
+        );
+        expect(l.totalSeats, n, reason: 'n=$n conserved');
+        // Total singles is exactly what was requested (no fabricated extras).
+        expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 8,
+            reason: 'n=$n keeps 8 singles');
+        final back = l.grid.where((c) => c.row == l.rows - 1 && c.hasSeat);
+        expect(back.where((c) => c.seatType == SeatType.singleSofa).length, 3,
+            reason: 'n=$n back row 3 singles');
+        expect(back.where((c) => c.seatType == SeatType.doubleSofa).length, 2,
+            reason: 'n=$n back row 2 doubles');
+      }
+    });
+
+    test('a perfectly-pairable bus has NO rear bench, just clean rows', () {
+      // When both the single and double cell counts are even the bus lays flat
+      // into full [single | double] rows with no leftover, so no bench is carved
+      // (matches a 36-seat / 12-single coach with no gallery). This used to leave
+      // a hole in the last body row (body 9S+10D → singleLower one short).
+      int colCount(BusLayout l, int col) =>
+          l.grid.where((c) => c.col == col && c.hasSeat).length;
+
+      for (final cfg in [
+        (n: 20, singles: 8), // 8S + 6D, both even
+        (n: 36, singles: 12), // 12S + 12D, both even
+        (n: 40, singles: 8), // 8S + 16D, both even
+      ]) {
+        final l = BusLayout.generate(
+          busType: BusType.sleeper,
+          totalSeats: cfg.n,
+          singleSofaCount: cfg.singles,
+        );
+        expect(l.totalSeats, cfg.n, reason: 'n=${cfg.n} conserved');
+        // No bench: nothing lives in the aisle column.
+        expect(l.grid.where((c) => c.col == SeatGridCols.aisle && c.hasSeat),
+            isEmpty,
+            reason: 'n=${cfg.n} has no rear bench');
+        expect(l.hasBalcony, isFalse, reason: 'n=${cfg.n} no balcony/bench');
+        // Each lane's upper and lower halves are equal → no holes.
+        expect(colCount(l, SeatGridCols.singleUpper),
+            colCount(l, SeatGridCols.singleLower),
+            reason: 'n=${cfg.n} single lane balanced');
+        expect(colCount(l, SeatGridCols.doubleUpper),
+            colCount(l, SeatGridCols.doubleLower),
+            reason: 'n=${cfg.n} double lane balanced');
+      }
+
+      // The headline case: 36 / 12 → exactly 6 clean rows, no bench.
+      final l = BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: 36,
+        singleSofaCount: 12,
+      );
+      expect(l.rows, 6, reason: '36/12 → six full rows');
+      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 12);
+      expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 12);
+    });
+
+    test('OFF never fabricates singles: an all-double bus stays all double', () {
+      // No requested singles → OFF cannot make a 3-single back row, so it does
+      // NOT invent any singles; the bus stays entirely double.
+      final l = BusLayout.generate(busType: BusType.sleeper, totalSeats: 40);
+      expect(l.totalSeats, 40);
+      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa), isEmpty);
+      expect(l.grid.where((c) => c.seatType == SeatType.doubleSofa).length, 20);
+    });
+
+    test('back-row singles come OUT of the requested count, not on top', () {
+      final l = BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: 30,
+        singleSofaCount: 8,
+      );
+      expect(l.totalSeats, 30);
+      // Exactly 8 singles total: 3 in the back row, 5 up front — none added.
+      expect(l.grid.where((c) => c.seatType == SeatType.singleSofa).length, 8);
+      final backRow = l.rows - 1;
+      final frontSingles = l.grid.where((c) =>
+          c.row < backRow && c.seatType == SeatType.singleSofa);
+      expect(frontSingles.length, 5);
+      for (final c in frontSingles) {
+        expect(
+            c.col == SeatGridCols.singleUpper ||
+                c.col == SeatGridCols.singleLower,
+            isTrue);
+      }
+    });
+  });
+
+  group('BusLayout.generate — column placement', () {
     test('seater fills cols 0,1,3,4 and never the aisle', () {
       final l = BusLayout.generate(busType: BusType.seater, totalSeats: 40);
       expect(l.totalSeats, 40);
@@ -97,43 +206,6 @@ void main() {
           .fold<int>(1 << 30, (m, v) => v < m ? v : m);
       expect(seaterMinRow, greaterThan(sleeperMaxRow));
       expect(l.totalSeats, 30);
-    });
-  });
-
-  group('BusLayout.generate — balcony', () {
-    test('balcony adds an upper+lower pair in the aisle of the last row', () {
-      final l = BusLayout.generate(
-        busType: BusType.sleeper,
-        totalSeats: 20,
-        hasBalcony: true,
-      );
-      expect(l.hasBalcony, isTrue);
-      final pair = l.balconyPair(l.rows - 1);
-      expect(pair.upper.hasSeat, isTrue);
-      expect(pair.lower.hasSeat, isTrue);
-      expect(pair.upper.col, SeatGridCols.aisle);
-      expect(pair.lower.col, SeatGridCols.aisle);
-      expect(pair.upper.position, SeatPosition.upper);
-      expect(pair.lower.position, SeatPosition.lower);
-      // The pair shares the last row with lane berths — a full-width back bench,
-      // not a dedicated aisle-only line.
-      expect(
-        l.grid.any((c) =>
-            c.row == l.rows - 1 && c.hasSeat && c.col != SeatGridCols.aisle),
-        isTrue,
-      );
-      // 20 lane berths + 2 balcony berths.
-      expect(l.totalSeats, 22);
-    });
-
-    test('seater bus ignores the balcony flag', () {
-      final l = BusLayout.generate(
-        busType: BusType.seater,
-        totalSeats: 20,
-        hasBalcony: true,
-      );
-      expect(l.hasBalcony, isFalse);
-      expect(l.grid.any((c) => c.isBalconyAisle), isFalse);
     });
   });
 
@@ -200,29 +272,33 @@ void main() {
   });
 
   group('updateCell', () {
-    test('placing then clearing a balcony pair toggles hasBalcony', () {
-      var l = BusLayout.generate(busType: BusType.sleeper, totalSeats: 10);
-      final balconyRow = l.rows; // a fresh row past the cabin
+    test('clearing then replacing the aisle pair toggles hasBalcony', () {
+      // An all-double back row puts a double pair in the aisle from the start.
+      var l = BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: 10,
+        allDoubleBackRow: true,
+      );
+      final benchRow = l.rows - 1;
+      expect(l.hasBalcony, isTrue);
+      expect(l.balconyPair(benchRow).upper.hasSeat, isTrue);
+      expect(l.balconyPair(benchRow).lower.hasSeat, isTrue);
+
+      // Clear both aisle berths — the only aisle cells in the layout.
       l = l.updateCell(SeatCell(
-        row: balconyRow,
-        col: SeatGridCols.aisle,
-        seatType: SeatType.singleSofa,
-        position: SeatPosition.upper,
-      ));
+          row: benchRow, col: SeatGridCols.aisle, position: SeatPosition.upper));
       l = l.updateCell(SeatCell(
-        row: balconyRow,
+          row: benchRow, col: SeatGridCols.aisle, position: SeatPosition.lower));
+      expect(l.hasBalcony, isFalse);
+
+      // Place one back — hasBalcony flips on again.
+      l = l.updateCell(SeatCell(
+        row: benchRow,
         col: SeatGridCols.aisle,
-        seatType: SeatType.singleSofa,
+        seatType: SeatType.doubleSofa,
         position: SeatPosition.lower,
       ));
       expect(l.hasBalcony, isTrue);
-      expect(l.balconyPair(balconyRow).upper.hasSeat, isTrue);
-      expect(l.balconyPair(balconyRow).lower.hasSeat, isTrue);
-
-      // Clear both.
-      l = l.updateCell(SeatCell(row: balconyRow, col: SeatGridCols.aisle, position: SeatPosition.upper));
-      l = l.updateCell(SeatCell(row: balconyRow, col: SeatGridCols.aisle, position: SeatPosition.lower));
-      expect(l.hasBalcony, isFalse);
     });
   });
 }

@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/passenger.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
+import 'package:occubusbooking/models/bus_type.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
@@ -107,8 +108,10 @@ void main() {
         _seat(0, SeatGridCols.doubleLower, SeatType.doubleSofa,
             SeatPosition.lower, 'DL1'),
       ]);
+      // Doubles render Lower then Upper (U L | L U) so the two lower columns sit
+      // toward the centre aisle — matches CombinedSeatGrid._row.
       expect(SeatGridPlacement.columns(layout),
-          [ChartColumn.doubleUpper, ChartColumn.doubleLower]);
+          [ChartColumn.doubleLower, ChartColumn.doubleUpper]);
     });
 
     test('both sides present: aisle inserted between single and double', () {
@@ -122,12 +125,13 @@ void main() {
         _seat(0, SeatGridCols.doubleLower, SeatType.doubleSofa,
             SeatPosition.lower, 'DL1'),
       ]);
+      // Doubles render Lower then Upper (U L | L U) — see CombinedSeatGrid._row.
       expect(SeatGridPlacement.columns(layout), [
         ChartColumn.singleUpper,
         ChartColumn.singleLower,
         ChartColumn.aisle,
-        ChartColumn.doubleUpper,
         ChartColumn.doubleLower,
+        ChartColumn.doubleUpper,
       ]);
     });
 
@@ -149,6 +153,64 @@ void main() {
         ChartColumn.singleLower,
         ChartColumn.aisle,
       ]);
+    });
+  });
+
+  group('SeatGridPlacement back-row toggle (generated sleeper layout)', () {
+    // The back row is set by the create-bus toggle. ON → 4 doubles (the aisle
+    // pair is two double sofas). OFF (default) → 3 single + 2 double (the aisle
+    // carries a single). The placement layer must surface either bench: aisle
+    // column present, bench row listed, and the aisle cells resolvable.
+    test('toggle ON: aisle bench pair are DOUBLE sofas, surfaced via columns',
+        () {
+      final layout = BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: 40,
+        allDoubleBackRow: true,
+      );
+      final benchRow = layout.rows - 1;
+
+      expect(SeatGridPlacement.columns(layout).contains(ChartColumn.aisle),
+          isTrue);
+      expect(SeatGridPlacement.rowsWithSeats(layout).contains(benchRow), isTrue);
+
+      final pair = layout.balconyPair(benchRow);
+      expect(pair.upper.seatType, SeatType.doubleSofa);
+      expect(pair.lower.seatType, SeatType.doubleSofa);
+      expect(pair.upper.seatId, startsWith('DU'));
+      expect(pair.lower.seatId, startsWith('DL'));
+
+      // All-double back row → no single sofa anywhere on the bench.
+      final benchSingles = layout.grid.where((c) =>
+          c.row == benchRow && c.seatType == SeatType.singleSofa);
+      expect(benchSingles, isEmpty);
+    });
+
+    test('toggle OFF: 3 single + 2 double bench, singles surfaced via cellFor',
+        () {
+      final layout = BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: 41,
+        singleSofaCount: 13,
+      );
+      final benchRow = layout.rows - 1;
+
+      expect(SeatGridPlacement.columns(layout).contains(ChartColumn.aisle),
+          isTrue);
+
+      final back = layout.grid.where((c) => c.row == benchRow && c.hasSeat);
+      expect(back.where((c) => c.seatType == SeatType.singleSofa).length, 3);
+      expect(back.where((c) => c.seatType == SeatType.doubleSofa).length, 2);
+
+      // The single column berths resolve through cellFor for the printed chart.
+      final laneSingle = back.firstWhere((c) =>
+          c.seatType == SeatType.singleSofa &&
+          c.col != SeatGridCols.aisle);
+      final col = laneSingle.col == SeatGridCols.singleLower
+          ? ChartColumn.singleLower
+          : ChartColumn.singleUpper;
+      expect(SeatGridPlacement.cellFor(layout, benchRow, col)?.seatId,
+          laneSingle.seatId);
     });
   });
 

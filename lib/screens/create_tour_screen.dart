@@ -243,6 +243,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       toCity: _toCtrl.text.trim(),
                       departureDate: _departureDate,
                       price: _priceCtrl.text.trim(),
+                      coverImage: _broadcastImage,
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     UgamInput(
@@ -477,6 +478,7 @@ class _TourPreviewCard extends StatelessWidget {
   final String toCity;
   final DateTime? departureDate;
   final String price;
+  final XFile? coverImage;
 
   const _TourPreviewCard({
     required this.c,
@@ -485,7 +487,16 @@ class _TourPreviewCard extends StatelessWidget {
     required this.toCity,
     required this.departureDate,
     required this.price,
+    this.coverImage,
   });
+
+  /// Route-initials monogram for the graphite backdrop, e.g. "S→M".
+  String? _routeLabel() {
+    final f = fromCity.trim();
+    final t = toCity.trim();
+    if (f.isEmpty || t.isEmpty) return null;
+    return '${f[0].toUpperCase()}→${t[0].toUpperCase()}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -523,7 +534,12 @@ class _TourPreviewCard extends StatelessWidget {
             child: SizedBox(
               width: 64,
               height: 64,
-              child: UgamBusBackdrop(seed: 'preview-${fromCity}_$toCity'),
+              child: coverImage != null
+                  ? Image.file(File(coverImage!.path), fit: BoxFit.cover)
+                  : UgamBusBackdrop(
+                      seed: 'preview-${fromCity}_$toCity',
+                      label: _routeLabel(),
+                    ),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),

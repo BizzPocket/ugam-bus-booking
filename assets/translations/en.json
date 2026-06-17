@@ -74,7 +74,6 @@
     "account_details_title": "Account Details",
     "account_details_subtitle": "Name, phone, business info",
     "whatsapp_title": "WhatsApp Settings",
-    "whatsapp_subtitle": "Handoff number & message signature",
     "payment_title": "Payment Settings",
     "payment_subtitle": "UPI, payee & receipt defaults",
     "notifications_title": "Notifications",
@@ -82,25 +81,13 @@
     "logout": "Log Out",
     "logout_subtitle": "Sign out of your account",
     "logout_confirm_message": "Are you sure you want to sign out of your account?",
-    "delete_account": "Delete Account",
-    "delete_account_subtitle": "Permanently erase your account and all data",
-    "delete_account_confirm_title": "Delete account?",
-    "delete_account_confirm_message": "This permanently deletes your account along with every tour, bus, passenger, and booking request you own. This cannot be undone.",
-    "delete_account_confirm_cta": "Delete forever",
-    "delete_account_success": "Your account and all data have been deleted.",
-    "delete_account_error": "Could not delete your account. Please try again or contact support.",
     "footer_made_in": "Made with ♥ in Gujarat",
     "account_section": "ACCOUNT",
     "phone_label": "Phone",
-    "whatsapp_label": "WhatsApp",
     "theme_system": "System",
     "theme_light": "Light",
     "theme_dark": "Dark",
-    "stat_tour": "tour",
-    "stat_tours": "tours",
-    "stat_passenger": "passenger",
-    "stat_passengers": "passengers",
-    "stat_this_month": "this month"
+    "footer_version": "Ugam Booking v{version}"
   },
   "settings_pages": {
     "save": "Save changes",
@@ -144,7 +131,8 @@
       "payment_label": "Payment reminders",
       "payment_hint": "Outstanding collections & dues",
       "departure_label": "Departure reminders",
-      "departure_hint": "Before a tour departs"
+      "departure_hint": "Before a tour departs",
+      "turn_on_hint": "Turn on Notifications to enable"
     }
   },
   "language": {
@@ -178,6 +166,9 @@
   },
   "customer_more": {
     "title": "More",
+    "section_my_trip": "Your trip",
+    "find_seat": "Find my seat",
+    "find_seat_subtitle": "See your seat by mobile number",
     "section_preferences": "Preferences",
     "language": "Language",
     "section_about_legal": "About & Legal",
@@ -218,11 +209,13 @@
     "section_attention": "Needs attention",
     "section_recent": "Recent requests",
     "attention_no_bus": "No bus yet · {n} request(s) waiting",
+    "attention_seating_decisions": "{n} need your seating decision",
     "attention_unassigned": "{n} seat(s) not yet assigned",
     "attention_pick_handler": "All seats assigned · pick a handler",
     "attention_ready_lock": "Ready to lock & notify",
     "cta_add_bus": "Add bus",
     "cta_assign": "Assign",
+    "cta_decide": "Decide",
     "cta_pick": "Pick",
     "cta_lock": "Lock",
     "countdown_now": "NOW",
@@ -248,7 +241,8 @@
     "mini_today": "Today",
     "mini_waitlist": "Waitlist",
     "ago_now": "now",
-    "recent_subtitle": "{title} · {n} seat(s)"
+    "recent_subtitle": "{title} · {n} seat(s)",
+    "qa_notify": "Notify"
   },
   "tours": {
     "title": "My Tours",
@@ -283,35 +277,14 @@
     }
   },
   "requests": {
-    "eyebrow": "Triage board",
-    "section": {
-      "capacity": "Capacity",
-      "triage": "Triage"
-    },
     "title": "Requests",
-    "menu": {
-      "tooltip": "More actions",
-      "manage_groups": "Manage groups",
-      "empty_bus": "Empty bus"
-    },
-    "empty_bus": {
-      "none": "No seats are assigned yet.",
-      "title": "Empty the bus?",
-      "body": "This frees all {count} assigned seat(s) across this tour. Passengers keep their requests and drop back to New.",
-      "confirm": "Empty bus",
-      "done": "Cleared all assigned seats."
-    },
-    "fab_add": "Add Request",
     "filter": {
       "new": "NEW",
-      "confirmed": "CONFIRMED",
-      "waitlist": "WAITLIST",
+      "confirmed": "CONFIRM",
+      "waitlist": "WAIT",
       "assigned": "ALLOTTED"
     },
     "status": {
-      "new": "NEW",
-      "waitlist": "WAITLIST",
-      "seats_assigned": "SEATS ASSIGNED",
       "partial": "Partial"
     },
     "time": {
@@ -343,7 +316,9 @@
       "decline_request": "Decline request",
       "more_actions": "More actions",
       "edit_request": "Edit request",
-      "confirm_and_seat": "Confirm & seat"
+      "confirm_and_seat": "Confirm & seat",
+      "add_to_group": "Add to group",
+      "change_group": "Change group"
     },
     "decline_dialog": {
       "title": "Decline request?",
@@ -395,11 +370,6 @@
       "save": "Save Request",
       "saving": "Saving…"
     },
-    "validation": {
-      "name_required": "Enter a name",
-      "phone_invalid": "Enter a 10-digit phone number",
-      "seat_required": "Pick at least one seat"
-    },
     "snack": {
       "ack_title": "Acknowledgment ready",
       "ack_opened": "WhatsApp opened for {name}.",
@@ -418,11 +388,6 @@
       "bulk_waitlisted": "Moved {n} to waitlist",
       "bulk_wa_opened": "Opened {n} WhatsApp chats"
     },
-    "sort": {
-      "newest": "Newest",
-      "name": "Name (A–Z)",
-      "most_seats": "Most seats"
-    },
     "bulk": {
       "waitlist": "Waitlist",
       "promote": "Promote",
@@ -434,14 +399,21 @@
       "decline_body": "This permanently removes {n} selected requests. This cannot be undone.",
       "decline_confirm": "Decline",
       "confirm": "Confirm",
-      "confirmed": "Confirmed {n} requests"
+      "confirmed": "Confirmed {n} requests",
+      "confirmed_sent": "Confirmed {n} · messaged {sent}",
+      "confirmed_sent_partial": "Confirmed {n} · messaged {sent}, {failed} failed"
     },
     "capacity": {
       "requested": "Requested",
       "seats": "Seats",
       "free": "Free",
       "over": "Over",
-      "no_buses": "No buses"
+      "no_buses": "No buses",
+      "legs": "GO {go} · RET {ret}",
+      "reclaim_ret": "{n} return-only seats free",
+      "reclaim_go": "{n} outbound-only seats free",
+      "free_by_type": "Free by type",
+      "needs_decision": "{n} need your decision"
     },
     "assigned": {
       "bus_fallback": "Bus"
@@ -452,12 +424,26 @@
     },
     "selected_count": "{n} selected",
     "search_hint": "Search name or phone…",
-    "cta_autofill": "Auto-fill seats · {tour}",
     "cta_add_bus": "Add a bus to start assigning",
     "cta_remaining": "{n} left",
     "group": {
       "no_bus": "Add a bus to size groups"
     }
+  },
+  "find_seat": {
+    "title": "Find my seat",
+    "intro": "Enter the mobile number you booked with to see your seat once the organiser has locked the tour.",
+    "phone_label": "Mobile number",
+    "phone_hint": "e.g. 98765 43210",
+    "find_btn": "Find my seat",
+    "searching": "Searching…",
+    "error_short": "Enter a full mobile number (at least 10 digits).",
+    "error_load": "Couldn't look up your seat. Please check your connection and try again.",
+    "empty_title": "No seat found",
+    "empty_body": "No seat is linked to this number yet. Seats appear here once your organiser locks the tour.",
+    "your_seats": "Your seats: {seats}",
+    "layout_unavailable": "The bus diagram isn't available yet.",
+    "driver": "Driver"
   },
   "customer_my_requests": {
     "title": "My Requests",
@@ -508,7 +494,9 @@
     "chip_edited": "EDITED",
     "chip_oneway_out": "ONE-WAY OUT",
     "chip_oneway_return": "ONE-WAY RETURN",
-    "chip_seats": "SEATS: {seats}"
+    "chip_seats": "SEATS: {seats}",
+    "chip_seats_finalizing": "Seats being finalized",
+    "seats_pending_toast": "Seats aren't finalized yet — you'll see them once the trip is confirmed."
   },
   "add_bus": {
     "title": "Add Bus",
@@ -528,7 +516,6 @@
       "optional": "(optional)",
       "slot": "Slot",
       "bus_name": "Bus name",
-      "back_row_balcony": "Back row (balcony)",
       "bus_price": "Full bus price (rent)",
       "boarding_point": "Departure place",
       "departure_time": "Departure time"
@@ -597,6 +584,12 @@
     "resize_confirm_title": "Change seats?",
     "resize_confirm_msg": "This unassigns the {count} passenger(s) seated on this bus. They return to the unassigned list and can be re-seated. Continue?",
     "resize_confirm_cta": "Change seats",
+    "regenerate_label": "Regenerate layout",
+    "regenerate_subtitle": "Rebuild the seat layout from these settings using the current engine.",
+    "regenerate_confirm_title": "Regenerate layout?",
+    "regenerate_confirm_msg": "This rebuilds the seat layout from the current settings and renumbers every berth. The {count} passenger(s) seated on this bus will be freed and must be re-assigned. Continue?",
+    "regenerate_confirm_msg_empty": "This rebuilds the seat layout from the current settings and renumbers every berth. No passengers are seated on this bus, so nothing is unassigned. Continue?",
+    "regenerate_confirm_cta": "Regenerate layout",
     "step_progress": "Step {current} / {total}",
     "step1": {
       "eyebrow": "IDENTITY",
@@ -613,8 +606,11 @@
       "title": "Pick the layout",
       "body": "How many seats — and what kind. Once saved, the layout is locked because passengers will start holding seat IDs."
     },
-    "balcony_body": "Add a full-width back row with an upper + lower berth in the aisle (+2 berths).",
-    "odd_berth_warning": "Odd sleeper count — one berth can’t pair into a double, so it’s placed as an extra single sofa. Adjust the counts if that’s not what you want.",
+    "back_row_toggle": {
+      "label": "All-double last row",
+      "on": "On: last row is 4 double sofas",
+      "off": "Off: last row is 3 single + 2 double sofas"
+    },
     "step3": {
       "eyebrow": "PRICE",
       "title": "Set the per-seat price",
@@ -686,7 +682,8 @@
     "mail_unavailable_body": "Could not open your mail app. Please email {email}.",
     "support_heading": "Admin accounts are managed by the Ugam team",
     "support_body": "Contact our support team to add or modify admin access. You'll be added to the system within 24 hours.",
-    "btn_contact_support": "Contact support"
+    "btn_contact_support": "Contact support",
+    "email_copied": "Copied {email}"
   },
   "bus_status": {
     "bus_not_found": "Bus not found",
@@ -789,6 +786,7 @@
     "err_phone_invalid": "Please enter a 10-digit phone number",
     "err_no_seats": "Pick at least one seat",
     "err_save_failed": "Could not save your request — try again.",
+    "err_bookings_closed": "Bookings are closed for this tour — seats are finalized.",
     "success_sent_wa": "Request sent. Tap Send in WhatsApp to confirm.",
     "success_sent_no_wa": "Request saved. The organiser will reach out shortly.",
     "success_saved_wa_failed": "Request saved, but WhatsApp didn't open. The organiser still has your request and will reach out.",
@@ -810,7 +808,8 @@
     "err_duplicate": "You already have a pending request for this trip.",
     "err_too_fast": "Please wait a few seconds before submitting again.",
     "cta_seat_count": "{n} seats",
-    "cta_seat_count_one": "1 seat"
+    "cta_seat_count_one": "1 seat",
+    "estimated_total_label": "Estimated total"
   },
   "booking_form": {
     "label_name": "YOUR NAME",
@@ -1047,6 +1046,7 @@
     "recipient_count": "{count} passenger(s) on this bus",
     "field_message": "Message",
     "field_message_hint": "Type your announcement…",
+    "frame_note": "A greeting and closing blessing are added automatically — just type your message.",
     "empty_text": "Type a message first.",
     "send_btn": "Send",
     "sending": "Sending…",
@@ -1177,7 +1177,9 @@
     "row_pending": "PENDING",
     "lock_reason_no_passengers": "Add at least one passenger first",
     "lock_reason_unassigned": "Some seats are still unassigned",
-    "lock_reason_no_handler": "Pick a handler before locking"
+    "lock_reason_no_handler": "Pick a handler before locking",
+    "reset_sent": "Reset sent",
+    "no_seated_passengers": "No seated passengers to notify yet. Assign seats first."
   },
   "seat_assignment": {
     "title": "Seat Assignment",
@@ -1402,6 +1404,19 @@
   "tour_seat_assignment": {
     "tooltip_manage_buses": "Manage buses",
     "title": "Seat Assignment",
+    "relocate": {
+      "started": "Moving {name} to {bus} — tap a seat",
+      "banner": "Moving {name} on {bus} · tap a free seat to move, an occupied seat to swap",
+      "move_confirm_title": "Move passenger?",
+      "move_confirm_body": "Move {name} to seat {seat} on {bus}?",
+      "move_confirm_yes": "Move",
+      "moved": "{name} moved to {seat}",
+      "swap_confirm_title": "Swap seats?",
+      "swap_confirm_body": "Swap {mover} with {other} on seat {seat}?",
+      "swap_confirm_yes": "Swap",
+      "swapped": "Swapped {mover} ↔ {other}",
+      "too_small": "Seat {seat} is too small for {name}"
+    },
     "picker_title": "Seat {seat} · {bus}",
     "picker_subtitle": "Tap a passenger to seat them here.",
     "picker_none": "No pending passenger fits seat {seat}.",
@@ -1453,6 +1468,9 @@
     "share_confirm_title": "Share this double sofa?",
     "share_confirm_body": "{otherName} already has seat {seat}. Splitting this sofa between {otherName} and {currentName} will count as one seat each.",
     "share_confirm_yes": "Share sofa",
+    "swap_in_confirm_title": "Swap seats?",
+    "swap_in_confirm_body": "Seat {placing} on {seat}? {occupant} moves back to pending and can be re-seated.",
+    "swap_in_confirm_yes": "Swap in",
     "tooltip_edit_request": "Edit request",
     "btn_download_chart": "Download chart",
     "all_assigned_dock": "All passengers assigned.",
@@ -1485,14 +1503,32 @@
       "filled_body": "Seated {a} beside {b} on seat {seat}.",
       "moved_both_title": "Pair moved",
       "moved_both_body": "Moved {names} to seat {seat}.",
-      "shared_need_free_double": "A shared sofa can only move onto a fully-free double sofa."
+      "shared_need_free_double": "A shared sofa can only move onto a fully-free double sofa.",
+      "no_leg_room_title": "No room on that leg",
+      "no_leg_room_body": "Seat {seat} is already full on the {leg}.",
+      "leg_go": "going leg (GO)",
+      "leg_ret": "return leg (RET)",
+      "leg_both": "leg this passenger needs",
+      "consolidated_title": "Merged onto double",
+      "consolidated_body": "Moved {name} onto {seat} — both singles freed."
+    },
+    "split_pair": {
+      "title": "Seat {seat} — who moves here?",
+      "subtitle": "Two passengers share this sofa. Pick one to take the single seat — the other keeps the double.",
+      "moved_title": "Seat moved",
+      "moved_body": "Moved {name} to seat {seat}. The other passenger keeps the double.",
+      "swapped_body": "Swapped {a} ↔ {b}. {b} now shares the double."
     },
     "flags": {
       "forward_title": "Forward / premium seat",
       "forward_subtitle": "Mark this seat as a front / premium spot.",
       "reserved_title": "Hold / reserved",
       "reserved_subtitle": "Keep this seat reserved — it won't be auto-filled."
-    }
+    },
+    "dock_all_pending_title": "All pending ({count})",
+    "dock_view_all": "View all",
+    "assigned_card_done_title": "All seats assigned",
+    "assigned_card_done_sub": "Every passenger is seated. Tap a seat to make changes."
   },
   "chart": {
     "col_upper": "Upper",
@@ -1526,7 +1562,9 @@
     "call": "Call",
     "move_or_swap": "Move or swap seat",
     "free": "Free this seat",
-    "seat_here": "Seat {name} here"
+    "seat_here": "Seat {name} here",
+    "swap_in": "Swap {name} in here",
+    "edit_request": "Edit request"
   },
   "edit_request": {
     "title": "Edit request",
@@ -1618,6 +1656,10 @@
     "no_seat_layout": "This bus has no seat layout yet.",
     "no_passengers_on_bus": "No passengers seated on {bus} yet.",
     "driver": "Driver",
+    "driver_unnamed": "Driver",
+    "wa_failed_title": "WhatsApp failed",
+    "wa_open_failed": "Could not open WhatsApp for {phone}.",
+    "wa_open_error": "Could not open WhatsApp. {error}",
     "view_grid": "Grid",
     "view_list": "List",
     "legend_free": "Free",
@@ -1663,6 +1705,17 @@
     "balance_still_to_collect": "Still to collect: {amount}",
     "balance_settled": "Settled",
     "saving": "Saving…",
+    "view_attendance": "Attendance",
+    "att_leg_go": "Going",
+    "att_leg_ret": "Return",
+    "att_present": "Present",
+    "att_left_behind": "Left behind",
+    "att_total": "Total",
+    "att_boarded": "Boarded {present}/{total}",
+    "att_tally": "{present} present · {left} left behind",
+    "att_none": "No passengers on this leg yet.",
+    "att_mark_present": "Mark present",
+    "error_save_attendance": "Couldn't save attendance. Please try again.",
     "error_save_collection": "Couldn't save the collection. Please try again.",
     "stat_collected": "Collected",
     "stat_to_return": "To return",
@@ -1688,6 +1741,23 @@
     "error_amount_zero": "Enter an amount greater than zero.",
     "error_save_expense": "Couldn't save the expense. Please try again."
   },
+  "seat_legend": {
+    "free": "Free",
+    "booked": "Booked",
+    "priority": "Priority / forward",
+    "held": "Held",
+    "go": "Go only",
+    "ret": "Return only",
+    "half": "½ half fare",
+    "paid": "Paid",
+    "owing": "Owing"
+  },
+  "seat_swap_conflict": {
+    "title": "Seat shares a leg",
+    "body": "{occupant} still uses this seat on one leg. Seating a full-trip passenger here would double-book that leg. Move {occupant} off? Their request stays — they go back to unseated.",
+    "move_off": "Move off",
+    "keep": "Keep them"
+  },
   "seat_detail": {
     "title": "Seat detail",
     "bus_not_found": "Bus not found.",
@@ -1711,7 +1781,9 @@
       "free": "Free",
       "priority_forward": "Priority / forward",
       "one_way": "One-way (GO/RET)",
-      "held": "Held"
+      "held": "Held",
+      "go": "Go (one-way)",
+      "return": "Return (one-way)"
     },
     "badge": {
       "round": "Round",
@@ -1802,6 +1874,8 @@
   "tour_groups": {
     "default_group_name": "Group {n}",
     "delete_group": "Delete group",
+    "delete_group_title": "Delete \"{name}\"?",
+    "delete_group_body": "The {n} people in this group will be ungrouped. They stay on the tour — only the group is removed.",
     "remove_member": "Remove member",
     "title": "Groups & priority",
     "new_group": "New group",
@@ -1832,7 +1906,15 @@
     "full_for_bus": "Full for one bus",
     "wont_fit": "Won't fit one bus ({used}/{cap})",
     "create_too_big": "Too big for one bus ({seats}/{cap})",
-    "create_group_seats": "Create group ({n}) · {seats} seats"
+    "create_group_seats": "Create group ({n}) · {seats} seats",
+    "assign_title": "Add {name} to a group",
+    "assigned": "{name} added to {group}",
+    "removed": "{name} removed from group",
+    "current_group": "Current group",
+    "remove_from_group": "Remove from group",
+    "no_groups_note": "No groups yet. Create one in Groups & Priority.",
+    "only_group": "This is the only group. Create more in Groups & Priority.",
+    "open_manager": "Open Groups & Priority"
   },
   "tour_money_board": {
     "eyebrow": "TOUR MONEY",
@@ -1882,7 +1964,11 @@
     "status_unplaced": "Unplaced seats",
     "no_buses": "No buses on this tour yet.",
     "fill_bus": "Fill bus",
-    "regenerate_plan": "Re-generate plan"
+    "regenerate_plan": "Re-generate plan",
+    "cta_edit_by_hand": "Edit by hand",
+    "cta_regenerate": "Re-generate",
+    "regenerate_confirm_title": "Re-generate seating plan?",
+    "regenerate_confirm_body": "This discards the current seat arrangement and re-assigns every passenger from scratch."
   },
   "errors": {
     "save_failed": "Save failed",
@@ -1900,6 +1986,7 @@
     "create_tour": "Could not create tour.",
     "delete_tour": "Could not delete tour.",
     "save_passenger": "Could not save passenger.",
+    "bookings_closed": "Bookings are closed — this tour is locked.",
     "remove_passenger": "Could not remove passenger.",
     "update_passenger": "Could not update passenger.",
     "update_payment": "Could not update payment status.",
@@ -1938,7 +2025,8 @@
     "sign_in": "Could not sign in.\n{e}",
     "call_failed": "Call failed",
     "dialer_open_failed": "Could not open the dialer for {phone}.",
-    "dialer_open_failed_generic": "Could not open the dialer."
+    "dialer_open_failed_generic": "Could not open the dialer.",
+    "duplicate": "Already exists — looks like a duplicate (e.g. the same bus number on this tour)."
   },
   "enums": {
     "seat_type": {
@@ -2141,5 +2229,26 @@
     "card_eyebrow": "PROFIT & LOSS",
     "card_loading": "Calculating…",
     "card_lifetime": "Lifetime · tap for full report"
+  },
+  "trip_pnl": {
+    "eyebrow": "Money",
+    "title": "Profit & Loss",
+    "net_profit": "Net profit",
+    "net_loss": "Net loss",
+    "true_billed": "Billed (true)",
+    "cash_collected": "Cash collected",
+    "revenue": "Revenue",
+    "costs": "Costs",
+    "collected": "Collected",
+    "by_handler": "By handler",
+    "by_bus": "By bus",
+    "no_handler": "No handler yet",
+    "bus_one": "1 bus",
+    "bus_many": "{n} buses",
+    "rent": "Rent {n}",
+    "profit": "profit",
+    "loss": "loss",
+    "cash_net": "Cash net",
+    "entry_sub": "Per bus & per handler"
   }
 }

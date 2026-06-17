@@ -9,6 +9,8 @@ import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
+import 'package:occubusbooking/models/tour_status.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/services/sync_service.dart';
 
 /// Records every server write so a test can assert HOW MANY rows a controller
@@ -101,6 +103,7 @@ Tour _tourWith(
   List<Passenger> passengers, {
   String? handlerId,
   List<Bus> buses = const [],
+  TourStatus status = TourStatus.collecting,
 }) =>
     Tour(
       id: 't1',
@@ -112,9 +115,16 @@ Tour _tourWith(
       handlerId: handlerId,
       buses: buses,
       passengers: passengers,
+      status: status,
     );
 
 void main() {
+  // Some controller guards surface a toast via AppSnackBar, which reads
+  // Get.context — that getter touches WidgetsBinding.instance and throws if the
+  // binding isn't initialized. With the binding up, there's no navigator so the
+  // toast no-ops; the guard's data behavior is what we assert here.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   tearDown(Get.reset);
 
   test('setHandler writes the tour row + only the changed passenger (no prior '
@@ -220,6 +230,68 @@ void main() {
     );
   });
 
+  test('swapSeats bumps a leg-conflicting occupant off the seat, request kept',
+      () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    // L1 is leg-shared: G (outbound-only) + R (return-only). F (round-trip) sits
+    // on L2. Swapping G ↔ F would leave R + F on L1 → the RET leg double-books.
+    // The UI guard resolves it by bumping R; here we assert swapSeats honours it.
+    final g = Passenger(
+      id: 'G',
+      tourId: 't1',
+      name: 'G',
+      phone: '+910000000000',
+      tripType: TripType.outboundOnly,
+      assignedSeats: [SeatAssignment(busId: 'b1', seatId: 'L1')],
+    );
+    final r = Passenger(
+      id: 'R',
+      tourId: 't1',
+      name: 'R',
+      phone: '+910000000000',
+      tripType: TripType.returnOnly,
+      requestLines: [RequestLine(seatType: SeatType.singleSofa, qty: 1)],
+      assignedSeats: [SeatAssignment(busId: 'b1', seatId: 'L1')],
+    );
+    final f = Passenger(
+      id: 'F',
+      tourId: 't1',
+      name: 'F',
+      phone: '+910000000000',
+      tripType: TripType.roundTrip,
+      assignedSeats: [SeatAssignment(busId: 'b1', seatId: 'L2')],
+    );
+    ctrl.tours.assignAll([
+      _tourWith([g, r, f], buses: [_bus('b1')]),
+    ]);
+
+    await ctrl.swapSeats(
+      tourId: 't1',
+      busId: 'b1',
+      passengerAId: 'G',
+      seatAId: 'L1',
+      passengerBId: 'F',
+      seatBId: 'L2',
+      bump: [(passengerId: 'R', busId: 'b1', seatId: 'L1')],
+    );
+
+    final tour = ctrl.tours.first;
+    Passenger byId(String id) => tour.passengers.firstWhere((p) => p.id == id);
+    // R is freed off L1 but keeps its request — back to the unseated pool.
+    expect(byId('R').assignedSeats, isEmpty);
+    expect(byId('R').requestLines, isNotEmpty);
+    // The swap still completes: F lands on L1, G on L2.
+    expect(byId('F').assignedSeats.single.seatId, 'L1');
+    expect(byId('G').assignedSeats.single.seatId, 'L2');
+    // R's freed row is persisted, alongside the atomic G/F swap.
+    expect(sync.updates, contains('passengers:R'));
+    expect(sync.swaps, [
+      {'a': 'G', 'b': 'F'}
+    ]);
+  });
+
   test('fillTour applies the whole plan in one atomic RPC call', () async {
     final sync = _RecordingSync();
     Get.put<SyncService>(sync);
@@ -232,5 +304,50 @@ void main() {
 
     expect(sync.applies.length, 1);
     expect((sync.applies.first['assignments'] as List).isNotEmpty, isTrue);
+  });
+
+  test('addPassenger on an OPEN tour writes the new passenger row', () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith([_p('p1')], status: TourStatus.collecting),
+    ]);
+
+    await ctrl.addPassenger('t1', _p('p2'));
+
+    expect(sync.inserts, contains('passengers:p2'));
+    expect(ctrl.getTour('t1')!.passengers.map((p) => p.id), contains('p2'));
+  });
+
+  test('addPassenger on a LOCKED tour is refused — no write, no local add',
+      () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith([_p('p1')], status: TourStatus.locked),
+    ]);
+
+    await ctrl.addPassenger('t1', _p('p2'));
+
+    // Bookings are closed once locked: nothing persisted, nothing added
+    // optimistically — the guard short-circuits before any write.
+    expect(sync.inserts, isEmpty);
+    expect(ctrl.getTour('t1')!.passengers.map((p) => p.id), isNot(contains('p2')));
+  });
+
+  test('addPassenger on a COMPLETED tour is refused', () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith([_p('p1')], status: TourStatus.completed),
+    ]);
+
+    await ctrl.addPassenger('t1', _p('p2'));
+
+    expect(sync.inserts, isEmpty);
+    expect(ctrl.getTour('t1')!.passengers.map((p) => p.id), isNot(contains('p2')));
   });
 }

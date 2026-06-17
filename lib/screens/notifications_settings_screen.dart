@@ -85,14 +85,13 @@ class _NotificationsSettingsScreenState
         Container(
           decoration: BoxDecoration(
             color: c.cardElev,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(UgamRadius.sheet),
           ),
           child: Column(
             children: [
               _ToggleRow(
                 c: c,
                 icon: Icons.notifications_active_rounded,
-                tone: UgamStatVariant.accent,
                 title: tr('settings_pages.notifications.push_label'),
                 subtitle: tr('settings_pages.notifications.push_hint'),
                 value: _push,
@@ -102,7 +101,6 @@ class _NotificationsSettingsScreenState
               _ToggleRow(
                 c: c,
                 icon: Icons.inbox_rounded,
-                tone: UgamStatVariant.good,
                 title: tr('settings_pages.notifications.booking_label'),
                 subtitle: tr('settings_pages.notifications.booking_hint'),
                 value: _bookingRequests,
@@ -113,7 +111,6 @@ class _NotificationsSettingsScreenState
               _ToggleRow(
                 c: c,
                 icon: Icons.payments_rounded,
-                tone: UgamStatVariant.warm,
                 title: tr('settings_pages.notifications.payment_label'),
                 subtitle: tr('settings_pages.notifications.payment_hint'),
                 value: _paymentReminders,
@@ -124,7 +121,6 @@ class _NotificationsSettingsScreenState
               _ToggleRow(
                 c: c,
                 icon: Icons.directions_bus_rounded,
-                tone: UgamStatVariant.neutral,
                 title: tr('settings_pages.notifications.departure_label'),
                 subtitle: tr('settings_pages.notifications.departure_hint'),
                 value: _departureReminders,
@@ -142,7 +138,6 @@ class _NotificationsSettingsScreenState
 class _ToggleRow extends StatelessWidget {
   final UgamColorSet c;
   final IconData icon;
-  final UgamStatVariant tone;
   final String title;
   final String subtitle;
   final bool value;
@@ -152,7 +147,6 @@ class _ToggleRow extends StatelessWidget {
   const _ToggleRow({
     required this.c,
     required this.icon,
-    required this.tone,
     required this.title,
     required this.subtitle,
     required this.value,
@@ -162,58 +156,59 @@ class _ToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (iconBg, iconFg) = switch (tone) {
-      UgamStatVariant.accent => (c.accentFill, c.accent),
-      UgamStatVariant.good => (c.goodFill, c.good),
-      UgamStatVariant.warm => (c.warmFill, c.warm),
-      UgamStatVariant.neutral => (c.card, c.ink2),
-    };
     final on = value && enabled;
 
-    return Opacity(
-      opacity: enabled ? 1 : 0.45,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.md,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 18, color: iconFg),
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.md,
+      ),
+      child: Row(
+        children: [
+          // Single neutral icon tile — the Switch is the only colour signal.
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: c.card,
+              borderRadius: BorderRadius.circular(UgamRadius.row),
             ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 18, color: enabled ? c.ink2 : c.ink3),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: UgamText.titleS.copyWith(
+                    color: enabled ? c.ink : c.ink3,
+                    fontSize: 15,
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    subtitle,
-                    style: UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(height: 1),
+                // When the master Push switch is off, dependent rows can't be
+                // toggled — say so inline instead of dimming the whole row.
+                Text(
+                  enabled
+                      ? subtitle
+                      : tr('settings_pages.notifications.turn_on_hint'),
+                  style: UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
+                ),
+              ],
             ),
-            const SizedBox(width: UgamSpacing.sm),
-            Switch(
-              value: on,
-              onChanged: enabled ? onChanged : null,
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Switch(
+            value: on,
+            onChanged: enabled ? onChanged : null,
+            activeTrackColor: c.accent,
+            activeThumbColor: c.onAccent,
+          ),
+        ],
       ),
     );
   }

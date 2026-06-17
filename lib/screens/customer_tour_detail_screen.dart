@@ -5,9 +5,9 @@ import 'package:get/get.dart';
 
 import '../design/ugam.dart';
 import '../models/tour.dart';
-import '../models/tour_status.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 import 'customer_booking_request_screen.dart';
 
@@ -110,7 +110,12 @@ class _HeroSection extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Positioned.fill(child: UgamBusBackdrop(seed: tour.id)),
+          Positioned.fill(
+            child: UgamBusBackdrop(
+              seed: tour.id,
+              label: _routeInitials(tour.fromCity, tour.toCity),
+            ),
+          ),
           // Dark gradient for legibility.
           Positioned.fill(
             child: DecoratedBox(
@@ -237,6 +242,25 @@ class _HeroSection extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (tour.pricePerSeat > 0) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      tr(
+                        'customer_tour_detail.price_per_seat_value',
+                        namedArgs: {
+                          'price': Formatters.formatMoneyInr(
+                            tour.pricePerSeat,
+                          ).replaceFirst('₹', ''),
+                        },
+                      ),
+                      style: UgamText.tabular(
+                        UgamText.bodyStrong.copyWith(
+                          color: c.ink,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -290,6 +314,20 @@ String _monthShort(int month) {
     'app.month.short.dec',
   ];
   return tr(keys[month - 1]);
+}
+
+/// Route monogram for the bus backdrop, e.g. "S→M" from "Surat"/"Mumbai".
+/// Empty when neither city is set so the backdrop shows just the bus motif.
+String _routeInitials(String from, String to) {
+  String first(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '' : t.characters.first.toUpperCase();
+  }
+
+  final f = first(from);
+  final t = first(to);
+  if (f.isEmpty && t.isEmpty) return '';
+  return '$f→$t';
 }
 
 class _ChromeCircle extends StatelessWidget {
@@ -371,6 +409,18 @@ class _AboutTab extends StatelessWidget {
               (
                 tr('customer_tour_detail.label_return'),
                 _dateWithTime(tour.returnDate!, tour.returnTime),
+              ),
+            if (tour.pricePerSeat > 0)
+              (
+                tr('customer_tour_detail.label_price'),
+                tr(
+                  'customer_tour_detail.price_per_seat_value',
+                  namedArgs: {
+                    'price': Formatters.formatMoneyInr(
+                      tour.pricePerSeat,
+                    ).replaceFirst('₹', ''),
+                  },
+                ),
               ),
           ],
         ),
@@ -544,7 +594,10 @@ class _BusCard extends StatelessWidget {
             child: SizedBox(
               width: 84,
               height: 84,
-              child: UgamBusBackdrop(seed: '${bus.id}-bus'),
+              child: UgamBusBackdrop(
+                seed: '${bus.id}-bus',
+                label: _routeInitials(tour.fromCity, tour.toCity),
+              ),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
@@ -554,7 +607,7 @@ class _BusCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  bus.busNumber.isNotEmpty ? bus.busNumber : bus.name,
+                  bus.customerLabel,
                   style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -868,8 +921,7 @@ class _StickyBookCta extends StatelessWidget {
     final capacity = tour.totalBusSeats;
     final seatsLeft = capacity - tour.totalSeatsAssigned;
     final full = capacity > 0 && seatsLeft <= 0;
-    final locked =
-        tour.status == TourStatus.locked || tour.status == TourStatus.completed;
+    final locked = !tour.acceptsBookings;
 
     final String label;
     final IconData icon;

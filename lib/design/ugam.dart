@@ -24,6 +24,7 @@ export 'components/ugam_input.dart';
 export 'components/ugam_request_row.dart';
 export 'components/ugam_route_header.dart';
 export 'components/ugam_search_field.dart';
+export 'components/ugam_seat_chart_legend.dart';
 export 'components/ugam_seat_grid.dart';
 export 'components/ugam_selector_pills.dart';
 export 'components/ugam_sheet.dart';

@@ -114,4 +114,53 @@ void main() {
       expect(cap.needsDecision, 1, reason: 'B surfaces as needing a decision');
     });
   });
+
+  group('computeTourCapacity — per-leg free is plan-derived, never inverted', () {
+    test('outbound-only rider surfaces a RETURN-only-free seat (not outbound)',
+        () {
+      // 3 single berths; one outbound-only rider takes the GO slot of one. That
+      // seat returns EMPTY → 2 fully empty + 1 return-only empty (the screenshot
+      // case). The free room is on the RETURN leg, so retOnlyFree carries it.
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+          _seat(1, 1, SeatType.singleSofa, SeatPosition.lower, 'SL2'),
+        ])
+      ], [
+        _p('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            trip: TripType.outboundOnly),
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      expect(cap.free, 2, reason: 'two seats are empty on BOTH legs');
+      expect(cap.retOnlyFree, 1, reason: "A's seat returns empty");
+      expect(cap.goOnlyFree, 0);
+    });
+
+    test('blocked return rider no longer fabricates an outbound-only-free line',
+        () {
+      // The exact screenshot inversion: a returnOnly rider the engine CANNOT
+      // seat (seater request, only sofas exist) inflates raw return demand above
+      // go demand. The old banner read `goDemand < retDemand` and printed
+      // "outbound-only free" — pointing at the wrong leg. Plan-derived truth:
+      // the placed legs are balanced, so NEITHER one-way surplus exists.
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ], [
+        _p('A', lines: [_line(SeatType.singleSofa, 1)]),
+        _p('B', lines: [_line(SeatType.seater, 1)], trip: TripType.returnOnly),
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      expect(cap.needsDecision, 1, reason: 'B (seater on a sofa bus) is blocked');
+      expect(cap.goOnlyFree, 0, reason: 'no phantom outbound-only-free seat');
+      expect(cap.retOnlyFree, 0, reason: 'placed legs are balanced');
+      expect(cap.free, 1);
+    });
+  });
 }

@@ -274,12 +274,31 @@ class MoneyController extends GetxController {
     return {for (final b in buses) b.id: b.busPrice};
   }
 
+  /// Per-bus BILLED revenue — the sum of fares owed by every passenger seated
+  /// on the bus (via [Bus.amountDueFor], which is already bus-scoped and trip-
+  /// factor aware). This is ACCRUAL revenue: what the trip earns regardless of
+  /// how much cash has been collected, so the P&L can show a "true" profit.
+  /// Keyed by bus id; guards a missing tour / unregistered controller with 0.
+  Map<String, double> _billedRevenues() {
+    final tourId = _loadedTourId;
+    if (tourId == null || !Get.isRegistered<TourController>()) {
+      return const {};
+    }
+    final tour = Get.find<TourController>().getTour(tourId);
+    if (tour == null) return const {};
+    return {
+      for (final b in tour.buses)
+        b.id: tour.passengers.fold(0.0, (sum, p) => sum + b.amountDueFor(p)),
+    };
+  }
+
   BusMoneySummary summaryForBus(String busId) => BusMoneySummary.compute(
     busId: busId,
     collections: collections.toList(),
     expenses: expenses.toList(),
     handovers: handovers.toList(),
     busRent: _busRents()[busId] ?? 0,
+    revenueBilled: _billedRevenues()[busId] ?? 0,
   );
 
   TourMoneySummary tourSummary() => TourMoneySummary.compute(
@@ -287,6 +306,8 @@ class MoneyController extends GetxController {
     expenses: expenses.toList(),
     handovers: handovers.toList(),
     busRentsTotal: _busRents().values.fold(0.0, (sum, r) => sum + r),
+    totalRevenueBilled:
+        _billedRevenues().values.fold(0.0, (sum, r) => sum + r),
   );
 
   /// Read-only summaries for every bus id in [busIds], in the order given.
@@ -298,6 +319,7 @@ class MoneyController extends GetxController {
     final exps = expenses.toList();
     final hands = handovers.toList();
     final rents = _busRents();
+    final billed = _billedRevenues();
     return [
       for (final id in busIds)
         BusMoneySummary.compute(
@@ -306,7 +328,46 @@ class MoneyController extends GetxController {
           expenses: exps,
           handovers: hands,
           busRent: rents[id] ?? 0,
+          revenueBilled: billed[id] ?? 0,
         ),
+    ];
+  }
+
+  /// Per-handler money rollups for the loaded tour. A handler runs whole buses
+  /// ([Bus.handlerPassengerId]), so each handler's P&L is the sum of their
+  /// buses' [BusMoneySummary]s. Buses with no handler fall into a single
+  /// null-keyed bucket (kept LAST) so unassigned buses are never dropped.
+  /// First-seen handler order is preserved for a stable UI.
+  List<HandlerMoneySummary> handlerSummaries() {
+    final tourId = _loadedTourId;
+    if (tourId == null || !Get.isRegistered<TourController>()) {
+      return const [];
+    }
+    final tour = Get.find<TourController>().getTour(tourId);
+    if (tour == null) return const [];
+
+    final handlerByBus = {
+      for (final b in tour.buses) b.id: b.handlerPassengerId,
+    };
+    final summaries = summariesForBuses(tour.buses.map((b) => b.id));
+
+    final order = <String?>[];
+    final grouped = <String?, List<BusMoneySummary>>{};
+    for (final s in summaries) {
+      final h = handlerByBus[s.busId];
+      if (!grouped.containsKey(h)) {
+        grouped[h] = [];
+        order.add(h);
+      }
+      grouped[h]!.add(s);
+    }
+    // Non-null handlers first (in first-seen order), unassigned bucket last.
+    final ordered = [
+      ...order.where((h) => h != null),
+      ...order.where((h) => h == null),
+    ];
+    return [
+      for (final h in ordered) HandlerMoneySummary.fromBuses(h, grouped[h]!),
     ];
   }
 

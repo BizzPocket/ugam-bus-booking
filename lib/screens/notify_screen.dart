@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../components/bus_message_composer_field.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
@@ -99,21 +100,16 @@ class _NotifyScreenState extends State<NotifyScreen> {
       handlerPhone: tour.handler?.phone,
     );
 
-    // The handler coordinates the whole bus, so they get the full chart of
-    // everyone with NO highlight. Every other passenger gets their own bus with
-    // their seats highlighted.
-    final isHandler = tour.handlerId != null && p.id == tour.handlerId;
-
+    // Every recipient — handler included — gets THEIR OWN bus chart with their
+    // seats highlighted.
     List<Uint8List> images = const [];
     try {
       final footer = await ChartFooterStore.load(tour.id);
-      images = isHandler
-          ? await SeatChartPdf.buildTourChartImages(tour: tour, footer: footer)
-          : await SeatChartPdf.buildPassengerChartImages(
-              tour: tour,
-              passenger: p,
-              footer: footer,
-            );
+      images = await SeatChartPdf.buildPassengerChartImages(
+        tour: tour,
+        passenger: p,
+        footer: footer,
+      );
     } catch (_) {
       images = const [];
     }
@@ -195,14 +191,10 @@ class _NotifyScreenState extends State<NotifyScreen> {
           if (tour == null) {
             return Column(
               children: [
-                _TopBar(
-                  c: c,
-                  searchActive: false,
-                  onToggleSearch: () {},
-                  showSearch: false,
-                  onReset: null,
-                  showReset: false,
-                  onBack: _scoped ? () => Get.back() : null,
+                UgamAppBar(
+                  title: tr('notify.title'),
+                  showBack: Navigator.canPop(context),
+                  onBack: () => Navigator.of(context).maybePop(),
                 ),
                 Expanded(
                   child: UgamEmpty(
@@ -226,83 +218,103 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
           final busInfo = _resolveBusInfo(tour);
 
-          return Stack(
+          return Column(
             children: [
-              Column(
-                children: [
-                  _TopBar(
-                    c: c,
-                    searchActive: _searchVisible,
-                    onToggleSearch: _toggleSearch,
-                    showSearch: isLocked,
-                    onReset: _resetSent,
-                    showReset: isLocked && _sentIds.isNotEmpty,
-                    onBack: _scoped ? () => Get.back() : null,
-                  ),
+              UgamAppBar(
+                title: tr('notify.title'),
+                showBack: Navigator.canPop(context),
+                onBack: () => Navigator.of(context).maybePop(),
+                actions: [
+                  if (isLocked && _sentIds.isNotEmpty)
+                    UgamAppBarAction(
+                      icon: Icons.refresh_rounded,
+                      onTap: _resetSent,
+                      tooltip: tr('notify.reset_sent'),
+                    ),
                   if (isLocked)
-                    AnimatedSize(
-                      duration: UgamMotion.tab,
-                      curve: UgamMotion.easeOut,
-                      child: _searchVisible
-                          ? _SearchField(
-                              c: c,
-                              controller: _searchCtrl,
-                              onChanged: (v) =>
-                                  setState(() => _query = v.trim()),
-                            )
-                          : const SizedBox.shrink(),
+                    UgamAppBarAction(
+                      icon: _searchVisible
+                          ? Icons.close_rounded
+                          : Icons.search_rounded,
+                      onTap: _toggleSearch,
+                      active: _searchVisible,
                     ),
-                  if (!_scoped && activeTours.length > 1)
-                    _TourSelector(
-                      c: c,
-                      tours: activeTours,
-                      selectedId: tour.id,
-                      onSelect: (id) => setState(() {
-                        _selectedTourId = id;
-                        _sentIds.clear();
-                        _filter = _NotifyFilter.all;
-                      }),
-                    ),
-                  const SizedBox(height: UgamSpacing.md),
-                  Expanded(
-                    child: isLocked
-                        ? _buildTracker(
-                            tour: tour,
-                            assigned: assigned,
-                            sentCount: sentCount,
-                            pendingCount: pendingCount,
-                            busInfo: busInfo,
-                            c: c,
-                          )
-                        : _buildLockGate(tour: tour, c: c),
-                  ),
                 ],
               ),
-              if (isLocked && pendingCount > 0)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: UgamStickyCTA(
-                    child: UgamCTA(
-                      label: tr('notify.send_all_pending'),
-                      leadingIcon: Icons.chat_rounded,
-                      trailingValue: '$pendingCount',
-                      onPressed: () => _sendSeatAllocations(tour),
-                    ),
-                  ),
+              if (isLocked)
+                AnimatedSize(
+                  duration: UgamMotion.tab,
+                  curve: UgamMotion.easeOut,
+                  child: _searchVisible
+                      ? _SearchField(
+                          c: c,
+                          controller: _searchCtrl,
+                          onChanged: (v) => setState(() => _query = v.trim()),
+                        )
+                      : const SizedBox.shrink(),
                 ),
-              if (!isLocked)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: _LockStickyCTA(tour: tour, c: c, onLock: _lockTour),
+              if (!_scoped && activeTours.length > 1)
+                _TourSelector(
+                  c: c,
+                  tours: activeTours,
+                  selectedId: tour.id,
+                  onSelect: (id) => setState(() {
+                    _selectedTourId = id;
+                    _sentIds.clear();
+                    _filter = _NotifyFilter.all;
+                  }),
                 ),
+              const SizedBox(height: UgamSpacing.md),
+              Expanded(
+                child: isLocked
+                    ? _buildTracker(
+                        tour: tour,
+                        assigned: assigned,
+                        sentCount: sentCount,
+                        pendingCount: pendingCount,
+                        busInfo: busInfo,
+                        c: c,
+                      )
+                    : _buildLockGate(tour: tour, c: c),
+              ),
             ],
           );
         }),
       ),
+      // CTA lives in the bottomNavigationBar slot (not a Stack overlay) so it
+      // behaves like every other action screen and respects the keyboard inset.
+      // Its own Obx mirrors the body's derived state.
+      bottomNavigationBar: Obx(() {
+        final activeTours =
+            tourCtrl.tours
+                .where((t) => t.status != TourStatus.completed)
+                .toList()
+              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        final selected = _selectedTourId != null
+            ? activeTours.firstWhereOrNull((t) => t.id == _selectedTourId)
+            : null;
+        final Tour? tour =
+            selected ?? (activeTours.isEmpty ? null : activeTours.first);
+        if (tour == null) return const SizedBox.shrink();
+
+        final isLocked = tour.status == TourStatus.locked;
+        if (isLocked) {
+          final pendingCount = tour.passengers
+              .where((p) => p.assignedSeats.isNotEmpty)
+              .where((p) => !_sentIds.contains(p.id))
+              .length;
+          if (pendingCount <= 0) return const SizedBox.shrink();
+          return UgamStickyCTA(
+            child: UgamCTA(
+              label: tr('notify.send_all_pending'),
+              leadingIcon: Icons.chat_rounded,
+              trailingValue: '$pendingCount',
+              onPressed: () => _sendSeatAllocations(tour),
+            ),
+          );
+        }
+        return _LockStickyCTA(tour: tour, c: c, onLock: _lockTour);
+      }),
     );
   }
 
@@ -345,11 +357,11 @@ class _NotifyScreenState extends State<NotifyScreen> {
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
       ),
-      padding: EdgeInsets.fromLTRB(
+      padding: const EdgeInsets.fromLTRB(
         UgamSpacing.gutter,
         0,
         UgamSpacing.gutter,
-        pendingCount > 0 ? 140 : 24,
+        24,
       ),
       children: [
         _HeroSummaryCard(tour: tour, busInfo: busInfo, c: c),
@@ -392,7 +404,9 @@ class _NotifyScreenState extends State<NotifyScreen> {
               onSend: () => _sendOne(
                 filtered[i],
                 tour: tour,
-                busNo: busInfo.busNo,
+                // Customer-facing caption: bus NAME only (no plate). The agent's
+                // own panel still shows busInfo.busNo (name · reg).
+                busNo: tour.buses.map((b) => b.customerLabel).join(', '),
                 driverName: busInfo.driverName,
                 driverPhone: busInfo.driverPhone,
               ),
@@ -418,7 +432,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
         UgamSpacing.gutter,
         0,
         UgamSpacing.gutter,
-        160,
+        24,
       ),
       children: [
         _HeroSummaryCard(tour: tour, busInfo: _resolveBusInfo(tour), c: c),
@@ -519,10 +533,8 @@ class _NotifyScreenState extends State<NotifyScreen> {
     if (!confirmed) return;
     await Get.find<TourController>().lockTour(tour.id);
     if (!mounted) return;
-    AppSnackBar.success(
-      tr('notify.locked_snack_body'),
-      title: tr('notify.locked_snack_title'),
-    );
+    // No green "locked" toast here — the locked status card + the sticky CTA
+    // already make the new state obvious, so the toast was redundant noise.
 
     // Phase 8 — push each seated passenger their seat allocation via the Cloud
     // API (seat_allotment template).
@@ -540,9 +552,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
     debugPrint('[WA] _sendSeatAllocations: tour=${t.id} '
         'passengers=${t.passengers.length} seated=${seated.length}');
     if (seated.isEmpty) {
-      AppSnackBar.error(
-        'No seated passengers to notify — assignedSeats is empty on this tour.',
-      );
+      AppSnackBar.error(tr('notify.no_seated_passengers'));
       return;
     }
 
@@ -589,7 +599,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
     } catch (e) {
       if (mounted && dialogOpen) Navigator.of(context, rootNavigator: true).pop();
       progress.dispose();
-      if (mounted) AppSnackBar.error('${tr('notify.alloc_failed_body')}\n$e');
+      if (mounted) AppSnackBar.error(tr('notify.alloc_failed_body'));
       return;
     }
     if (mounted && dialogOpen) Navigator.of(context, rootNavigator: true).pop();
@@ -711,7 +721,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
       );
     }
     return _BusInfo(
-      busNo: tour.buses.map((b) => b.busNumber).join(', '),
+      busNo: tour.buses.map((b) => b.displayLabel).join(', '),
       driverName: tour.buses.map((b) => b.driverName).join(', '),
       driverPhone: tour.buses.first.driverPhone,
     );
@@ -729,97 +739,7 @@ class _BusInfo {
   });
 }
 
-// ─── Top bar ──────────────────────────────────────────────────────────
-
-class _TopBar extends StatelessWidget {
-  final UgamColorSet c;
-  final bool searchActive;
-  final VoidCallback onToggleSearch;
-  final bool showSearch;
-  final VoidCallback? onReset;
-  final bool showReset;
-
-  /// Shown as a leading back button when Notify is a pushed, tour-scoped
-  /// screen. Null in the legacy tab mode (no back affordance).
-  final VoidCallback? onBack;
-
-  const _TopBar({
-    required this.c,
-    required this.searchActive,
-    required this.onToggleSearch,
-    required this.showSearch,
-    required this.onReset,
-    required this.showReset,
-    this.onBack,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          if (onBack != null) ...[
-            _CircleBtn(icon: Icons.arrow_back_rounded, c: c, onTap: onBack!),
-            const SizedBox(width: UgamSpacing.sm),
-          ],
-          Expanded(
-            child: Text(
-              tr('notify.title'),
-              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
-            ),
-          ),
-          if (showReset)
-            _CircleBtn(icon: Icons.refresh_rounded, c: c, onTap: onReset!),
-          if (showReset && showSearch) const SizedBox(width: UgamSpacing.sm),
-          if (showSearch)
-            _CircleBtn(
-              icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
-              c: c,
-              onTap: onToggleSearch,
-              active: searchActive,
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CircleBtn extends StatelessWidget {
-  final IconData icon;
-  final UgamColorSet c;
-  final VoidCallback onTap;
-  final bool active;
-  const _CircleBtn({
-    required this.icon,
-    required this.c,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: active ? c.accentFill : c.cardElev,
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Icon(icon, size: 19, color: active ? c.accent : c.ink),
-      ),
-    );
-  }
-}
+// ─── Search field ─────────────────────────────────────────────────────
 
 class _SearchField extends StatelessWidget {
   final UgamColorSet c;
@@ -895,44 +815,61 @@ class _TourSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 38,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-        itemCount: tours.length,
-        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
-        itemBuilder: (_, i) {
-          final t = tours[i];
-          final isActive = t.id == selectedId;
-          return GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onSelect(t.id);
-            },
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: UgamMotion.tab,
-              curve: UgamMotion.easeOut,
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.lg,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: isActive ? c.accent : c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                t.title,
-                style: UgamText.bodyStrong.copyWith(
-                  color: isActive ? c.onAccent : c.ink2,
-                  fontSize: 12.5,
+    final selectedIndex = tours.indexWhere((t) => t.id == selectedId);
+    final currentIndex = selectedIndex < 0 ? 0 : selectedIndex;
+
+    // UgamTabPills is a fixed segmented control built for 2–4 segments. When
+    // there are more active tours than that, fall back to a horizontally
+    // scrollable pill row so we never trip the component's assert.
+    if (tours.length > 4) {
+      return SizedBox(
+        height: 38,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+          itemCount: tours.length,
+          separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
+          itemBuilder: (_, i) {
+            final t = tours[i];
+            final isActive = t.id == selectedId;
+            return GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onSelect(t.id);
+              },
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedContainer(
+                duration: UgamMotion.tab,
+                curve: UgamMotion.easeOut,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: UgamSpacing.lg,
+                  vertical: UgamSpacing.sm,
+                ),
+                decoration: BoxDecoration(
+                  color: isActive ? c.card : c.cardElev,
+                  borderRadius: BorderRadius.circular(UgamRadius.chip),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  t.title,
+                  style: UgamText.bodyStrong.copyWith(
+                    color: isActive ? c.ink : c.ink2,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+      child: UgamTabPills(
+        currentIndex: currentIndex,
+        onChanged: (i) => onSelect(tours[i].id),
+        items: [for (final t in tours) UgamTabItem(label: t.title)],
       ),
     );
   }
@@ -951,35 +888,14 @@ class _HeroSummaryCard extends StatelessWidget {
     required this.c,
   });
 
-  String _formatDate(DateTime d) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    String s = '${d.day} ${months[d.month - 1]}';
-    return s;
-  }
-
-  String _formatTime(DateTime d) {
-    final h = d.hour.toString().padLeft(2, '0');
-    final m = d.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
-
   @override
   Widget build(BuildContext context) {
     final isLocked = tour.status == TourStatus.locked;
     final handler = tour.handler;
+    final locale = context.locale.toString();
+    final departure = DateFormat('d MMM', locale).format(tour.departureDate);
+    final departureTime =
+        DateFormat('HH:mm', locale).format(tour.departureDate);
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
@@ -1015,8 +931,7 @@ class _HeroSummaryCard extends StatelessWidget {
                   c: c,
                   icon: Icons.event_rounded,
                   label: tr('notify.info_departure'),
-                  value:
-                      '${_formatDate(tour.departureDate)} · ${_formatTime(tour.departureDate)}',
+                  value: '$departure · $departureTime',
                 ),
               ),
               const SizedBox(width: UgamSpacing.sm),
@@ -1488,7 +1403,7 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
     super.dispose();
   }
 
-  String _busLabel(Bus b) => b.busNumber.isNotEmpty ? b.busNumber : b.name;
+  String _busLabel(Bus b) => b.displayLabel;
 
   Future<void> _send() async {
     if (_sending) return;
@@ -1588,14 +1503,7 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
             ),
           ),
           const SizedBox(height: UgamSpacing.lg),
-          UgamInput(
-            label: tr('bus_message.field_message'),
-            controller: _textCtrl,
-            hint: tr('bus_message.field_message_hint'),
-            maxLines: 5,
-            minLines: 3,
-            autofocus: true,
-          ),
+          BusMessageComposerField(controller: _textCtrl),
           const SizedBox(height: UgamSpacing.lg),
           UgamCTA(
             label: _sending

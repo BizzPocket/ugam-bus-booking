@@ -80,6 +80,12 @@ class Tour {
   String get route => '$fromCity → $toCity';
   int get passengerCount => passengers.length;
 
+  /// Whether this tour still accepts a NEW booking request / passenger.
+  /// Delegates to [TourStatus.acceptsBookings] so every "book"/"add request"
+  /// surface (customer + admin/handler) gates on one shared rule. Closed once
+  /// the tour is locked or completed.
+  bool get acceptsBookings => status.acceptsBookings;
+
   int get totalSeatsRequested =>
       passengers.fold(0, (sum, p) => sum + p.totalSeatsRequested);
 
@@ -87,6 +93,57 @@ class Tour {
       passengers.fold(0, (sum, p) => sum + p.totalSeatsAssigned);
 
   int get totalBusSeats => buses.fold(0, (sum, b) => sum + b.totalSeats);
+
+  /// Leg-aware berths occupied per bus — the BUSIER leg's load, `max(GO, RET)`.
+  ///
+  /// A physical berth offers ONE outbound slot and ONE return slot, so two
+  /// opposite one-way riders share a single seat (GO on one, RET on the other)
+  /// and produce TWO [SeatAssignment] entries on ONE berth. Counting raw
+  /// entries double-counts that berth — pushing a bus PAST capacity ("38/37")
+  /// and reading "full" while a seat sits physically empty. The honest load is
+  /// the busier leg, which never exceeds capacity and never reads full while a
+  /// berth is free. Distinct from [totalSeatsAssigned] (raw entries), which
+  /// stays the unit for "seats sold" — a leg-shared berth is still two fares.
+  Map<String, int> occupiedBerthsByBus() {
+    final go = <String, int>{};
+    final ret = <String, int>{};
+    final busIds = <String>{};
+    for (final p in passengers) {
+      final usesGo = p.tripType.usesOutbound;
+      final usesRet = p.tripType.usesReturn;
+      for (final a in p.assignedSeats) {
+        busIds.add(a.busId);
+        if (usesGo) go[a.busId] = (go[a.busId] ?? 0) + 1;
+        if (usesRet) ret[a.busId] = (ret[a.busId] ?? 0) + 1;
+      }
+    }
+    return {
+      for (final id in busIds) id: math.max(go[id] ?? 0, ret[id] ?? 0),
+    };
+  }
+
+  /// Leg-aware berths occupied on one bus — `max(GO, RET)`. See
+  /// [occupiedBerthsByBus].
+  int occupiedBerthsFor(String busId) {
+    var go = 0;
+    var ret = 0;
+    for (final p in passengers) {
+      var n = 0;
+      for (final a in p.assignedSeats) {
+        if (a.busId == busId) n++;
+      }
+      if (n == 0) continue;
+      if (p.tripType.usesOutbound) go += n;
+      if (p.tripType.usesReturn) ret += n;
+    }
+    return math.max(go, ret);
+  }
+
+  /// Leg-aware berths occupied across every bus on this tour — the sum of each
+  /// bus's busier leg. The honest "seats placed" total, free of the leg-share
+  /// double-count that lets [totalSeatsAssigned] exceed [totalBusSeats].
+  int get occupiedBerths =>
+      occupiedBerthsByBus().values.fold(0, (sum, n) => sum + n);
 
   /// Seat capacity of the single LARGEST bus on this tour, in berths. A
   /// cross-booking group must ride ONE bus, so this is the largest group that

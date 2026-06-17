@@ -41,6 +41,24 @@ enum SeatDropAction {
   /// Move BOTH occupants of a shared double together onto a fully-free double.
   moveBoth,
 
+  /// Swap the FULL contents of a paired Double Sofa with the full contents of
+  /// another OCCUPIED double — two couples (or a couple and a solo whole-double
+  /// holder) exchange sofas. Both seats are cap-2, so the exchange is always
+  /// capacity- and leg-safe in either direction.
+  swapPair,
+
+  /// A paired Double Sofa dropped onto a SINGLE seat (free or single-occupant).
+  /// The agent chooses WHICH sharer peels onto the single; the other keeps the
+  /// double. Drives the screen's "which passenger moves?" picker.
+  splitPairChoice,
+
+  /// A paired Double Sofa MERGED into an already-occupied double whose existing
+  /// occupants ride DISJOINT legs — e.g. two GO-only riders sit there and the
+  /// incoming pair is two RET-only riders, so all four share one double across
+  /// the trip (2 berths × 2 legs = 4 berth-legs). Both source sharers move onto
+  /// the target double; the target's occupants stay put.
+  fillPairInto,
+
   /// Drop is illegal — see [SeatDropDecision.block] for why.
   blocked,
 }
@@ -65,7 +83,9 @@ enum SeatDropBlock {
   /// Target is already shared by two people — a one-finger swap is ambiguous.
   sharedTargetAmbiguous,
 
-  /// A shared source can only land on a fully-FREE double.
+  /// A paired source (or a 2-occupant non-double) has no legal home here — e.g.
+  /// a pair dropped on a single already shared by two, or a leg-reused single
+  /// lifted as a unit.
   sharedNeedsFreeDouble,
 
   /// Per-leg capacity leaves no room to share/move here.
@@ -107,6 +127,12 @@ class SeatDropDecision {
       const SeatDropDecision._(SeatDropAction.fill, berths: 1);
   factory SeatDropDecision.moveBoth() =>
       const SeatDropDecision._(SeatDropAction.moveBoth);
+  factory SeatDropDecision.swapPair() =>
+      const SeatDropDecision._(SeatDropAction.swapPair);
+  factory SeatDropDecision.splitPairChoice() =>
+      const SeatDropDecision._(SeatDropAction.splitPairChoice);
+  factory SeatDropDecision.fillPairInto() =>
+      const SeatDropDecision._(SeatDropAction.fillPairInto);
   factory SeatDropDecision.blocked(SeatDropBlock reason) =>
       SeatDropDecision._(SeatDropAction.blocked, block: reason);
 
@@ -124,14 +150,75 @@ typedef DropCell = ({
 /// Whether a mover's 2-berth load on [fromCell] is a SUBSTITUTE double (two
 /// single requests parked on a double because singles ran out) rather than a
 /// genuine requested double. Only substitutes may be split onto singles.
+///
+/// Decided per-CELL conservatively: a passenger who requested ANY double keeps
+/// ALL their whole doubles intact, so a genuine double is never split even when
+/// they also happen to hold a second (surplus) one. Only a passenger who
+/// requested NO double at all — yet sits on a whole double — is parking singles
+/// there and may peel a berth off.
 bool _moverIsSubstituteDouble(SeatOccupant mover) =>
-    mover.berthsHere >= 2 &&
-    mover.wholeDoublesHeld > mover.requestedDoubleQty;
+    mover.berthsHere >= 2 && mover.requestedDoubleQty == 0;
 
 int _cap(SeatType? type) => type == SeatType.doubleSofa ? 2 : 1;
 
+/// Whether an incoming [pair] (two 1-berth sharers) can MERGE onto a Double Sofa
+/// already holding [existing] occupants without exceeding the cap-2 limit on
+/// EITHER leg — i.e. the pair rides legs the existing occupants leave free. The
+/// canonical fit is two GO-only riders already seated + a two-RET-only pair
+/// incoming: GO 2/2, RET 2/2, all four share one double across the trip.
+bool _pairFitsLegDisjoint(
+  List<SeatOccupant> pair,
+  List<SeatOccupant> existing,
+) {
+  int goOf(List<SeatOccupant> os) =>
+      os.where((o) => o.trip.usesOutbound).fold(0, (s, o) => s + o.berthsHere);
+  int retOf(List<SeatOccupant> os) =>
+      os.where((o) => o.trip.usesReturn).fold(0, (s, o) => s + o.berthsHere);
+  return goOf(existing) + goOf(pair) <= 2 && retOf(existing) + retOf(pair) <= 2;
+}
+
+/// Whether swapping the FULL contents of two seats is capacity-safe in BOTH
+/// directions: each seat must absorb the OTHER's occupants without exceeding its
+/// cap on either leg. Generalises the always-safe double↔double pair swap to
+/// mixed sizes — e.g. relocating a single-sofa leg-share onto an occupied single
+/// by exchanging occupants, which is leg-safe because each cap-1 seat ends up
+/// with at most one rider per leg.
+bool _contentsSwapLegSafe(
+  DropCell from,
+  DropCell target,
+  List<SeatOccupant> fromOccupants,
+  List<SeatOccupant> targetOccupants,
+) {
+  bool fits(List<SeatOccupant> incoming, int cap) {
+    final go = incoming
+        .where((o) => o.trip.usesOutbound)
+        .fold(0, (s, o) => s + o.berthsHere);
+    final ret = incoming
+        .where((o) => o.trip.usesReturn)
+        .fold(0, (s, o) => s + o.berthsHere);
+    return go <= cap && ret <= cap;
+  }
+
+  return fits(fromOccupants, _cap(target.seatType)) &&
+      fits(targetOccupants, _cap(from.seatType));
+}
+
 bool _isSleeper(SeatType? t) =>
     t == SeatType.singleSofa || t == SeatType.doubleSofa;
+
+/// True when [occupants] is exactly a GO-only (outbound-only) + RET-only
+/// (return-only) pair reusing ONE physical berth across disjoint legs — the
+/// leg-share on a single sofa. Each holds a single berth on opposite legs, so
+/// the pair can be lifted and relocated TOGETHER onto a free seat without ever
+/// over-booking a leg. Used by both the drag-pickability gate and the engine so
+/// the same definition drives "can lift" and "what the drop does".
+bool isLegDisjointPair(List<SeatOccupant> occupants) {
+  if (occupants.length != 2) return false;
+  final a = occupants[0].trip;
+  final b = occupants[1].trip;
+  return (a == TripType.outboundOnly && b == TripType.returnOnly) ||
+      (a == TripType.returnOnly && b == TripType.outboundOnly);
+}
 
 /// Decide what dropping the contents of [fromCell] onto [targetCell] should do.
 ///
@@ -152,6 +239,9 @@ SeatDropDecision decideSeatDrop({
   if (fromOccupants.isEmpty) {
     return SeatDropDecision.blocked(SeatDropBlock.neutral);
   }
+  // A reserved/held SOURCE seat can't be dragged off — the hold guards the
+  // origin as well as the destination, so its occupant is never silently moved.
+  if (fromCell.reserved) return SeatDropDecision.blocked(SeatDropBlock.held);
 
   // Seat-class gate: a sleeper berth and a seater chair never interchange.
   final srcSleeper = _isSleeper(fromCell.seatType);
@@ -162,19 +252,69 @@ SeatDropDecision decideSeatDrop({
     return SeatDropDecision.blocked(SeatDropBlock.classMismatch);
   }
 
+  // A reserved/held TARGET is off-limits no matter what sits on it — free,
+  // occupied, single, or shared. Hoisted here so every downstream branch
+  // (move / swap / fill / moveBoth / swapPair / splitPairChoice) is guarded
+  // uniformly; the per-branch reserved checks below are now redundant.
+  if (targetCell.reserved) return SeatDropDecision.blocked(SeatDropBlock.held);
+
   final tgtCap = _cap(targetCell.seatType);
 
-  // ── SHARED SOURCE: two people on one sofa move together ──────────────────
+  // ── SHARED SOURCE: a Double Sofa held by TWO occupants (a pair) ───────────
   if (fromOccupants.length >= 2) {
-    // The only legal home for a pair is a fully-free double with room on every
-    // leg they travel. (They already coexisted on a cap-2 source, so an empty
-    // cap-2 target always has room — the leg check is a belt-and-braces guard.)
-    if (targetCell.seatType != SeatType.doubleSofa ||
-        targetOccupants.isNotEmpty) {
+    // A cap-1 single reused across disjoint legs (one GO-only + one RET-only)
+    // also surfaces two occupants. It is NOT a real double, so it can't fill /
+    // swap / merge — but it CAN be lifted and relocated as a UNIT onto a fully
+    // FREE compatible seat, carrying the whole GO+RET pairing across intact.
+    // (The class gate above already rejected a seater target.)
+    if (fromCell.seatType != SeatType.doubleSofa) {
+      // Only a clean GO+RET leg-share lifts as a unit off a non-double seat.
+      if (!isLegDisjointPair(fromOccupants)) {
+        return SeatDropDecision.blocked(SeatDropBlock.sharedNeedsFreeDouble);
+      }
+      // Free target → relocate the whole GO+RET pairing intact.
+      if (targetOccupants.isEmpty) return SeatDropDecision.moveBoth();
+      // Occupied DOUBLE whose free legs still fit the pair → MERGE all of them
+      // onto it (e.g. dropping onto the empty half of a half-filled double), the
+      // same leg-disjoint share a double-sofa pair already gets.
+      if (targetCell.seatType == SeatType.doubleSofa &&
+          _pairFitsLegDisjoint(fromOccupants, targetOccupants)) {
+        return SeatDropDecision.fillPairInto();
+      }
+      // Otherwise exchange the full contents when the swap is leg-safe in BOTH
+      // directions — relocating the leg-share onto an occupied single, or onto a
+      // double it can't merge into. This gives a single-sofa leg-share the same
+      // "move/swap onto an occupied seat" reach as a double-sofa pair, so it is
+      // never stranded just because no fully-free seat is left.
+      if (_contentsSwapLegSafe(
+          fromCell, targetCell, fromOccupants, targetOccupants)) {
+        return SeatDropDecision.swapPair();
+      }
       return SeatDropDecision.blocked(SeatDropBlock.sharedNeedsFreeDouble);
     }
-    if (targetCell.reserved) return SeatDropDecision.blocked(SeatDropBlock.held);
-    return SeatDropDecision.moveBoth();
+
+    if (targetCell.seatType == SeatType.doubleSofa) {
+      // Free double → move the whole pair across intact.
+      if (targetOccupants.isEmpty) return SeatDropDecision.moveBoth();
+      // Occupied double → if the incoming pair rides legs that are still FREE on
+      // the target (e.g. two GO-only sit there and the pair is two RET-only),
+      // MERGE all four onto the one double across the trip. Otherwise exchange
+      // the full contents of the two sofas (the always-safe pair-for-pair swap).
+      if (_pairFitsLegDisjoint(fromOccupants, targetOccupants)) {
+        return SeatDropDecision.fillPairInto();
+      }
+      return SeatDropDecision.swapPair();
+    }
+
+    // Single target → the pair can't both sit here, but the agent may want to
+    // peel ONE sharer onto it (the other keeps the double). Offer the choice
+    // when the single holds at most one person; two occupants is too ambiguous.
+    if (targetCell.seatType == SeatType.singleSofa &&
+        targetOccupants.length < 2) {
+      return SeatDropDecision.splitPairChoice();
+    }
+
+    return SeatDropDecision.blocked(SeatDropBlock.sharedNeedsFreeDouble);
   }
 
   // ── SINGLE SOURCE OCCUPANT ───────────────────────────────────────────────
@@ -183,15 +323,32 @@ SeatDropDecision decideSeatDrop({
 
   // Free target.
   if (targetOccupants.isEmpty) {
-    if (targetCell.reserved) return SeatDropDecision.blocked(SeatDropBlock.held);
     if (moverBerths <= tgtCap) return SeatDropDecision.move(moverBerths);
     // moverBerths (2) > tgtCap (1): a whole-double dropped onto a single.
     if (_moverIsSubstituteDouble(mover)) return SeatDropDecision.splitToSingle();
     return SeatDropDecision.blocked(SeatDropBlock.tooSmall);
   }
 
-  // Target shared by two — ambiguous to swap into.
+  // Target shared by two. A 1-berth mover may STILL fit if its leg is free —
+  // e.g. dropping a GO-only rider onto a double whose two occupants are both
+  // RET-only (the "4 berth-legs into one double" build step). Run the leg-aware
+  // capacity over ALL target occupants before falling back to the ambiguity /
+  // leg-room blocks. A multi-berth (whole-double) mover never shares, so it is
+  // still ambiguous here.
   if (targetOccupants.length >= 2) {
+    if (moverBerths == 1) {
+      final room = seatHasLegRoom(
+        activeTrip: mover.trip,
+        need: 1,
+        cap: tgtCap,
+        occupants: [
+          for (final o in targetOccupants) (trip: o.trip, berths: o.berthsHere),
+        ],
+      );
+      if (room) return SeatDropDecision.fill();
+      // A pure leg conflict — the mover's leg is full, not a size mismatch.
+      return SeatDropDecision.blocked(SeatDropBlock.noLegRoom);
+    }
     return SeatDropDecision.blocked(SeatDropBlock.sharedTargetAmbiguous);
   }
 
@@ -216,6 +373,16 @@ SeatDropDecision decideSeatDrop({
       occupants: [(trip: occ.trip, berths: occBerthsHere)],
     );
     if (room) return SeatDropDecision.fill();
+    // No leg room on a cap-2 target where a fill was the intent (the free half
+    // of a half-filled double is blocked by the mover's leg being full): report
+    // the leg-specific reason rather than the tooSmall the swap fallback would
+    // give. A cap-1 target was never shareable, so a full single legitimately
+    // falls through to a swap below; and a genuine size mismatch (occupant holds
+    // more berths than the source cell can take) likewise routes to tooSmall.
+    final srcCapForFill = _cap(fromCell.seatType);
+    if (tgtCap >= 2 && occBerthsHere <= srcCapForFill) {
+      return SeatDropDecision.blocked(SeatDropBlock.noLegRoom);
+    }
   }
 
   // SWAP — only when each side's berth load fits the other's cell, so we never

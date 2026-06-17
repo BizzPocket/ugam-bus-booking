@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,19 +19,21 @@ import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/tour_capacity.dart';
 import '../widgets/booking_capture_form.dart';
 import '../widgets/edit_request_sheet.dart';
 import '../widgets/group_picker.dart';
+import 'add_bus_screen.dart';
 
 /// Requests tab — passenger management workspace.
 ///
 /// Layout top → bottom:
-///   [Title + circle search + circle "+"]
+///   [Title + circle search + groups + circle "+"]
 ///   [Collapsible search bar]
 ///   [Tour selector pills (active solid accent)]
-///   [Stats strip: New / Waitlist / Assigned counts]
-///   [Filter pills mirror the stats]
-///   [Passenger list (dense _RequestCard with avatar / chips / actions)]
+///   [Collapsible capacity banner (_CapacityBanner)]
+///   [Four status tabs (UgamTabPills): New / Waitlist / Confirmed / Assigned]
+///   [Passenger list — dense _RequestCard: name + phone/time + one chip Wrap + action row]
 ///   [Sticky bottom CTA → seat assignment]
 ///
 /// Selection mode is entered via long-press. While active the bottom CTA
@@ -48,21 +52,24 @@ class RequestsScreen extends StatefulWidget {
 
 enum _RequestFilter { newRequests, waitlist, confirmed, assigned }
 
-enum _RequestSort { newest, name, mostSeats }
-
 class _RequestsScreenState extends State<RequestsScreen> {
   final tourCtrl = Get.find<TourController>();
   final _searchCtrl = TextEditingController();
 
   int _selectedTourIndex = 0;
   _RequestFilter _filter = _RequestFilter.newRequests;
-  _RequestSort _sort = _RequestSort.newest;
   bool _searchVisible = false;
   String _query = '';
 
   // ── Bulk selection state ─────────────────────────────────────
   bool _selectionMode = false;
   final Set<String> _selectedIds = <String>{};
+
+  // Bottom list clearance so the last card never hides under the floating
+  // bars. Token-derived (8pt grid) — selection bar vs sticky CTA.
+  static const double _listBottomPadSelection =
+      UgamSpacing.huge3 + UgamSpacing.huge2 + UgamSpacing.lg; // 56+40+16 = 112
+  static const double _listBottomPadNormal = UgamSpacing.huge2 * 4; // 40*4 = 160
 
   @override
   void initState() {
@@ -94,37 +101,18 @@ class _RequestsScreenState extends State<RequestsScreen> {
   }
 
   void _openAddRequest(Tour tour) {
+    // Once the tour is locked the allocation is final — admins/handlers can no
+    // longer add a new request. Tell them why rather than opening a form whose
+    // save the controller would silently refuse.
+    if (!tour.acceptsBookings) {
+      AppSnackBar.error(tr('errors.bookings_closed'));
+      return;
+    }
     UgamSheet.show(
       context,
       title: tr('requests.sheet.title'),
       builder: (_) => _AddRequestForm(tour: tour),
     );
-  }
-
-  /// Empty the ENTIRE tour: unassign every seat on every bus in one shot.
-  /// Passengers keep their requests and drop straight back into New, so the
-  /// agent can re-run auto-fill from a clean slate. Destructive → confirm.
-  Future<void> _confirmEmptyBus(Tour tour) async {
-    final assigned = tour.totalSeatsAssigned;
-    if (assigned == 0) {
-      AppSnackBar.info(tr('requests.empty_bus.none'));
-      return;
-    }
-    final ok = await UgamDialog.confirm(
-      context,
-      title: tr('requests.empty_bus.title'),
-      message: tr('requests.empty_bus.body', namedArgs: {'count': '$assigned'}),
-      cancelLabel: tr('app.action.cancel'),
-      confirmLabel: tr('requests.empty_bus.confirm'),
-      destructive: true,
-      confirmIcon: Icons.layers_clear_rounded,
-    );
-    if (!ok) return;
-    for (final bus in tour.buses) {
-      await tourCtrl.unassignBus(tour.id, bus.id);
-    }
-    if (!mounted) return;
-    AppSnackBar.success(tr('requests.empty_bus.done'));
   }
 
   void _exitSelection() {
@@ -167,22 +155,52 @@ class _RequestsScreenState extends State<RequestsScreen> {
   }
 
   /// Confirm every selected New/waitlisted request in one tap — mirrors the
-  /// per-card Confirm (which clears any waitlist flag), but skips the per-person
-  /// WhatsApp send so the bulk move stays fast. Already-assigned passengers are
-  /// ignored (they're past the confirm stage).
+  /// per-card Confirm exactly: clears any waitlist flag AND auto-sends each
+  /// passenger the Cloud `seat_allocation` confirmation template (no manual
+  /// WhatsApp tap). Already-assigned passengers are ignored (they're past the
+  /// confirm stage).
   Future<void> _bulkConfirm(Tour tour) async {
     final ids = List<String>.from(_selectedIds);
-    var done = 0;
+    var confirmed = 0;
+    var sent = 0;
+    var failed = 0;
     for (final id in ids) {
       final p = tour.passengers.firstWhereOrNull((x) => x.id == id);
       if (p == null || p.isFullyAssigned) continue;
       await tourCtrl.setConfirmed(tour.id, id, true);
-      done++;
+      confirmed++;
+      // Same send as the per-card _confirm(): the dedicated confirm template,
+      // fired automatically so confirming IS messaging.
+      try {
+        final result = await WhatsAppOutbound().sendConfirmed(
+          tour: tour,
+          passenger: p,
+        );
+        if (result.anySent) {
+          sent++;
+        } else {
+          failed++;
+        }
+      } catch (_) {
+        failed++;
+      }
     }
     if (!mounted) return;
-    AppSnackBar.success(
-      tr('requests.bulk.confirmed', namedArgs: {'n': '$done'}),
-    );
+    if (failed == 0) {
+      AppSnackBar.success(
+        tr(
+          'requests.bulk.confirmed_sent',
+          namedArgs: {'n': '$confirmed', 'sent': '$sent'},
+        ),
+      );
+    } else {
+      AppSnackBar.warning(
+        tr(
+          'requests.bulk.confirmed_sent_partial',
+          namedArgs: {'n': '$confirmed', 'sent': '$sent', 'failed': '$failed'},
+        ),
+      );
+    }
     _exitSelection();
   }
 
@@ -248,38 +266,12 @@ class _RequestsScreenState extends State<RequestsScreen> {
     _exitSelection();
   }
 
-  /// Cycle the list sort order (Newest → Name → Most seats → …) and surface
-  /// the new mode as a toast so the change is legible even though the control
-  /// is a single compact button.
-  void _cycleSort() {
-    HapticFeedback.selectionClick();
-    setState(() {
-      _sort = _RequestSort
-          .values[(_sort.index + 1) % _RequestSort.values.length];
-    });
-  }
-
-  String _sortLabel(_RequestSort s) => switch (s) {
-    _RequestSort.newest => tr('requests.sort.newest'),
-    _RequestSort.name => tr('requests.sort.name'),
-    _RequestSort.mostSeats => tr('requests.sort.most_seats'),
-  };
-
-  List<Passenger> _applySort(List<Passenger> list) {
-    final out = List<Passenger>.from(list);
-    switch (_sort) {
-      case _RequestSort.newest:
-        out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      case _RequestSort.name:
-        out.sort(
-          (a, b) =>
-              a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
-        );
-      case _RequestSort.mostSeats:
-        out.sort(
-          (a, b) => b.totalSeatsRequested.compareTo(a.totalSeatsRequested),
-        );
-    }
+  /// Default ordering: newest request first. The sort control was removed —
+  /// agents triage top-down, and a stable newest-first order is the one that
+  /// matches how requests arrive.
+  List<Passenger> _orderNewestFirst(List<Passenger> list) {
+    final out = List<Passenger>.from(list)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return out;
   }
 
@@ -307,14 +299,29 @@ class _RequestsScreenState extends State<RequestsScreen> {
                 children: [
                   _TopBar(
                     c: c,
+                    // Selected tour's route shown as the eyebrow above the
+                    // title (e.g. "Surat → Ambaji").
+                    eyebrow: selectedTour == null
+                        ? null
+                        : '${selectedTour.fromCity} → ${selectedTour.toCity}',
+                    // Pushed/scoped mode (opened from a tour workspace with a
+                    // tour pre-selected) strands the user with no dock nav — so
+                    // render a back affordance. The shell tab (initialTourId
+                    // null, nothing to pop) keeps the plain title.
+                    showBack: widget.initialTourId != null &&
+                        Navigator.canPop(context),
+                    onBack: Get.back,
                     searchActive: _searchVisible,
                     onToggleSearch: _toggleSearch,
                     onAdd: selectedTour == null
                         ? null
                         : () => _openAddRequest(selectedTour),
-                    onEmptyBus: selectedTour == null
+                    onGroups: selectedTour == null
                         ? null
-                        : () => _confirmEmptyBus(selectedTour),
+                        : () => Get.toNamed(
+                              AppRoutes.tourGroups,
+                              arguments: {'tourId': selectedTour.id},
+                            ),
                     selectionMode: _selectionMode,
                     selectedCount: _selectedIds.length,
                     onExitSelection: _exitSelection,
@@ -420,7 +427,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                     p.phone.toLowerCase().contains(q),
               )
               .toList();
-    final passengers = _applySort(filtered);
+    final passengers = _orderNewestFirst(filtered);
 
     return Column(
       children: [
@@ -444,45 +451,30 @@ class _RequestsScreenState extends State<RequestsScreen> {
           child: _CapacityBanner(c: c, tour: selectedTour),
         ),
         const SizedBox(height: UgamSpacing.md),
-        // One filter row: pills (with counts) + a compact sort toggle. The old
-        // stats strip was redundant with these counts, so it's gone.
+        // Status filter pills (with counts). The sort control was removed — the
+        // list is ordered newest-first and the four tabs now use the full width.
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-          child: Row(
-            children: [
-              Expanded(
-                child: UgamTabPills(
-                  currentIndex: _filter.index,
-                  onChanged: (i) =>
-                      setState(() => _filter = _RequestFilter.values[i]),
-                  items: [
-                    UgamTabItem(
-                      label: tr('requests.filter.new'),
-                      count: newList.length,
-                    ),
-                    UgamTabItem(
-                      label: tr('requests.filter.waitlist'),
-                      count: waitlistList.length,
-                    ),
-                    UgamTabItem(
-                      label: tr('requests.filter.confirmed'),
-                      count: confirmedList.length,
-                    ),
-                    UgamTabItem(
-                      label: tr('requests.filter.assigned'),
-                      count: assignedList.length,
-                    ),
-                  ],
-                ),
+          child: UgamTabPills(
+            currentIndex: _filter.index,
+            onChanged: (i) =>
+                setState(() => _filter = _RequestFilter.values[i]),
+            items: [
+              UgamTabItem(
+                label: tr('requests.filter.new'),
+                count: newList.length,
               ),
-              const SizedBox(width: UgamSpacing.sm),
-              // Four pills leave little room, so the sort control is icon-only
-              // here; its current mode shows in the tooltip and still cycles
-              // on tap.
-              _SortButton(
-                c: c,
-                tooltip: _sortLabel(_sort),
-                onTap: _cycleSort,
+              UgamTabItem(
+                label: tr('requests.filter.waitlist'),
+                count: waitlistList.length,
+              ),
+              UgamTabItem(
+                label: tr('requests.filter.confirmed'),
+                count: confirmedList.length,
+              ),
+              UgamTabItem(
+                label: tr('requests.filter.assigned'),
+                count: assignedList.length,
               ),
             ],
           ),
@@ -560,7 +552,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
                       UgamSpacing.gutter,
                       0,
                       UgamSpacing.gutter,
-                      _selectionMode ? 110 : 160,
+                      _selectionMode
+                          ? _listBottomPadSelection
+                          : _listBottomPadNormal,
                     ),
                     itemCount: passengers.length,
                     separatorBuilder: (_, _) =>
@@ -590,203 +584,76 @@ class _RequestsScreenState extends State<RequestsScreen> {
 
 class _TopBar extends StatelessWidget {
   final UgamColorSet c;
+  final bool showBack;
+  final VoidCallback onBack;
   final bool searchActive;
   final VoidCallback onToggleSearch;
   final VoidCallback? onAdd;
-  final VoidCallback? onEmptyBus;
+  final VoidCallback? onGroups;
   final bool selectionMode;
   final int selectedCount;
   final VoidCallback onExitSelection;
 
+  /// Optional small champagne label above the title — the selected tour's
+  /// route (e.g. "Surat → Ambaji"), so the agent always sees which tour these
+  /// requests belong to. Null when no tour is selected.
+  final String? eyebrow;
+
   const _TopBar({
     required this.c,
+    this.showBack = false,
+    required this.onBack,
     required this.searchActive,
     required this.onToggleSearch,
     required this.onAdd,
-    required this.onEmptyBus,
+    required this.onGroups,
     required this.selectionMode,
     required this.selectedCount,
     required this.onExitSelection,
+    this.eyebrow,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Selection mode: the shared app bar with a close-X "back" and the
+    // selected-count as the title. Keeps the chrome identical to the rest of
+    // the app instead of a hand-rolled row.
     if (selectionMode) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(
-          UgamSpacing.gutter,
-          UgamSpacing.lg,
-          UgamSpacing.gutter,
-          UgamSpacing.md,
-        ),
-        child: Row(
-          children: [
-            _CircleBtn(icon: Icons.close_rounded, c: c, onTap: onExitSelection),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Text(
-                tr('requests.selected_count', namedArgs: {'n': '$selectedCount'}),
-                style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
-              ),
-            ),
-          ],
-        ),
+      return UgamAppBar(
+        title: tr('requests.selected_count', namedArgs: {'n': '$selectedCount'}),
+        showBack: true,
+        onBack: onExitSelection,
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              tr('requests.title'),
-              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
-            ),
-          ),
-          _CircleBtn(
-            icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
-            c: c,
-            onTap: onToggleSearch,
-            active: searchActive,
-          ),
-          if (onEmptyBus != null) ...[
-            const SizedBox(width: UgamSpacing.sm),
-            _MoreMenu(c: c, onEmptyBus: onEmptyBus),
-          ],
-          const SizedBox(width: UgamSpacing.sm),
-          GestureDetector(
-            onTap: onAdd,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: onAdd == null
-                    ? c.accent.withValues(alpha: 0.4)
-                    : c.accent,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Icons.person_add_alt_rounded,
-                size: 19,
-                color: c.onAccent,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CircleBtn extends StatelessWidget {
-  final IconData icon;
-  final UgamColorSet c;
-  final VoidCallback onTap;
-  final bool active;
-  const _CircleBtn({
-    required this.icon,
-    required this.c,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: active ? c.accentFill : c.cardElev,
-          shape: BoxShape.circle,
+    // Normal mode. Add is now a NEUTRAL chrome action (champagne is rationed to
+    // the sticky Seats CTA + bulk-Confirm); a null onTap renders it properly
+    // disabled via UgamIconButton's muted token, not an accent-at-40% hack.
+    return UgamAppBar(
+      title: tr('requests.title'),
+      // Selected tour's route as the eyebrow, so the agent always sees which
+      // tour these requests belong to.
+      eyebrow: eyebrow,
+      // Pushed/scoped mode shows the back affordance; the shell tab hides it.
+      showBack: showBack,
+      onBack: onBack,
+      actions: [
+        UgamAppBarAction(
+          icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
+          onTap: onToggleSearch,
+          active: searchActive,
         ),
-        alignment: Alignment.center,
-        child: Icon(icon, size: 19, color: active ? c.accent : c.ink),
-      ),
-    );
-  }
-}
-
-/// Compact "more actions" overflow for the Requests top bar. Holds the one
-/// tour-level move that doesn't belong on any single passenger card: empty
-/// every assigned seat on the tour. (Groups & Priority has its single home on
-/// the tour workspace TourTools tile — it is NOT duplicated here.) The callback
-/// is nullable — the menu only renders when it's live.
-class _MoreMenu extends StatelessWidget {
-  final UgamColorSet c;
-  final VoidCallback? onEmptyBus;
-  const _MoreMenu({required this.c, required this.onEmptyBus});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 44,
-      height: 44,
-      decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
-      child: PopupMenuButton<_TopAction>(
-        tooltip: tr('requests.menu.tooltip'),
-        icon: Icon(Icons.more_vert_rounded, size: 19, color: c.ink),
-        position: PopupMenuPosition.under,
-        color: c.card,
-        onSelected: (a) {
-          switch (a) {
-            case _TopAction.emptyBus:
-              onEmptyBus?.call();
-          }
-        },
-        itemBuilder: (_) => [
-          if (onEmptyBus != null)
-            PopupMenuItem<_TopAction>(
-              value: _TopAction.emptyBus,
-              child: _MenuRow(
-                icon: Icons.layers_clear_rounded,
-                label: tr('requests.menu.empty_bus'),
-                c: c,
-                danger: true,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-enum _TopAction { emptyBus }
-
-class _MenuRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final UgamColorSet c;
-  final bool danger;
-  const _MenuRow({
-    required this.icon,
-    required this.label,
-    required this.c,
-    this.danger = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: danger ? c.danger : c.ink2),
-        const SizedBox(width: UgamSpacing.sm + 2),
-        Text(
-          label,
-          style: UgamText.body.copyWith(
-            color: danger ? c.danger : c.ink,
-            fontSize: 13,
-          ),
+        UgamIconButton(
+          icon: Icons.groups_rounded,
+          onTap: onGroups,
+          size: 42,
+          semanticLabel: tr('tour_detail.tool_groups'),
+        ),
+        UgamIconButton(
+          icon: Icons.person_add_alt_rounded,
+          onTap: onAdd,
+          size: 42,
+          semanticLabel: tr('requests.sheet.title'),
         ),
       ],
     );
@@ -800,90 +667,320 @@ class _MenuRow extends StatelessWidget {
 /// an overflow. This is the screen where the agent decides who to waitlist,
 /// so the capacity pressure belongs right here. Counted in berths — a Double
 /// Sofa request line costs 2 berths — matching [Tour.totalBusSeats].
-class _CapacityBanner extends StatelessWidget {
+class _CapacityBanner extends StatefulWidget {
   final UgamColorSet c;
   final Tour tour;
   const _CapacityBanner({required this.c, required this.tour});
 
   @override
+  State<_CapacityBanner> createState() => _CapacityBannerState();
+}
+
+class _CapacityBannerState extends State<_CapacityBanner> {
+  // Collapsed by default so the passenger cards surface sooner — the agent
+  // taps to reveal the full demand/seats/free breakdown only when triaging.
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) {
+    final c = widget.c;
+    final tour = widget.tour;
     final capacity = tour.totalBusSeats;
-    var demand = 0;
+    // Trip-aware seat-LOAD: a round-trip rider weighs a full seat, a one-way
+    // rider half. The headline "requested" figure uses this weight so the 0.5
+    // a one-way booking adds is honest and visible (e.g. "1.5"), while the
+    // free/over maths below stay on the PHYSICAL leg demand so the busier leg
+    // is never overbooked.
+    var loadDemand = 0.0;
     for (final p in tour.passengers) {
       if (p.isWaitlisted) continue;
-      for (final line in p.requestLines) {
-        demand += line.qty * (line.seatType == SeatType.doubleSofa ? 2 : 1);
-      }
+      loadDemand += p.seatLoad;
     }
     final noBus = tour.buses.isEmpty;
-    final free = capacity - demand;
-    final over = !noBus && free < 0;
+    // Engine-truth occupancy (the single source) — see [computeTourCapacity].
+    // The old `capacity − demand` lied "FULL" while a seat sat physically empty,
+    // because it counted every non-waitlisted rider as seatable even when the
+    // engine could not place them (stranger-share double, leg-blocked single,
+    // seater vs sofa). Reading the deterministic plan makes `free` mean GENUINELY
+    // empty, and the riders the engine can't auto-seat surface as
+    // "needs your decision" instead of hiding inside a phantom full bus.
+    final cap = computeTourCapacity(tour);
+    final occupied = cap.occupied;
+    final free = cap.free;
+    final needsDecision = cap.needsDecision;
+    // Per-leg one-way surplus, derived from the SAME plan as [free] (never from
+    // raw demand, which counted the unseatable needsDecision rider and inverted
+    // the reclaim direction). At most one is non-zero per bus, but across buses
+    // both can be — so both are surfaced.
+    final goOnlyFree = cap.goOnlyFree;
+    final retOnlyFree = cap.retOnlyFree;
+    // GENUINELY-empty berths per seat type, read from the SAME engine plan as
+    // [free] (see [TourCapacity.freeByType]). The old `capacity − requested
+    // demand` math lived here and could go NEGATIVE (e.g. "Single Sofa −2") when
+    // riders asked for more of a type than exists — disagreeing with the engine
+    // headline. Over-demand now surfaces as [needsDecision], never a phantom
+    // negative. Only types the buses actually have are shown.
+    final typeFree = <(String, int)>[
+      for (final st in const [
+        SeatType.singleSofa,
+        SeatType.doubleSofa,
+        SeatType.seater,
+      ])
+        if ((cap.capByType[st] ?? 0) > 0)
+          (st.displayName, cap.freeByType[st] ?? 0),
+    ];
 
     final (Color tone, Color fill, IconData icon, String statusValue,
         String statusLabel) = noBus
         ? (c.warm, c.warmFill, Icons.directions_bus_outlined, '—',
             tr('requests.capacity.no_buses'))
-        : over
-        ? (c.danger, c.danger.withValues(alpha: 0.12),
-            Icons.error_outline_rounded, '${-free}',
-            tr('requests.capacity.over'))
-        : (c.good, c.goodFill, Icons.event_seat_outlined, '$free',
+        : free > 0
+        ? (c.good, c.goodFill, Icons.event_seat_outlined, '$free',
+            tr('requests.capacity.free'))
+        : (c.ink3, c.card, Icons.event_seat_outlined, '0',
             tr('requests.capacity.free'));
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm + 2,
-      ),
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(UgamRadius.stat),
-        border: Border.all(color: tone.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        setState(() => _expanded = !_expanded);
+      },
+      child: AnimatedSize(
+        duration: UgamMotion.tab,
+        curve: UgamMotion.easeOut,
+        alignment: Alignment.topCenter,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.md,
+            vertical: UgamSpacing.sm + 2,
+          ),
+          decoration: BoxDecoration(
+            color: fill,
+            borderRadius: BorderRadius.circular(UgamRadius.stat),
+            border: Border.all(color: tone.withValues(alpha: 0.35)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 18, color: tone),
-              const SizedBox(width: UgamSpacing.sm),
-              _CapSeg(
-                c: c,
-                value: '$demand',
-                label: tr('requests.capacity.requested'),
-                color: c.ink,
+              // Collapsed glance line: status icon + the headline numbers + a
+              // chevron. The bus-fill bar fills the middle so demand-vs-capacity
+              // still reads at a glance without expanding.
+              Row(
+                children: [
+                  Icon(icon, size: 18, color: tone),
+                  const SizedBox(width: UgamSpacing.sm),
+                  Text(
+                    noBus
+                        ? _fmtSeatLoad(loadDemand)
+                        : '$occupied/$capacity',
+                    style: UgamText.tabular(
+                      UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                    ),
+                  ),
+                  const SizedBox(width: UgamSpacing.sm),
+                  if (!noBus)
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(UgamRadius.chip),
+                        child: LinearProgressIndicator(
+                          value: capacity <= 0
+                              ? 0
+                              : (occupied / capacity).clamp(0.0, 1.0),
+                          minHeight: 4,
+                          backgroundColor: c.border,
+                          valueColor: AlwaysStoppedAnimation<Color>(tone),
+                        ),
+                      ),
+                    )
+                  else
+                    const Spacer(),
+                  const SizedBox(width: UgamSpacing.sm),
+                  Text(
+                    '$statusValue ${statusLabel.toUpperCase()}',
+                    style: UgamText.tabular(
+                      UgamText.micro.copyWith(color: tone),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 18,
+                    color: c.ink3,
+                  ),
+                ],
               ),
-              _CapDivider(c: c),
-              _CapSeg(
-                c: c,
-                value: noBus ? '—' : '$capacity',
-                label: tr('requests.capacity.seats'),
-                color: c.ink,
-              ),
-              _CapDivider(c: c),
-              _CapSeg(
-                c: c,
-                value: statusValue,
-                label: statusLabel,
-                color: tone,
-              ),
+              // Honest "blocked" line: riders the engine can't auto-seat under
+              // the hard rules (stranger-share double, leg conflict, wrong seat
+              // type). Shown right under the glance line so an empty-but-blocked
+              // seat is never mistaken for a miscalculated "full".
+              if (!noBus && needsDecision > 0) ...[
+                const SizedBox(height: 6),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    Get.toNamed(
+                      AppRoutes.seatingExceptions,
+                      arguments: {'tourId': tour.id},
+                    );
+                  },
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline_rounded,
+                          size: 14, color: c.warm),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          tr('requests.capacity.needs_decision',
+                              namedArgs: {'n': '$needsDecision'}),
+                          style: UgamText.micro.copyWith(color: c.warm),
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded,
+                          size: 14, color: c.warm),
+                    ],
+                  ),
+                ),
+              ],
+              // Expanded detail: the full three-segment breakdown + per-leg
+              // reclaim row. Hidden by default so cards surface sooner.
+              if (_expanded) ...[
+                const SizedBox(height: UgamSpacing.sm + 2),
+                Row(
+                  children: [
+                    _CapSeg(
+                      c: c,
+                      value: _fmtSeatLoad(loadDemand),
+                      label: tr('requests.capacity.requested'),
+                      color: c.ink,
+                    ),
+                    _CapDivider(c: c),
+                    _CapSeg(
+                      c: c,
+                      value: noBus ? '—' : '$capacity',
+                      label: tr('requests.capacity.seats'),
+                      color: c.ink,
+                    ),
+                    _CapDivider(c: c),
+                    _CapSeg(
+                      c: c,
+                      value: statusValue,
+                      label: statusLabel,
+                      color: tone,
+                    ),
+                  ],
+                ),
+                // Per-leg breakdown — only meaningful when one-way riders make
+                // the two legs differ. Shows the engine-PLACED load per leg and
+                // the opposite-leg seats still open, so the agent can fill
+                // "going-out-full, coming-back-empty" seats. All plan-derived, so
+                // the GO/RET counts and the reclaim direction agree with the
+                // chart instead of the old raw-demand reclaim that could invert.
+                if (!noBus && (goOnlyFree > 0 || retOnlyFree > 0)) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Text(
+                        tr('requests.capacity.legs', namedArgs: {
+                          'go': '${cap.goOccupied}',
+                          'ret': '${cap.retOccupied}',
+                        }),
+                        style: UgamText.micro.copyWith(color: c.ink2),
+                      ),
+                      const Spacer(),
+                      Text(
+                        [
+                          if (goOnlyFree > 0)
+                            tr('requests.capacity.reclaim_go',
+                                namedArgs: {'n': '$goOnlyFree'}),
+                          if (retOnlyFree > 0)
+                            tr('requests.capacity.reclaim_ret',
+                                namedArgs: {'n': '$retOnlyFree'}),
+                        ].join(' · '),
+                        style: UgamText.micro.copyWith(color: c.good),
+                      ),
+                    ],
+                  ),
+                ],
+                // Free-by-type breakdown — which KIND of seat is still open, so
+                // the agent can match a Double Sofa request to a free double
+                // (not just any empty berth). Only shown when the bus mixes seat
+                // types; a single-type bus already says it in the headline free.
+                if (!noBus && typeFree.length >= 2) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        tr('requests.capacity.free_by_type'),
+                        style: UgamText.micro.copyWith(color: c.ink3),
+                      ),
+                      const SizedBox(width: UgamSpacing.sm),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.end,
+                          children: [
+                            for (final (label, free) in typeFree)
+                              _TypeFreePill(c: c, label: label, free: free),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
             ],
           ),
-          // Glanceable demand-vs-capacity fill bar — reads "how full the bus is"
-          // at a glance, without parsing the three numbers. Hidden when there's
-          // no bus yet (no capacity to fill).
-          if (!noBus) ...[
-            const SizedBox(height: UgamSpacing.sm),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: capacity <= 0 ? 0 : (demand / capacity).clamp(0.0, 1.0),
-                minHeight: 4,
-                backgroundColor: c.border,
-                valueColor: AlwaysStoppedAnimation<Color>(tone),
+        ),
+      ),
+    );
+  }
+}
+
+/// One "Single Sofa · 2" free-seat pill in the capacity banner's by-type row.
+/// The count is tinted green when seats remain, red when that type is
+/// over-subscribed, muted when exactly full.
+class _TypeFreePill extends StatelessWidget {
+  final UgamColorSet c;
+  final String label;
+  final int free;
+  const _TypeFreePill({
+    required this.c,
+    required this.label,
+    required this.free,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = free > 0 ? c.good : (free < 0 ? c.danger : c.ink3);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            '$free',
+            style: UgamText.tabular(
+              UgamText.micro.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
               ),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -940,45 +1037,6 @@ class _CapDivider extends StatelessWidget {
       );
 }
 
-// ─── Sort button ──────────────────────────────────────────────────────
-
-/// Compact sort toggle that sits beside the filter pills. Tapping cycles the
-/// order; the current mode is shown as its short label.
-class _SortButton extends StatelessWidget {
-  final UgamColorSet c;
-  final String tooltip;
-  final VoidCallback onTap;
-  const _SortButton({
-    required this.c,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Icon-only sort toggle: with four filter pills sharing the row there's no
-    // room for the mode label, so the tappable icon stands in for it and the
-    // current mode lives in the tooltip.
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          width: 38,
-          height: 38,
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-            border: Border.all(color: c.border),
-          ),
-          alignment: Alignment.center,
-          child: Icon(Icons.swap_vert_rounded, size: 18, color: c.ink2),
-        ),
-      ),
-    );
-  }
-}
 
 // ─── Assignment CTA ───────────────────────────────────────────────────
 
@@ -998,21 +1056,24 @@ class _AssignmentCTA extends StatelessWidget {
         // on the auto-fill SUMMARY (SeatsMode.summary). Auto-fill / re-generate
         // are actions INSIDE that screen, never the navigation entry label.
         label: hasBus ? tr('seats.title') : tr('requests.cta_add_bus'),
-        leadingIcon: Icons.event_seat_rounded,
+        leadingIcon: hasBus ? Icons.event_seat_rounded : Icons.add_rounded,
         trailingValue: hasBus && remaining > 0
             ? tr('requests.cta_remaining', namedArgs: {'n': '$remaining'})
             : null,
-        onPressed: hasBus
-            ? () {
-                HapticFeedback.lightImpact();
-                // Seats workspace on the SUMMARY; the in-screen "Edit seats by
-                // hand" CTA switches to the editable grid as needed.
-                Get.toNamed(
-                  AppRoutes.tourOverview,
-                  arguments: {'tourId': tour.id},
-                );
-              }
-            : null,
+        // With a bus → open the Seats workspace (auto-fill SUMMARY). Without a
+        // bus → the label says "Add bus" and it must DO that, not sit disabled:
+        // route into the add-bus flow so the CTA is never a dead end.
+        onPressed: () {
+          HapticFeedback.lightImpact();
+          if (hasBus) {
+            Get.toNamed(
+              AppRoutes.tourOverview,
+              arguments: {'tourId': tour.id},
+            );
+          } else {
+            Get.to(() => AddBusScreen(tourId: tour.id));
+          }
+        },
       ),
     );
   }
@@ -1142,6 +1203,11 @@ class _BulkActionBar extends StatelessWidget {
 
 // ─── Passenger card ───────────────────────────────────────────────────
 
+/// Compact seat-weight label: a whole number drops its decimal (1.0 → "1"),
+/// a half keeps it (0.5 → "0.5"). Used on the one-way trip chip.
+String _fmtSeatLoad(double load) =>
+    load == load.roundToDouble() ? load.toInt().toString() : load.toString();
+
 class _RequestCard extends StatelessWidget {
   final Passenger passenger;
   final Tour tour;
@@ -1160,14 +1226,6 @@ class _RequestCard extends StatelessWidget {
     required this.onLongPress,
     required this.onSelectTap,
   });
-
-  String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
-  }
 
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
@@ -1219,33 +1277,27 @@ class _RequestCard extends StatelessWidget {
         ? null
         : tour.groups.firstWhereOrNull((g) => g.id == passenger.groupId);
 
-    Widget leading;
-    if (selectionMode) {
-      leading = Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(
-          color: selected ? c.accent : c.cardElev,
-          shape: BoxShape.circle,
-          border: Border.all(color: selected ? c.accent : c.border, width: 1.5),
-        ),
-        alignment: Alignment.center,
-        child: selected
-            ? Icon(Icons.check_rounded, size: 18, color: c.onAccent)
-            : null,
-      );
-    } else {
-      leading = Container(
-        width: 32,
-        height: 32,
-        decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
-        alignment: Alignment.center,
-        child: Text(
-          _initials(passenger.name),
-          style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
-        ),
-      );
-    }
+    // Selection mode keeps a leading checkbox; normal mode drops the avatar
+    // entirely (no initials / profile pictures) so the name leads the card and
+    // the row stays compact.
+    final Widget? checkbox = selectionMode
+        ? Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: selected ? c.accent : c.cardElev,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected ? c.accent : c.border,
+                width: 1.5,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: selected
+                ? Icon(Icons.check_rounded, size: 16, color: c.onAccent)
+                : null,
+          )
+        : null;
 
     final card = AnimatedContainer(
       duration: UgamMotion.tab,
@@ -1258,18 +1310,18 @@ class _RequestCard extends StatelessWidget {
         ),
       ),
       child: UgamCard.plain(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm + 2,
-        ),
+        // 8pt grid: 12 padding on every side.
+        padding: const EdgeInsets.all(UgamSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
-                leading,
-                const SizedBox(width: UgamSpacing.sm + 2),
+                if (checkbox != null) ...[
+                  checkbox,
+                  const SizedBox(width: UgamSpacing.sm),
+                ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1281,14 +1333,15 @@ class _RequestCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: UgamText.titleS.copyWith(
                           color: c.ink,
-                          fontSize: 14,
+                          fontSize: 16,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: UgamSpacing.xs),
                       // Phone (tap to call) + time-ago. The list is already
                       // filtered by status, so the old status chip was noise —
                       // the number the agent calls is far more useful here.
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           if (passenger.phone.trim().isNotEmpty) ...[
                             GestureDetector(
@@ -1296,23 +1349,27 @@ class _RequestCard extends StatelessWidget {
                                   ? null
                                   : () => PhoneDialer.call(passenger.phone),
                               behavior: HitTestBehavior.opaque,
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.phone_rounded,
-                                    size: 12,
-                                    color: c.accent,
-                                  ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    passenger.phone,
-                                    style: UgamText.caption.copyWith(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(minHeight: 40),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.phone_rounded,
+                                      size: 14,
                                       color: c.ink2,
-                                      fontSize: 11,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      passenger.phone,
+                                      style: UgamText.caption.copyWith(
+                                        color: c.ink2,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                             const SizedBox(width: 6),
@@ -1320,7 +1377,7 @@ class _RequestCard extends StatelessWidget {
                               '·',
                               style: UgamText.caption.copyWith(
                                 color: c.ink3,
-                                fontSize: 11,
+                                fontSize: 13,
                               ),
                             ),
                             const SizedBox(width: 6),
@@ -1332,7 +1389,7 @@ class _RequestCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: UgamText.caption.copyWith(
                                 color: c.ink3,
-                                fontSize: 11,
+                                fontSize: 13,
                               ),
                             ),
                           ),
@@ -1341,13 +1398,91 @@ class _RequestCard extends StatelessWidget {
                     ],
                   ),
                 ),
+              ],
+            ),
+            // All info chips on ONE wrap directly under the name — seat count,
+            // request breakdown, one-way weight, partial, priority, group and
+            // any assigned seats — instead of three stacked blocks. 8pt-grid
+            // spacing (8) between chips. Built inline and spread so the gap
+            // above only appears when there's at least one chip.
+            ...(() {
+              final chips = <Widget>[
+                if (passenger.requestLines.isNotEmpty)
+                  UgamReqChip(
+                    // Count BERTHS (a Double Sofa = 2 seats), so "2 × Double
+                    // Sofa" reads as 4 SEATS. Unit word is localized + pluralised.
+                    label: passenger.isPartiallyAssigned
+                        ? '${passenger.totalSeatsAssigned}/${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
+                              .toUpperCase()
+                        : '${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
+                              .toUpperCase(),
+                    variant: isAssigned
+                        ? UgamChipVariant.good
+                        : UgamChipVariant.accent,
+                  ),
+                if (passenger.requestLines.isNotEmpty)
+                  UgamReqChip(
+                    label: passenger.requestLines
+                        .map((l) => l.label)
+                        .join(' + ')
+                        .toUpperCase(),
+                    variant: isAssigned
+                        ? UgamChipVariant.good
+                        : UgamChipVariant.accent,
+                  ),
+                if (passenger.tripType.isOneWay)
+                  UgamReqChip(
+                    // One-way loads a single leg, so it weighs HALF a physical
+                    // seat per berth — surface that weight on the trip chip.
+                    label: '${passenger.tripType == TripType.outboundOnly ? tr(
+                            'requests.chip.trip_outbound',
+                            namedArgs: {
+                              'from': tour.fromCity,
+                              'to': tour.toCity,
+                            },
+                          ) : tr(
+                            'requests.chip.trip_return',
+                            namedArgs: {
+                              'from': tour.toCity,
+                              'to': tour.fromCity,
+                            },
+                          )} · ${_fmtSeatLoad(passenger.seatLoad)}'
+                        .toUpperCase(),
+                    variant: UgamChipVariant.warm,
+                  ),
                 if (passenger.isPartiallyAssigned)
                   UgamReqChip(
                     label: tr('requests.status.partial').toUpperCase(),
                     variant: UgamChipVariant.warm,
                   ),
-              ],
-            ),
+                if (passenger.isPriorityApproved) _PriorityBadge(c: c),
+                // Group badge taps into the single Groups & Priority home.
+                if (group != null)
+                  GestureDetector(
+                    onTap: selectionMode
+                        ? null
+                        : () {
+                            HapticFeedback.selectionClick();
+                            Get.toNamed(
+                              AppRoutes.tourGroups,
+                              arguments: {'tourId': tour.id},
+                            );
+                          },
+                    behavior: HitTestBehavior.opaque,
+                    child: _GroupBadge(group: group, c: c),
+                  ),
+                ..._assignedSeatChips(),
+              ];
+              if (chips.isEmpty) return const <Widget>[];
+              return <Widget>[
+                const SizedBox(height: UgamSpacing.sm),
+                Wrap(
+                  spacing: UgamSpacing.sm,
+                  runSpacing: UgamSpacing.sm,
+                  children: chips,
+                ),
+              ];
+            })(),
             if (passenger.note != null && passenger.note!.isNotEmpty) ...[
               const SizedBox(height: UgamSpacing.md),
               Container(
@@ -1372,6 +1507,10 @@ class _RequestCard extends StatelessWidget {
                     Expanded(
                       child: Text(
                         '"${passenger.note}"',
+                        // Cap a very long note so it can't blow out the card
+                        // height; the full text is still visible on the request.
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: UgamText.caption.copyWith(
                           color: c.ink2,
                           fontSize: 13,
@@ -1383,85 +1522,8 @@ class _RequestCard extends StatelessWidget {
                 ),
               ),
             ],
-            if (passenger.isPriorityApproved || group != null) ...[
-              const SizedBox(height: UgamSpacing.md),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  if (passenger.isPriorityApproved) _PriorityBadge(c: c),
-                  // Badge reflects membership; tapping links into the single
-                  // Groups & Priority home (no group management on the card).
-                  if (group != null)
-                    GestureDetector(
-                      onTap: selectionMode
-                          ? null
-                          : () {
-                              HapticFeedback.selectionClick();
-                              Get.toNamed(
-                                AppRoutes.tourGroups,
-                                arguments: {'tourId': tour.id},
-                              );
-                            },
-                      behavior: HitTestBehavior.opaque,
-                      child: _GroupBadge(group: group, c: c),
-                    ),
-                ],
-              ),
-            ],
-            if (passenger.requestLines.isNotEmpty) ...[
-              const SizedBox(height: UgamSpacing.sm),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  UgamReqChip(
-                    // Count BERTHS (a Double Sofa = 2 seats), so "2 × Double
-                    // Sofa" reads as 4 SEATS. assignedSeats is already berths.
-                    // Unit word is localized + pluralised (1 SEAT vs 4 SEATS).
-                    label: passenger.isPartiallyAssigned
-                        ? '${passenger.totalSeatsAssigned}/${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
-                              .toUpperCase()
-                        : '${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
-                              .toUpperCase(),
-                    variant: isAssigned
-                        ? UgamChipVariant.good
-                        : UgamChipVariant.accent,
-                  ),
-                  UgamReqChip(
-                    label: passenger.requestLines
-                        .map((l) => l.label)
-                        .join(' + ')
-                        .toUpperCase(),
-                    variant: isAssigned
-                        ? UgamChipVariant.good
-                        : UgamChipVariant.accent,
-                  ),
-                  if (passenger.tripType.isOneWay)
-                    UgamReqChip(
-                      label: passenger.tripType == TripType.outboundOnly
-                          ? tr(
-                              'requests.chip.trip_outbound',
-                              namedArgs: {
-                                'from': tour.fromCity,
-                                'to': tour.toCity,
-                              },
-                            ).toUpperCase()
-                          : tr(
-                              'requests.chip.trip_return',
-                              namedArgs: {
-                                'from': tour.toCity,
-                                'to': tour.fromCity,
-                              },
-                            ).toUpperCase(),
-                      variant: UgamChipVariant.warm,
-                    ),
-                  ..._assignedSeatChips(),
-                ],
-              ),
-            ],
             if (!selectionMode) ...[
-              const SizedBox(height: UgamSpacing.sm + 2),
+              const SizedBox(height: UgamSpacing.md),
               _CardActions(
                 passenger: passenger,
                 tour: tour,
@@ -1497,7 +1559,7 @@ class _PriorityBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: c.warmFill,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1508,7 +1570,6 @@ class _PriorityBadge extends StatelessWidget {
             tr('requests.chip.priority').toUpperCase(),
             style: UgamText.micro.copyWith(
               color: c.warm,
-              fontSize: 9.5,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.3,
             ),
@@ -1533,7 +1594,7 @@ class _GroupBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: c.cardElev,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1545,7 +1606,6 @@ class _GroupBadge extends StatelessWidget {
                 .toUpperCase(),
             style: UgamText.micro.copyWith(
               color: c.ink2,
-              fontSize: 9.5,
               fontWeight: FontWeight.w700,
               letterSpacing: 0.3,
             ),
@@ -1576,16 +1636,25 @@ class _CardActions extends StatelessWidget {
   TourController get _ctrl => Get.find<TourController>();
 
   Future<void> _sendAck() async {
-    // Seats assigned (but tour not locked) → send the Cloud `seat_allotment`
-    // "seat confirmed" template from the business number (automatic, no manual
-    // WhatsApp tap). Before any seats exist, fall back to the free-text
+    // Re-notify ("notify again") an already-seated passenger. Once the tour is
+    // LOCKED the seats are final, so this delivers the SAME full seat-allotment
+    // as the lock-time send — the highlighted seat chart + boarding place +
+    // departure + handler contact — not just a "seats confirmed" greeting.
+    // Before lock the seats are provisional (hidden), so we send only the
+    // lighter greeting. Before any seats exist, fall back to the free-text
     // request-received deep-link the agent sends from their own WhatsApp.
     if (passenger.assignedSeats.isNotEmpty) {
       try {
-        final result = await WhatsAppOutbound().sendSeatConfirmed(
-          tour: tour,
-          passenger: passenger,
-        );
+        final result =
+            WhatsAppOutbound.shouldSendFullAllotment(tour, passenger)
+                ? await WhatsAppOutbound().sendSeatAllocations(
+                    tour: tour,
+                    onlyPassengerIds: {passenger.id},
+                  )
+                : await WhatsAppOutbound().sendSeatConfirmed(
+                    tour: tour,
+                    passenger: passenger,
+                  );
         if (result.anySent) {
           AppSnackBar.success(
             tr(
@@ -1646,6 +1715,13 @@ class _CardActions extends StatelessWidget {
   /// "seat confirmed" message that _sendAck sends once seats exist.
   Future<void> _confirm() async {
     await _ctrl.setConfirmed(tour.id, passenger.id, true);
+    await _sendConfirmationMessage();
+  }
+
+  /// Fires the Cloud `seat_allocation` confirmation template to this passenger
+  /// and toasts the outcome. Split out of [_confirm] so "Confirm & seat" can
+  /// reuse the exact same send without re-confirming.
+  Future<void> _sendConfirmationMessage() async {
     try {
       final result = await WhatsAppOutbound().sendConfirmed(
         tour: tour,
@@ -1727,13 +1803,17 @@ class _CardActions extends StatelessWidget {
 
   /// One-tap "Confirm & seat": collapse the two-step Confirm → Assign into a
   /// single move. Flip the passenger to Confirmed (clears any waitlist flag in
-  /// the controller), then jump straight into the seat grid pre-selected to
-  /// this passenger. No WhatsApp send here — the agent is mid-seating, so the
-  /// confirmation message goes out later from the assigned card.
+  /// the controller), fire the confirmation WhatsApp, then jump straight into
+  /// the seat grid pre-selected to this passenger. The send runs in the
+  /// background (unawaited) so the seat grid opens instantly — the toast still
+  /// reports the outcome via the global snackbar.
   Future<void> _confirmAndSeat() async {
     HapticFeedback.lightImpact();
     await _ctrl.setConfirmed(tour.id, passenger.id, true);
-    _openAssignment();
+    unawaited(_sendConfirmationMessage());
+    // NOTE: per user request, confirming no longer auto-navigates to seat
+    // allocation — it confirms + sends the WhatsApp message and stays on the
+    // Requests list. Seats are assigned via the sticky Seats CTA / Assigned tab.
   }
 
   void _openEdit(BuildContext context) {
@@ -1772,18 +1852,19 @@ class _CardActions extends StatelessWidget {
     required VoidCallback onTap,
     String? tooltip,
   }) {
-    final btn = GestureDetector(
+    Widget btn = GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 38,
-        height: 38,
+        width: 40,
+        height: 40,
         decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
         alignment: Alignment.center,
-        child: Icon(icon, size: 17, color: iconColor),
+        child: Icon(icon, size: 18, color: iconColor),
       ),
     );
-    return tooltip == null ? btn : Tooltip(message: tooltip, child: btn);
+    if (tooltip != null) btn = Tooltip(message: tooltip, child: btn);
+    return Semantics(button: true, label: tooltip, child: btn);
   }
 
   @override
@@ -1807,6 +1888,16 @@ class _CardActions extends StatelessWidget {
       () => _confirmDecline(context),
       isDanger: true,
     );
+    // Assign this passenger to an EXISTING cross-booking group (or change/remove
+    // it) without leaving Requests. Group CREATION still lives in the single
+    // Groups & Priority manager (reached from the sheet) — no duplicated logic.
+    final groupItem = _MenuItem(
+      passenger.groupId == null
+          ? tr('requests.action.add_to_group')
+          : tr('requests.action.change_group'),
+      Icons.group_add_rounded,
+      () => AssignGroupSheet.show(context, tour: tour, passenger: passenger),
+    );
 
     if (isAssigned) {
       // ASSIGNED — view the seat map; keep the one-tap WhatsApp confirmation.
@@ -1818,6 +1909,7 @@ class _CardActions extends StatelessWidget {
         fill: c.accentFill,
         iconColor: c.accent,
         onTap: _sendAck,
+        tooltip: tr('requests.action.send_wa_ack'),
       );
       menu = [
         editItem,
@@ -1838,9 +1930,11 @@ class _CardActions extends StatelessWidget {
         fill: c.accentFill,
         iconColor: c.accent,
         onTap: _confirm,
+        tooltip: tr('requests.action.send_wa_ack'),
       );
       menu = [
         editItem,
+        groupItem,
         _MenuItem(
           tr('requests.action.back_to_new'),
           Icons.arrow_back_rounded,
@@ -1870,6 +1964,7 @@ class _CardActions extends StatelessWidget {
       );
       menu = [
         editItem,
+        groupItem,
         // Plain confirm (no seating) — confirms + fires the WhatsApp template.
         _MenuItem(
           tr('requests.action.confirm'),
@@ -1895,6 +1990,7 @@ class _CardActions extends StatelessWidget {
       );
       menu = [
         editItem,
+        groupItem,
         // Plain confirm (no seating) — confirms + fires the WhatsApp template.
         _MenuItem(
           tr('requests.action.confirm'),
@@ -1924,7 +2020,7 @@ class _CardActions extends StatelessWidget {
             onTap: primaryAction,
             behavior: HitTestBehavior.opaque,
             child: Container(
-              height: 38,
+              height: 40,
               decoration: BoxDecoration(
                 color: primaryFill,
                 borderRadius: BorderRadius.circular(UgamRadius.chip),
@@ -1943,7 +2039,7 @@ class _CardActions extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: UgamText.bodyStrong.copyWith(
                         color: primaryTone,
-                        fontSize: 12.5,
+                        fontSize: 13,
                       ),
                     ),
                   ),
@@ -1968,12 +2064,12 @@ class _CardActions extends StatelessWidget {
         secondary,
         const SizedBox(width: UgamSpacing.sm),
         Container(
-          width: 38,
-          height: 38,
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
           child: PopupMenuButton<_MenuItem>(
             tooltip: tr('requests.action.more_actions'),
-            icon: Icon(Icons.more_vert_rounded, size: 17, color: c.ink2),
+            icon: Icon(Icons.more_vert_rounded, size: 18, color: c.ink2),
             position: PopupMenuPosition.under,
             onSelected: (item) => item.onTap(),
             color: c.card,

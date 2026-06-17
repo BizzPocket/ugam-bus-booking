@@ -13,6 +13,7 @@ import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/time_format.dart';
+import 'main_shell.dart';
 
 /// 3-step wizard for adding (or editing) a bus on a tour.
 ///
@@ -68,9 +69,14 @@ class _AddBusScreenState extends State<AddBusScreen> {
   // Every bus is a sleeper coach — no seater/mixed types in this app.
   static const BusType _busType = BusType.sleeper;
   int _singleSofaCount = 0;
-  bool _hasBalcony = false;
   bool _saving = false;
   bool _priceInitialized = false;
+
+  /// The "all-double last row" toggle the agent sets when creating a bus. When
+  /// true the seat engine builds the LAST row as 4 double sofas; when false
+  /// (default) it builds 3 single + 2 double sofas. Not persisted on the model
+  /// — inferred from the saved layout when editing (see [_seedCapacityFromLayout]).
+  bool _allDoubleBackRow = false;
 
   /// Capacity values as first shown when EDITING an existing bus (derived from
   /// its saved layout in [initState]). Used to detect whether the admin actually
@@ -78,7 +84,14 @@ class _AddBusScreenState extends State<AddBusScreen> {
   /// regenerates the layout or threatens existing seat assignments.
   int _initTotalSeats = 40;
   int _initSingleSofaCount = 0;
-  bool _initHasBalcony = false;
+  bool _initAllDoubleBackRow = false;
+
+  /// Edit-mode only. Set by the "Regenerate layout" button to force a rebuild of
+  /// the seat layout from the current form settings even when no capacity field
+  /// was touched — used to re-apply the current seat engine to a bus whose layout
+  /// was saved under the old engine. Always reset back to false after a save
+  /// attempt (cancel, error, or success) so a later plain edit never regenerates.
+  bool _forceRegenerate = false;
 
   // ── Wizard state ────────────────────────────────────────────────────
   /// 0 = identity, 1 = capacity (add only), 2 = price.
@@ -128,17 +141,13 @@ class _AddBusScreenState extends State<AddBusScreen> {
   }
 
   /// Reconstruct the capacity-step inputs from a saved bus so EDIT mode shows the
-  /// bus's current size. The toggle balcony adds a 2-berth aisle pair on top, so
-  /// it shows as exactly two aisle cells; a single relocated "orphan" berth shows
-  /// as one. `totalSeats` for the stepper is the sleeper berths EXCLUDING that
-  /// toggle pair (matching what [BusLayout.generate] expects as its `totalSeats`).
-  /// The derived values are snapshotted so [_save] can tell whether the admin
-  /// actually changed the capacity.
+  /// bus's current size. The back bench is now generated automatically from the
+  /// seat-count parity, so `totalSeats` for the stepper is simply the layout's
+  /// total seats. The derived values are snapshotted so [_save] can tell whether
+  /// the admin actually changed the capacity.
   void _seedCapacityFromLayout(Bus e) {
     final layout = e.layout;
     if (layout != null) {
-      final balconyAisle = layout.grid.where((cl) => cl.isBalconyAisle).length;
-      _hasBalcony = balconyAisle >= 2;
       _singleSofaCount = layout.grid
           .where((cl) =>
               cl.hasSeat &&
@@ -146,14 +155,23 @@ class _AddBusScreenState extends State<AddBusScreen> {
               (cl.col == SeatGridCols.singleUpper ||
                   cl.col == SeatGridCols.singleLower))
           .length;
-      _totalSeats =
-          (layout.totalSeats - (_hasBalcony ? 2 : 0)).clamp(1, 100);
+      _totalSeats = layout.totalSeats.clamp(1, 100);
+      // The toggle isn't persisted, so infer it from the existing layout: look
+      // at the last row — if it still carries any single sofa the bus was built
+      // with the default mixed back row (toggle OFF); otherwise the back row was
+      // all-double (toggle ON).
+      final lastRow = layout.rows - 1;
+      final lastRowHasSingle = layout.grid.any((cl) =>
+          cl.row == lastRow &&
+          cl.hasSeat &&
+          cl.seatType == SeatType.singleSofa);
+      _allDoubleBackRow = !lastRowHasSingle;
     } else {
       _totalSeats = e.totalSeats;
     }
     _initTotalSeats = _totalSeats;
     _initSingleSofaCount = _singleSofaCount;
-    _initHasBalcony = _hasBalcony;
+    _initAllDoubleBackRow = _allDoubleBackRow;
   }
 
   @override
@@ -218,7 +236,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
       widget.isEditing &&
       (_totalSeats != _initTotalSeats ||
           _singleSofaCount != _initSingleSofaCount ||
-          _hasBalcony != _initHasBalcony);
+          _allDoubleBackRow != _initAllDoubleBackRow);
 
   /// The layout the price step previews its rear-zone / price-band rows against:
   /// the freshly-sized layout when editing and capacity was changed, otherwise
@@ -232,7 +250,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
       totalSeats: _totalSeats,
       seaterCount: 0,
       singleSofaCount: _singleSofaCount,
-      hasBalcony: _hasBalcony,
+      allDoubleBackRow: _allDoubleBackRow,
     );
   }
 
@@ -258,7 +276,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
   /// Berths left for doubles after the singles; odd means one spare berth that
   /// can't pair into a whole double sofa.
   int get _doubleBerths => _sleeperSeats - _singleSofaCount;
-  bool get _hasOddSleeperBerth => _doubleBerths.isOdd;
 
   String get _singleSofaSummary {
     // Two berths per double sofa, so the leftover berths pair up 2-for-1.
@@ -332,17 +349,50 @@ class _AddBusScreenState extends State<AddBusScreen> {
     }
   }
 
+  // ── Regenerate layout (edit only) ───────────────────────────────────
+
+  /// Force-rebuild this bus's seat layout from the current form settings
+  /// (capacity + single count + the all-double-back-row toggle). Used to migrate
+  /// a bus whose layout was saved under the OLD seat engine onto the current one.
+  ///
+  /// Renumbers every berth, so any passenger currently seated on THIS bus is
+  /// freed and must be re-assigned. Shows its own destructive confirm; on accept
+  /// it sets [_forceRegenerate] and runs the normal [_save] (which then skips its
+  /// own resize prompt because the warning was already shown here).
+  Future<void> _regenerateLayout() async {
+    final seated = _seatedOnThisBus;
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('add_bus.regenerate_confirm_title'),
+      message: seated > 0
+          ? tr(
+              'add_bus.regenerate_confirm_msg',
+              namedArgs: {'count': '$seated'},
+            )
+          : tr('add_bus.regenerate_confirm_msg_empty'),
+      confirmLabel: tr('add_bus.regenerate_confirm_cta'),
+      destructive: true,
+    );
+    if (ok != true) return;
+    setState(() => _forceRegenerate = true);
+    await _save();
+  }
+
   // ── Save ────────────────────────────────────────────────────────────
 
   Future<void> _save() async {
     if (!widget.isEditing) {
       // Layout-buildability is enforced inline on Step 2 (see _canAdvance);
       // these guards are a final safety net and surface no toast.
-      if (_singleSofaInvalid) return;
+      if (_singleSofaInvalid) {
+        _forceRegenerate = false;
+        return;
+      }
     }
 
     final tour = _tour;
     if (tour == null) {
+      _forceRegenerate = false;
       AppSnackBar.error(tr('add_bus.snackbar.error_tour_not_found'));
       return;
     }
@@ -379,41 +429,51 @@ class _AddBusScreenState extends State<AddBusScreen> {
       if (widget.isEditing) {
         final source = widget.existing!;
 
-        // A plain field edit (driver, price, …) reuses the saved layout
-        // untouched, so seat IDs — and every existing seat assignment — stay
-        // exactly as they were. Only a touched capacity regenerates the layout.
-        final newLayout = _capacityChanged
+        // The layout is rebuilt when the admin either touched a capacity field
+        // (_capacityChanged) OR tapped "Regenerate layout" (_forceRegenerate) —
+        // the latter forces a fresh build from the current settings so a bus
+        // saved under the old seat engine adopts the current one. Otherwise the
+        // saved layout is reused untouched, so seat IDs — and every existing
+        // seat assignment — stay exactly as they were.
+        final regenerate = _capacityChanged || _forceRegenerate;
+        final newLayout = regenerate
             ? BusLayout.generate(
                 busType: _busType,
                 totalSeats: _totalSeats,
                 seaterCount: 0,
                 singleSofaCount: _singleSofaCount,
-                hasBalcony: _hasBalcony,
+                allDoubleBackRow: _allDoubleBackRow,
               )
             : source.layout;
 
-        // A real resize renumbers the seat IDs, so anyone seated on this bus
-        // would be orphaned. Confirm-then-clear those assignments first.
+        // A real resize/regenerate renumbers the seat IDs, so anyone seated on
+        // this bus would be orphaned. Confirm-then-clear those assignments first.
         final oldIds = source.layout?.allSeatIds.toSet() ?? <String>{};
         final newIds = newLayout?.allSeatIds.toSet() ?? <String>{};
-        final structuralChange = _capacityChanged &&
+        final structuralChange = regenerate &&
             (oldIds.length != newIds.length || !oldIds.containsAll(newIds));
 
         final seated = _seatedOnThisBus;
         if (structuralChange && seated > 0) {
-          final ok = await UgamDialog.confirm(
-            context,
-            title: tr('add_bus.resize_confirm_title'),
-            message: tr(
-              'add_bus.resize_confirm_msg',
-              namedArgs: {'count': '$seated'},
-            ),
-            confirmLabel: tr('add_bus.resize_confirm_cta'),
-            destructive: true,
-          );
-          if (ok != true) {
-            if (mounted) setState(() => _saving = false);
-            return;
+          // The "Regenerate layout" button shows its own destructive warning
+          // before calling _save, so don't double-prompt here when the rebuild
+          // was forced from that button — only the in-flow resize path prompts.
+          if (!_forceRegenerate) {
+            final ok = await UgamDialog.confirm(
+              context,
+              title: tr('add_bus.resize_confirm_title'),
+              message: tr(
+                'add_bus.resize_confirm_msg',
+                namedArgs: {'count': '$seated'},
+              ),
+              confirmLabel: tr('add_bus.resize_confirm_cta'),
+              destructive: true,
+            );
+            if (ok != true) {
+              if (mounted) setState(() => _saving = false);
+              _forceRegenerate = false;
+              return;
+            }
           }
           // Frees every seat on this bus; the passengers' request lines stay
           // intact so they reappear as needing assignment and can be re-seated.
@@ -456,7 +516,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
         totalSeats: _totalSeats,
         seaterCount: 0,
         singleSofaCount: _singleSofaCount,
-        hasBalcony: _hasBalcony,
+        allDoubleBackRow: _allDoubleBackRow,
       );
 
       final rearRows = rearRowsRaw.clamp(0, layout.rows);
@@ -492,6 +552,9 @@ class _AddBusScreenState extends State<AddBusScreen> {
     } catch (_) {
       AppSnackBar.error(tr('add_bus.snackbar.error_save'));
     } finally {
+      // Always clear the forced-regenerate intent so a later normal save (e.g.
+      // a plain field edit after an error) never regenerates unexpectedly.
+      _forceRegenerate = false;
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -522,6 +585,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
 
     return Scaffold(
       backgroundColor: c.bg,
+      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         child: Column(
           children: [
@@ -598,8 +662,11 @@ class _AddBusScreenState extends State<AddBusScreen> {
           singleSofaCount: _singleSofaCount,
           sleeperSeats: _sleeperSeats,
           singleSofaSummary: _singleSofaSummary,
-          hasOddSleeperBerth: _hasOddSleeperBerth,
-          hasBalcony: _hasBalcony,
+          allDoubleBackRow: _allDoubleBackRow,
+          onAllDoubleBackRow: (v) => setState(() => _allDoubleBackRow = v),
+          // Edit mode only: re-apply the current seat engine to a bus whose
+          // layout was saved under the old engine. Null in add mode (hides it).
+          onRegenerate: widget.isEditing ? _regenerateLayout : null,
           // Edit mode only: warn that resizing will unassign the people already
           // seated on this bus (their seat IDs change when the layout rebuilds).
           seatedWarning: (widget.isEditing && _seatedOnThisBus > 0)
@@ -618,7 +685,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
             }
           }),
           onSingleSofa: (v) => setState(() => _singleSofaCount = v),
-          onBalcony: (v) => setState(() => _hasBalcony = v),
         );
       case 2:
       default:
@@ -981,8 +1047,12 @@ class _Step2Capacity extends StatelessWidget {
   final int singleSofaCount;
   final int sleeperSeats;
   final String singleSofaSummary;
-  final bool hasOddSleeperBerth;
-  final bool hasBalcony;
+
+  /// Current state of the "all-double last row" toggle, and the callback that
+  /// flips it. When on, the seat engine builds the last row as 4 double sofas;
+  /// when off (default) it builds 3 single + 2 double sofas.
+  final bool allDoubleBackRow;
+  final ValueChanged<bool> onAllDoubleBackRow;
 
   /// Inline validation caption shown under the single-sofa stepper, or null
   /// when the value is valid. Replaces the legacy save-time toast.
@@ -991,9 +1061,13 @@ class _Step2Capacity extends StatelessWidget {
   /// Edit-mode resize warning shown above the controls when the bus already has
   /// passengers seated — changing the size will unassign them. Null hides it.
   final String? seatedWarning;
+
+  /// Edit-mode only: force-rebuild the saved layout from the current settings
+  /// (re-applies the current seat engine to a bus saved under the old one).
+  /// Null in add mode, which hides the "Regenerate layout" button.
+  final VoidCallback? onRegenerate;
   final ValueChanged<int> onTotalSeats;
   final ValueChanged<int> onSingleSofa;
-  final ValueChanged<bool> onBalcony;
 
   const _Step2Capacity({
     required this.c,
@@ -1001,13 +1075,13 @@ class _Step2Capacity extends StatelessWidget {
     required this.singleSofaCount,
     required this.sleeperSeats,
     required this.singleSofaSummary,
-    required this.hasOddSleeperBerth,
-    required this.hasBalcony,
+    required this.allDoubleBackRow,
+    required this.onAllDoubleBackRow,
     this.singleSofaError,
     this.seatedWarning,
+    this.onRegenerate,
     required this.onTotalSeats,
     required this.onSingleSofa,
-    required this.onBalcony,
   });
 
   @override
@@ -1063,39 +1137,89 @@ class _Step2Capacity extends StatelessWidget {
             const SizedBox(height: UgamSpacing.xs),
             _InlineError(c: c, text: singleSofaError!),
           ],
-          if (hasOddSleeperBerth) ...[
-            const SizedBox(height: UgamSpacing.sm),
-            _OddBerthWarning(c: c),
-          ],
-          const SizedBox(height: UgamSpacing.xl),
-          _Label(c: c, text: tr('add_bus.label.back_row_balcony')),
           const SizedBox(height: UgamSpacing.sm),
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: UgamSpacing.lg,
-              vertical: UgamSpacing.sm,
-            ),
-            decoration: BoxDecoration(
-              color: c.card,
-              borderRadius: BorderRadius.circular(UgamRadius.row),
-              border: Border.all(color: c.border),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    tr('add_bus.balcony_body'),
-                    style: UgamText.caption.copyWith(color: c.ink2),
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.md),
-                Switch(value: hasBalcony, onChanged: onBalcony),
-              ],
-            ),
+          _BackRowToggle(
+            c: c,
+            value: allDoubleBackRow,
+            onChanged: onAllDoubleBackRow,
           ),
+          if (onRegenerate != null) ...[
+            const SizedBox(height: UgamSpacing.lg),
+            _RegenerateLayoutButton(c: c, onTap: onRegenerate!),
+          ],
         ],
         const SizedBox(height: UgamSpacing.xl),
       ],
+    );
+  }
+}
+
+/// Edit-mode action that re-applies the current seat-layout engine to a bus
+/// whose layout was saved under an older engine. Styled as a secondary, slightly
+/// cautionary row (not the primary save CTA) so it stays discoverable without
+/// competing with the wizard's Next/Save button. Tapping it shows a destructive
+/// confirm before any layout is rebuilt.
+class _RegenerateLayoutButton extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _RegenerateLayoutButton({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.lg,
+          vertical: UgamSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(color: c.card, shape: BoxShape.circle),
+              alignment: Alignment.center,
+              child: Icon(Icons.refresh_rounded, size: 18, color: c.ink2),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('add_bus.regenerate_label'),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    tr('add_bus.regenerate_subtitle'),
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1135,34 +1259,80 @@ class _ResizeWarning extends StatelessWidget {
   }
 }
 
-/// Shown when the sleeper berths left for doubles is odd — one berth can't pair
-/// into a whole double sofa, so it's placed as an extra single sofa.
-class _OddBerthWarning extends StatelessWidget {
+/// Interactive control for the "all-double last row" seat-engine toggle. When
+/// ON, the bus's LAST row is built as 4 double sofas; when OFF (default) it's
+/// 3 single + 2 double sofas. The subtitle reflects the current state. No total
+/// seats are added either way — the count is conserved by the engine.
+class _BackRowToggle extends StatelessWidget {
   final UgamColorSet c;
+  final bool value;
+  final ValueChanged<bool> onChanged;
 
-  const _OddBerthWarning({required this.c});
+  const _BackRowToggle({
+    required this.c,
+    required this.value,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      decoration: BoxDecoration(
-        color: c.warmFill,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-        border: Border.all(color: c.warm.withValues(alpha: 0.4)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline_rounded, size: 16, color: c.warm),
-          const SizedBox(width: UgamSpacing.sm),
-          Expanded(
-            child: Text(
-              tr('add_bus.odd_berth_warning'),
-              style: UgamText.caption.copyWith(color: c.ink2, height: 1.4),
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.lg,
+          vertical: UgamSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: value ? c.accentFill : c.card,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.weekend_rounded,
+                size: 18,
+                color: value ? c.accent : c.ink3,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('add_bus.back_row_toggle.label'),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    value
+                        ? tr('add_bus.back_row_toggle.on')
+                        : tr('add_bus.back_row_toggle.off'),
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch(value: value, onChanged: onChanged),
+          ],
+        ),
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../controllers/tour_controller.dart';
 import '../controllers/user_controller.dart';
 import '../design/ugam.dart';
 import '../models/passenger.dart';
@@ -13,6 +14,7 @@ import '../routes/app_routes.dart';
 import '../services/customer_requests_store.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
 import '../widgets/booking_capture_form.dart';
 
@@ -84,6 +86,19 @@ class _CustomerBookingRequestScreenState
     // returns null when invalid, so we early-return without touching the network.
     final data = _formKey.currentState?.collect();
     if (data == null) return;
+
+    // Bookings close the moment the organiser locks the tour. Re-check against
+    // the LIVE tour where we have it (this screen can be opened from a stale
+    // cache — e.g. the "My requests" edit path rebuilds a Tour from a local
+    // entry), falling back to the tour we were handed. This blocks both a fresh
+    // request and an edit once the allocation is final.
+    final liveTour = Get.isRegistered<TourController>()
+        ? Get.find<TourController>().getTour(widget.tour.id)
+        : null;
+    if (!(liveTour ?? widget.tour).acceptsBookings) {
+      AppSnackBar.error(tr('customer_booking.err_bookings_closed'));
+      return;
+    }
 
     final adminPhone = widget.tour.createdBy;
     final hasOrganiser = adminPhone != null && adminPhone.isNotEmpty;
@@ -376,8 +391,8 @@ class _CustomerBookingRequestScreenState
         bottom: false,
         child: Column(
           children: [
-            _TopBar(
-              c: c,
+            UgamAppBar(
+              showBack: true,
               title: widget.isEditing
                   ? tr('customer_booking.title_edit')
                   : tr('customer_booking.title'),
@@ -410,26 +425,56 @@ class _CustomerBookingRequestScreenState
                 ],
               ),
             ),
-            UgamStickyCTA(
-              child: UgamCTA(
-                label: _saving
-                    ? tr('customer_booking.button_saving')
-                    : (widget.isEditing
-                          ? tr('customer_booking.button_update')
-                          : tr('customer_booking.button_submit')),
-                leadingIcon: Icons.send_rounded,
-                loading: _saving,
-                // Live "N seats" tabular value on the right — reads off the
-                // shared form's totalSeats getter, refreshed via onChanged.
-                trailingValue: seatCount > 0
-                    ? (seatCount == 1
-                          ? tr('customer_booking.cta_seat_count_one')
-                          : tr('customer_booking.cta_seat_count', namedArgs: {
-                              'n': '$seatCount',
-                            }))
-                    : null,
-                onPressed: _submit,
+          ],
+        ),
+      ),
+      // Primary submit CTA lives in the scaffold's bottom slot (like
+      // CustomerTourDetailScreen) so the sticky zone stays anchored and
+      // consistent across the customer flow — not inline in the Column.
+      bottomNavigationBar: UgamStickyCTA(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (seatCount > 0 && widget.tour.pricePerSeat > 0) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      tr('customer_booking.estimated_total_label'),
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                    Text(
+                      Formatters.formatMoneyInr(
+                        seatCount * widget.tour.pricePerSeat,
+                      ),
+                      style: UgamText.tabular(
+                        UgamText.bodyStrong.copyWith(color: c.ink),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ],
+            UgamCTA(
+              label: _saving
+              ? tr('customer_booking.button_saving')
+              : (widget.isEditing
+                    ? tr('customer_booking.button_update')
+                    : tr('customer_booking.button_submit')),
+          leadingIcon: Icons.send_rounded,
+          loading: _saving,
+          // Live "N seats" tabular value on the right — reads off the
+          // shared form's totalSeats getter, refreshed via onChanged.
+          trailingValue: seatCount > 0
+                  ? (seatCount == 1
+                        ? tr('customer_booking.cta_seat_count_one')
+                        : tr('customer_booking.cta_seat_count', namedArgs: {
+                            'n': '$seatCount',
+                          }))
+                  : null,
+              onPressed: _submit,
             ),
           ],
         ),
@@ -438,54 +483,21 @@ class _CustomerBookingRequestScreenState
   }
 }
 
-// ─── TOP BAR ──────────────────────────────────────────────────────────
-
-class _TopBar extends StatelessWidget {
-  final UgamColorSet c;
-  final String title;
-  const _TopBar({required this.c, required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Get.back(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_back_rounded, size: 19, color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              title,
-              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 22),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── TOUR PREVIEW CARD ────────────────────────────────────────────────
+
+/// Route monogram for the bus backdrop, e.g. "S→M" from "Surat"/"Mumbai".
+/// Empty when neither city is set so the backdrop shows just the bus motif.
+String _routeInitials(String from, String to) {
+  String first(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '' : t.characters.first.toUpperCase();
+  }
+
+  final f = first(from);
+  final t = first(to);
+  if (f.isEmpty && t.isEmpty) return '';
+  return '$f→$t';
+}
 
 class _TourPreviewCard extends StatelessWidget {
   final Tour tour;
@@ -510,7 +522,10 @@ class _TourPreviewCard extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  UgamBusBackdrop(seed: tour.id),
+                  UgamBusBackdrop(
+                    seed: tour.id,
+                    label: _routeInitials(tour.fromCity, tour.toCity),
+                  ),
                   Positioned(
                     left: 6,
                     top: 6,
@@ -520,14 +535,14 @@ class _TourPreviewCard extends StatelessWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
+                        color: c.cardElev,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         _formatDate(tour.departureDate),
                         style: UgamText.tabular(
                           UgamText.micro.copyWith(
-                            color: Colors.white,
+                            color: c.ink,
                             fontSize: 9.5,
                           ),
                         ),

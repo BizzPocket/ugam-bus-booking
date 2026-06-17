@@ -1,3 +1,4 @@
+import 'attendance.dart';
 import 'bus_details.dart';
 import 'collection.dart';
 import 'expense.dart';
@@ -20,11 +21,17 @@ class HandlerManifest {
   /// can review the bus's running costs and reconcile cash on the ground.
   final List<Expense> expenses;
 
+  /// Every attendance row logged against any bus on this tour. Surfaced so the
+  /// handler can see who boarded each leg and reconcile the manifest on the
+  /// ground.
+  final List<Attendance> attendance;
+
   const HandlerManifest({
     this.buses = const [],
     this.passengers = const [],
     this.collections = const [],
     this.expenses = const [],
+    this.attendance = const [],
   });
 
   factory HandlerManifest.fromJson(Map<String, dynamic> json) {
@@ -33,6 +40,7 @@ class HandlerManifest {
       passengers: _parsePassengers(json['passengers']),
       collections: _parseCollections(json['collections']),
       expenses: _parseExpenses(json['expenses']),
+      attendance: _parseAttendance(json['attendance']),
     );
   }
 
@@ -68,6 +76,14 @@ class HandlerManifest {
         .toList();
   }
 
+  static List<Attendance> _parseAttendance(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((m) => Attendance.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
   /// The passenger occupying [seatId] on bus [busId], or null if the seat is
   /// free. Matches by bus AND seat so the same seat label on different buses
   /// stays distinct.
@@ -87,6 +103,23 @@ class HandlerManifest {
           collection.busId == busId &&
           collection.seatId == seatId) {
         return collection;
+      }
+    }
+    return null;
+  }
+
+  /// The attendance row recorded for [passengerId] on bus [busId] for [leg], or
+  /// null if attendance hasn't been marked yet for that passenger on that leg.
+  Attendance? attendanceFor(
+    String passengerId,
+    String busId,
+    AttendanceLeg leg,
+  ) {
+    for (final row in attendance) {
+      if (row.passengerId == passengerId &&
+          row.busId == busId &&
+          row.leg == leg) {
+        return row;
       }
     }
     return null;

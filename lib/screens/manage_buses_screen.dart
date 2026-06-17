@@ -14,6 +14,7 @@ import '../utils/passenger_display.dart';
 import '../utils/time_format.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
+import 'main_shell.dart';
 
 /// List of buses attached to a tour. Topbar + capacity stat tiles +
 /// photo-anchored bus cards (matching image-5 list pattern) + sticky
@@ -48,7 +49,7 @@ class ManageBusesScreen extends StatelessWidget {
   void _openBusMenu(BuildContext context, Tour tour, Bus bus) {
     UgamSheet.show<void>(
       context,
-      title: bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+      title: bus.displayLabel,
       builder: (ctx) {
         final c = UgamColors.of(ctx);
         return Column(
@@ -109,7 +110,7 @@ class ManageBusesScreen extends StatelessWidget {
       ..writeln(tr('manage_buses.wa_assignment',
           namedArgs: {'tour': tour.title}))
       ..writeln(tr('manage_buses.wa_bus', namedArgs: {
-        'bus': bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+        'bus': bus.displayLabel,
       }))
       ..writeln(tr('manage_buses.wa_departure', namedArgs: {
         'date':
@@ -154,7 +155,7 @@ class ManageBusesScreen extends StatelessWidget {
     UgamSheet.show<void>(
       context,
       title: tr('bus_handler.picker_title', namedArgs: {
-        'bus': bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+        'bus': bus.displayLabel,
       }),
       builder: (ctx) {
         final c = UgamColors.of(ctx);
@@ -218,7 +219,7 @@ class ManageBusesScreen extends StatelessWidget {
       context,
       title: tr('manage_buses.delete_title'),
       message: tr('manage_buses.delete_body', namedArgs: {
-        'bus': bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+        'bus': bus.displayLabel,
       }),
       confirmLabel: tr('app.action.delete'),
       destructive: true,
@@ -338,12 +339,19 @@ class ManageBusesScreen extends StatelessWidget {
           );
         }),
       ),
-      bottomNavigationBar: UgamStickyCTA(
-        child: UgamCTA(
-          label: tr('manage_buses.add_bus'),
-          leadingIcon: Icons.add_rounded,
-          onPressed: () => Get.to(() => AddBusScreen(tourId: tourId)),
-        ),
+      // Add-bus CTA stacked above the persistent workspace dock.
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          UgamStickyCTA(
+            child: UgamCTA(
+              label: tr('manage_buses.add_bus'),
+              leadingIcon: Icons.add_rounded,
+              onPressed: () => Get.to(() => AddBusScreen(tourId: tourId)),
+            ),
+          ),
+          const UgamWorkspaceDock(),
+        ],
       ),
     );
   }
@@ -385,6 +393,12 @@ class _BusListItem extends StatelessWidget {
       .where((s) => s != null && s.trim().isNotEmpty)
       .join(' · ');
 
+  /// Single combined meta line: driver then departure, each segment kept only
+  /// when present, joined by a middot. Collapses the old two-line driver +
+  /// departure stack into one dense secondary line.
+  String get _metaLine =>
+      [_driverLine, _departureLine].where((s) => s.isNotEmpty).join('  ·  ');
+
   @override
   Widget build(BuildContext context) {
     final cap = bus.totalSeats;
@@ -414,7 +428,7 @@ class _BusListItem extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        bus.busNumber.isEmpty ? bus.name : bus.busNumber,
+                        bus.displayLabel,
                         style: UgamText.titleS.copyWith(
                           color: c.ink,
                           fontSize: 15,
@@ -422,10 +436,10 @@ class _BusListItem extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (_driverLine.isNotEmpty) ...[
+                      if (_metaLine.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
-                          _driverLine,
+                          _metaLine,
                           style: UgamText.caption.copyWith(
                             color: c.ink2,
                             fontSize: 12,
@@ -434,42 +448,10 @@ class _BusListItem extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
-                      if (_departureLine.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.place_outlined,
-                              size: 12,
-                              color: c.ink3,
-                            ),
-                            const SizedBox(width: 3),
-                            Expanded(
-                              child: Text(
-                                _departureLine,
-                                style: UgamText.caption.copyWith(
-                                  color: c.ink2,
-                                  fontSize: 12,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
+                      if (bus.isAC) ...[
+                        const SizedBox(height: UgamSpacing.sm),
+                        UgamReqChip(label: tr('manage_buses.tag_ac')),
                       ],
-                      const SizedBox(height: UgamSpacing.sm),
-                      Row(
-                        children: [
-                          if (bus.isAC) UgamReqChip(label: tr('manage_buses.tag_ac')),
-                          if (bus.isAC) const SizedBox(width: 5),
-                          UgamReqChip(
-                            label: tr('manage_buses.chip_seats',
-                                namedArgs: {'n': '$cap'}),
-                            variant: UgamChipVariant.neutral,
-                          ),
-                        ],
-                      ),
                     ],
                   ),
                 ),

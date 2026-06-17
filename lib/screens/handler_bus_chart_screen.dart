@@ -1,13 +1,14 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:get/get.dart';
 
+import '../components/bus_message_composer_field.dart';
 import '../components/combined_seat_grid.dart';
 import '../components/seat_chart_tile.dart';
 import '../design/group_color.dart';
 import '../design/price_band_color.dart';
 import '../design/ugam.dart';
+import '../models/attendance.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/expense.dart';
@@ -16,107 +17,42 @@ import '../models/passenger.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import '../services/whatsapp_cloud_service.dart';
+import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
 import 'fullscreen_chart_screen.dart';
 
-/// The passengers holding one seat, resolved by leg.
-///
-/// A single seat can now be LEG-SHARED: an `outboundOnly` passenger (the GO
-/// leg) and a separate `returnOnly` passenger (the RETURN leg) can both hold
-/// the same seatId on disjoint legs. A `roundTrip` passenger holds BOTH legs
-/// exclusively (so [go] and [ret] are the same person). [primary] is the
-/// passenger to show first / use for the single-occupant tile look.
-class _SeatOccupants {
-  /// The GO-leg occupant (outboundOnly or roundTrip), if any.
-  final Passenger? go;
-
-  /// The RETURN-leg occupant (returnOnly or roundTrip), if any.
-  final Passenger? ret;
-
-  const _SeatOccupants({this.go, this.ret});
-
-  bool get isEmpty => go == null && ret == null;
-
-  /// True when GO and RETURN are two DIFFERENT people sharing the seat across
-  /// legs (an outbound-only + a return-only) — the leg-shared case.
-  bool get isLegShared => go != null && ret != null && go!.id != ret!.id;
-
-  /// The single passenger when the seat is held by one person (a round-trip,
-  /// or a lone one-way leg); null when leg-shared or empty.
-  Passenger? get sole {
-    if (isEmpty) return null;
-    if (isLegShared) return null;
-    return go ?? ret;
-  }
-
-  /// Every DISTINCT passenger on this seat, GO first.
-  List<Passenger> get all {
-    final out = <Passenger>[];
-    if (go != null) out.add(go!);
-    if (ret != null && (go == null || ret!.id != go!.id)) out.add(ret!);
-    return out;
-  }
-}
-
 /// Builds a leg-resolved occupant view for [seatId] on [busId] from the
-/// manifest's passengers. A whole-double (one passenger, two assignment
-/// entries on the SAME seatId) still resolves to a single occupant; a
-/// genuine leg-shared seat resolves to two distinct people on disjoint legs.
-_SeatOccupants _occupantsForSeat(
+/// manifest's passengers — the single-seat slice of the shared resolver. A
+/// whole-double (one passenger, two assignment entries on the SAME seatId)
+/// still resolves to a single occupant; a genuine leg-shared seat resolves to
+/// two distinct people on disjoint legs.
+SeatOccupancy _occupantsForSeat(
   HandlerManifest manifest,
   String busId,
   String seatId,
-) {
-  Passenger? go;
-  Passenger? ret;
-  for (final p in manifest.passengers) {
-    final holdsSeat = p.assignedSeats.any(
-      (a) => a.busId == busId && a.seatId == seatId,
-    );
-    if (!holdsSeat) continue;
-    if (p.tripType.usesOutbound && go == null) go = p;
-    if (p.tripType.usesReturn && ret == null) ret = p;
-  }
-  return _SeatOccupants(go: go, ret: ret);
-}
+) =>
+    seatOccupantsForBus(manifest.passengers, busId)[seatId] ??
+    const SeatOccupancy();
 
 /// Resolves the leg-aware occupants for EVERY seat on [busId] in a single
-/// O(passengers × assignedSeats) pass, keyed by seatId.
-///
-/// The grid and roster previously called [_occupantsForSeat] once per seat
-/// cell — O(cells × passengers) — so a 50-seat / 50-passenger bus did ~2,500
-/// passenger scans on every rebuild (bus switch, scroll, post-save setState),
-/// all on the UI thread. This builds the lookup once per build and the hot
-/// paths do an O(1) map read instead. "First passenger wins per leg" ordering
-/// is preserved via [Map.putIfAbsent] over the same passenger iteration order
-/// as [_occupantsForSeat].
-Map<String, _SeatOccupants> _occupantsBySeatForBus(
+/// O(passengers × assignedSeats) pass, keyed by seatId — delegating to the
+/// shared [seatOccupantsForBus]. This handler was the reference implementation
+/// that the resolver was promoted from, so behaviour is byte-for-byte
+/// identical; identity resolution now lives in one place.
+Map<String, SeatOccupancy> _occupantsBySeatForBus(
   HandlerManifest manifest,
   String busId,
-) {
-  final go = <String, Passenger>{};
-  final ret = <String, Passenger>{};
-  for (final p in manifest.passengers) {
-    for (final a in p.assignedSeats) {
-      if (a.busId != busId) continue;
-      if (p.tripType.usesOutbound) go.putIfAbsent(a.seatId, () => p);
-      if (p.tripType.usesReturn) ret.putIfAbsent(a.seatId, () => p);
-    }
-  }
-  final out = <String, _SeatOccupants>{};
-  for (final seatId in {...go.keys, ...ret.keys}) {
-    out[seatId] = _SeatOccupants(go: go[seatId], ret: ret[seatId]);
-  }
-  return out;
-}
+) => seatOccupantsForBus(manifest.passengers, busId);
 
-/// The two ways the handler reads the chart: the visual seat [grid] or the
-/// call-first [list] (a roster of full name + mobile per seat).
-enum _ViewMode { grid, list }
+/// The ways the handler reads the chart: the visual seat [grid], the
+/// call-first [list] (a roster of full name + mobile per seat), or the
+/// [attendance] boarding tally (who's present / left behind per leg).
+enum _ViewMode { grid, list, attendance }
 
 /// Read-only full bus chart for a tour "handler" (group coordinator).
 ///
@@ -162,8 +98,19 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   /// and the "spent / in hand" summary refresh without a full reload.
   final Map<String, Expense> _expenses = {};
 
+  /// Local, mutable attendance cache keyed by '"$passengerId|$busId|$leg"'.
+  /// Seeded from the manifest once loaded; updated in-place after each toggle
+  /// so the boarding tally refreshes without a full reload.
+  final Map<String, Attendance> _attendance = {};
+
+  /// Which leg the attendance view is currently showing (GO vs RETURN).
+  AttendanceLeg _attLeg = AttendanceLeg.go;
+
   String _collectionKey(String passengerId, String busId, String seatId) =>
       '$passengerId|$busId|$seatId';
+
+  String _attKey(String passengerId, String busId, AttendanceLeg leg) =>
+      '$passengerId|$busId|${leg.name}';
 
   /// Expenses logged against [busId], oldest first.
   List<Expense> _expensesForBus(String busId) {
@@ -178,6 +125,100 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     final cached = _collections[_collectionKey(passengerId, busId, seatId)];
     if (cached != null) return cached;
     return _manifest?.collectionFor(passengerId, busId, seatId);
+  }
+
+  /// Reads the local attendance cache first, falling back to the manifest.
+  /// Returns null when attendance hasn't been marked for that passenger on
+  /// that leg.
+  Attendance? _attendanceFor(
+    String passengerId,
+    String busId,
+    AttendanceLeg leg,
+  ) {
+    final cached = _attendance[_attKey(passengerId, busId, leg)];
+    if (cached != null) return cached;
+    return _manifest?.attendanceFor(passengerId, busId, leg);
+  }
+
+  /// Whether [passengerId] is marked present on [busId] for [leg]. Unmarked
+  /// passengers are NOT counted as boarded here (the tally treats "no row" as
+  /// "not yet boarded" so the handler can work through the manifest); the
+  /// model default of present=true only applies once a row is written.
+  bool _isPresent(String passengerId, String busId, AttendanceLeg leg) =>
+      _attendanceFor(passengerId, busId, leg)?.present ?? false;
+
+  /// Every passenger expected to board [bus] on [leg]: those holding a seat on
+  /// this bus whose trip uses the matching leg, deduped by passenger id and
+  /// sorted by display name.
+  List<Passenger> _expectedForLeg(
+    HandlerManifest manifest,
+    Bus bus,
+    AttendanceLeg leg,
+  ) {
+    final seen = <String>{};
+    final out = <Passenger>[];
+    for (final p in manifest.passengers) {
+      final onBus = p.assignedSeats.any((a) => a.busId == bus.id);
+      if (!onBus) continue;
+      final usesLeg = leg == AttendanceLeg.go
+          ? p.tripType.usesOutbound
+          : p.tripType.usesReturn;
+      if (!usesLeg) continue;
+      if (!seen.add(p.id)) continue;
+      out.add(p);
+    }
+    out.sort(
+      (a, b) =>
+          a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
+    );
+    return out;
+  }
+
+  /// Boarding counts for [bus] on [leg] across its expected passengers.
+  _AttendanceCounts _attendanceCounts(
+    HandlerManifest manifest,
+    Bus bus,
+    AttendanceLeg leg,
+  ) {
+    final expected = _expectedForLeg(manifest, bus, leg);
+    final present = expected.where((p) => _isPresent(p.id, bus.id, leg)).length;
+    return _AttendanceCounts(present: present, total: expected.length);
+  }
+
+  /// Marks [p] present / left-behind on [bus] for [leg], persisting via the
+  /// store and caching the server-returned row. Mirrors [_showOccupantSheet]'s
+  /// save+cache flow.
+  Future<void> _togglePresent(
+    Bus bus,
+    Passenger p,
+    AttendanceLeg leg,
+    bool present,
+  ) async {
+    // Resolve the tour id from the bus first, falling back to the passenger;
+    // both manifest models carry tourId.
+    final tourId = (bus.tourId?.isNotEmpty == true) ? bus.tourId! : p.tourId;
+    final existing = _attendanceFor(p.id, bus.id, leg);
+    final base =
+        existing ??
+        Attendance(tourId: tourId, busId: bus.id, passengerId: p.id, leg: leg);
+    final updated = base.copyWith(present: present);
+    try {
+      final saved = await _store.handlerUpsertAttendance(
+        widget.requestId,
+        updated,
+      );
+      if (saved == null) {
+        throw StateError('Handler attendance save was rejected.');
+      }
+      if (!mounted) return;
+      // Cache the server-returned row so ids/timestamps stay aligned with the
+      // database after insert or conflict update.
+      setState(() {
+        _attendance[_attKey(saved.passengerId, saved.busId, saved.leg)] = saved;
+      });
+    } catch (_) {
+      AppSnackBar.error(tr('handler_chart.error_save_attendance'));
+    }
   }
 
   /// Aggregates collection figures across every passenger holding a seat on
@@ -248,6 +289,13 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
               (e) => MapEntry(e.id, e),
             ),
           );
+        _attendance
+          ..clear()
+          ..addEntries(
+            (manifest?.attendance ?? const <Attendance>[]).map(
+              (a) => MapEntry(_attKey(a.passengerId, a.busId, a.leg), a),
+            ),
+          );
         _selectedBusId = manifest?.buses.isNotEmpty == true
             ? manifest!.buses.first.id
             : null;
@@ -278,7 +326,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     // chooser: the handler picks which person to call / collect from. A single
     // occupant goes straight to the collect sheet.
     final occ = manifest == null
-        ? const _SeatOccupants()
+        ? const SeatOccupancy()
         : _occupantsForSeat(manifest, bus.id, seatId);
     if (occ.isLegShared) {
       _showLegSharedChooser(bus, seatId, occ);
@@ -293,7 +341,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   Future<void> _showLegSharedChooser(
     Bus bus,
     String seatId,
-    _SeatOccupants occ,
+    SeatOccupancy occ,
   ) {
     return UgamSheet.show<void>(
       context,
@@ -464,15 +512,21 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           if (!mounted) return;
           if (result.allSent) {
             AppSnackBar.success(
-              tr('bus_message.sent_body', namedArgs: {'count': '${result.sent}'}),
+              tr(
+                'bus_message.sent_body',
+                namedArgs: {'count': '${result.sent}'},
+              ),
               title: tr('bus_message.sent_title'),
             );
           } else if (result.anySent) {
             AppSnackBar.warning(
-              tr('bus_message.partial_body', namedArgs: {
-                'sent': '${result.sent}',
-                'failed': '${result.failed}',
-              }),
+              tr(
+                'bus_message.partial_body',
+                namedArgs: {
+                  'sent': '${result.sent}',
+                  'failed': '${result.failed}',
+                },
+              ),
               title: tr('bus_message.partial_title'),
             );
           } else {
@@ -485,7 +539,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
 
   /// Opens the shared full-screen chart for the currently-shown bus. Reuses the
   /// exact per-seat occupant data the grid's tileBuilder builds (the leg-aware
-  /// `_SeatOccupants` map flattened to the `List<Passenger>` shape the
+  /// `SeatOccupancy` map flattened to the `List<Passenger>` shape the
   /// full-screen view expects: a leg-shared seat → both occupants, otherwise the
   /// sole occupant, else empty). Only wired up in grid view with a real chart on
   /// screen (see [build]).
@@ -510,7 +564,6 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
         final idx = bus.bandIndexForRow(cell.row);
         return idx == null ? null : priceBandWash(idx);
       },
-      emphasizeOneWay: true,
     );
   }
 
@@ -536,12 +589,22 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
         bottom: false,
         child: Column(
           children: [
-            _TopBar(
+            UgamAppBar(
               title: tr('handler_chart.bus_chart'),
-              c: c,
-              onExpand: canExpand ? () => _openFullscreenChart(bus) : null,
-              onMessage:
-                  canMessage ? () => _openBusMessageComposer(bus) : null,
+              actions: [
+                if (canMessage)
+                  UgamAppBarAction(
+                    icon: Icons.campaign_rounded,
+                    onTap: () => _openBusMessageComposer(bus),
+                    tooltip: tr('bus_message.message_bus'),
+                  ),
+                if (canExpand)
+                  UgamAppBarAction(
+                    icon: Icons.open_in_full_rounded,
+                    onTap: () => _openFullscreenChart(bus),
+                    tooltip: tr('handler_chart.expand_chart'),
+                  ),
+              ],
             ),
             Expanded(child: _body(c)),
           ],
@@ -588,15 +651,22 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     final occupantsBySeat = _occupantsBySeatForBus(manifest, bus.id);
 
     final grid = _viewMode == _ViewMode.grid;
+    final attendance = _viewMode == _ViewMode.attendance;
+
+    // Boarding tallies for the header chips (both legs, current bus).
+    final goCounts = _attendanceCounts(manifest, bus, AttendanceLeg.go);
+    final retCounts = _attendanceCounts(manifest, bus, AttendanceLeg.ret);
 
     return Column(
       children: [
         if (multiBus)
-          _BusPills(
-            buses: manifest.buses,
-            selectedBusId: bus.id,
-            onTapBus: (id) => setState(() => _selectedBusId = id),
-            c: c,
+          UgamSelectorPills(
+            items: [
+              for (final b in manifest.buses) UgamSelectorItem(label: b.name),
+            ],
+            currentIndex: manifest.buses.indexWhere((b) => b.id == bus.id),
+            onChanged: (i) =>
+                setState(() => _selectedBusId = manifest.buses[i].id),
           ),
         if (multiBus) const SizedBox(height: UgamSpacing.md),
         Padding(
@@ -616,10 +686,22 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                 label: tr('handler_chart.view_grid'),
                 icon: Icons.grid_view_rounded,
               ),
+              UgamTabItem(
+                label: tr('handler_chart.view_attendance'),
+                icon: Icons.how_to_reg_rounded,
+              ),
             ],
-            currentIndex: _viewMode == _ViewMode.list ? 0 : 1,
+            currentIndex: _viewMode == _ViewMode.list
+                ? 0
+                : _viewMode == _ViewMode.grid
+                ? 1
+                : 2,
             onChanged: (i) => setState(
-              () => _viewMode = i == 0 ? _ViewMode.list : _ViewMode.grid,
+              () => _viewMode = i == 0
+                  ? _ViewMode.list
+                  : i == 1
+                  ? _ViewMode.grid
+                  : _ViewMode.attendance,
             ),
           ),
         ),
@@ -635,6 +717,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             child: Column(
               children: [
                 _BusDeparture(bus: bus, c: c),
+                _DriverContact(bus: bus, c: c),
                 _SummaryHeader(
                   collected: summary.collected,
                   toReturn: summary.toReturn,
@@ -642,6 +725,8 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                   spent: summary.spent,
                   inHand: summary.inHand,
                 ),
+                const SizedBox(height: UgamSpacing.md),
+                _BoardedSummary(go: goCounts, ret: retCounts, c: c),
                 const SizedBox(height: UgamSpacing.lg),
                 if (grid) ...[
                   _SeatGrid(
@@ -652,8 +737,32 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                     onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
-                  _Legend(c: c),
-                ] else
+                  UgamSeatChartLegend(c: c),
+                  _PriceBandKey(bus: bus),
+                  const SizedBox(height: UgamSpacing.xl),
+                  _ExpensesSection(
+                    busName: bus.name,
+                    expenses: _expensesForBus(bus.id),
+                    onAdd: () => _showExpenseSheet(bus),
+                    onEdit: (e) => _showExpenseSheet(bus, existing: e),
+                    onDelete: (e) => _deleteExpense(e),
+                  ),
+                ] else if (attendance)
+                  _AttendanceView(
+                    bus: bus,
+                    leg: _attLeg,
+                    rows: [
+                      for (final p in _expectedForLeg(manifest, bus, _attLeg))
+                        _AttendanceEntry(
+                          passenger: p,
+                          present: _isPresent(p.id, bus.id, _attLeg),
+                        ),
+                    ],
+                    onToggleLeg: (leg) => setState(() => _attLeg = leg),
+                    onTogglePresent: (p, present) =>
+                        _togglePresent(bus, p, _attLeg, present),
+                  )
+                else ...[
                   _SeatRoster(
                     bus: bus,
                     occupantsBySeat: occupantsBySeat,
@@ -661,15 +770,16 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                         _collectionFor(pId, bus.id, seatId),
                     onTapOccupant: (seatId, p) => _onSeatTapped(bus, seatId, p),
                   ),
-                _PriceBandKey(bus: bus),
-                const SizedBox(height: UgamSpacing.xl),
-                _ExpensesSection(
-                  busName: bus.name,
-                  expenses: _expensesForBus(bus.id),
-                  onAdd: () => _showExpenseSheet(bus),
-                  onEdit: (e) => _showExpenseSheet(bus, existing: e),
-                  onDelete: (e) => _deleteExpense(e),
-                ),
+                  _PriceBandKey(bus: bus),
+                  const SizedBox(height: UgamSpacing.xl),
+                  _ExpensesSection(
+                    busName: bus.name,
+                    expenses: _expensesForBus(bus.id),
+                    onAdd: () => _showExpenseSheet(bus),
+                    onEdit: (e) => _showExpenseSheet(bus, existing: e),
+                    onDelete: (e) => _deleteExpense(e),
+                  ),
+                ],
               ],
             ),
           ),
@@ -709,11 +819,17 @@ class _LoadingSkeleton extends StatelessWidget {
           const SizedBox(height: UgamSpacing.md),
           Row(
             children: const [
-              Expanded(child: UgamSkeleton(height: 76, radius: UgamRadius.card)),
+              Expanded(
+                child: UgamSkeleton(height: 76, radius: UgamRadius.card),
+              ),
               SizedBox(width: UgamSpacing.md),
-              Expanded(child: UgamSkeleton(height: 76, radius: UgamRadius.card)),
+              Expanded(
+                child: UgamSkeleton(height: 76, radius: UgamRadius.card),
+              ),
               SizedBox(width: UgamSpacing.md),
-              Expanded(child: UgamSkeleton(height: 76, radius: UgamRadius.card)),
+              Expanded(
+                child: UgamSkeleton(height: 76, radius: UgamRadius.card),
+              ),
             ],
           ),
           const SizedBox(height: UgamSpacing.lg),
@@ -722,144 +838,6 @@ class _LoadingSkeleton extends StatelessWidget {
             const SizedBox(height: UgamSpacing.sm),
           ],
         ],
-      ),
-    );
-  }
-}
-
-// ─── Top bar ───────────────────────────────────────────────────────────
-
-class _TopBar extends StatelessWidget {
-  final String title;
-  final UgamColorSet c;
-
-  /// When non-null, shows an "expand to full screen chart" button that opens the
-  /// shared [FullscreenChartScreen]. Null hides it (e.g. list view, or no real
-  /// chart on screen).
-  final VoidCallback? onExpand;
-
-  /// When non-null, shows a "Message this bus" button that opens the per-bus
-  /// announcement composer (F4 handler path). Null hides it (e.g. still loading
-  /// or no bus resolved).
-  final VoidCallback? onMessage;
-
-  const _TopBar({
-    required this.title,
-    required this.c,
-    this.onExpand,
-    this.onMessage,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          UgamIconButton(
-            icon: Icons.arrow_back_rounded,
-            onTap: () => Get.back(),
-            semanticLabel: tr('app.action.back'),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              title,
-              style: UgamText.titleL.copyWith(color: c.ink, fontSize: 20),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (onMessage != null) ...[
-            UgamIconButton(
-              icon: Icons.campaign_rounded,
-              onTap: onMessage,
-              semanticLabel: tr('bus_message.message_bus'),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-          ],
-          if (onExpand != null) ...[
-            UgamIconButton(
-              icon: Icons.open_in_full_rounded,
-              onTap: onExpand,
-              semanticLabel: tr('handler_chart.expand_chart'),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-          ],
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.directions_bus_filled_rounded,
-              size: 19,
-              color: c.ink,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Bus pills ─────────────────────────────────────────────────────────
-
-class _BusPills extends StatelessWidget {
-  final List<Bus> buses;
-  final String selectedBusId;
-  final ValueChanged<String> onTapBus;
-  final UgamColorSet c;
-
-  const _BusPills({
-    required this.buses,
-    required this.selectedBusId,
-    required this.onTapBus,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-        itemCount: buses.length,
-        separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
-        itemBuilder: (ctx, i) {
-          final bus = buses[i];
-          final selected = bus.id == selectedBusId;
-          return GestureDetector(
-            onTap: () => onTapBus(bus.id),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.lg,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: selected ? c.accent : c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                bus.name,
-                style: UgamText.bodyStrong.copyWith(
-                  color: selected ? c.onAccent : c.ink,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -901,7 +879,7 @@ extension _MoneyStateView on _MoneyState {
 
 class _SeatGrid extends StatelessWidget {
   final Bus bus;
-  final Map<String, _SeatOccupants> occupantsBySeat;
+  final Map<String, SeatOccupancy> occupantsBySeat;
   final Collection? Function(String passengerId, String seatId) collectionFor;
   final void Function(String seatId, Passenger passenger) onTapOccupant;
 
@@ -919,7 +897,9 @@ class _SeatGrid extends StatelessWidget {
   _MoneyState _moneyState(Passenger passenger, String seatId) {
     final due = bus.amountDueForSeat(passenger, seatId);
     final col = collectionFor(passenger.id, seatId);
-    if (col == null) return due > 0 ? _MoneyState.owing : _MoneyState.uncollected;
+    if (col == null) {
+      return due > 0 ? _MoneyState.owing : _MoneyState.uncollected;
+    }
     if (col.isReturnDue) return _MoneyState.returnDue;
     if (col.balance < 0) return _MoneyState.owing;
     if (col.isSquare && col.amountReceived > 0) return _MoneyState.paid;
@@ -958,13 +938,13 @@ class _SeatGrid extends StatelessWidget {
           // them. The canonical tile detects the GO/RET split itself by trip
           // type, so we just hand it the occupant list.
           final occ = cell.seatId == null
-              ? const _SeatOccupants()
-              : (occupantsBySeat[cell.seatId!] ?? const _SeatOccupants());
+              ? const SeatOccupancy()
+              : (occupantsBySeat[cell.seatId!] ?? const SeatOccupancy());
           final List<Passenger> occList = occ.isLegShared
               ? <Passenger>[occ.go!, occ.ret!]
               : (occ.sole != null
-                  ? <Passenger>[occ.sole!]
-                  : const <Passenger>[]);
+                    ? <Passenger>[occ.sole!]
+                    : const <Passenger>[]);
           // The money dot follows the GO occupant first (then RETURN) — the
           // primary person whose due/collection drives the at-a-glance state.
           final primary = occ.go ?? occ.ret;
@@ -986,10 +966,9 @@ class _SeatGrid extends StatelessWidget {
                 // the empty resolver falls back to stable id-hash colours.
                 groupColors: const GroupColorResolver({}),
                 bandColor: bandColor,
-                // Handler view: RET reads violet (distinct from GO cyan) and
-                // one-way pills show "½" — the cue that this seat pays half fare.
-                emphasizeOneWay: true,
-                moneyDotColor: primary == null ? null : money.color(UgamColors.of(ctx)),
+                moneyDotColor: primary == null
+                    ? null
+                    : money.color(UgamColors.of(ctx)),
                 onTapBooked: primary == null
                     ? null
                     : () => onTapOccupant(cell.seatId!, primary),
@@ -1015,230 +994,6 @@ class _Dot extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
-/// Paints a dashed rounded-rectangle border for the FREE tile. Kept local so
-/// the free look stays distinct from the solid-bordered booked/held tiles —
-/// mirrors the agent seat-detail screen's free-tile border.
-class _DashedBorderPainter extends CustomPainter {
-  final Color color;
-  final double radius;
-
-  _DashedBorderPainter({required this.color, required this.radius});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    final rrect = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      Radius.circular(radius),
-    );
-    final path = Path()..addRRect(rrect);
-    const dash = 4.0;
-    const gap = 3.0;
-    for (final metric in path.computeMetrics()) {
-      var dist = 0.0;
-      while (dist < metric.length) {
-        final next = (dist + dash).clamp(0.0, metric.length);
-        canvas.drawPath(metric.extractPath(dist, next), paint);
-        dist += dash + gap;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedBorderPainter old) =>
-      old.color != color || old.radius != radius;
-}
-
-// ─── Legend ────────────────────────────────────────────────────────────
-
-/// Reads the chart for the handler: the seat-state swatches (matching the
-/// agent seat-detail legend) plus the handler-only money dots.
-class _Legend extends StatelessWidget {
-  final UgamColorSet c;
-  const _Legend({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: UgamSpacing.md,
-      runSpacing: 6,
-      alignment: WrapAlignment.center,
-      children: [
-        _LegendItem(
-          swatch: _LegendSwatch.dashed,
-          label: tr('handler_chart.legend_free'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.filled,
-          label: tr('handler_chart.legend_booked'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.warmRing,
-          label: tr('handler_chart.legend_priority'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.held,
-          label: tr('handler_chart.legend_held'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.go,
-          label: tr('handler_chart.legend_go'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.ret,
-          label: tr('handler_chart.legend_ret'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.halfFare,
-          label: tr('handler_chart.legend_half'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.paidDot,
-          label: tr('handler_chart.legend_paid'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.owingDot,
-          label: tr('handler_chart.legend_owing'),
-          c: c,
-        ),
-      ],
-    );
-  }
-}
-
-enum _LegendSwatch {
-  dashed,
-  filled,
-  warmRing,
-  held,
-  go,
-  ret,
-  halfFare,
-  paidDot,
-  owingDot,
-}
-
-class _LegendItem extends StatelessWidget {
-  final _LegendSwatch swatch;
-  final String label;
-  final UgamColorSet c;
-
-  const _LegendItem({
-    required this.swatch,
-    required this.label,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Widget dot;
-    switch (swatch) {
-      case _LegendSwatch.dashed:
-        dot = CustomPaint(
-          painter: _DashedBorderPainter(
-            color: c.ink3.withValues(alpha: 0.7),
-            radius: 3,
-          ),
-          child: const SizedBox(width: 12, height: 12),
-        );
-      case _LegendSwatch.filled:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.border),
-          ),
-        );
-      case _LegendSwatch.warmRing:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.warm, width: 2),
-          ),
-        );
-      case _LegendSwatch.held:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: c.cardElev.withValues(alpha: 0.5),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.border),
-          ),
-          alignment: Alignment.center,
-          child: Icon(Icons.lock_outline_rounded, size: 8, color: c.ink3),
-        );
-      case _LegendSwatch.go:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: kOneWayTint.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: kOneWayTint, width: 1.6),
-          ),
-        );
-      case _LegendSwatch.ret:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: kReturnTint.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: kReturnTint, width: 1.6),
-          ),
-        );
-      case _LegendSwatch.halfFare:
-        dot = Container(
-          width: 16,
-          height: 12,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: c.ink3.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.ink3.withValues(alpha: 0.6), width: 0.8),
-          ),
-          child: Text(
-            '½',
-            style: UgamText.micro.copyWith(
-              color: c.ink2,
-              fontSize: 8,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        );
-      case _LegendSwatch.paidDot:
-        dot = _Dot(color: c.good, size: 12);
-      case _LegendSwatch.owingDot:
-        dot = _Dot(color: c.danger, size: 12);
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        dot,
-        const SizedBox(width: 6),
-        Text(label, style: UgamText.micro.copyWith(color: c.ink2)),
-      ],
     );
   }
 }
@@ -1350,7 +1105,10 @@ class _PriceBandRow extends StatelessWidget {
         ),
         const SizedBox(width: UgamSpacing.sm),
         Text(
-          tr('handler_chart.band_per_person', namedArgs: {'amount': Formatters.formatMoneyInr(band.price)}),
+          tr(
+            'handler_chart.band_per_person',
+            namedArgs: {'amount': Formatters.formatMoneyInr(band.price)},
+          ),
           style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
         ),
       ],
@@ -1368,7 +1126,7 @@ class _PriceBandRow extends StatelessWidget {
 /// collect sheet the grid uses.
 class _SeatRoster extends StatelessWidget {
   final Bus bus;
-  final Map<String, _SeatOccupants> occupantsBySeat;
+  final Map<String, SeatOccupancy> occupantsBySeat;
   final Collection? Function(String passengerId, String seatId) collectionFor;
   final void Function(String seatId, Passenger passenger) onTapOccupant;
 
@@ -1413,7 +1171,7 @@ class _SeatRoster extends StatelessWidget {
     for (final cell in layout.grid) {
       final seatId = cell.seatId;
       if (seatId == null) continue;
-      final occ = occupantsBySeat[seatId] ?? const _SeatOccupants();
+      final occ = occupantsBySeat[seatId] ?? const SeatOccupancy();
       if (occ.isEmpty) continue;
       for (final p in occ.all) {
         rows.add(
@@ -1433,7 +1191,10 @@ class _SeatRoster extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
         alignment: Alignment.center,
         child: Text(
-          tr('handler_chart.no_passengers_on_bus', namedArgs: {'bus': bus.name}),
+          tr(
+            'handler_chart.no_passengers_on_bus',
+            namedArgs: {'bus': bus.name},
+          ),
           textAlign: TextAlign.center,
           style: UgamText.caption.copyWith(color: c.ink2),
         ),
@@ -1567,7 +1328,10 @@ class _RosterRow extends StatelessWidget {
               const SizedBox(width: UgamSpacing.sm),
               Semantics(
                 button: true,
-                label: tr('handler_chart.call_semantic', namedArgs: {'phone': p.phone}),
+                label: tr(
+                  'handler_chart.call_semantic',
+                  namedArgs: {'phone': p.phone},
+                ),
                 child: GestureDetector(
                   onTap: () => PhoneDialer.call(p.phone),
                   behavior: HitTestBehavior.opaque,
@@ -1608,7 +1372,9 @@ class _TripBadge extends StatelessWidget {
     final tint = isRet ? kReturnTint : kOneWayTint;
     final base = !oneWay
         ? tr('handler_chart.badge_round_trip')
-        : (isRet ? tr('handler_chart.badge_ret') : tr('handler_chart.badge_go'));
+        : (isRet
+              ? tr('handler_chart.badge_ret')
+              : tr('handler_chart.badge_go'));
     final label = oneWay
         ? tr('handler_chart.badge_half_suffix', namedArgs: {'leg': base})
         : base;
@@ -1740,7 +1506,10 @@ class _LegSharedTile extends StatelessWidget {
               const SizedBox(width: UgamSpacing.sm),
               Semantics(
                 button: true,
-                label: tr('handler_chart.call_semantic', namedArgs: {'phone': p.phone}),
+                label: tr(
+                  'handler_chart.call_semantic',
+                  namedArgs: {'phone': p.phone},
+                ),
                 child: GestureDetector(
                   onTap: () => PhoneDialer.call(p.phone),
                   behavior: HitTestBehavior.opaque,
@@ -1823,6 +1592,142 @@ class _BusDeparture extends StatelessWidget {
   }
 }
 
+/// Driver name + phone for THIS bus, with one-tap call and WhatsApp so the
+/// handler can reach the driver from the ground (running late, boarding-point
+/// change, head-count). Hidden entirely when the bus has neither a driver name
+/// nor a phone — there is nothing to show or contact. The phone line and the
+/// action buttons only appear when a number exists; otherwise just the name is
+/// shown so the handler at least knows who is driving.
+class _DriverContact extends StatelessWidget {
+  final Bus bus;
+  final UgamColorSet c;
+
+  const _DriverContact({required this.bus, required this.c});
+
+  Future<void> _openWhatsApp(String phone) async {
+    final cleaned = phone.replaceAll(RegExp(r'[^\d+]'), '');
+    if (cleaned.isEmpty) return;
+    try {
+      final ok = await WhatsAppService().openChat(phone: phone, message: '');
+      if (!ok) {
+        AppSnackBar.error(
+          tr('handler_chart.wa_open_failed', namedArgs: {'phone': phone}),
+          title: tr('handler_chart.wa_failed_title'),
+        );
+      }
+    } catch (e) {
+      AppSnackBar.error(
+        tr('handler_chart.wa_open_error', namedArgs: {'error': '$e'}),
+        title: tr('handler_chart.wa_failed_title'),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = bus.driverName.trim();
+    final phone = bus.driverPhone.trim();
+    if (name.isEmpty && phone.isEmpty) return const SizedBox.shrink();
+    final hasPhone = phone.isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: UgamSpacing.md),
+      child: UgamCard.plain(
+        padding: const EdgeInsets.all(UgamSpacing.sm),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                Icons.directions_bus_filled_rounded,
+                size: 19,
+                color: c.accent,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr('handler_chart.driver'),
+                    style: UgamText.micro.copyWith(
+                      color: c.ink3,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    name.isEmpty ? tr('handler_chart.driver_unnamed') : name,
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (hasPhone)
+                    Text(
+                      phone,
+                      style: UgamText.tabular(
+                        UgamText.caption.copyWith(color: c.ink2),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            if (hasPhone) ...[
+              const SizedBox(width: UgamSpacing.sm),
+              Semantics(
+                button: true,
+                label: tr(
+                  'handler_chart.call_semantic',
+                  namedArgs: {'phone': phone},
+                ),
+                child: GestureDetector(
+                  onTap: () => PhoneDialer.call(phone),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.call_rounded, size: 17, color: c.accent),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: () => _openWhatsApp(phone),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: c.goodFill,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(Icons.chat_rounded, size: 17, color: c.good),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Summary header ────────────────────────────────────────────────────
 
 /// Aggregated collection figures for the selected bus.
@@ -1844,6 +1749,27 @@ class _BusSummary {
   /// Net cash the handler should be holding for this bus — what was collected
   /// less what was spent. This is what they hand over to the admin.
   double get inHand => collected - spent;
+}
+
+/// Boarding tally for one bus + leg: how many of the [total] expected
+/// passengers are marked [present], and by subtraction how many were left
+/// behind.
+class _AttendanceCounts {
+  final int present;
+  final int total;
+
+  const _AttendanceCounts({required this.present, required this.total});
+
+  int get left => total - present;
+}
+
+/// One row in the attendance list: a passenger expected on the current leg
+/// plus their boarded flag (resolved from the cache/manifest by the screen).
+class _AttendanceEntry {
+  final Passenger passenger;
+  final bool present;
+
+  const _AttendanceEntry({required this.passenger, required this.present});
 }
 
 class _SummaryHeader extends StatelessWidget {
@@ -2133,7 +2059,8 @@ class _CollectSheetState extends State<_CollectSheet> {
             const SizedBox(height: UgamSpacing.sm),
             Builder(
               builder: (_) {
-                final isRet = passenger.tripType.usesReturn &&
+                final isRet =
+                    passenger.tripType.usesReturn &&
                     !passenger.tripType.usesOutbound;
                 final tint = isRet ? kReturnTint : kOneWayTint;
                 return Row(
@@ -2197,7 +2124,9 @@ class _CollectSheetState extends State<_CollectSheet> {
                   ? (
                       tr(
                         'handler_chart.balance_change',
-                        namedArgs: {'amount': Formatters.formatMoneyInr(balance)},
+                        namedArgs: {
+                          'amount': Formatters.formatMoneyInr(balance),
+                        },
                       ),
                       c.warm,
                     )
@@ -2205,7 +2134,9 @@ class _CollectSheetState extends State<_CollectSheet> {
                   ? (
                       tr(
                         'handler_chart.balance_still_to_collect',
-                        namedArgs: {'amount': Formatters.formatMoneyInr(-balance)},
+                        namedArgs: {
+                          'amount': Formatters.formatMoneyInr(-balance),
+                        },
                       ),
                       c.danger,
                     )
@@ -2229,9 +2160,7 @@ class _CollectSheetState extends State<_CollectSheet> {
           ),
           const SizedBox(height: UgamSpacing.lg),
           UgamCTA(
-            label: _saving
-                ? tr('handler_chart.saving')
-                : tr('app.action.save'),
+            label: _saving ? tr('handler_chart.saving') : tr('app.action.save'),
             onPressed: _saving ? null : _save,
           ),
         ],
@@ -2318,37 +2247,11 @@ class _ExpensesSection extends StatelessWidget {
                 ],
               ),
             ),
-            Semantics(
-              button: true,
-              label: tr('handler_chart.add_expense'),
-              child: GestureDetector(
-                onTap: onAdd,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.md,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: c.accentFill,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.add_rounded, size: 15, color: c.accent),
-                      const SizedBox(width: 4),
-                      Text(
-                        tr('app.action.add'),
-                        style: UgamText.caption.copyWith(
-                          color: c.accent,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            UgamButton(
+              label: tr('app.action.add'),
+              icon: Icons.add_rounded,
+              kind: UgamButtonKind.tonal,
+              onPressed: onAdd,
             ),
           ],
         ),
@@ -2583,30 +2486,31 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
             children: ExpenseCategory.values
                 .where((cat) => cat != ExpenseCategory.busOwner)
                 .map((cat) {
-              final active = cat == _category;
-              return GestureDetector(
-                onTap: () => setState(() => _category = cat),
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.lg,
-                    vertical: UgamSpacing.sm + 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: active ? c.accentFill : c.cardElev,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                    border: Border.all(color: active ? c.accent : c.border),
-                  ),
-                  child: Text(
-                    cat.displayName,
-                    style: UgamText.caption.copyWith(
-                      color: active ? c.accent : c.ink2,
-                      fontWeight: FontWeight.w700,
+                  final active = cat == _category;
+                  return GestureDetector(
+                    onTap: () => setState(() => _category = cat),
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: UgamSpacing.lg,
+                        vertical: UgamSpacing.sm + 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: active ? c.accentFill : c.cardElev,
+                        borderRadius: BorderRadius.circular(UgamRadius.chip),
+                        border: Border.all(color: active ? c.accent : c.border),
+                      ),
+                      child: Text(
+                        cat.displayName,
+                        style: UgamText.caption.copyWith(
+                          color: active ? c.accent : c.ink2,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              );
-            }).toList(),
+                  );
+                })
+                .toList(),
           ),
           const SizedBox(height: UgamSpacing.lg),
           UgamInput(
@@ -2694,18 +2598,14 @@ class _HandlerBusMessageSheetState extends State<_HandlerBusMessageSheet> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            tr('bus_message.handler_intro', namedArgs: {'bus': widget.busLabel}),
+            tr(
+              'bus_message.handler_intro',
+              namedArgs: {'bus': widget.busLabel},
+            ),
             style: UgamText.body.copyWith(color: c.ink2),
           ),
           const SizedBox(height: UgamSpacing.lg),
-          UgamInput(
-            label: tr('bus_message.field_message'),
-            controller: _textCtrl,
-            hint: tr('bus_message.field_message_hint'),
-            maxLines: 5,
-            minLines: 3,
-            autofocus: true,
-          ),
+          BusMessageComposerField(controller: _textCtrl),
           const SizedBox(height: UgamSpacing.lg),
           UgamCTA(
             label: _sending
@@ -2713,6 +2613,326 @@ class _HandlerBusMessageSheetState extends State<_HandlerBusMessageSheet> {
                 : tr('bus_message.send_btn'),
             leadingIcon: Icons.send_rounded,
             onPressed: _sending ? null : _send,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Boarded summary chips ─────────────────────────────────────────────
+
+/// Two compact chips under the money summary — GO and RET — each showing the
+/// "Boarded {present}/{total}" tally for the current bus, tinted with the
+/// chart's leg colours (GO cyan [kOneWayTint], RET violet [kReturnTint]) so the
+/// boarding state is glanceable from every view mode.
+class _BoardedSummary extends StatelessWidget {
+  final _AttendanceCounts go;
+  final _AttendanceCounts ret;
+  final UgamColorSet c;
+
+  const _BoardedSummary({required this.go, required this.ret, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _BoardedChip(
+            icon: Icons.north_east_rounded,
+            tint: kOneWayTint,
+            counts: go,
+            c: c,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.md),
+        Expanded(
+          child: _BoardedChip(
+            icon: Icons.south_west_rounded,
+            tint: kReturnTint,
+            counts: ret,
+            c: c,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BoardedChip extends StatelessWidget {
+  final IconData icon;
+  final Color tint;
+  final _AttendanceCounts counts;
+  final UgamColorSet c;
+
+  const _BoardedChip({
+    required this.icon,
+    required this.tint,
+    required this.counts,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        border: Border.all(color: tint.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: tint),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              tr(
+                'handler_chart.att_boarded',
+                namedArgs: {
+                  'present': '${counts.present}',
+                  'total': '${counts.total}',
+                },
+              ),
+              style: UgamText.micro.copyWith(
+                color: c.ink,
+                fontWeight: FontWeight.w800,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Attendance view ───────────────────────────────────────────────────
+
+/// The handler's boarding board for one bus: a GO/RET leg toggle, a present /
+/// left-behind / total tally header, and a tap-to-mark roster of every
+/// passenger expected on the chosen leg. Strictly attendance — no money or seat
+/// pricing chrome (those live in the grid / list views).
+class _AttendanceView extends StatelessWidget {
+  final Bus bus;
+  final AttendanceLeg leg;
+  final List<_AttendanceEntry> rows;
+  final ValueChanged<AttendanceLeg> onToggleLeg;
+  final void Function(Passenger passenger, bool present) onTogglePresent;
+
+  const _AttendanceView({
+    required this.bus,
+    required this.leg,
+    required this.rows,
+    required this.onToggleLeg,
+    required this.onTogglePresent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final total = rows.length;
+    final present = rows.where((r) => r.present).length;
+    final left = total - present;
+
+    return Column(
+      children: [
+        // GO / RET leg toggle.
+        UgamTabPills(
+          items: [
+            UgamTabItem(label: tr('handler_chart.att_leg_go')),
+            UgamTabItem(label: tr('handler_chart.att_leg_ret')),
+          ],
+          currentIndex: leg == AttendanceLeg.go ? 0 : 1,
+          onChanged: (i) =>
+              onToggleLeg(i == 0 ? AttendanceLeg.go : AttendanceLeg.ret),
+        ),
+        const SizedBox(height: UgamSpacing.md),
+        // Tally header: present / left-behind / total.
+        Row(
+          children: [
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.how_to_reg_rounded,
+                value: '$present',
+                label: tr('handler_chart.att_present'),
+                variant: UgamStatVariant.good,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.person_off_rounded,
+                value: '$left',
+                label: tr('handler_chart.att_left_behind'),
+                variant: UgamStatVariant.warm,
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: UgamStatTile(
+                icon: Icons.groups_rounded,
+                value: '$total',
+                label: tr('handler_chart.att_total'),
+                variant: UgamStatVariant.neutral,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            tr(
+              'handler_chart.att_tally',
+              namedArgs: {'present': '$present', 'left': '$left'},
+            ),
+            style: UgamText.micro.copyWith(color: c.ink2),
+          ),
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        if (rows.isEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+            alignment: Alignment.center,
+            child: Text(
+              tr('handler_chart.att_none'),
+              textAlign: TextAlign.center,
+              style: UgamText.caption.copyWith(color: c.ink2),
+            ),
+          )
+        else
+          UgamCard.plain(
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+            child: Column(
+              children: [
+                for (final r in rows)
+                  _AttendanceRow(
+                    bus: bus,
+                    passenger: r.passenger,
+                    present: r.present,
+                    onChanged: (v) => onTogglePresent(r.passenger, v),
+                    c: c,
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// One attendance line: the passenger's seat id chip(s) on this bus, their name
+/// + mobile, and a present / left-behind toggle. Mirrors [_RosterRow]'s left
+/// side; the trailing control is a [Switch] instead of a call button.
+class _AttendanceRow extends StatelessWidget {
+  final Bus bus;
+  final Passenger passenger;
+  final bool present;
+  final ValueChanged<bool> onChanged;
+  final UgamColorSet c;
+
+  const _AttendanceRow({
+    required this.bus,
+    required this.passenger,
+    required this.present,
+    required this.onChanged,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final p = passenger;
+    final hasPhone = p.phone.trim().isNotEmpty;
+    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
+    final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
+    // Every seat this passenger holds on THIS bus, joined (a whole double-sofa
+    // resolves to a single seat id via the set).
+    final seatIds =
+        p.assignedSeats
+            .where((a) => a.busId == bus.id)
+            .map((a) => a.seatId)
+            .toSet()
+            .toList()
+          ..sort();
+    final seatLabel = seatIds.join(', ');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm + 2,
+      ),
+      child: Row(
+        children: [
+          // Seat id chip(s).
+          Container(
+            constraints: const BoxConstraints(minWidth: 40),
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: c.cardElev,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
+              border: Border.all(color: c.border),
+            ),
+            child: Text(
+              seatLabel,
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(
+                  color: c.ink,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          // Name + mobile + group dot.
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        p.displayName,
+                        style: UgamText.bodyStrong.copyWith(color: c.ink),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (groupColor != null) ...[
+                      const SizedBox(width: 6),
+                      _Dot(color: groupColor, size: 8),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  hasPhone ? p.phone : tr('handler_chart.no_mobile'),
+                  style: UgamText.tabular(
+                    UgamText.micro.copyWith(color: hasPhone ? c.ink2 : c.ink3),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Present / left-behind toggle.
+          const SizedBox(width: UgamSpacing.sm),
+          Semantics(
+            label: tr('handler_chart.att_mark_present'),
+            toggled: present,
+            child: Switch(
+              value: present,
+              onChanged: onChanged,
+              activeTrackColor: c.good,
+              activeThumbColor: c.onAccent,
+            ),
           ),
         ],
       ),

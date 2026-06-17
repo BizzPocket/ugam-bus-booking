@@ -14,11 +14,14 @@ import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../models/trip_type.dart';
 import '../services/chart_footer_store.dart';
 import '../services/seat_chart_pdf.dart';
+import '../services/seat_swap_guard.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_drop_engine.dart';
+import '../utils/seat_fit.dart';
 import '../utils/seat_leg_capacity.dart';
 import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
@@ -37,9 +40,12 @@ import 'notify_screen.dart';
 ///   * `UgamTabPills` deck toggle when an upper deck exists.
 ///   * Seat grid wrapped in `UgamCard.plain` (22 px radius). Tile colours
 ///     come from `UgamColors.of(context)`.
-///   * Pending dock pinned to the bottom — horizontal passenger cards +
-///     auto-pick / done circle column. The "Lock tour" pill appears in
-///     the dock when `tour.allSeatsAssigned && tour.handlerId != null`.
+///   * Floating `_AssignmentDock` pinned to the bottom — collapsed by default
+///     (grab handle + one-line active-passenger summary + horizontal queue
+///     strip + Lock/Download action) so the whole chart stays visible; drag
+///     the handle up to OVERLAY the chart with the full passenger detail.
+///     The "Lock tour" pill appears when `tour.allSeatsAssigned &&
+///     tour.handlerId != null`.
 ///
 /// Sacred business logic preserved:
 ///   * `_pendingLines`, `_berthsForFreeCell`, `_onSeatTapped`,
@@ -86,6 +92,11 @@ class TourSeatAssignmentScreen extends StatefulWidget {
       _TourSeatAssignmentScreenState();
 }
 
+/// Height the collapsed assignment dock reserves at the bottom of the screen.
+/// The seat-chart scroll view pads its bottom by this much (+ the safe area)
+/// so the chart legend is never hidden behind the floating dock.
+const double _kCollapsedDockHeight = 176;
+
 class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   String? _selectedBusId;
   String? _selectedPassengerId;
@@ -101,6 +112,21 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// agent sees legal targets before releasing.
   String? _dragFromSeatId;
   bool _dragActive = false;
+
+  /// Active cross-bus "relocate" hand-off. Set when the agent picks a
+  /// destination bus from the move flow: the chart switches to that bus and the
+  /// [mover] is held "in hand" with their source seat ([fromBusId]/[fromSeatId])
+  /// remembered, so the next seat tap MOVES (tap a free seat) or SWAPS (tap an
+  /// occupied seat) them across — driven by hand instead of the auto
+  /// swap-assistant. Null when no relocate is in progress.
+  ({Passenger mover, String fromBusId, String fromSeatId})? _relocate;
+
+  /// Whether the bottom assignment dock is expanded to its full-detail state.
+  /// Collapsed by default so the whole seat chart is visible; the agent drags
+  /// the handle up (or taps it) only when they want the active passenger's
+  /// full request breakdown. The expanded sheet OVERLAYS the chart, so opening
+  /// it never squeezes the grid.
+  bool _dockExpanded = false;
 
   @override
   void initState() {
@@ -230,116 +256,118 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     return map;
   }
 
-  /// Total occupants across all seats on a bus — a shared double counts
-  /// as 2, not 1. Used wherever we display "seats sold" totals.
-  int _occupants(Map<String, List<String>> assignmentMap) =>
-      assignmentMap.values.fold<int>(0, (sum, list) => sum + list.length);
-
   /// Pending request lines for the passenger after subtracting what's
   /// already been assigned.
+  ///
+  /// The draining math (which held berth satisfies which request line,
+  /// cross-fill, own-cell double completion, leg-aware reuse) now lives in the
+  /// shared, pure [computePendingLines] so the manual screen matches the auto
+  /// seating engine BY CONSTRUCTION. This wrapper just adapts the passenger /
+  /// tour models into the module's value inputs and maps the module's
+  /// aggregated `remaining` back onto the original per-line `_PendingLine`s so
+  /// the displayed `X/Y` progress (which needs each line's `totalRequested`)
+  /// stays exact.
   List<_PendingLine> _pendingLines(Passenger passenger, {Tour? tour}) {
-    final pending = <_PendingLine>[];
-    for (final line in passenger.requestLines) {
-      pending.add(
+    // One `_PendingLine` per ORIGINAL request line (preserves order + the
+    // per-line totalRequested the progress label renders). `remaining` starts
+    // full and is reduced below from the module's verdict.
+    final lines = [
+      for (final line in passenger.requestLines)
         _PendingLine(
           seatType: line.seatType,
           position: line.position,
           remaining: line.qty,
           totalRequested: line.qty,
         ),
+    ];
+
+    final t = tour ?? _tour;
+    if (t == null) return lines;
+
+    final result = computePendingLines(
+      requestLines: [
+        for (final line in passenger.requestLines)
+          PendingLineInput(
+            seatType: line.seatType,
+            position: line.position,
+            qty: line.qty,
+          ),
+      ],
+      heldBerths: [
+        for (final a in passenger.assignedSeats)
+          HeldBerth(busId: a.busId, seatId: a.seatId),
+      ],
+      ctx: _seatFitContext(t),
+      // The own-cell double-completion case the manual screen historically
+      // MISSED: a passenger holding ONE berth of a Double Sofa whose partner
+      // berth is still leg-free, with a matching pending doubleSofa line. The
+      // module decides it and asks here whether the partner berth is actually
+      // claimable; we answer with the SAME per-leg rule the engine uses.
+      canClaimPartnerBerth: (claim) =>
+          _canClaimPartnerBerth(t, passenger, claim),
+    );
+
+    // Map the aggregated `remaining` (keyed by seatType+position) back onto the
+    // original lines, in order. Each original line keeps its totalRequested;
+    // its `remaining` is whatever the module still leaves unsatisfied for that
+    // (type, position) bucket, distributed across matching lines first-come.
+    final leftover = <(SeatType, SeatPosition?), int>{};
+    for (final r in result.remaining) {
+      leftover[(r.seatType, r.position)] =
+          (leftover[(r.seatType, r.position)] ?? 0) + r.qty;
+    }
+    for (var i = 0; i < lines.length; i++) {
+      final l = lines[i];
+      final key = (l.seatType, l.position);
+      final pool = leftover[key] ?? 0;
+      final keep = pool >= l.totalRequested ? l.totalRequested : pool;
+      leftover[key] = pool - keep;
+      lines[i] = _PendingLine(
+        seatType: l.seatType,
+        position: l.position,
+        remaining: keep,
+        totalRequested: l.totalRequested,
       );
     }
-    final t = tour ?? _tour;
-    if (t == null) return pending;
-
-    // Group this passenger's berths by physical cell.
-    final groups = <String, _CellGroup>{};
-    for (final a in passenger.assignedSeats) {
-      final key = '${a.busId}:${a.seatId}';
-      groups
-          .putIfAbsent(key, () => _CellGroup(busId: a.busId, seatId: a.seatId))
-          .berths++;
-    }
-
-    // Track berths that didn't find a matching exact-type line on the
-    // first pass — used for the cross-fill rule (2 singles can satisfy
-    // 1 doubleSofa line when the bus is short on doubles).
-    int leftoverSingleBerths = 0;
-    int leftoverHalfDoubles = 0;
-
-    for (final g in groups.values) {
-      final cell = _findCell(t, g.busId, g.seatId);
-      if (cell == null) continue;
-
-      if (cell.seatType == SeatType.singleSofa) {
-        for (var i = 0; i < g.berths; i++) {
-          if (!_drainPending(pending, [SeatType.singleSofa], cell.position)) {
-            leftoverSingleBerths++;
-          }
-        }
-        continue;
-      }
-
-      if (cell.seatType == SeatType.seater) {
-        for (var i = 0; i < g.berths; i++) {
-          _drainPending(pending, [SeatType.seater], cell.position);
-        }
-        continue;
-      }
-
-      // doubleSofa
-      if (g.berths >= 2) {
-        // Whole double held solo. Prefer the doubleSofa line; otherwise
-        // consume 2 single lines.
-        if (!_drainPending(pending, [SeatType.doubleSofa], cell.position)) {
-          _drainPending(pending, [SeatType.singleSofa], cell.position);
-          _drainPending(pending, [SeatType.singleSofa], cell.position);
-        }
-      } else {
-        // 1 berth on a double — half-share. Prefer single, fall back to
-        // a half-of-double counted toward a doubleSofa line in the
-        // cross-fill pass below.
-        if (!_drainPending(pending, [SeatType.singleSofa], cell.position)) {
-          leftoverHalfDoubles++;
-        }
-      }
-    }
-
-    // Cross-fill: two leftover single-class berths (single sofas OR
-    // half-doubles) drain ONE doubleSofa line.
-    int leftoverPairs = (leftoverSingleBerths + leftoverHalfDoubles) ~/ 2;
-    while (leftoverPairs > 0) {
-      if (_drainPending(pending, [SeatType.doubleSofa], null)) {
-        leftoverPairs--;
-      } else {
-        break;
-      }
-    }
-
-    return pending;
+    return lines;
   }
 
-  /// Decrement the first pending line whose `seatType` is in [tryTypes]
-  /// (checked in order) and whose position matches [cellPos]. Returns
-  /// true when something was decremented.
-  bool _drainPending(
-    List<_PendingLine> pending,
-    List<SeatType> tryTypes,
-    SeatPosition? cellPos,
+  /// Pure cell-lookup adapter the shared [computePendingLines] /
+  /// [berthsForFreeCell] use to resolve a cell's type + position from
+  /// (busId, seatId) against the tour layout.
+  SeatFitContext _seatFitContext(Tour tour) => SeatFitContext(
+    cellTypeAt: (busId, seatId) => _findCell(tour, busId, seatId)?.seatType,
+    cellPositionAt: (busId, seatId) => _findCell(tour, busId, seatId)?.position,
+  );
+
+  /// Answers the module's own-cell double-completion question with the SAME
+  /// per-leg model the auto engine uses: the partner berth of [claim]'s Double
+  /// Sofa is claimable when there is still leg room for ONE MORE berth on
+  /// [passenger]'s trip after accounting for everyone ALREADY on that cell —
+  /// including [passenger]'s OWN already-held berth (which, like the engine's
+  /// locked berth, has already consumed a per-leg slot before the partner is
+  /// claimed). The engine answers this against its plan state; here we read the
+  /// live tour.
+  bool _canClaimPartnerBerth(
+    Tour tour,
+    Passenger passenger,
+    PendingClaim claim,
   ) {
-    for (final t in tryTypes) {
-      final idx = pending.indexWhere(
-        (l) =>
-            l.seatType == t &&
-            (l.position == null || l.position == cellPos) &&
-            l.remaining > 0,
-      );
-      if (idx >= 0) {
-        pending[idx] = pending[idx].copyDecremented();
-        return true;
-      }
-    }
-    return false;
+    final holders = <SeatLegHolder>[
+      for (final p in tour.passengers)
+        for (final n in [
+          p.assignedSeats
+              .where((a) => a.busId == claim.busId && a.seatId == claim.seatId)
+              .length,
+        ])
+          if (n > 0) (trip: p.tripType, berths: n),
+    ];
+    return seatHasLegRoom(
+      activeTrip: passenger.tripType,
+      need: 1,
+      cap: 2,
+      occupants: holders,
+    );
   }
 
   SeatCell? _findCell(Tour tour, String busId, String seatId) {
@@ -354,51 +382,46 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
 
   /// How many berths to claim when this passenger taps an unoccupied
   /// cell. Returns 0 when the cell's type doesn't match anything pending.
+  ///
+  /// Routes through the shared, pure [berthsForFreeCell] so the type/position
+  /// matching matrix AND the per-leg capacity gate are the SAME single rule the
+  /// auto engine and the occupied-cell path use. A genuinely free cell has no
+  /// occupants, so the leg gate is trivially satisfied; the unified rule means
+  /// "what the tap offers" and "what placement accepts" can no longer diverge
+  /// (symptoms B & C).
   int _berthsForFreeCell(Passenger passenger, SeatCell cell, {Tour? tour}) {
-    final pending = _pendingLines(passenger, tour: tour);
-    bool positionOk(_PendingLine l) =>
-        l.position == null || l.position == cell.position;
+    return _berthsForCell(passenger, cell, const <SeatLegHolder>[], tour: tour);
+  }
 
-    if (cell.seatType == SeatType.doubleSofa) {
-      final hasDoubleLine = pending.any(
-        (l) =>
-            l.seatType == SeatType.doubleSofa &&
-            positionOk(l) &&
-            l.remaining > 0,
-      );
-      if (hasDoubleLine) return 2;
-      final singleRemaining = pending
-          .where(
-            (l) =>
-                l.seatType == SeatType.singleSofa &&
-                positionOk(l) &&
-                l.remaining > 0,
-          )
-          .fold<int>(0, (sum, l) => sum + l.remaining);
-      if (singleRemaining >= 2) return 2;
-      if (singleRemaining == 1) return 1;
-      return 0;
-    }
-
-    if (cell.seatType == SeatType.singleSofa) {
-      final hasSingleLine = pending.any(
-        (l) =>
-            l.seatType == SeatType.singleSofa &&
-            positionOk(l) &&
-            l.remaining > 0,
-      );
-      if (hasSingleLine) return 1;
-      final hasDoubleLine = pending.any(
-        (l) => l.seatType == SeatType.doubleSofa && l.remaining > 0,
-      );
-      if (hasDoubleLine) return 1;
-      return 0;
-    }
-
-    final hasMatch = pending.any(
-      (l) => l.seatType == cell.seatType && positionOk(l) && l.remaining > 0,
+  /// Shared core for both the free-cell tap ([_berthsForFreeCell], empty
+  /// [occupants]) and the share-onto-occupied path ([_seatHereBerths], real
+  /// holders). Drains the passenger's pending lines, then asks the shared
+  /// module how many berths the (free or occupied) [cell] can take.
+  int _berthsForCell(
+    Passenger passenger,
+    SeatCell cell,
+    List<SeatLegHolder> occupants, {
+    Tour? tour,
+  }) {
+    final cellType = cell.seatType;
+    if (cellType == null) return 0; // empty / aisle cell — nothing to claim
+    final remaining = [
+      for (final l in _pendingLines(passenger, tour: tour))
+        if (l.remaining > 0)
+          PendingLineInput(
+            seatType: l.seatType,
+            position: l.position,
+            qty: l.remaining,
+          ),
+    ];
+    return berthsForFreeCell(
+      remaining: remaining,
+      cellType: cellType,
+      cellPosition: cell.position,
+      activeTrip: passenger.tripType,
+      cap: cellType == SeatType.doubleSofa ? 2 : 1,
+      occupants: occupants,
     );
-    return hasMatch ? 1 : 0;
   }
 
   void _onSeatTapped(SeatCell cell, Bus bus, Tour tour) {
@@ -408,6 +431,14 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     // sheet; occupant management and placement are suspended.
     if (_editMode) {
       _showSeatFlagsSheet(cell, bus);
+      return;
+    }
+
+    // Relocate mode → the tapped seat is the TARGET for the in-hand mover: a
+    // free seat moves them here (after confirm), an occupied seat opens the
+    // occupant menu with a "seat [mover] here" swap.
+    if (_relocate != null) {
+      _onRelocateSeatTapped(cell, bus, tour);
       return;
     }
 
@@ -527,12 +558,30 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
 
     Passenger? placing;
     VoidCallback? onSeatHere;
+    VoidCallback? onSwapIn;
     if (active != null && !owners.contains(active.id)) {
       final berths = _seatHereBerths(tour, bus, cell, active, occupants);
       if (berths > 0) {
         placing = active;
         onSeatHere = () =>
             _seatHere(active, bus, tour, cell, occupants.first, berths);
+      } else {
+        // No leg room to SHARE — but the active passenger may still belong here
+        // if we bump the occupant who actually blocks their leg. Pick that one
+        // occupant, then confirm the active rider fits once they're gone, so the
+        // swap never overbooks the cell (and the other leg-share stays put).
+        final conflict = _conflictingOccupant(active, occupants);
+        if (conflict != null) {
+          final remaining =
+              occupants.where((o) => o.id != conflict.id).toList();
+          final berthsAfter =
+              _seatHereBerths(tour, bus, cell, active, remaining);
+          if (berthsAfter > 0) {
+            placing = active;
+            onSwapIn = () =>
+                _swapInPlacing(active, bus, tour, cell, conflict, berthsAfter);
+          }
+        }
       }
     }
 
@@ -545,6 +594,219 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       busName: bus.name,
       placing: placing,
       onSeatHere: onSeatHere,
+      onSwapIn: onSwapIn,
+      // "Move or swap" → pick a destination bus → hand back here so the agent
+      // lands on that bus's chart and taps the exact target seat by hand.
+      onRelocateToBus: _beginRelocate,
+    );
+  }
+
+  // ── Cross-bus relocate (tap-to-place hand-off) ──────────────────────────
+  //
+  // The move flow's destination picker calls [_beginRelocate] instead of the
+  // auto swap-assistant: the chart switches to the chosen bus and the mover is
+  // held "in hand". The next seat tap then MOVES them onto a free seat (after a
+  // confirm) or SWAPS them with an occupant — using the cross-bus
+  // [TourController.moveSeat] / [swapSeats] under the hood.
+
+  /// Switch the chart to [destination] and enter relocate mode for [mover]
+  /// (remembering the seat they currently sit on so the move/swap can be
+  /// applied). Triggered from the occupant sheet's "move or swap" → bus picker.
+  void _beginRelocate(
+    Bus destination,
+    Passenger mover,
+    String sourceBusId,
+    String fromSeatId,
+  ) {
+    setState(() {
+      _selectedBusId = destination.id;
+      _selectedPassengerId = mover.id;
+      _relocate = (
+        mover: mover,
+        fromBusId: sourceBusId,
+        fromSeatId: fromSeatId,
+      );
+    });
+    AppSnackBar.info(
+      tr(
+        'tour_seat_assignment.relocate.started',
+        namedArgs: {'name': mover.displayName, 'bus': destination.name},
+      ),
+    );
+  }
+
+  void _cancelRelocate() {
+    if (_relocate == null) return;
+    setState(() => _relocate = null);
+  }
+
+  /// A seat was tapped while a relocate is in progress. Route to a move (free
+  /// seat) or a swap (occupied seat).
+  void _onRelocateSeatTapped(SeatCell cell, Bus bus, Tour tour) {
+    final reloc = _relocate;
+    if (reloc == null) return;
+    final mover =
+        tour.passengers.firstWhereOrNull((p) => p.id == reloc.mover.id) ??
+        reloc.mover;
+
+    final owners =
+        (_assignmentMap(tour, bus.id)[cell.seatId] ?? const <String>[])
+            .toList();
+    final others = owners.where((id) => id != mover.id).toList();
+
+    // The mover's OWN seat (same-bus tap) — nothing to do.
+    if (others.isEmpty && owners.isNotEmpty) return;
+
+    if (others.isNotEmpty) {
+      _relocateOntoOccupied(cell, bus, tour, mover, reloc, others);
+    } else {
+      _relocateOntoFree(cell, bus, tour, mover, reloc);
+    }
+  }
+
+  /// Berths [mover] holds on their source cell — 2 for a whole double, else 1.
+  int _relocateMoverBerths(
+    ({Passenger mover, String fromBusId, String fromSeatId}) reloc,
+    Passenger mover,
+  ) {
+    return mover.assignedSeats
+        .where(
+          (a) => a.busId == reloc.fromBusId && a.seatId == reloc.fromSeatId,
+        )
+        .length;
+  }
+
+  /// Move [mover] onto a FREE [cell] of [bus] after a confirm. Guards seat size
+  /// so a whole-double mover can't be crammed onto a single-capacity cell.
+  Future<void> _relocateOntoFree(
+    SeatCell cell,
+    Bus bus,
+    Tour tour,
+    Passenger mover,
+    ({Passenger mover, String fromBusId, String fromSeatId}) reloc,
+  ) async {
+    final seatId = cell.seatId;
+    if (seatId == null) return;
+    final targetCap = cell.seatType == SeatType.doubleSofa ? 2 : 1;
+    final moverBerths = _relocateMoverBerths(reloc, mover);
+    if (moverBerths > targetCap) {
+      AppSnackBar.warning(
+        tr(
+          'tour_seat_assignment.relocate.too_small',
+          namedArgs: {'seat': seatId, 'name': mover.displayName},
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('tour_seat_assignment.relocate.move_confirm_title'),
+      message: tr(
+        'tour_seat_assignment.relocate.move_confirm_body',
+        namedArgs: {'name': mover.displayName, 'seat': seatId, 'bus': bus.name},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('tour_seat_assignment.relocate.move_confirm_yes'),
+    );
+    if (!confirmed) return;
+
+    await _ctrl.moveSeat(
+      tourId: tour.id,
+      passengerId: mover.id,
+      busId: reloc.fromBusId,
+      fromSeatId: reloc.fromSeatId,
+      toSeatId: seatId,
+      toBusId: bus.id,
+    );
+    if (!mounted) return;
+    setState(() => _relocate = null);
+    AppSnackBar.success(
+      tr(
+        'tour_seat_assignment.relocate.moved',
+        namedArgs: {'name': mover.displayName, 'seat': seatId},
+      ),
+    );
+  }
+
+  /// An occupied seat was tapped while relocating: open the full occupant menu
+  /// (manage the occupant) with a "seat [mover] here" action that SWAPS the
+  /// mover with the occupant (after a confirm).
+  void _relocateOntoOccupied(
+    SeatCell cell,
+    Bus bus,
+    Tour tour,
+    Passenger mover,
+    ({Passenger mover, String fromBusId, String fromSeatId}) reloc,
+    List<String> ownerIds,
+  ) {
+    final byId = {for (final p in tour.passengers) p.id: p};
+    final occupants = <Passenger>[
+      for (final id in ownerIds)
+        if (byId[id] != null) byId[id]!,
+    ];
+    if (occupants.isEmpty) return;
+
+    OccupantActionSheet.show(
+      context,
+      occupants: occupants,
+      tourId: tour.id,
+      busId: bus.id,
+      seatId: cell.seatId!,
+      busName: bus.name,
+      // "Seat [mover] here" → swap the mover with this occupant.
+      placing: mover,
+      onSeatHere: () =>
+          _relocateSwap(cell, bus, tour, mover, reloc, occupants.first),
+    );
+  }
+
+  /// Swap [mover] (on their source seat) with [other] (on the tapped [cell]),
+  /// across buses, after a confirm.
+  Future<void> _relocateSwap(
+    SeatCell cell,
+    Bus bus,
+    Tour tour,
+    Passenger mover,
+    ({Passenger mover, String fromBusId, String fromSeatId}) reloc,
+    Passenger other,
+  ) async {
+    final seatId = cell.seatId;
+    if (seatId == null) return;
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('tour_seat_assignment.relocate.swap_confirm_title'),
+      message: tr(
+        'tour_seat_assignment.relocate.swap_confirm_body',
+        namedArgs: {
+          'mover': mover.displayName,
+          'other': other.displayName,
+          'seat': seatId,
+        },
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('tour_seat_assignment.relocate.swap_confirm_yes'),
+    );
+    if (!confirmed) return;
+    if (!mounted) return;
+
+    await SeatSwapGuard.run(
+      context,
+      tourId: tour.id,
+      busAId: reloc.fromBusId,
+      passengerAId: mover.id,
+      seatAId: reloc.fromSeatId,
+      passengerBId: other.id,
+      seatBId: seatId,
+      busBId: bus.id,
+    );
+    if (!mounted) return;
+    setState(() => _relocate = null);
+    AppSnackBar.success(
+      tr(
+        'tour_seat_assignment.relocate.swapped',
+        namedArgs: {'mover': mover.displayName, 'other': other.displayName},
+      ),
     );
   }
 
@@ -568,10 +830,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   ) {
     final seatId = cell.seatId;
     if (seatId == null) return 0;
-    final need = _berthsForFreeCell(active, cell, tour: tour);
-    if (need == 0) return 0;
-    final cap = cell.seatType == SeatType.doubleSofa ? 2 : 1;
 
+    // Build the real per-leg holders on this cell, then defer to the SAME
+    // shared rule the free-cell path uses. This unifies "share onto occupied"
+    // and "place on free" into one type/position + per-leg gate (symptoms B/C).
     final holders = <SeatLegHolder>[
       for (final o in occupants)
         (
@@ -582,14 +844,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         ),
     ];
 
-    return seatHasLegRoom(
-          activeTrip: active.tripType,
-          need: need,
-          cap: cap,
-          occupants: holders,
-        )
-        ? need
-        : 0;
+    return _berthsForCell(active, cell, holders, tour: tour);
   }
 
   /// Confirm + seat [passenger] onto the already-occupied [cell] — either
@@ -620,6 +875,68 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     );
     if (!confirmed) return;
     await _placeBerths(passenger, bus, tour, cell, berths);
+  }
+
+  /// True when trips [a] and [b] both ride the SAME physical leg — so they
+  /// genuinely compete for one berth (vs a GO-only + RET-only pair that can
+  /// share a single seat across disjoint legs).
+  bool _tripsOverlap(TripType a, TripType b) =>
+      (a.usesOutbound && b.usesOutbound) || (a.usesReturn && b.usesReturn);
+
+  /// The single occupant whose leg collides with [active]'s — the one a swap
+  /// must bump so [active] can take the berth. Returns null when the collision
+  /// is ambiguous (two occupants both overlap, e.g. a round-trip rider onto a
+  /// GO+RET leg-shared seat) so we never guess and overbook.
+  Passenger? _conflictingOccupant(Passenger active, List<Passenger> occupants) {
+    final overlap = occupants
+        .where((o) => _tripsOverlap(o.tripType, active.tripType))
+        .toList();
+    if (overlap.length == 1) return overlap.first;
+    if (overlap.isEmpty && occupants.length == 1) return occupants.first;
+    return null;
+  }
+
+  /// Swap [placing] INTO an occupied [cell] by freeing the leg-conflicting
+  /// [occupant] (they return to the pending pool, ready to re-seat) and then
+  /// seating [placing] on the [berths] that opens up. Used when the seat is full
+  /// on [placing]'s leg so a plain share isn't possible — turning the old
+  /// dead-end "no room on this leg" into an actionable swap.
+  Future<void> _swapInPlacing(
+    Passenger placing,
+    Bus bus,
+    Tour tour,
+    SeatCell cell,
+    Passenger occupant,
+    int berths,
+  ) async {
+    final seatId = cell.seatId;
+    if (seatId == null) return;
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('tour_seat_assignment.swap_in_confirm_title'),
+      message: tr(
+        'tour_seat_assignment.swap_in_confirm_body',
+        namedArgs: {
+          'placing': placing.displayName,
+          'occupant': occupant.displayName,
+          'seat': seatId,
+        },
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('tour_seat_assignment.swap_in_confirm_yes'),
+    );
+    if (!confirmed) return;
+
+    // 1. Free the conflicting occupant's berth(s) on THIS seat only — they keep
+    //    their request and drop back into the pending pool.
+    final occNext = occupant.assignedSeats
+        .where((a) => !(a.busId == bus.id && a.seatId == seatId))
+        .toList();
+    await _ctrl.assignSeats(tour.id, occupant.id, occNext);
+
+    // 2. Seat the placing passenger on the freed berth(s).
+    final freshTour = _ctrl.getTour(tour.id) ?? tour;
+    await _placeBerths(placing, bus, freshTour, cell, berths);
   }
 
   /// Add [berths] berths of [cell] to [passenger], persist, then auto-advance
@@ -689,7 +1006,12 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// The occupants on [cell] of the selected bus, as engine [SeatOccupant]s.
   /// Empty for an empty/aisle cell; one entry for a sole occupant; two for a
   /// shared double (or a leg-disjoint reuse).
-  List<SeatOccupant> _occupantsOn(Tour tour, Bus bus, SeatCell cell) {
+  List<SeatOccupant> _occupantsOn(
+    Tour tour,
+    Bus bus,
+    SeatCell cell, {
+    String? onlyOccupantId,
+  }) {
     final seatId = cell.seatId;
     if (seatId == null) return const [];
     final ids = _assignmentMap(tour, bus.id)[seatId] ?? const <String>[];
@@ -697,6 +1019,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     final out = <SeatOccupant>[];
     for (final id in ids) {
       if (!seen.add(id)) continue;
+      // DRAG-THE-PERSON: when a single sharer of a shared double was grabbed,
+      // narrow the SOURCE occupants to just them so the engine's normal 1-berth
+      // move / fill / swap path runs and the partner stays put.
+      if (onlyOccupantId != null && id != onlyOccupantId) continue;
       final p = tour.passengers.firstWhereOrNull((x) => x.id == id);
       if (p != null) out.add(_occupantFor(tour, bus, p, seatId));
     }
@@ -737,8 +1063,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     Tour tour,
     Bus bus,
     SeatCell fromCell,
-    SeatCell target,
-  ) {
+    SeatCell target, {
+    String? grabbedOccupantId,
+  }) {
     return decideSeatDrop(
       fromCell: (
         seatId: fromCell.seatId,
@@ -750,15 +1077,35 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         seatType: target.seatType,
         reserved: target.reserved,
       ),
-      fromOccupants: _occupantsOn(tour, bus, fromCell),
+      fromOccupants: _occupantsOn(
+        tour,
+        bus,
+        fromCell,
+        onlyOccupantId: grabbedOccupantId,
+      ),
       targetOccupants: _occupantsOn(tour, bus, target),
     );
   }
 
-  /// Whether [cell] can be PICKED UP for a drag — any occupant (a shared double
-  /// lifts BOTH together).
-  bool _canDragSeat(Tour tour, Bus bus, SeatCell cell) =>
-      !_editMode && _occupantsOn(tour, bus, cell).isNotEmpty;
+  /// Whether [cell] can be PICKED UP for a drag. A sole occupant always lifts; a
+  /// TWO-occupant cell lifts as a unit when it is a real Double Sofa (a
+  /// paired/whole double) OR a single seat reused across disjoint legs (one
+  /// GO-only + one RET-only sharing one berth) — that leg-share relocates
+  /// together onto a free seat. Any OTHER two-occupant non-double is managed
+  /// per-person via the occupant sheet instead.
+  bool _canDragSeat(Tour tour, Bus bus, SeatCell cell) {
+    if (_editMode) return false;
+    if (cell.reserved)
+      return false; // a held seat stays put — can't drag it off
+    final occs = _occupantsOn(tour, bus, cell);
+    if (occs.isEmpty) return false;
+    if (occs.length >= 2 &&
+        cell.seatType != SeatType.doubleSofa &&
+        !isLegDisjointPair(occs)) {
+      return false;
+    }
+    return true;
+  }
 
   /// Chip label that follows the finger — the occupant's name, or "A + B" for a
   /// shared double moving as a unit.
@@ -799,13 +1146,23 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       case SeatDropBlock.neutral:
       case null:
         return SeatDropHighlight.none;
+      case SeatDropBlock.held:
+        // A reserved/held seat is PROTECTED, not merely a bad fit — paint the
+        // distinct red lock so the agent can tell "can't touch this" from the
+        // softer "doesn't fit here" dim.
+        return SeatDropHighlight.blocked;
       default:
         return SeatDropHighlight.dim;
     }
   }
 
   /// Toast explaining why a drop was rejected.
-  void _toastBlocked(SeatDropBlock block, SeatCell fromCell, String toSeatId) {
+  void _toastBlocked(
+    SeatDropBlock block,
+    SeatCell fromCell,
+    String toSeatId, {
+    TripType? moverTrip,
+  }) {
     switch (block) {
       case SeatDropBlock.self:
       case SeatDropBlock.neutral:
@@ -840,10 +1197,29 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         );
         return;
       case SeatDropBlock.sharedTargetAmbiguous:
-      case SeatDropBlock.noLegRoom:
         AppSnackBar.info(
           tr('tour_seat_assignment.drop.shared_body'),
           title: tr('tour_seat_assignment.drop.shared_title'),
+        );
+        return;
+      case SeatDropBlock.noLegRoom:
+        // Distinct from the ambiguity toast: the mover's LEG is full on the
+        // target, not a size mismatch and not a one-finger-ambiguity. Name the
+        // SPECIFIC leg when the rider is one-way so the agent knows exactly which
+        // leg clashed (round-trip rides both, so it stays generic).
+        final legKey = moverTrip == null
+            ? 'tour_seat_assignment.drop.leg_both'
+            : (moverTrip.usesOutbound && !moverTrip.usesReturn)
+                ? 'tour_seat_assignment.drop.leg_go'
+                : (moverTrip.usesReturn && !moverTrip.usesOutbound)
+                    ? 'tour_seat_assignment.drop.leg_ret'
+                    : 'tour_seat_assignment.drop.leg_both';
+        AppSnackBar.warning(
+          tr(
+            'tour_seat_assignment.drop.no_leg_room_body',
+            namedArgs: {'seat': toSeatId, 'leg': tr(legKey)},
+          ),
+          title: tr('tour_seat_assignment.drop.no_leg_room_title'),
         );
         return;
       case SeatDropBlock.sharedNeedsFreeDouble:
@@ -855,32 +1231,161 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     }
   }
 
+  /// When a SINGLE berth is dragged onto a FREE Double Sofa, decide whether this
+  /// should CONSOLIDATE the passenger's two cross-filled singles into the one
+  /// double instead of a plain move. Returns the OTHER single seatId to fold in
+  /// (so the source pair is `[fromSeatId, otherSeatId]`), or null when this is a
+  /// plain move.
+  ///
+  /// Detected screen-side from the passenger's own state — no new engine action:
+  ///   * [target] is a free Double Sofa,
+  ///   * the mover holds EXACTLY one berth on [fromSeatId] (a single-berth move),
+  ///   * the mover holds EXACTLY one OTHER single-sofa berth on this bus, and
+  ///   * the mover has an outstanding `doubleSofa` request line (i.e. they were
+  ///     satisfied via two cross-filled singles and now want the real double).
+  String? _consolidationPartnerSeat(
+    Tour tour,
+    Bus bus,
+    Passenger mover,
+    SeatCell fromCell,
+    SeatCell target,
+  ) {
+    final fromSeatId = fromCell.seatId;
+    if (fromSeatId == null) return null;
+    if (target.seatType != SeatType.doubleSofa) return null;
+    // Free double only — a half-filled/occupied double is a fill/swap, not a
+    // consolidation of the mover's own scattered singles.
+    if (_occupantsOn(tour, bus, target).isNotEmpty) return null;
+
+    final wantsDouble =
+        mover.requestLines
+            .where((l) => l.seatType == SeatType.doubleSofa)
+            .fold<int>(0, (s, l) => s + l.qty) >
+        0;
+    if (!wantsDouble) return null;
+
+    // Berths the mover holds per seat on THIS bus.
+    final perSeat = <String, int>{};
+    for (final a in mover.assignedSeats) {
+      if (a.busId != bus.id) continue;
+      perSeat[a.seatId] = (perSeat[a.seatId] ?? 0) + 1;
+    }
+    // The source must be a single-berth hold (a cross-filled single, not a
+    // whole double the engine would have routed elsewhere).
+    if ((perSeat[fromSeatId] ?? 0) != 1) return null;
+
+    // Find exactly one OTHER single-sofa seat the mover also holds one berth on.
+    String? partner;
+    for (final entry in perSeat.entries) {
+      if (entry.key == fromSeatId) continue;
+      if (entry.value != 1) continue;
+      final cell = _findCell(tour, bus.id, entry.key);
+      if (cell?.seatType != SeatType.singleSofa) continue;
+      if (partner != null) return null; // ambiguous — more than one candidate
+      partner = entry.key;
+    }
+    return partner;
+  }
+
   /// Resolve a released drag from [fromSeatId] onto [toSeatId] on [bus] by
   /// dispatching the engine verdict.
   Future<void> _handleSeatDrop(
     Tour tour,
     Bus bus,
     String fromSeatId,
-    String toSeatId,
-  ) async {
+    String toSeatId, {
+    String? grabbedOccupantId,
+  }) async {
     final fromCell = _findCell(tour, bus.id, fromSeatId);
     final targetCell = _findCell(tour, bus.id, toSeatId);
     if (fromCell == null || targetCell == null) return;
-    final fromOccs = _occupantsOn(tour, bus, fromCell);
+    final fromOccs = _occupantsOn(
+      tour,
+      bus,
+      fromCell,
+      onlyOccupantId: grabbedOccupantId,
+    );
     if (fromOccs.isEmpty) return;
 
-    final decision = _decideDrop(tour, bus, fromCell, targetCell);
+    final decision = _decideDrop(
+      tour,
+      bus,
+      fromCell,
+      targetCell,
+      grabbedOccupantId: grabbedOccupantId,
+    );
     final mover = tour.passengers.firstWhereOrNull(
       (p) => p.id == fromOccs.first.passengerId,
     );
 
     switch (decision.action) {
       case SeatDropAction.blocked:
-        _toastBlocked(decision.block!, fromCell, toSeatId);
+        _toastBlocked(
+          decision.block!,
+          fromCell,
+          toSeatId,
+          moverTrip: mover?.tripType,
+        );
+        return;
+
+      case SeatDropAction.splitPairChoice:
+        // A paired double dropped onto a single (free or single-occupant). Ask
+        // WHICH of the two sharers peels onto the single; the other keeps the
+        // double. The engine surfaces this as a VALID (green) target, so the
+        // highlight matches what release does.
+        await _promptSplitPairOntoSingle(tour, bus, fromCell, targetCell);
+        return;
+
+      case SeatDropAction.swapPair:
+        // Two occupied doubles exchange their full contents (two couples swap
+        // sofas). Both seats are cap-2, so the exchange is always seat-safe.
+        await _ctrl.swapSeatContents(
+          tourId: tour.id,
+          busId: bus.id,
+          seatAId: fromSeatId,
+          seatBId: toSeatId,
+        );
+        AppSnackBar.success(
+          tr(
+            'tour_seat_assignment.drop.swapped_body',
+            namedArgs: {
+              'a': _dragLabelFor(tour, bus, fromCell) ?? fromSeatId,
+              'b': _dragLabelFor(tour, bus, targetCell) ?? toSeatId,
+            },
+          ),
+          title: tr('tour_seat_assignment.drop.swapped_title'),
+        );
         return;
 
       case SeatDropAction.move:
         if (mover == null) return;
+        // CONSOLIDATION: a single berth dragged onto a free Double Sofa while the
+        // mover also holds another cross-filled single AND still wants a double →
+        // fold BOTH singles into the one double instead of a plain move.
+        final partnerSeat = _consolidationPartnerSeat(
+          tour,
+          bus,
+          mover,
+          fromCell,
+          targetCell,
+        );
+        if (partnerSeat != null) {
+          await _ctrl.consolidateOntoDouble(
+            tourId: tour.id,
+            passengerId: mover.id,
+            busId: bus.id,
+            targetSeatId: toSeatId,
+            sourceSeatIds: [fromSeatId, partnerSeat],
+          );
+          AppSnackBar.success(
+            tr(
+              'tour_seat_assignment.drop.consolidated_body',
+              namedArgs: {'name': mover.displayName, 'seat': toSeatId},
+            ),
+            title: tr('tour_seat_assignment.drop.consolidated_title'),
+          );
+          return;
+        }
         await _ctrl.moveSeat(
           tourId: tour.id,
           passengerId: mover.id,
@@ -970,9 +1475,11 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           (p) => p.id == _occupantsOn(tour, bus, targetCell).first.passengerId,
         );
         if (occ == null) return;
-        await _ctrl.swapSeats(
+        if (!mounted) return;
+        await SeatSwapGuard.run(
+          context,
           tourId: tour.id,
-          busId: bus.id,
+          busAId: bus.id,
           passengerAId: mover.id,
           seatAId: fromSeatId,
           passengerBId: occ.id,
@@ -1006,7 +1513,148 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           title: tr('tour_seat_assignment.drop.moved_both_title'),
         );
         return;
+
+      case SeatDropAction.fillPairInto:
+        // Merge the source pair into the leg-disjoint occupied double: move each
+        // sharer's single berth onto the target (its occupants stay put), so all
+        // four share one double across opposite legs. Two atomic 1-berth moves.
+        for (final o in fromOccs) {
+          await _ctrl.moveSeat(
+            tourId: tour.id,
+            passengerId: o.passengerId,
+            busId: bus.id,
+            fromSeatId: fromSeatId,
+            toSeatId: toSeatId,
+            toBusId: bus.id,
+            berths: 1,
+          );
+        }
+        AppSnackBar.success(
+          tr(
+            'tour_seat_assignment.drop.moved_both_body',
+            namedArgs: {
+              'names': _dragLabelFor(tour, bus, fromCell) ?? '',
+              'seat': toSeatId,
+            },
+          ),
+          title: tr('tour_seat_assignment.drop.moved_both_title'),
+        );
+        return;
     }
+  }
+
+  /// A paired double was dropped on a single seat. Ask which of the two sharers
+  /// moves onto [targetCell] (the other keeps the double), then seat the chosen
+  /// one. A FREE single just takes the chosen passenger's berth; an OCCUPIED
+  /// single swaps the chosen sharer with whoever sits there (so that occupant
+  /// joins the remaining sharer on the double). A single reused across legs (two
+  /// occupants) is too ambiguous to resolve with one tap → fall back to a toast.
+  Future<void> _promptSplitPairOntoSingle(
+    Tour tour,
+    Bus bus,
+    SeatCell fromCell,
+    SeatCell targetCell,
+  ) async {
+    final fromSeatId = fromCell.seatId!;
+    final toSeatId = targetCell.seatId!;
+    final pair = _occupantsOn(tour, bus, fromCell);
+    final candidates = pair
+        .map(
+          (o) => tour.passengers.firstWhereOrNull((p) => p.id == o.passengerId),
+        )
+        .whereType<Passenger>()
+        .toList();
+    if (candidates.length != 2) return;
+
+    final targetOccs = _occupantsOn(tour, bus, targetCell);
+    if (targetOccs.length >= 2) {
+      _toastBlocked(SeatDropBlock.sharedNeedsFreeDouble, fromCell, toSeatId);
+      return;
+    }
+
+    UgamSheet.show<void>(
+      context,
+      title: tr(
+        'tour_seat_assignment.split_pair.title',
+        namedArgs: {'seat': toSeatId},
+      ),
+      builder: (sheetCtx) => _SeatPassengerPicker(
+        candidates: candidates,
+        activeId: null,
+        subtitle: tr('tour_seat_assignment.split_pair.subtitle'),
+        onPick: (chosen) {
+          Navigator.of(sheetCtx).pop();
+          _seatChosenSharerOnSingle(
+            tour,
+            bus,
+            fromSeatId,
+            toSeatId,
+            chosen,
+            targetOccs.firstOrNull,
+          );
+        },
+      ),
+    );
+  }
+
+  /// Seat [chosen] (one sharer of a paired double) onto the single [toSeatId].
+  /// When the single is free, move their single berth over; when it already
+  /// holds [occupant], swap the two so the displaced occupant takes the freed
+  /// half of the double beside the remaining sharer.
+  Future<void> _seatChosenSharerOnSingle(
+    Tour tour,
+    Bus bus,
+    String fromSeatId,
+    String toSeatId,
+    Passenger chosen,
+    SeatOccupant? occupant,
+  ) async {
+    if (occupant == null) {
+      await _ctrl.moveSeat(
+        tourId: tour.id,
+        passengerId: chosen.id,
+        busId: bus.id,
+        fromSeatId: fromSeatId,
+        toSeatId: toSeatId,
+        toBusId: bus.id,
+        berths: 1,
+      );
+      AppSnackBar.success(
+        tr(
+          'tour_seat_assignment.split_pair.moved_body',
+          namedArgs: {'name': chosen.displayName, 'seat': toSeatId},
+        ),
+        title: tr('tour_seat_assignment.split_pair.moved_title'),
+      );
+      return;
+    }
+
+    final occ = tour.passengers.firstWhereOrNull(
+      (p) => p.id == occupant.passengerId,
+    );
+    if (occ == null) return;
+    if (!mounted) return;
+    await SeatSwapGuard.run(
+      context,
+      tourId: tour.id,
+      busAId: bus.id,
+      passengerAId: chosen.id,
+      seatAId: fromSeatId,
+      passengerBId: occ.id,
+      seatBId: toSeatId,
+      busBId: bus.id,
+    );
+    AppSnackBar.success(
+      tr(
+        'tour_seat_assignment.split_pair.swapped_body',
+        namedArgs: {
+          'a': chosen.displayName,
+          'b': occ.displayName,
+          'seat': toSeatId,
+        },
+      ),
+      title: tr('tour_seat_assignment.drop.swapped_title'),
+    );
   }
 
   // ── Edit seats: Forward / Reserved flags ────────────────────────────────
@@ -1159,106 +1807,163 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                 )
                 .toList();
 
-            return Column(
+            final allAssigned = tour.allSeatsAssigned;
+            return Stack(
               children: [
-                Row(
+                Column(
                   children: [
-                    Expanded(
-                      child: _BusPills(
-                        buses: tour.buses,
-                        selectedBusId: bus.id,
-                        seatsAssignedFor: (id) => _occupants(
-                          assignmentsByBus[id] ??
-                              const <String, List<String>>{},
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _BusPills(
+                            buses: tour.buses,
+                            selectedBusId: bus.id,
+                            // Leg-aware: a berth shared by two opposite one-way
+                            // riders is ONE physical seat. Counting raw entries
+                            // made the badge read "38/37" past capacity.
+                            seatsAssignedFor: tour.occupiedBerthsFor,
+                            onTapBus: (id) {
+                              setState(() {
+                                _selectedBusId = id;
+                              });
+                            },
+                            c: c,
+                          ),
                         ),
-                        onTapBus: (id) {
-                          setState(() {
-                            _selectedBusId = id;
-                          });
-                        },
-                        c: c,
-                      ),
+                        const SizedBox(width: UgamSpacing.sm),
+                        // Edit-seats toggle: ON routes a seat tap to the
+                        // Forward/Reserved flag sheet and suspends drag-to-move;
+                        // OFF restores tap-to-place + drag. Visible in standalone
+                        // and embedded alike.
+                        _EditSeatsToggle(
+                          editMode: _editMode,
+                          onToggle: () =>
+                              setState(() => _editMode = !_editMode),
+                          c: c,
+                        ),
+                        const SizedBox(width: UgamSpacing.gutter),
+                      ],
                     ),
-                    const SizedBox(width: UgamSpacing.sm),
-                    // Edit-seats toggle: ON routes a seat tap to the
-                    // Forward/Reserved flag sheet and suspends drag-to-move;
-                    // OFF restores tap-to-place + drag. Visible in standalone
-                    // and embedded alike.
-                    _EditSeatsToggle(
-                      editMode: _editMode,
-                      onToggle: () => setState(() => _editMode = !_editMode),
-                      c: c,
-                    ),
-                    const SizedBox(width: UgamSpacing.gutter),
-                  ],
-                ),
-                const SizedBox(height: UgamSpacing.md),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (ctx, constraints) {
-                      return SingleChildScrollView(
+                    const SizedBox(height: UgamSpacing.md),
+                    if (_relocate != null)
+                      Padding(
                         padding: const EdgeInsets.fromLTRB(
                           UgamSpacing.gutter,
                           0,
                           UgamSpacing.gutter,
-                          UgamSpacing.sm,
+                          UgamSpacing.md,
                         ),
-                        physics: const BouncingScrollPhysics(),
-                        child: _SeatGrid(
-                          layout: bus.layout,
-                          tour: tour,
-                          assignmentMap: assignmentMap,
-                          currentPassengerId: passenger?.id,
-                          onTap: (cell) => _onSeatTapped(cell, bus, tour),
+                        child: _RelocateBanner(
+                          moverName: _relocate!.mover.displayName,
                           busName: bus.name,
-                          editMode: _editMode,
-                          // Drag-to-move is live whenever not editing flags.
-                          enableDrag: !_editMode,
-                          dragActive: _dragActive,
-                          canDragSeat: (cell) => _canDragSeat(tour, bus, cell),
-                          dropHighlightFor: (cell) =>
-                              _dropHighlightFor(tour, bus, cell),
-                          dragLabelFor: (cell) =>
-                              _dragLabelFor(tour, bus, cell),
-                          onSeatDragStarted: (cell) => setState(() {
-                            _dragFromSeatId = cell.seatId;
-                            _dragActive = true;
-                          }),
-                          onSeatDragEnded: () => setState(() {
-                            _dragFromSeatId = null;
-                            _dragActive = false;
-                          }),
-                          onSeatDraggedToSeat: (fromSeatId, toSeatId) =>
-                              _handleSeatDrop(tour, bus, fromSeatId, toSeatId),
+                          onCancel: _cancelRelocate,
+                          c: c,
                         ),
-                      );
-                    },
-                  ),
+                      ),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (ctx, constraints) {
+                          return SingleChildScrollView(
+                            padding: EdgeInsets.fromLTRB(
+                              UgamSpacing.gutter,
+                              0,
+                              UgamSpacing.gutter,
+                              // Clear the floating assignment dock so the chart
+                              // legend is never hidden behind it.
+                              _kCollapsedDockHeight +
+                                  MediaQuery.of(context).padding.bottom,
+                            ),
+                            physics: const BouncingScrollPhysics(),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _SeatGrid(
+                                  layout: bus.layout,
+                                  tour: tour,
+                                  assignmentMap: assignmentMap,
+                                  currentPassengerId: passenger?.id,
+                                  onTap: (cell) =>
+                                      _onSeatTapped(cell, bus, tour),
+                                  busName: bus.name,
+                                  editMode: _editMode,
+                                  // Drag-to-move is live whenever not editing
+                                  // flags.
+                                  enableDrag: !_editMode,
+                                  dragActive: _dragActive,
+                                  canDragSeat: (cell) =>
+                                      _canDragSeat(tour, bus, cell),
+                                  dropHighlightFor: (cell) =>
+                                      _dropHighlightFor(tour, bus, cell),
+                                  dragLabelFor: (cell) =>
+                                      _dragLabelFor(tour, bus, cell),
+                                  onSeatDragStarted: (cell) => setState(() {
+                                    _dragFromSeatId = cell.seatId;
+                                    _dragActive = true;
+                                  }),
+                                  onSeatDragEnded: () => setState(() {
+                                    _dragFromSeatId = null;
+                                    _dragActive = false;
+                                  }),
+                                  onSeatDraggedToSeat: (fromSeatId, toSeatId) =>
+                                      _handleSeatDrop(
+                                        tour,
+                                        bus,
+                                        fromSeatId,
+                                        toSeatId,
+                                      ),
+                                ),
+                                // Canonical seat-colour key — the same legend
+                                // every other role sees, so admins read
+                                // GO/RET/priority/held/paid colours the same way.
+                                const SizedBox(height: UgamSpacing.md),
+                                UgamSeatChartLegend(c: c),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                if (passenger != null)
-                  _PassengerCard(
+                // ─── Floating assignment dock ──────────────────────────────
+                // Pinned to the bottom and OVERLAYS the chart, so opening the
+                // full passenger detail grows the sheet UPWARD over the grid
+                // instead of squeezing it. Collapsed by default → whole chart
+                // visible. When every seat is filled `passenger` is null, so
+                // the dock shows only its "all assigned · Lock & notify"
+                // done-state (no duplicate "all seats assigned" card).
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: _AssignmentDock(
+                    c: c,
                     tour: tour,
-                    passenger: passenger,
-                    pending: _pendingLines(passenger),
-                    allPassengers: tour.passengers,
+                    passenger: (passenger != null && !allAssigned)
+                        ? passenger
+                        : null,
+                    pendingLines: passenger != null
+                        ? _pendingLines(passenger)
+                        : const [],
                     handlerId: tour.handlerId,
-                    onChange: (id) => _selectPassenger(tour, id),
                     onManageBuses: () =>
                         Get.to(() => ManageBusesScreen(tourId: widget.tourId)),
+                    pending: pending,
+                    activeId: passenger?.id,
+                    onTapPassenger: (id) => _selectPassenger(tour, id),
+                    onLockTour: canLock ? () => _openLockAndNotify(tour) : null,
+                    onDownloadChart: canDownload
+                        ? () => _downloadChart(tour)
+                        : null,
+                    expanded: _dockExpanded,
+                    onToggleExpanded: () =>
+                        setState(() => _dockExpanded = !_dockExpanded),
+                    onSetExpanded: (v) {
+                      if (_dockExpanded != v) {
+                        setState(() => _dockExpanded = v);
+                      }
+                    },
                   ),
-                _PendingDock(
-                  c: c,
-                  pending: pending,
-                  activeId: passenger?.id,
-                  onTapPassenger: (id) => _selectPassenger(tour, id),
-                  onLockTour: canLock ? () => _openLockAndNotify(tour) : null,
-                  onDownloadChart: canDownload
-                      ? () => _downloadChart(tour)
-                      : null,
-                ),
-                SizedBox(
-                  height:
-                      MediaQuery.of(context).padding.bottom + UgamSpacing.xs,
                 ),
               ],
             );
@@ -1274,16 +1979,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       body: SafeArea(bottom: false, child: content),
     );
   }
-}
-
-/// Per-cell tally used by `_pendingLines`. `berths` is how many entries
-/// in `Passenger.assignedSeats` point at this cell — 1 for a regular
-/// seat or half-double, 2 when the passenger owns a whole double solo.
-class _CellGroup {
-  final String busId;
-  final String seatId;
-  int berths;
-  _CellGroup({required this.busId, required this.seatId}) : berths = 0;
 }
 
 class _PendingLine {
@@ -1322,10 +2017,15 @@ class _SeatPassengerPicker extends StatelessWidget {
   final String? activeId;
   final ValueChanged<Passenger> onPick;
 
+  /// Optional override for the explanatory line above the list. Defaults to the
+  /// seat-first "tap a passenger to seat them here" copy.
+  final String? subtitle;
+
   const _SeatPassengerPicker({
     required this.candidates,
     required this.activeId,
     required this.onPick,
+    this.subtitle,
   });
 
   @override
@@ -1336,7 +2036,7 @@ class _SeatPassengerPicker extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          tr('tour_seat_assignment.picker_subtitle'),
+          subtitle ?? tr('tour_seat_assignment.picker_subtitle'),
           style: UgamText.caption.copyWith(color: c.ink2),
         ),
         const SizedBox(height: UgamSpacing.md),
@@ -1579,6 +2279,77 @@ class _BusPills extends StatelessWidget {
   }
 }
 
+// ─── Relocate banner ─────────────────────────────────────────────────────
+
+/// Slim accent banner shown while a cross-bus relocate is in progress: tells
+/// the agent who is in hand and which bus they're placing on, with a Cancel.
+class _RelocateBanner extends StatelessWidget {
+  final String moverName;
+  final String busName;
+  final VoidCallback onCancel;
+  final UgamColorSet c;
+
+  const _RelocateBanner({
+    required this.moverName,
+    required this.busName,
+    required this.onCancel,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm + 2,
+      ),
+      decoration: BoxDecoration(
+        color: c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        border: Border.all(color: c.accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.touch_app_rounded, size: 18, color: c.accent),
+          const SizedBox(width: UgamSpacing.sm),
+          Expanded(
+            child: Text(
+              tr(
+                'tour_seat_assignment.relocate.banner',
+                namedArgs: {'name': moverName, 'bus': busName},
+              ),
+              style: UgamText.caption.copyWith(
+                color: c.accent,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          GestureDetector(
+            onTap: onCancel,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.sm,
+                vertical: 2,
+              ),
+              child: Text(
+                tr('app.action.cancel'),
+                style: UgamText.caption.copyWith(
+                  color: c.ink2,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── Seat grid card ────────────────────────────────────────────────────
 
 class _SeatGrid extends StatelessWidget {
@@ -1655,6 +2426,8 @@ class _SeatGrid extends StatelessWidget {
             colGap: 8,
             rowGap: 8,
             driverLabel: tr('tour_seat_assignment.grid_label_driver'),
+            // Reserve a header band so the top-left expand button clears SU1.
+            reserveTopAction: canExpand,
             // Drag-to-move: a booked seat can be long-pressed onto another. The
             // grid owns the gesture; the screen owns move/swap (group-safe).
             enableDrag: enableDrag,
@@ -1680,6 +2453,10 @@ class _SeatGrid extends StatelessWidget {
                 occupants: occ,
                 groupColors: resolver,
                 editMode: editMode,
+                // [occ] is berth-accurate (one entry per assignment), so a
+                // half-taken double sofa renders split (filled + empty) instead
+                // of reading as fully booked.
+                markHalfDouble: true,
                 onTapBooked: () => onTap(cell),
                 onTapFree: () => onTap(cell),
               );
@@ -1727,6 +2504,9 @@ class _SeatGrid extends StatelessWidget {
                 groupColors: resolver,
                 title: busName,
                 driverLabel: tr('tour_seat_assignment.grid_label_driver'),
+                // [occupantsBySeat] here is berth-accurate, so the expanded
+                // chart can split a half-taken double too.
+                markHalfDouble: true,
               ),
             ),
         ],
@@ -1745,13 +2525,11 @@ class _PassengerCard extends StatelessWidget {
   final Tour tour;
   final Passenger passenger;
   final List<_PendingLine> pending;
-  final List<Passenger> allPassengers;
 
   /// Tour-wide handler pointer — kept only to badge the handler in this card
   /// and to drive the "assign a handler" nudge. Handlers are now assigned
   /// PER BUS on the Manage Buses screen, so there's no toggle here.
   final String? handlerId;
-  final ValueChanged<String> onChange;
 
   /// Opens Manage Buses, where each bus's handler is picked.
   final VoidCallback onManageBuses;
@@ -1760,9 +2538,7 @@ class _PassengerCard extends StatelessWidget {
     required this.tour,
     required this.passenger,
     required this.pending,
-    required this.allPassengers,
     required this.handlerId,
-    required this.onChange,
     required this.onManageBuses,
   });
 
@@ -1843,7 +2619,7 @@ class _PassengerCard extends StatelessWidget {
                               tr('tour_seat_assignment.badge_handler'),
                               style: UgamText.micro.copyWith(
                                 color: c.warm,
-                                fontSize: 8,
+                                fontSize: 9.5,
                                 letterSpacing: 0.6,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -1860,15 +2636,16 @@ class _PassengerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: tr('tour_seat_assignment.tooltip_edit_request'),
-                onPressed: () => EditRequestSheet.show(
+              UgamIconButton(
+                icon: Icons.edit_outlined,
+                size: 38,
+                iconSize: 18,
+                semanticLabel: tr('tour_seat_assignment.tooltip_edit_request'),
+                onTap: () => EditRequestSheet.show(
                   context: context,
                   tour: tour,
                   passenger: passenger,
                 ),
-                icon: Icon(Icons.edit_outlined, size: 20, color: c.ink3),
               ),
               Text(
                 '${passenger.totalSeatsAssigned}/${passenger.totalSeatsRequested}',
@@ -1960,99 +2737,257 @@ class _PassengerCard extends StatelessWidget {
               ),
             ),
           ],
-          // Inline passenger picker — kept simple chips so the agent can
-          // quickly jump between requests without leaving the screen.
-          const SizedBox(height: UgamSpacing.sm + 2),
-          SizedBox(
-            height: 28,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: allPassengers.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 6),
-              itemBuilder: (ctx, i) {
-                final p = allPassengers[i];
-                final selected = p.id == passenger.id;
-                return GestureDetector(
-                  onTap: () => onChange(p.id),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: selected ? c.accentFill : c.cardElev,
-                      borderRadius: BorderRadius.circular(UgamRadius.chip),
-                      border: selected
-                          ? Border.all(color: c.accent.withValues(alpha: 0.28))
-                          : null,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (p.isFullyAssigned)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 4),
-                            child: Icon(
-                              Icons.check_circle_rounded,
-                              size: 12,
-                              color: selected ? c.accent : c.good,
-                            ),
-                          ),
-                        Text(
-                          p.displayName,
-                          style: UgamText.caption.copyWith(
-                            color: selected ? c.accent : c.ink,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
+          // The all-passenger chip picker that used to live here was removed:
+          // the dock's queue strip is now the SINGLE passenger switcher, so the
+          // cramped bottom third breathes and there's only one place to jump
+          // between requests.
         ],
       ),
     );
   }
 }
 
-// ─── Pending dock ──────────────────────────────────────────────────────
-
-class _PendingDock extends StatelessWidget {
+// ─── Assignment dock ───────────────────────────────────────────────────
+//
+// Cohesive bottom panel that floats over the seat chart. Two snap states:
+//   • Collapsed (default): grab handle + a one-line active-passenger summary
+//     + the pending queue strip + the lock/download action. The chart owns
+//     all the space above, so the WHOLE grid is visible.
+//   • Expanded: drag the handle up (or tap it) to reveal the full passenger
+//     detail (phone, every pending line, handler nudge, edit) — the sheet
+//     grows UPWARD as an overlay, so the chart is never squeezed.
+//
+// Replaces the old stacked `_PassengerCard` + `_PendingDock`, which together
+// ate ~40% of the screen and left only a sliver of the chart visible.
+class _AssignmentDock extends StatelessWidget {
   final UgamColorSet c;
+  final Tour tour;
+
+  /// Active passenger being seated. Null when nobody is selected or every
+  /// seat is filled — the dock then shows only its queue / done-state.
+  final Passenger? passenger;
+  final List<_PendingLine> pendingLines;
+  final String? handlerId;
+  final VoidCallback onManageBuses;
+
+  /// The pending queue (everyone still needing seats).
   final List<Passenger> pending;
   final String? activeId;
   final ValueChanged<String> onTapPassenger;
   final VoidCallback? onLockTour;
   final VoidCallback? onDownloadChart;
 
-  const _PendingDock({
+  final bool expanded;
+  final VoidCallback onToggleExpanded;
+  final ValueChanged<bool> onSetExpanded;
+
+  const _AssignmentDock({
     required this.c,
+    required this.tour,
+    required this.passenger,
+    required this.pendingLines,
+    required this.handlerId,
+    required this.onManageBuses,
     required this.pending,
     required this.activeId,
     required this.onTapPassenger,
     required this.onLockTour,
-    this.onDownloadChart,
+    required this.onDownloadChart,
+    required this.expanded,
+    required this.onToggleExpanded,
+    required this.onSetExpanded,
   });
 
   @override
   Widget build(BuildContext context) {
-    const cap = 8;
-    final visible = pending.take(cap).toList();
-    final overflow = pending.length - visible.length;
+    final media = MediaQuery.of(context);
+    final hasActive = passenger != null;
+    final showDetail = expanded && hasActive;
 
     return Container(
       decoration: BoxDecoration(
         color: c.card,
         border: Border(top: BorderSide(color: c.border)),
+        // Lift the sheet off the chart only while it overlays it (expanded).
+        boxShadow: showDetail
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 20,
+                  offset: const Offset(0, -8),
+                ),
+              ]
+            : null,
       ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Grab handle — tap toggles, a vertical flick snaps open/closed.
+          // Disabled when there's no active passenger (nothing to expand to).
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: hasActive ? onToggleExpanded : null,
+            onVerticalDragEnd: hasActive
+                ? (d) {
+                    final v = d.primaryVelocity ?? 0;
+                    if (v < -50) {
+                      onSetExpanded(true);
+                    } else if (v > 50) {
+                      onSetExpanded(false);
+                    }
+                  }
+                : null,
+            child: Container(
+              width: double.infinity,
+              alignment: Alignment.center,
+              padding: const EdgeInsets.only(top: 8, bottom: 6),
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: hasActive ? c.ink3 : c.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+          // Body: full detail when expanded, otherwise the one-line summary.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.bottomCenter,
+            child: showDetail
+                ? ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: media.size.height * 0.5,
+                    ),
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: _PassengerCard(
+                        tour: tour,
+                        passenger: passenger!,
+                        pending: pendingLines,
+                        handlerId: handlerId,
+                        onManageBuses: onManageBuses,
+                      ),
+                    ),
+                  )
+                : hasActive
+                ? _compactActive(context)
+                : const SizedBox.shrink(),
+          ),
+          // Queue strip + primary action, then the bottom safe-area inset.
+          _queueRow(context),
+          SizedBox(height: media.padding.bottom + UgamSpacing.xs),
+        ],
+      ),
+    );
+  }
+
+  /// One-line active-passenger summary shown while collapsed: avatar, name,
+  /// request summary + "needs N more", and the seats-assigned tally. Tapping
+  /// it expands the dock (same as the handle).
+  Widget _compactActive(BuildContext context) {
+    final p = passenger!;
+    final stillNeeded = pendingLines.fold<int>(0, (s, l) => s + l.remaining);
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onToggleExpanded,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          UgamSpacing.gutter,
+          UgamSpacing.xs,
+          UgamSpacing.gutter,
+          UgamSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+                style: UgamText.bodyStrong.copyWith(color: c.accent, fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm + 2),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    p.displayName,
+                    style: UgamText.titleM.copyWith(color: c.ink, fontSize: 14),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          p.requestSummary,
+                          style: UgamText.caption.copyWith(color: c.ink2),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (stillNeeded > 0) ...[
+                        Text(
+                          '  ·  ',
+                          style: UgamText.caption.copyWith(color: c.ink3),
+                        ),
+                        Text(
+                          tr(
+                            'tour_seat_assignment.more_needed',
+                            namedArgs: {'count': stillNeeded.toString()},
+                          ),
+                          style: UgamText.caption.copyWith(
+                            color: c.warm,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              '${p.totalSeatsAssigned}/${p.totalSeatsRequested}',
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.keyboard_arrow_up_rounded, size: 18, color: c.ink3),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Pending queue strip (horizontal passenger cards + "+N" overflow) and the
+  /// primary lock / download action. Unchanged from the previous dock — just
+  /// hosted inside the new sheet.
+  Widget _queueRow(BuildContext context) {
+    const cap = 8;
+    final visible = pending.take(cap).toList();
+    final overflow = pending.length - visible.length;
+
+    return Padding(
       padding: const EdgeInsets.fromLTRB(
         UgamSpacing.gutter,
-        UgamSpacing.sm + 2,
+        UgamSpacing.xs,
         UgamSpacing.gutter,
-        UgamSpacing.sm + 2,
+        UgamSpacing.sm,
       ),
       child: Row(
         children: [
@@ -2082,21 +3017,40 @@ class _PendingDock extends StatelessWidget {
                           const SizedBox(width: UgamSpacing.sm),
                       itemBuilder: (ctx, i) {
                         if (i >= visible.length) {
-                          return Container(
-                            width: 70,
-                            decoration: BoxDecoration(
-                              color: c.cardElev,
-                              borderRadius: BorderRadius.circular(
-                                UgamRadius.row,
+                          // The +N overflow opens a full sheet of every pending
+                          // passenger so none are stranded off-screen.
+                          return GestureDetector(
+                            onTap: () => _showAllPending(ctx),
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              width: 70,
+                              decoration: BoxDecoration(
+                                color: c.cardElev,
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.row,
+                                ),
+                                border: Border.all(color: c.border),
                               ),
-                              border: Border.all(color: c.border),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '+$overflow',
-                              style: UgamText.bodyStrong.copyWith(
-                                color: c.ink2,
-                                fontSize: 13,
+                              alignment: Alignment.center,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    '+$overflow',
+                                    style: UgamText.bodyStrong.copyWith(
+                                      color: c.ink,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 1),
+                                  Text(
+                                    tr('tour_seat_assignment.dock_view_all'),
+                                    style: UgamText.micro.copyWith(
+                                      color: c.ink3,
+                                      fontSize: 8.5,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           );
@@ -2130,6 +3084,111 @@ class _PendingDock extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+
+  /// Full sheet of every pending passenger — opened from the dock's "+N"
+  /// overflow tile so the agent can jump to anyone, not just the first few.
+  void _showAllPending(BuildContext context) {
+    UgamSheet.show<void>(
+      context,
+      title: tr(
+        'tour_seat_assignment.dock_all_pending_title',
+        namedArgs: {'count': '${pending.length}'},
+      ),
+      builder: (sheetCtx) {
+        final cc = UgamColors.of(sheetCtx);
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(sheetCtx).size.height * 0.55,
+          ),
+          child: ListView.separated(
+            shrinkWrap: true,
+            physics: const BouncingScrollPhysics(),
+            itemCount: pending.length,
+            separatorBuilder: (_, _) => const SizedBox(height: UgamSpacing.sm),
+            itemBuilder: (_, i) {
+              final p = pending[i];
+              final selected = p.id == activeId;
+              return GestureDetector(
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  onTapPassenger(p.id);
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding: const EdgeInsets.all(UgamSpacing.md),
+                  decoration: BoxDecoration(
+                    color: cc.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.row),
+                    border: selected
+                        ? Border.all(color: cc.accent, width: 1.5)
+                        : null,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: selected ? cc.accent : cc.accentFill,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          SeatChartTile.initials(p.displayName),
+                          style: UgamText.bodyStrong.copyWith(
+                            color: selected ? cc.onAccent : cc.accent,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: UgamSpacing.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              p.displayName,
+                              style: UgamText.bodyStrong.copyWith(
+                                color: cc.ink,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              p.requestSummary,
+                              style: UgamText.micro.copyWith(color: cc.ink2),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (selected) ...[
+                        const SizedBox(width: UgamSpacing.sm),
+                        Icon(
+                          Icons.check_circle_rounded,
+                          size: 16,
+                          color: cc.accent,
+                        ),
+                      ],
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 18,
+                        color: cc.ink3,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
@@ -2180,7 +3239,7 @@ class _PendingCard extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 104,
+        width: 116,
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.sm,
           vertical: UgamSpacing.sm,
@@ -2196,8 +3255,8 @@ class _PendingCard extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 28,
-              height: 28,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 color: active ? c.accent : c.card,
                 shape: BoxShape.circle,
@@ -2207,11 +3266,11 @@ class _PendingCard extends StatelessWidget {
                 _initials,
                 style: UgamText.bodyStrong.copyWith(
                   color: active ? c.onAccent : c.ink,
-                  fontSize: 11,
+                  fontSize: 13,
                 ),
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,

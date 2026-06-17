@@ -1,25 +1,25 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/auth_controller.dart';
 import '../controllers/finance_controller.dart';
 import '../controllers/theme_controller.dart';
-import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
-import '../models/tour.dart';
 import '../routes/app_routes.dart';
-import '../utils/app_snackbar.dart';
 import '../widgets/language_picker_sheet.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  /// Displayed in the footer. Mirrors the pubspec marketing version.
+  static const String _appVersion = '1.0.3';
+
   @override
   Widget build(BuildContext context) {
     final authCtrl = Get.find<AuthController>();
     final themeCtrl = Get.find<ThemeController>();
-    final tourCtrl = Get.find<TourController>();
     final c = UgamColors.of(context);
 
     return Scaffold(
@@ -36,25 +36,30 @@ class SettingsScreen extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  GestureDetector(
-                    onTap: () => Get.back(),
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: c.cardElev,
-                        shape: BoxShape.circle,
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(
-                        Icons.arrow_back_rounded,
-                        size: 19,
-                        color: c.ink,
+                  // Settings is shell tab 4 and normally cannot pop, so the
+                  // back affordance is hidden in tab mode. It only appears (and
+                  // acts) when a future caller actually pushes this screen.
+                  if (Navigator.canPop(context)) ...[
+                    GestureDetector(
+                      onTap: () => Get.back(),
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: c.cardElev,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.arrow_back_rounded,
+                          size: 19,
+                          color: c.ink,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
+                    const SizedBox(width: UgamSpacing.md),
+                  ],
                   Expanded(
                     child: Text(
                       tr('settings.profile_title'),
@@ -77,22 +82,16 @@ class SettingsScreen extends StatelessWidget {
                   children: [
                     _ProfileHero(authCtrl: authCtrl, c: c),
                     const SizedBox(height: UgamSpacing.md),
-                    Obx(
-                      () =>
-                          _AgentStatsRow(tours: tourCtrl.tours.toList(), c: c),
-                    ),
-                    const SizedBox(height: UgamSpacing.md),
                     _FinanceCard(c: c),
                     const SizedBox(height: UgamSpacing.xl),
                     Text(
-                      tr('settings.account_section'),
+                      tr('settings.account_section').toUpperCase(),
                       style: UgamText.micro.copyWith(color: c.ink3),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     Obx(
                       () => _AccountCard(
                         phone: authCtrl.userPhone.value,
-                        whatsapp: authCtrl.userPhone.value,
                         c: c,
                       ),
                     ),
@@ -125,7 +124,7 @@ class SettingsScreen extends StatelessWidget {
                           _SettingsRow(
                             c: c,
                             icon: Icons.person_outline_rounded,
-                            iconTone: UgamStatVariant.accent,
+                            iconTone: UgamStatVariant.neutral,
                             title: tr('settings.account_details_title'),
                             subtitle: tr('settings.account_details_subtitle'),
                             onTap: () =>
@@ -134,28 +133,8 @@ class SettingsScreen extends StatelessWidget {
                           _Divider(c: c),
                           _SettingsRow(
                             c: c,
-                            icon: Icons.chat_bubble_outline_rounded,
-                            iconTone: UgamStatVariant.good,
-                            title: tr('settings.whatsapp_title'),
-                            subtitle: tr('settings.whatsapp_subtitle'),
-                            onTap: () =>
-                                Get.toNamed(AppRoutes.whatsappSettings),
-                          ),
-                          _Divider(c: c),
-                          _SettingsRow(
-                            c: c,
-                            icon: Icons.attach_money_rounded,
-                            iconTone: UgamStatVariant.warm,
-                            title: tr('settings.payment_title'),
-                            subtitle: tr('settings.payment_subtitle'),
-                            onTap: () =>
-                                Get.toNamed(AppRoutes.paymentSettings),
-                          ),
-                          _Divider(c: c),
-                          _SettingsRow(
-                            c: c,
                             icon: Icons.notifications_none_rounded,
-                            iconTone: UgamStatVariant.accent,
+                            iconTone: UgamStatVariant.neutral,
                             title: tr('settings.notifications_title'),
                             subtitle: tr('settings.notifications_subtitle'),
                             onTap: () =>
@@ -186,43 +165,16 @@ class SettingsScreen extends StatelessWidget {
                         );
                         if (ok) authCtrl.logout();
                       },
-                      // Account deletion only applies to admins — passengers
-                      // have no server-side account (local phone only).
-                      onDeleteAccount: authCtrl.isAdmin
-                          ? () async {
-                              final ok = await UgamDialog.confirm(
-                                context,
-                                title: tr(
-                                  'settings.delete_account_confirm_title',
-                                ),
-                                message: tr(
-                                  'settings.delete_account_confirm_message',
-                                ),
-                                confirmLabel: tr(
-                                  'settings.delete_account_confirm_cta',
-                                ),
-                                destructive: true,
-                              );
-                              if (!ok) return;
-                              try {
-                                await authCtrl.deleteAccount();
-                                AppSnackBar.success(
-                                  tr('settings.delete_account_success'),
-                                );
-                              } catch (_) {
-                                AppSnackBar.error(
-                                  tr('settings.delete_account_error'),
-                                );
-                              }
-                            }
-                          : null,
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     Center(
                       child: Column(
                         children: [
                           Text(
-                            'Ugam Booking v1.0.0',
+                            tr(
+                              'settings.footer_version',
+                              namedArgs: {'version': _appVersion},
+                            ),
                             style: UgamText.caption.copyWith(color: c.ink3),
                           ),
                           const SizedBox(height: 2),
@@ -408,114 +360,11 @@ class _ProfileHero extends StatelessWidget {
   }
 }
 
-class _AgentStatsRow extends StatelessWidget {
-  final List<Tour> tours;
-  final UgamColorSet c;
-  const _AgentStatsRow({required this.tours, required this.c});
-
-  String _formatRevenue(double amount) {
-    if (amount >= 100000) {
-      final lakhs = amount / 100000;
-      return '₹${lakhs.toStringAsFixed(lakhs >= 10 ? 0 : 1)}L';
-    }
-    if (amount >= 1000) {
-      final k = amount / 1000;
-      return '₹${k.toStringAsFixed(k >= 10 ? 0 : 1)}K';
-    }
-    return '₹${amount.toStringAsFixed(0)}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final tourCount = tours.length;
-    final passengerCount = tours.fold<int>(
-      0,
-      (sum, t) => sum + t.passengers.length,
-    );
-    final monthRevenue = tours
-        .where((t) {
-          return t.departureDate.year == now.year &&
-              t.departureDate.month == now.month;
-        })
-        .fold<double>(
-          0,
-          (sum, t) => sum + (t.pricePerSeat * t.totalSeatsAssigned),
-        );
-
-    final items = <_StatItem>[
-      _StatItem(
-        value: '$tourCount',
-        label: tourCount == 1
-            ? tr('settings.stat_tour')
-            : tr('settings.stat_tours'),
-      ),
-      _StatItem(
-        value: '$passengerCount',
-        label: passengerCount == 1
-            ? tr('settings.stat_passenger')
-            : tr('settings.stat_passengers'),
-      ),
-      _StatItem(
-        value: _formatRevenue(monthRevenue),
-        label: tr('settings.stat_this_month'),
-      ),
-    ];
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.md,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < items.length; i++) ...[
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Text(
-                    items[i].value,
-                    style: UgamText.tabular(
-                      UgamText.titleM.copyWith(color: c.ink, fontSize: 17),
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    items[i].label,
-                    style: UgamText.caption.copyWith(color: c.ink2),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            if (i < items.length - 1)
-              Container(width: 1, height: 28, color: c.border),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _StatItem {
-  final String value;
-  final String label;
-  const _StatItem({required this.value, required this.label});
-}
-
 class _AccountCard extends StatelessWidget {
   final String phone;
-  final String whatsapp;
   final UgamColorSet c;
   const _AccountCard({
     required this.phone,
-    required this.whatsapp,
     required this.c,
   });
 
@@ -526,24 +375,12 @@ class _AccountCard extends StatelessWidget {
         color: c.cardElev,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Column(
-        children: [
-          _AccountRow(
-            c: c,
-            icon: Icons.phone_rounded,
-            iconTone: UgamStatVariant.accent,
-            label: tr('settings.phone_label'),
-            value: phone,
-          ),
-          _Divider(c: c),
-          _AccountRow(
-            c: c,
-            icon: Icons.chat_bubble_rounded,
-            iconTone: UgamStatVariant.good,
-            label: tr('settings.whatsapp_label'),
-            value: whatsapp,
-          ),
-        ],
+      child: _AccountRow(
+        c: c,
+        icon: Icons.phone_rounded,
+        iconTone: UgamStatVariant.neutral,
+        label: tr('settings.phone_label'),
+        value: phone,
       ),
     );
   }
@@ -638,25 +475,101 @@ class _ThemeTriPicker extends StatelessWidget {
     required this.c,
   });
 
+  // Each segment: (mode, icon, label key). Order matches the visible row.
+  static const _options = <(ThemeMode, IconData, String)>[
+    (ThemeMode.system, Icons.brightness_auto_rounded, 'settings.theme_system'),
+    (ThemeMode.light, Icons.light_mode_rounded, 'settings.theme_light'),
+    (ThemeMode.dark, Icons.dark_mode_rounded, 'settings.theme_dark'),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return UgamTabPills(
-      currentIndex: ThemeMode.values.indexOf(mode),
-      onChanged: (i) => onPick(ThemeMode.values[i]),
-      items: [
-        UgamTabItem(
-          label: tr('settings.theme_system'),
-          icon: Icons.brightness_auto_rounded,
+    // Same segmented-pill idiom as UgamTabPills, but tailored for the theme
+    // choice: a stacked icon-over-label cell with a clearer selected state
+    // (filled card + soft shadow + accent icon). Kept local so the shared
+    // pill component used across the app is untouched.
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.input),
+      ),
+      child: Row(
+        children: [
+          for (final (m, icon, key) in _options)
+            Expanded(
+              child: _ThemeSegment(
+                c: c,
+                icon: icon,
+                label: tr(key),
+                active: mode == m,
+                onTap: () => onPick(m),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThemeSegment extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _ThemeSegment({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: UgamMotion.tab,
+        curve: UgamMotion.easeOut,
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: active ? c.card : Colors.transparent,
+          borderRadius: BorderRadius.circular(13),
+          boxShadow: active
+              ? const [
+                  BoxShadow(
+                    color: Color(0x14000000),
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ]
+              : null,
         ),
-        UgamTabItem(
-          label: tr('settings.theme_light'),
-          icon: Icons.light_mode_rounded,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: active ? c.accent : c.ink3),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              style: UgamText.bodyStrong.copyWith(
+                color: active ? c.ink : c.ink2,
+                fontSize: 12,
+              ),
+            ),
+          ],
         ),
-        UgamTabItem(
-          label: tr('settings.theme_dark'),
-          icon: Icons.dark_mode_rounded,
-        ),
-      ],
+      ),
     );
   }
 }
@@ -753,14 +666,9 @@ class _DangerRow extends StatelessWidget {
   final UgamColorSet c;
   final VoidCallback onLogout;
 
-  /// Admin-only. When null (passenger session) the delete-account row is
-  /// hidden — passengers have no server-side account to delete.
-  final VoidCallback? onDeleteAccount;
-
   const _DangerRow({
     required this.c,
     required this.onLogout,
-    this.onDeleteAccount,
   });
 
   @override
@@ -774,15 +682,6 @@ class _DangerRow extends StatelessWidget {
           subtitle: tr('settings.logout_subtitle'),
           onTap: onLogout,
         ),
-        if (onDeleteAccount != null) ...[
-          const SizedBox(height: UgamSpacing.md),
-          _dangerTile(
-            icon: Icons.delete_forever_rounded,
-            title: tr('settings.delete_account'),
-            subtitle: tr('settings.delete_account_subtitle'),
-            onTap: onDeleteAccount!,
-          ),
-        ],
       ],
     );
   }

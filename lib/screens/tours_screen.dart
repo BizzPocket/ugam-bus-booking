@@ -65,14 +65,28 @@ class _ToursScreenState extends State<ToursScreen> {
         bottom: false,
         child: Column(
           children: [
-            _TopBar(
-              c: c,
-              searchActive: _searchVisible,
-              onToggleSearch: _toggleSearch,
-              onCreate: () {
-                HapticFeedback.lightImpact();
-                Get.toNamed('/create-tour');
-              },
+            UgamAppBar(
+              title: tr('tours.title'),
+              showBack: false,
+              actions: [
+                UgamAppBarAction(
+                  icon: _searchVisible
+                      ? Icons.close_rounded
+                      : Icons.search_rounded,
+                  active: _searchVisible,
+                  tooltip: tr('tours.search'),
+                  onTap: _toggleSearch,
+                ),
+                UgamAppBarAction(
+                  icon: Icons.add_rounded,
+                  tint: c.accent,
+                  tooltip: tr('tours.create'),
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    Get.toNamed('/create-tour');
+                  },
+                ),
+              ],
             ),
             AnimatedSize(
               duration: UgamMotion.tab,
@@ -261,116 +275,6 @@ class _Group {
 
 // ─── widget pieces ────────────────────────────────────────────────────
 
-class _TopBar extends StatelessWidget {
-  final UgamColorSet c;
-  final bool searchActive;
-  final VoidCallback onToggleSearch;
-  final VoidCallback onCreate;
-
-  const _TopBar({
-    required this.c,
-    required this.searchActive,
-    required this.onToggleSearch,
-    required this.onCreate,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              tr('tours.title'),
-              style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
-            ),
-          ),
-          Semantics(
-            button: true,
-            label: tr('tours.search'),
-            child: Tooltip(
-              message: tr('tours.search'),
-              child: _IconCircle(
-                icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
-                c: c,
-                onTap: onToggleSearch,
-                active: searchActive,
-              ),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.sm),
-          // Labelled pill rather than a bare "+" circle: the primary
-          // action on this screen reads as a verb, not a glyph.
-          Semantics(
-            button: true,
-            label: tr('tours.create'),
-            child: GestureDetector(
-              onTap: onCreate,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                height: 44,
-                padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
-                decoration: BoxDecoration(
-                  color: c.accent,
-                  borderRadius: BorderRadius.circular(UgamRadius.chip),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.add_rounded, size: 20, color: c.onAccent),
-                    const SizedBox(width: UgamSpacing.xs),
-                    Text(
-                      tr('tours.create'),
-                      style: UgamText.bodyStrong.copyWith(color: c.onAccent),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _IconCircle extends StatelessWidget {
-  final IconData icon;
-  final UgamColorSet c;
-  final VoidCallback onTap;
-  final bool active;
-  const _IconCircle({
-    required this.icon,
-    required this.c,
-    required this.onTap,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: active ? c.accentFill : c.cardElev,
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Icon(icon, size: 19, color: active ? c.accent : c.ink),
-      ),
-    );
-  }
-}
-
 class _SearchField extends StatelessWidget {
   final UgamColorSet c;
   final TextEditingController controller;
@@ -481,7 +385,10 @@ class _TourRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final assigned = tour.totalSeatsAssigned;
+    // Leg-aware physical berths (max(GO, RET) per bus) — the SAME engine-truth
+    // occupancy the Requests banner shows, so the card no longer reads a false
+    // "full" by double-counting leg-shared berths. See [Tour.occupiedBerths].
+    final assigned = tour.occupiedBerths;
     final capacity = tour.totalBusSeats;
     final pct = capacity > 0 ? (assigned / capacity).clamp(0.0, 1.0) : 0.0;
     final action = _actionFor(tour);
@@ -489,57 +396,55 @@ class _TourRow extends StatelessWidget {
 
     return Opacity(
       opacity: dimAlpha,
-      child: GestureDetector(
+      child: UgamCard.plain(
         onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          padding: const EdgeInsets.all(UgamSpacing.sm),
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: SizedBox(
-                      width: 88,
-                      height: 88,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          UgamBusBackdrop(seed: tour.id),
-                          Positioned(
-                            left: 6,
-                            top: 6,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                _formatDate(tour.departureDate),
-                                style: UgamText.tabular(
-                                  UgamText.micro.copyWith(
-                                    color: Colors.white,
-                                    fontSize: 9.5,
-                                  ),
+        elev: true,
+        radius: 20,
+        padding: const EdgeInsets.all(UgamSpacing.sm),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: SizedBox(
+                    width: 88,
+                    height: 88,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        UgamBusBackdrop(seed: tour.id, label: _routeLabel(tour)),
+                        Positioned(
+                          left: 6,
+                          top: 6,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            // Graphite-on-graphite chip reads cleanly over the
+                            // backdrop instead of a stray black box.
+                            decoration: BoxDecoration(
+                              color: c.cardElev,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              _formatDate(tour.departureDate),
+                              style: UgamText.tabular(
+                                UgamText.micro.copyWith(
+                                  color: c.ink,
+                                  fontSize: 9.5,
                                 ),
                               ),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
+                ),
                   const SizedBox(width: UgamSpacing.md),
                   Expanded(
                     child: Column(
@@ -600,49 +505,30 @@ class _TourRow extends StatelessWidget {
                   ),
                 ],
               ),
-              if (capacity > 0) ...[
-                const SizedBox(height: UgamSpacing.md - 2),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: pct,
-                    minHeight: 5,
-                    backgroundColor: c.card,
-                    valueColor: AlwaysStoppedAnimation(c.accent),
-                  ),
+            if (capacity > 0) ...[
+              const SizedBox(height: UgamSpacing.md - 2),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: pct,
+                  minHeight: 5,
+                  // Neutral per-row progress: the champagne accent is rationed
+                  // for the single signal in this view, not painted on every
+                  // capacity bar.
+                  backgroundColor: c.border,
+                  valueColor: AlwaysStoppedAnimation(c.ink3),
                 ),
-              ],
-              if (action != null) ...[
-                const SizedBox(height: UgamSpacing.md),
-                GestureDetector(
-                  onTap: () => _runRowAction(action.kind, tour),
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: c.accent,
-                      borderRadius: BorderRadius.circular(UgamRadius.chip),
-                    ),
-                    alignment: Alignment.center,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(action.icon, size: 14, color: c.onAccent),
-                        const SizedBox(width: 6),
-                        Text(
-                          action.label,
-                          style: UgamText.bodyStrong.copyWith(
-                            color: c.onAccent,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ],
-          ),
+            if (action != null) ...[
+              const SizedBox(height: UgamSpacing.md),
+              UgamCTA(
+                label: action.label,
+                leadingIcon: action.icon,
+                onPressed: () => _runRowAction(action.kind, tour),
+              ),
+            ],
+          ],
         ),
       ),
     );
@@ -664,6 +550,21 @@ class _TourRow extends StatelessWidget {
       'DEC',
     ];
     return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
+  }
+
+  /// Short route monogram for the backdrop, e.g. "S→M" from the from/to
+  /// cities. Returns null when either end is blank so the backdrop falls
+  /// back to its plain bus glyph.
+  static String? _routeLabel(Tour t) {
+    String initial(String s) {
+      final trimmed = s.trim();
+      return trimmed.isEmpty ? '' : trimmed.substring(0, 1).toUpperCase();
+    }
+
+    final from = initial(t.fromCity);
+    final to = initial(t.toCity);
+    if (from.isEmpty || to.isEmpty) return null;
+    return '$from→$to';
   }
 
   UgamStatusTone _toneFor(TourStatus s) => switch (s) {

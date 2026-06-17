@@ -3,11 +3,13 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/attendance.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/expense.dart';
 import '../models/handler_manifest.dart';
 import '../models/seat_assignment.dart';
+import '../models/seat_ticket.dart';
 import '../models/trip_type.dart';
 
 /// Device-local journal of booking requests the customer submitted from
@@ -35,6 +37,12 @@ class CustomerRequestEntry {
   final DateTime createdAt;
   final DateTime? lastRefreshedAt;
 
+  /// Whether the request's tour has reached the 'locked' (or 'completed')
+  /// lifecycle state. Seats stay hidden until this is true — assignments are
+  /// provisional and may shuffle right up until the organiser locks the tour.
+  /// Sourced server-side via the `booking_request_tour_locked` RPC on refresh.
+  final bool tourLocked;
+
   CustomerRequestEntry({
     required this.id,
     required this.tourId,
@@ -55,9 +63,15 @@ class CustomerRequestEntry {
     this.customerEditedAt,
     required this.createdAt,
     this.lastRefreshedAt,
+    this.tourLocked = false,
   });
 
   bool get hasSeatsAssigned => assignedSeats.isNotEmpty;
+
+  /// Seats may only be shown once the tour is locked AND seats are assigned.
+  /// Until the organiser locks the tour, assignments are provisional, so the
+  /// UI must neither reveal seat numbers nor open the seat-layout sheet.
+  bool get seatsVisible => tourLocked && hasSeatsAssigned;
   bool get canEdit => status == 'pending' && !hasSeatsAssigned;
   bool get wasEdited => customerEditedAt != null;
 
@@ -81,6 +95,7 @@ class CustomerRequestEntry {
     List<SeatAssignment>? assignedSeats,
     DateTime? customerEditedAt,
     DateTime? lastRefreshedAt,
+    bool? tourLocked,
   }) {
     return CustomerRequestEntry(
       id: id,
@@ -102,8 +117,22 @@ class CustomerRequestEntry {
       customerEditedAt: customerEditedAt ?? this.customerEditedAt,
       createdAt: createdAt,
       lastRefreshedAt: lastRefreshedAt ?? this.lastRefreshedAt,
+      tourLocked: tourLocked ?? this.tourLocked,
     );
   }
+
+  /// The server no longer has this request (the organiser deleted the request
+  /// or its whole tour). Drop the local ticket to a cancelled state AND clear
+  /// the now-orphaned seat/lock data: otherwise [seatsVisible] stays true, the
+  /// row keeps rendering "seats assigned" with stale numbers, and tapping it
+  /// opens the seat-layout sheet whose LIVE lookup returns nothing — the dead
+  /// "No layout" empty state the customer sees over a still-"allocated" card.
+  CustomerRequestEntry markCancelled({DateTime? at}) => copyWith(
+        status: 'rejected',
+        assignedSeats: const [],
+        tourLocked: false,
+        lastRefreshedAt: at ?? DateTime.now(),
+      );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -127,6 +156,7 @@ class CustomerRequestEntry {
     'created_at': createdAt.toIso8601String(),
     if (lastRefreshedAt != null)
       'last_refreshed_at': lastRefreshedAt!.toIso8601String(),
+    'tour_locked': tourLocked,
   };
 
   factory CustomerRequestEntry.fromJson(Map<String, dynamic> m) {
@@ -154,6 +184,7 @@ class CustomerRequestEntry {
       lastRefreshedAt: m['last_refreshed_at'] != null
           ? DateTime.tryParse(m['last_refreshed_at'] as String)
           : null,
+      tourLocked: (m['tour_locked'] as bool?) ?? false,
     );
   }
 
@@ -257,14 +288,15 @@ class CustomerRequestsStore {
       // cancelled so it drops out of the active Pending/Confirmed tabs and
       // surfaces under "Cancelled" instead of lingering as if still live.
       if (existing.status == 'rejected') return existing;
-      final cancelled = existing.copyWith(
-        status: 'rejected',
-        lastRefreshedAt: DateTime.now(),
-      );
+      final cancelled = existing.markCancelled(at: DateTime.now());
       await upsert(cancelled);
       return cancelled;
     }
     final row = Map<String, dynamic>.from(rows.first as Map);
+    // Seat assignments are provisional until the organiser locks the tour, so
+    // ask the server whether this request's tour is locked/completed. Any
+    // failure is treated as not-locked (seats stay hidden) — fail closed.
+    final locked = await _tourLocked(id);
     final updated = existing.copyWith(
       status: (row['status'] as String?) ?? existing.status,
       assignedSeats: CustomerRequestEntry._parseAssignedSeats(
@@ -277,9 +309,27 @@ class CustomerRequestsStore {
           ? DateTime.tryParse(row['customer_edited_at'] as String)
           : existing.customerEditedAt,
       lastRefreshedAt: DateTime.now(),
+      tourLocked: locked,
     );
     await upsert(updated);
     return updated;
+  }
+
+  /// Whether the request's tour has been locked (seats are final and may be
+  /// revealed). Goes through the `booking_request_tour_locked` SECURITY DEFINER
+  /// RPC since customers are anonymous and can't read tour status directly. Any
+  /// error or null result is treated as not-locked (seats stay hidden).
+  Future<bool> _tourLocked(String requestId) async {
+    final client = Supabase.instance.client;
+    try {
+      final result = await client.rpc(
+        'booking_request_tour_locked',
+        params: {'p_id': requestId},
+      );
+      return result as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Refreshes every entry. Errors on individual rows are swallowed so a
@@ -310,6 +360,25 @@ class CustomerRequestsStore {
     return result
         .whereType<Map>()
         .map((m) => Bus.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  /// "Find my seat by phone": resolves every seat held under [phone] on a
+  /// LOCKED/completed tour, with the bus diagram(s) to draw them — bypassing
+  /// booking_requests entirely so manually-added passengers (who have no in-app
+  /// ticket) can still see their seat. Phone is matched on its last 10 digits
+  /// server-side, so +91 / spaces never cause a miss. Goes through the
+  /// `seat_lookup_by_phone` SECURITY DEFINER RPC (customers are anonymous).
+  Future<List<SeatTicket>> seatsByPhone(String phone) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'seat_lookup_by_phone',
+      params: {'p_phone': phone},
+    );
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((m) => SeatTicket.fromJson(Map<String, dynamic>.from(m)))
         .toList();
   }
 
@@ -361,6 +430,25 @@ class CustomerRequestsStore {
     );
     if (result is! Map) return null;
     return Collection.fromMap(Map<String, dynamic>.from(result));
+  }
+
+  /// Inserts or updates an [Attendance] row for the handler's tour via a
+  /// SECURITY DEFINER RPC (customers are anonymous). The attendance is sent as a
+  /// jsonb payload; the server resolves the tour from the request and verifies
+  /// the bus + passenger belong to it. Returns the upserted row, or null when
+  /// the caller isn't the tour's handler. Lets exceptions propagate so the UI
+  /// can surface a real failure.
+  Future<Attendance?> handlerUpsertAttendance(
+    String requestId,
+    Attendance a,
+  ) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_upsert_attendance',
+      params: {'p_request_id': requestId, 'p_attendance': a.toMap()},
+    );
+    if (result is! Map) return null;
+    return Attendance.fromMap(Map<String, dynamic>.from(result));
   }
 
   /// Inserts or updates a bus [Expense] for the handler's tour via a SECURITY
