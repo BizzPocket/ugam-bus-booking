@@ -35,7 +35,12 @@ void main() {
     // First frame: still loading (the manifest future has not completed).
     await tester.pump();
 
-    expect(find.text('Bus chart'), findsOneWidget);
+    // EasyLocalization is NOT initialised under `flutter test`, so `tr(key)`
+    // returns the raw key. The screen titles its app bar with
+    // `tr('handler_chart.bus_chart')` (English copy "Bus chart"); under test
+    // that surfaces as the raw key. Asserting the key still proves the
+    // read-only header rendered on the first (loading) frame.
+    expect(find.text('handler_chart.bus_chart'), findsOneWidget);
     // Read-only: there is no "Edit seats" / "Done" affordance anywhere (those
     // belong to the agent seat-detail screen, not the handler chart).
     expect(find.text('Edit seats'), findsNothing);
@@ -55,8 +60,10 @@ void main() {
     await tester.pumpAndSettle();
 
     // The header survives, and the body shows the load-failure copy rather
-    // than crashing.
-    expect(find.text('Bus chart'), findsOneWidget);
-    expect(find.text("Couldn't load chart"), findsOneWidget);
+    // than crashing. Under test, `tr()` yields raw keys: the app-bar title is
+    // `handler_chart.bus_chart` ("Bus chart") and the empty-state title is
+    // `handler_chart.error_load_title` ("Couldn't load chart").
+    expect(find.text('handler_chart.bus_chart'), findsOneWidget);
+    expect(find.text('handler_chart.error_load_title'), findsOneWidget);
   });
 }

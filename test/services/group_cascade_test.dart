@@ -165,7 +165,10 @@ void main() {
 
       expect(plan.destinationFits, isFalse);
       expect(plan.blockedReason, contains('Group Joshi'));
-      expect(plan.blockedReason, contains('Single Sofa'));
+      // EasyLocalization is not initialised under test, so the seat-type label
+      // renders as its raw key ('enums.seat_type.single_sofa'); asserting the
+      // key still proves the shortfall names the Single Sofa type.
+      expect(plan.blockedReason, contains('enums.seat_type.single_sofa'));
       expect(plan.memberPassengerIds, ['g_a', 'g_b']);
     });
 
@@ -186,7 +189,8 @@ void main() {
       );
 
       expect(plan.destinationFits, isFalse);
-      expect(plan.blockedReason, contains('1 Single Sofa'));
+      // Raw seat-type key under test; the "1" keeps the shortfall-count check.
+      expect(plan.blockedReason, contains('1 enums.seat_type.single_sofa'));
     });
 
     test('a reserved seat does not count toward capacity', () {
@@ -204,7 +208,8 @@ void main() {
       );
 
       expect(plan.destinationFits, isFalse);
-      expect(plan.blockedReason, contains('1 Seater'));
+      // Raw seat-type key under test; the "1" keeps the shortfall-count check.
+      expect(plan.blockedReason, contains('1 enums.seat_type.seater'));
     });
 
     test('a bus with no layout cannot hold the group', () {

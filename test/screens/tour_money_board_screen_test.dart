@@ -61,8 +61,23 @@ Widget _harness() => GetMaterialApp(
 void main() {
   tearDown(Get.reset);
 
+  // The board renders its bus rows in a lazy ListView, so a default phone-size
+  // viewport only builds the first bus row before the fold. We grow the test
+  // surface so BOTH bus rows are laid out and assertable in one paint.
+  //
+  // EasyLocalization is not initialised in tests, so every tr() (incl. the
+  // status labels, which use namedArgs) renders as its RAW KEY — we assert
+  // those keys, not English. Money figures come from Formatters.formatMoneyInr
+  // which uses en_IN grouping → "₹1,000", "₹1,500" (with the thousands comma).
+  void useTallSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(1200, 4000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+  }
+
   testWidgets('renders one row per bus + the tour-totals capsule',
       (tester) async {
+    useTallSurface(tester);
     final tours = _FakeTourController();
     final money = _FakeMoneyController();
     Get.put<TourController>(tours);
@@ -113,21 +128,27 @@ void main() {
     expect(find.text('Bus 2'), findsOneWidget);
     expect(find.text('Sleeper'), findsNWidgets(2));
 
-    // Bus 1 needs action: outstanding 800 handover due.
-    expect(find.text('Handover ₹800 due'), findsOneWidget);
+    // Bus 1 needs action → its status dot carries the "handover due" label key
+    // (namedArgs aren't interpolated without EasyLocalization). The outstanding
+    // 800 leads the row as the headline figure.
+    expect(find.text('tour_money_board.handover_due'), findsOneWidget);
     // Bus 2 is settled.
-    expect(find.text('Settled'), findsOneWidget);
+    expect(find.text('tour_money_board.settled'), findsOneWidget);
 
-    // Tour totals capsule: collected 1500, expenses 200, net 1300.
-    expect(find.text('TOUR TOTALS'), findsOneWidget);
-    expect(find.text('₹1500'), findsWidgets); // total collected
-    expect(find.text('₹1300'), findsWidgets); // net
-    // Outstanding handover across the tour = net 1300 - handed 500 = 800.
+    // Tour-totals capsule: collected 1500, expenses 200, net 1300, with the
+    // tour open (Bus 1's 800 still outstanding).
+    expect(find.text('tour_money_board.tour_totals'), findsOneWidget);
+    expect(find.text('tour_money_board.open'), findsOneWidget);
+    expect(find.text('₹1,500'), findsOneWidget); // total collected
+    expect(find.text('₹1,300'), findsOneWidget); // net
+    // Outstanding handover (Bus 1's 800) appears as the bus headline AND the
+    // tour-totals outstanding line.
     expect(find.text('₹800'), findsWidgets);
   });
 
   testWidgets('classifier marks a bus with no activity as neutral',
       (tester) async {
+    useTallSurface(tester);
     final tours = _FakeTourController();
     final money = _FakeMoneyController();
     Get.put<TourController>(tours);
@@ -138,7 +159,9 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    expect(find.text('No activity'), findsNWidgets(2));
-    expect(find.text('All settled'), findsOneWidget); // totals capsule, 0 out
+    // Both bus rows show the neutral "no activity" status label key.
+    expect(find.text('tour_money_board.no_activity'), findsNWidgets(2));
+    // Totals capsule reports the tour fully settled (0 outstanding).
+    expect(find.text('tour_money_board.all_settled'), findsOneWidget);
   });
 }

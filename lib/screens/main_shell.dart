@@ -66,7 +66,6 @@ class UgamWorkspaceDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shell = Get.find<ShellController>();
     return Align(
       alignment: Alignment.center,
       heightFactor: 1.0,
@@ -80,9 +79,11 @@ class UgamWorkspaceDock extends StatelessWidget {
             currentIndex: activeTab,
             onTap: (i) {
               // Pop the whole tour-workspace stack back to the shell, then
-              // select the tapped tab.
+              // select the tapped tab. The ShellController is resolved lazily
+              // here (only on tap) rather than at build time, so a screen that
+              // embeds the dock without the shell registered still renders.
               Get.until((route) => route.isFirst);
-              shell.switchTab(i);
+              Get.find<ShellController>().switchTab(i);
             },
             items: buildAdminDockItems(),
           );

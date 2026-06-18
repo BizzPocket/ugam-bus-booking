@@ -111,7 +111,8 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    expect(find.text('Groups & priority'), findsOneWidget);
+    // App-bar title renders the raw key (easy_localization not initialized).
+    expect(find.text('tour_groups.title'), findsOneWidget);
     expect(find.text('Asha'), findsOneWidget);
     expect(find.text('Bharat'), findsOneWidget);
     expect(find.text('Chandni'), findsOneWidget);
@@ -133,7 +134,13 @@ void main() {
     expect(find.byIcon(Icons.star_outline_rounded), findsNWidgets(2));
 
     await tester.tap(find.byIcon(Icons.star_outline_rounded).first);
-    await tester.pump();
+    await tester.pumpAndSettle(); // open the "approve priority?" confirm dialog
+
+    // Turning priority ON is a deliberate promise, so the screen now confirms
+    // first via UgamDialog.confirm. Confirm to actually fire the write. The
+    // confirm button label is the raw key (l10n not initialized in tests).
+    await tester.tap(find.text('priority.alert_confirm'));
+    await tester.pumpAndSettle();
 
     expect(ctrl.priorityCalls.length, 1);
     expect(ctrl.priorityCalls.single.approved, isTrue);
@@ -181,9 +188,15 @@ void main() {
     // Group label appears (in the group card + the member's row chip).
     expect(find.text('Patel family'), findsWidgets);
 
-    // Delete the group.
+    // Delete the group — the redesigned card confirms first (deleting only
+    // ungroups members, so it guards the action via UgamDialog.confirm).
     await tester.tap(find.byIcon(Icons.delete_outline_rounded));
-    await tester.pump();
+    await tester.pumpAndSettle(); // open the destructive confirm dialog
+
+    // Confirm. The confirm button label is the raw key (l10n not initialized).
+    await tester.tap(find.text('tour_groups.delete_group'));
+    await tester.pumpAndSettle();
+
     expect(ctrl.deleteGroupIds, ['g1']);
   });
 }

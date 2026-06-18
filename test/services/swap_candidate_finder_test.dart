@@ -94,7 +94,9 @@ void main() {
       final o1 = r.movable.singleWhere((c) => c.passengerId == 'o1');
       expect(o1.rank, 2);
       expect(o1.reason, contains('different deck'));
-      expect(o1.reason, contains('you wanted Upper'));
+      // EasyLocalization is not initialised under test, so the engine's
+      // seat-position label renders as the raw key; "Upper" -> the upper key.
+      expect(o1.reason, contains('you wanted enums.seat_position.upper'));
     });
 
     test('a fully-occupied bus offers no free seats', () {
@@ -454,6 +456,9 @@ void main() {
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 2);
       expect(c.reason, contains('cross-fill'));
+      // This cross-fill reason is a hardcoded English literal in the engine
+      // (not via seatTypeLabel), so it stays English even with EasyLocalization
+      // uninitialised under test.
       expect(c.reason, contains('Double Sofa'));
       expect(c.reason, contains('other berth'));
       // The mover needs a WHOLE double, and DL1 has only one free berth, so it
@@ -480,6 +485,8 @@ void main() {
 
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 1);
+      // 'type match: Double Sofa' is a hardcoded English literal in the engine,
+      // so it stays English under test (no seatTypeLabel here).
       expect(c.reason, 'type match: Double Sofa');
     });
 
@@ -504,7 +511,8 @@ void main() {
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 2);
       expect(c.reason, contains('different deck'));
-      expect(c.reason, contains('you wanted Lower'));
+      // Raw seat-position key under test; "Lower" -> the lower key.
+      expect(c.reason, contains('you wanted enums.seat_position.lower'));
     });
 
     test(
@@ -525,6 +533,8 @@ void main() {
 
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 1);
+      // 'type match: Double Sofa' is a hardcoded English literal in the engine,
+      // so it stays English under test (no seatTypeLabel here).
       expect(c.reason, 'type match: Double Sofa');
     });
 
@@ -548,7 +558,8 @@ void main() {
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 2);
       expect(c.reason, contains('different deck'));
-      expect(c.reason, contains('you wanted Upper'));
+      // Raw seat-position key under test; "Upper" -> the upper key.
+      expect(c.reason, contains('you wanted enums.seat_position.upper'));
     });
   });
 

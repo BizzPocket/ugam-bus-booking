@@ -92,6 +92,21 @@ Widget _harness() => GetMaterialApp(
       home: const TourOverviewScreen(tourId: 't1'),
     );
 
+/// Bus rows compose "<name>  ·  <type>" inside a single [RichText] span, so the
+/// name/type are not findable as standalone [Text] widgets. These helpers walk
+/// the rendered RichText trees and match against the flattened plain text.
+String _flatten(InlineSpan span) => span.toPlainText();
+
+bool _richTextContaining(WidgetTester tester, String needle) =>
+    tester.widgetList<RichText>(find.byType(RichText)).any(
+          (rt) => _flatten(rt.text).contains(needle),
+        );
+
+int _richTextSpanCount(WidgetTester tester, String needle) =>
+    tester.widgetList<RichText>(find.byType(RichText)).where(
+          (rt) => _flatten(rt.text).contains(needle),
+        ).length;
+
 void main() {
   tearDown(Get.reset);
 
@@ -103,16 +118,25 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // Header shows the tour title.
-    expect(find.text('Dwarka Yatra'), findsOneWidget);
+    // The redesigned screen is BODY-ONLY: the SeatsScreen shell owns the
+    // head bar, so this widget no longer renders the tour title header.
+    expect(find.text('Dwarka Yatra'), findsNothing);
 
-    // Both bus cards render (name + type).
-    expect(find.text('Bus 1'), findsOneWidget);
-    expect(find.text('Bus 2'), findsOneWidget);
-    expect(find.text('Sleeper'), findsNWidgets(2));
+    // Bus names render inside the slim bus rows. Each row composes
+    // "<name>  ·  <type>" in a single RichText span, so the name + type are
+    // NOT separate Text widgets — match the combined run via RichText.
+    expect(_richTextContaining(tester, 'Bus 1'), isTrue);
+    expect(_richTextContaining(tester, 'Bus 2'), isTrue);
+    // Bus type "Sleeper" appears as a span inside each of the two bus rows.
+    expect(_richTextSpanCount(tester, 'Sleeper'), 2);
 
-    // Fill-bus pill renders (no seats placed yet → "Fill bus" label).
-    expect(find.text('Fill bus'), findsOneWidget);
+    // The summary's "seats placed" eyebrow renders (raw key — easy_localization
+    // is not initialized in tests, so tr() returns the key string).
+    expect(find.text('tour_overview.seats_placed'), findsOneWidget);
+
+    // Standalone CTA renders the auto-fill button. Its label is the raw key
+    // (no seats placed yet → the "fill_bus" key, not "regenerate_plan").
+    expect(find.text('tour_overview.fill_bus'), findsOneWidget);
   });
 
   testWidgets('tapping the Fill bus pill invokes the glue', (tester) async {
@@ -124,7 +148,8 @@ void main() {
     await tester.pump();
 
     expect(ctrl.fillCalls, 0);
-    await tester.tap(find.text('Fill bus'));
+    // The CTA label is the raw key (easy_localization not initialized).
+    await tester.tap(find.text('tour_overview.fill_bus'));
     await tester.pump(); // start the async fill
     await tester.pump(); // settle the post-fill setState
 
@@ -146,14 +171,16 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // No chip before a plan is generated.
-    expect(find.textContaining('need your decision'), findsNothing);
+    // No chip before a plan is generated (raw key — l10n not initialized).
+    expect(find.text('tour_overview.need_decision'), findsNothing);
 
-    await tester.tap(find.text('Fill bus'));
+    await tester.tap(find.text('tour_overview.fill_bus'));
     await tester.pump();
     await tester.pump();
 
-    // After the fill, the cached plan's single exception surfaces.
-    expect(find.text('1 need your decision'), findsOneWidget);
+    // After the fill, the cached plan's single exception surfaces the
+    // decision chip. easy_localization isn't initialized so the chip renders
+    // the raw key string (namedArgs aren't interpolated into a missing key).
+    expect(find.text('tour_overview.need_decision'), findsOneWidget);
   });
 }

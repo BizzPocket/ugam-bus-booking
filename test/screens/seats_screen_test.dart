@@ -60,7 +60,15 @@ Widget _harness() => GetMaterialApp(
 void main() {
   tearDown(Get.reset);
 
-  testWidgets('renders the 3-mode segmented control + tour title in the header',
+  // The screen was redesigned from a 3-mode segmented control into a
+  // SUMMARY → GRID relationship (see SeatsScreen doc-comment). There is no
+  // segmented control any more; the header carries the tour title + a
+  // mode subtitle (summary vs grid), and the body is the embedded
+  // TourOverviewScreen (summary) which exposes the auto-fill / edit-by-hand
+  // CTAs. EasyLocalization isn't initialised in tests so tr() returns the
+  // raw key — we assert those.
+
+  testWidgets('renders the tour title + summary subtitle in the header',
       (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
@@ -70,13 +78,13 @@ void main() {
     await tester.pump();
 
     expect(find.text('Dwarka Yatra'), findsOneWidget);
-    // tr() falls back to the key without EasyLocalization init in tests.
-    expect(find.text('seats.mode_autofill'), findsOneWidget);
-    expect(find.text('seats.mode_assign'), findsOneWidget);
-    expect(find.text('seats.mode_rearrange'), findsOneWidget);
+    // Lands on the summary face → its subtitle key renders (grid subtitle does
+    // not). Confirms the redesigned summary→grid header, not a segmented bar.
+    expect(find.text('seats.summary_subtitle'), findsOneWidget);
+    expect(find.text('seats.grid_subtitle'), findsNothing);
   });
 
-  testWidgets('defaults to Auto-fill mode (the Fill-bus cockpit is visible)',
+  testWidgets('defaults to the summary face (the auto-fill cockpit is visible)',
       (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
@@ -85,12 +93,13 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // Auto-fill body on screen → its "Fill bus" CTA is visible.
-    expect(find.text('Fill bus'), findsOneWidget);
+    // Embedded summary cockpit → both of its sticky CTAs render (raw keys):
+    // the primary "edit by hand" entry into the grid and the auto-fill button.
+    expect(find.text('tour_overview.cta_edit_by_hand'), findsOneWidget);
+    expect(find.text('tour_overview.fill_bus'), findsOneWidget);
   });
 
-  testWidgets('switching modes swaps the visible body (Assign hides the cockpit)',
-      (tester) async {
+  testWidgets('edit-by-hand swaps the body to the grid face', (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([_fakeTour()]);
@@ -98,17 +107,26 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // Start on Auto-fill.
-    expect(find.text('Fill bus'), findsOneWidget);
+    // Start on the summary face: its subtitle + auto-fill CTA are present.
+    expect(find.text('seats.summary_subtitle'), findsOneWidget);
+    expect(find.text('tour_overview.fill_bus'), findsOneWidget);
 
-    // Switch to Assign → the cockpit's Fill-bus CTA is now offstage.
-    await tester.tap(find.text('seats.mode_assign'));
-    await tester.pump();
-    expect(find.text('Fill bus'), findsNothing);
+    // Tap "Edit seats by hand" → SeatsScreen flips to the grid face. The
+    // header subtitle switches and the summary's auto-fill cockpit goes
+    // offstage (IndexedStack hides it).
+    await tester.tap(find.text('tour_overview.cta_edit_by_hand'));
+    await tester.pumpAndSettle();
 
-    // Switch back to Auto-fill → the cockpit returns.
-    await tester.tap(find.text('seats.mode_autofill'));
-    await tester.pump();
-    expect(find.text('Fill bus'), findsOneWidget);
+    expect(find.text('seats.grid_subtitle'), findsOneWidget);
+    expect(find.text('seats.summary_subtitle'), findsNothing);
+    expect(find.text('tour_overview.fill_bus'), findsNothing);
+
+    // Tap the "Summary" back-affordance (the grid's leading control carries
+    // this semantic label) → the summary cockpit returns.
+    await tester.tap(find.bySemanticsLabel('seats.back_to_summary'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('seats.summary_subtitle'), findsOneWidget);
+    expect(find.text('tour_overview.fill_bus'), findsOneWidget);
   });
 }

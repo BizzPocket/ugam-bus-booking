@@ -2,60 +2,127 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:occubusbooking/controllers/tour_controller.dart';
+import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/passenger.dart';
+import 'package:occubusbooking/models/priority_status.dart';
 import 'package:occubusbooking/models/request_line.dart';
+import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/screens/seating_exceptions_screen.dart';
-import 'package:occubusbooking/services/seating_engine.dart';
 
 /// Test double for [TourController] that needs no live Supabase / GetX
 /// service graph. [onInit] is overridden to a no-op so registering it does
-/// NOT kick off the real `_loadTours` + realtime subscription. A canned
-/// [SeatingPlan] can be seeded straight into [lastPlanByTour] so the
-/// exception screen reads it reactively, exactly as it would after a real
-/// [fillTour].
+/// NOT kick off the real `_loadTours` + realtime subscription.
+///
+/// NOTE: the screen was redesigned to derive its exception list LIVE from the
+/// engine (`seatingDecisionExceptions(tour)` → `SeatingEngine.propose`) rather
+/// than reading a cached plan. So a test no longer seeds a `SeatingPlan`; it
+/// seeds a real [Tour] (buses + passengers) whose live proposal genuinely
+/// produces the exceptions under test.
 class _FakeTourController extends TourController {
   @override
   // ignore: must_call_super
   void onInit() {
     // Intentionally empty: skip the real network load + realtime wiring.
   }
-
-  void seedPlan(String tourId, List<SeatingException> exceptions) {
-    lastPlanByTour[tourId] = SeatingPlan(
-      assignmentsByPassenger: const {},
-      exceptions: exceptions,
-      reasons: const [],
-    );
-    lastPlanByTour.refresh();
-  }
 }
 
-Passenger _passenger(String id, String tourId, String name) => Passenger(
+SeatCell _seat(int row, int col, SeatType type, SeatPosition? pos, String id) =>
+    SeatCell(row: row, col: col, seatType: type, position: pos, seatId: id);
+
+/// A tiny hand-rolled bus so we control exactly which seats are free. Rows
+/// derive from the highest used row index.
+Bus _bus(String id, List<SeatCell> cells) {
+  var maxRow = 0;
+  for (final c in cells) {
+    if (c.row > maxRow) maxRow = c.row;
+  }
+  return Bus(
+    id: id,
+    name: id,
+    busType: 'Sleeper',
+    layout: BusLayout(rows: maxRow + 1, cols: SeatGridCols.count, grid: cells),
+  );
+}
+
+Passenger _passenger(
+  String id,
+  String name, {
+  List<RequestLine> lines = const [],
+  String? groupId,
+  PriorityStatus priority = PriorityStatus.none,
+}) =>
+    Passenger(
       id: id,
-      tourId: tourId,
+      tourId: 't1',
       name: name,
       phone: '+910000000000',
-      requestLines: [
-        RequestLine(seatType: SeatType.doubleSofa, qty: 1),
-      ],
+      requestLines: lines,
+      groupId: groupId,
+      priorityStatus: priority,
     );
 
-Tour _fakeTour() {
-  const tourId = 't1';
+RequestLine _line(SeatType t, {SeatPosition? pos, int qty = 1}) =>
+    RequestLine(seatType: t, position: pos, qty: qty);
+
+/// A tour whose LIVE engine proposal yields exactly three exception
+/// categories and no waitlist:
+///   * priorityNoLowerBerth  (Ramesh Patel — only an upper sofa is free, so the
+///     approved-priority rider is seated but not on a lower berth) → "Priority"
+///   * seatTypeUnavailable   (Mohan Shah wants a Double Sofa, none free)
+///     → "Seat type"
+///   * groupWontFit          (group "patel" needs 4 berths, none fit) → "Groups"
+Tour _exceptionsTour() {
+  final bus = _bus('b1', [
+    // The ONLY sofa is an upper single → priority rider seats here (no lower).
+    _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'b1_SU1'),
+    _seat(0, 1, SeatType.seater, null, 'b1_ST1'),
+  ]);
   return Tour(
-    id: tourId,
+    id: 't1',
     title: 'Dwarka Yatra',
     fromCity: 'Surat',
     toCity: 'Dwarka',
     departureDate: DateTime(2026, 7, 1),
     pricePerSeat: 1200,
-    buses: const [],
+    buses: [bus],
     passengers: [
-      _passenger('p1', tourId, 'Ramesh Patel'),
-      _passenger('p2', tourId, 'Sita Joshi'),
-      _passenger('p3', tourId, 'Mohan Shah'),
+      _passenger(
+        'p1',
+        'Ramesh Patel',
+        priority: PriorityStatus.approved,
+        lines: [_line(SeatType.singleSofa)],
+      ),
+      _passenger(
+        'p3',
+        'Mohan Shah',
+        lines: [_line(SeatType.doubleSofa)],
+      ),
+      _passenger('g1', 'Geeta A', groupId: 'patel',
+          lines: [_line(SeatType.doubleSofa)]),
+      _passenger('g2', 'Geeta B', groupId: 'patel',
+          lines: [_line(SeatType.doubleSofa)]),
+    ],
+  );
+}
+
+/// A tour where every passenger fits → the live proposal has zero exceptions,
+/// driving the calm "All clear" empty state.
+Tour _allClearTour() {
+  final bus = _bus('b1', [
+    _seat(0, 0, SeatType.doubleSofa, SeatPosition.lower, 'b1_DL1'),
+  ]);
+  return Tour(
+    id: 't1',
+    title: 'Dwarka Yatra',
+    fromCity: 'Surat',
+    toCity: 'Dwarka',
+    departureDate: DateTime(2026, 7, 1),
+    pricePerSeat: 1200,
+    buses: [bus],
+    passengers: [
+      _passenger('p1', 'Ramesh Patel', lines: [_line(SeatType.doubleSofa)]),
     ],
   );
 }
@@ -72,7 +139,7 @@ void main() {
       (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
-    ctrl.tours.assignAll([_fakeTour()]);
+    ctrl.tours.assignAll([_allClearTour()]);
 
     await tester.pumpWidget(_harness());
     await tester.pump();
@@ -87,47 +154,28 @@ void main() {
       'resolved passenger names', (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
-    ctrl.tours.assignAll([_fakeTour()]);
-    ctrl.seedPlan('t1', const [
-      // → "Priority"
-      SeatingException(
-        type: SeatingExceptionType.priorityNoLowerBerth,
-        passengerId: 'p1',
-        message: 'Approved-priority Ramesh Patel was seated, but no lower '
-            'berth was available.',
-      ),
-      // → "Seat type"
-      SeatingException(
-        type: SeatingExceptionType.seatTypeUnavailable,
-        passengerId: 'p3',
-        message: 'No matching Double Sofa seat free for Mohan Shah.',
-      ),
-      // → "Groups"
-      SeatingException(
-        type: SeatingExceptionType.groupWontFit,
-        groupId: 'patel',
-        message: 'Group patel (6 berths across 3 bookings) does not fit on '
-            'any single bus.',
-      ),
-    ]);
+    ctrl.tours.assignAll([_exceptionsTour()]);
 
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // Section headers (uppercased category keys) with their counts.
+    // Section headers (uppercased category-label keys) for the three live
+    // categories the proposal produced.
     expect(find.text('SEATING_EXCEPTIONS.CAT_PRIORITY'), findsOneWidget);
     expect(find.text('SEATING_EXCEPTIONS.CAT_GROUPS'), findsOneWidget);
     expect(find.text('SEATING_EXCEPTIONS.CAT_SEAT_TYPE'), findsOneWidget);
-    // No waitlist exception was seeded → no Waitlist section.
+    // No overflow/waitlist exception arose → no Waitlist section.
     expect(find.text('SEATING_EXCEPTIONS.CAT_WAITLIST'), findsNothing);
 
-    // Per-exception messages render.
+    // The priority card swaps the engine message for explicit alert copy
+    // (title + message keys), so we assert those keys, not the raw message.
+    expect(find.text('priority.no_lower_title'), findsOneWidget);
+    expect(find.text('priority.no_lower_msg'), findsOneWidget);
+
+    // The seat-type and group cards render the engine's own message text. The
+    // seat-type label is itself an un-translated key fragment in tests.
     expect(
-      find.textContaining('no lower berth was available'),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('No matching Double Sofa seat free'),
+      find.textContaining('No matching enums.seat_type.double_sofa'),
       findsOneWidget,
     );
     expect(
@@ -135,7 +183,8 @@ void main() {
       findsOneWidget,
     );
 
-    // Resolved passenger names (from the tour roster) appear as card titles.
+    // Resolved passenger names (from the tour roster) appear as card titles for
+    // the passenger-scoped exceptions.
     expect(find.text('Ramesh Patel'), findsOneWidget);
     expect(find.text('Mohan Shah'), findsOneWidget);
 
@@ -147,8 +196,7 @@ void main() {
       (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
-    ctrl.tours.assignAll([_fakeTour()]);
-    // No plan seeded → exceptionsForTour returns empty.
+    ctrl.tours.assignAll([_allClearTour()]);
 
     await tester.pumpWidget(_harness());
     await tester.pump();
