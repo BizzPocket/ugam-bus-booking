@@ -9,6 +9,7 @@ import '../models/seat_type.dart';
 import '../models/trip_type.dart';
 import '../utils/passenger_display.dart';
 import '../widgets/seat_occupant_label.dart';
+import 'seat_render.dart';
 
 /// Canonical tile size used by every seat chart in the app so the chart reads
 /// identically wherever it appears (auto-fill, assign, rearrange, handler,
@@ -127,65 +128,6 @@ class SeatChartTile extends StatelessWidget {
 
   bool get _isBooked => _occ.isNotEmpty;
 
-  /// A genuine SHARED-double split: two DISTINCT passengers sitting side-by-side
-  /// on one seatId that is NOT a clean disjoint GO/RETURN leg reuse. Leg reuse
-  /// is rendered by the leg-aware path instead.
-  ///
-  /// Gated to [SeatType.doubleSofa]: a side-by-side split is only physically
-  /// meaningful for a TWO-berth sofa. A SINGLE sofa is one berth — it can only
-  /// ever be held by one person, or REUSED across disjoint legs (one GO + one
-  /// RET), which is the stacked leg-share tile, never a same-time side split. So
-  /// a single (or seater) cell never renders the split share even if stale data
-  /// somehow lists two same-leg holders; it falls through to the leg-share or
-  /// single booked tile, keeping "a single sofa is one person per leg" true on
-  /// screen.
-  bool get _isShared =>
-      cell.seatType == SeatType.doubleSofa &&
-      _occ.length > 1 &&
-      _legShare == null;
-
-  /// A HALF-occupied Double Sofa: one person holding a SINGLE berth of a
-  /// two-berth sofa (a single-on-double / half-share), so the other berth is
-  /// still free. Detected by the RAW berth count — a WHOLE double held solo
-  /// arrives as the same passenger twice ([occupants].length == 2), while a
-  /// half-share is a single berth entry ([occupants].length == 1). Rendered as
-  /// a split tile: the occupant on one half, an empty placeholder on the other,
-  /// so the chart never reads a half-taken sofa as fully booked.
-  bool get _isHalfDouble =>
-      markHalfDouble &&
-      cell.seatType == SeatType.doubleSofa &&
-      _occ.length == 1 &&
-      occupants.length == 1;
-
-  /// Free physical berths still bookable on this Double Sofa, under the
-  /// leg-aware capacity model (a seat = its BUSIER leg, so berths used =
-  /// max(GO, RET) — see project seat-leg-counting). Counts RAW berth entries:
-  /// a whole double held solo is the same passenger twice; a round-trip berth
-  /// consumes BOTH legs. Returns 0 for non-doubles and whenever [markHalfDouble]
-  /// is off (leg-DEDUPED charts can't count berths, so they must never split).
-  ///
-  /// A GO-only + RET-only leg-share is one berth's worth (go=1, ret=1 →
-  /// max=1 → one berth free), so it still has a half to draw empty — the case
-  /// that previously read as a fully-booked leg-share.
-  int get _freeDoubleBerths {
-    if (!markHalfDouble || cell.seatType != SeatType.doubleSofa) return 0;
-    var go = 0, ret = 0;
-    for (final p in occupants) {
-      switch (p.tripType) {
-        case TripType.outboundOnly:
-          go++;
-        case TripType.returnOnly:
-          ret++;
-        case TripType.roundTrip:
-          go++;
-          ret++;
-      }
-    }
-    final used = go > ret ? go : ret;
-    final free = 2 - used;
-    return free < 0 ? 0 : free;
-  }
-
   /// Riders BEYOND the two the tile can draw. A Double Sofa is two berths, each
   /// reusable across legs, so up to four distinct one-way riders can share it;
   /// the tile only ever shows two (a shared split or a GO/RET stack), so a
@@ -195,32 +137,6 @@ class SeatChartTile extends StatelessWidget {
     if (cell.seatType != SeatType.doubleSofa) return 0;
     final extra = _occ.length - 2;
     return extra > 0 ? extra : 0;
-  }
-
-  /// When this seat is reused across disjoint legs — an outbound-only GO holder
-  /// AND a return-only RETURN holder — returns that pair (GO first). Otherwise
-  /// null. A round-trip occupant holds BOTH legs exclusively, so a pair of
-  /// round-trips (or any same-leg pair) is NOT a leg reuse and returns null.
-  ///
-  /// Tolerant of a stray extra occupant: it scans for the FIRST outbound-only
-  /// and FIRST return-only holder rather than requiring exactly two entries, so
-  /// a legitimate GO/RET reuse on a single sofa still resolves cleanly even if
-  /// an over-capacity stale berth (the kind that inflates a "38/37" tally) also
-  /// lists a third holder. The leg-share is what the seat actually IS; the extra
-  /// is dropped from view.
-  ({Passenger go, Passenger ret})? get _legShare {
-    if (_occ.length < 2) return null;
-    Passenger? go;
-    Passenger? ret;
-    for (final p in _occ) {
-      if (p.tripType == TripType.outboundOnly) {
-        go ??= p;
-      } else if (p.tripType == TripType.returnOnly) {
-        ret ??= p;
-      }
-    }
-    if (go != null && ret != null) return (go: go, ret: ret);
-    return null;
   }
 
   static String initials(String displayName) {
@@ -274,35 +190,44 @@ class SeatChartTile extends StatelessWidget {
       );
     }
 
-    final legShare = _legShare;
-    final hasFreeHalf = _freeDoubleBerths >= 1;
+    // The ONE decision (which tile to draw) lives in the pure [resolveSeatRender]
+    // so it is unit-tested and identical on every chart; this widget just paints
+    // the resolved state. [anonymous] is handled above, so it never reaches here.
+    final r = resolveSeatRender(
+      cell: cell,
+      occupants: occupants,
+      markHalfDouble: markHalfDouble,
+    );
     final Widget tile;
     final VoidCallback? onTap;
-    if (legShare != null) {
-      // A GO+RET leg-share on a DOUBLE only consumes one berth's worth of
-      // capacity (max(GO,RET) == 1), so the other berth is still bookable —
-      // draw that half empty instead of reading the whole sofa as full. On a
-      // SINGLE sofa the same reuse fills the one berth, so [hasFreeHalf] is
-      // false there (the getter is doubleSofa-only) and it stays a full tile.
-      tile = hasFreeHalf
-          ? _legShareHalfTile(c, legShare.go, legShare.ret)
-          : _legShareTile(c, legShare.go, legShare.ret);
-      onTap = onTapBooked;
-    } else if (_isShared) {
-      tile = _sharedTile(c);
-      onTap = onTapBooked;
-    } else if (_isHalfDouble) {
-      tile = _halfDoubleTile(c, _occ.first);
-      onTap = onTapBooked;
-    } else if (_isBooked) {
-      tile = _bookedTile(c, _occ.first);
-      onTap = onTapBooked;
-    } else if (cell.reserved) {
-      tile = _heldTile(c);
-      onTap = onTapFree;
-    } else {
-      tile = _freeTile(c);
-      onTap = onTapFree;
+    switch (r.kind) {
+      case SeatRenderKind.legShareHalf:
+        // A GO+RET leg-share on a DOUBLE only consumes one berth's worth of
+        // capacity (max(GO,RET) == 1), so the other berth is drawn empty.
+        tile = _legShareHalfTile(c, r.go!, r.ret!);
+        onTap = onTapBooked;
+      case SeatRenderKind.legShare:
+        tile = _legShareTile(c, r.go!, r.ret!);
+        onTap = onTapBooked;
+      case SeatRenderKind.shared:
+        tile = _sharedTile(c);
+        onTap = onTapBooked;
+      case SeatRenderKind.halfDouble:
+        tile = _halfDoubleTile(c, r.primary!);
+        onTap = onTapBooked;
+      case SeatRenderKind.booked:
+        tile = _bookedTile(c, r.primary!);
+        onTap = onTapBooked;
+      case SeatRenderKind.held:
+        tile = _heldTile(c);
+        onTap = onTapFree;
+      case SeatRenderKind.quad:
+        tile = _quadTile(c, r.quadGo, r.quadRet, r.extra);
+        onTap = onTapBooked;
+      case SeatRenderKind.anonymous:
+      case SeatRenderKind.free:
+        tile = _freeTile(c);
+        onTap = onTapFree;
     }
 
     final rendered = editMode ? _withEditAffordance(c, tile) : tile;
@@ -577,7 +502,7 @@ class SeatChartTile extends StatelessWidget {
             ),
           if (moneyDotColor != null)
             Positioned(bottom: 3, right: 4, child: _dot(moneyDotColor!, 7)),
-          if (_extraOccupants > 0) _extraBadge(c),
+          if (_extraOccupants > 0) _extraBadge(c, _extraOccupants),
         ],
       ),
     );
@@ -637,7 +562,7 @@ class SeatChartTile extends StatelessWidget {
             ),
           if (moneyDotColor != null)
             Positioned(bottom: 3, right: 4, child: _dot(moneyDotColor!, 7)),
-          if (_extraOccupants > 0) _extraBadge(c),
+          if (_extraOccupants > 0) _extraBadge(c, _extraOccupants),
         ],
       ),
     );
@@ -726,7 +651,7 @@ class SeatChartTile extends StatelessWidget {
             ),
           if (moneyDotColor != null)
             Positioned(bottom: 4, right: 4, child: _dot(moneyDotColor!, 8)),
-          if (_extraOccupants > 0) _extraBadge(c),
+          if (_extraOccupants > 0) _extraBadge(c, _extraOccupants),
         ],
       ),
     );
@@ -847,10 +772,116 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
+  // QUAD — a Double Sofa shared by THREE or FOUR distinct riders (two berths,
+  // each reusable across disjoint legs). A GO row (cyan) over a RET row (violet),
+  // each holding up to two riders and padded with an empty placeholder when a
+  // berth's leg is free. A round-trip rider holds both legs of their berth, so
+  // they appear in BOTH rows. Replaces the old "two names + a +N badge" that hid
+  // the extra riders and read as a bug.
+  Widget _quadTile(
+      UgamColorSet c, List<Passenger> goRow, List<Passenger> retRow, int extra) {
+    final priority = cell.forward ||
+        goRow.any((p) => p.isPriorityApproved) ||
+        retRow.any((p) => p.isPriorityApproved);
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
+        border: Border.all(
+          color: priority ? c.warm : c.border,
+          width: priority ? 2 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              Expanded(child: _quadRow(c, goRow, TripType.outboundOnly)),
+              Container(height: 1, color: c.border),
+              Expanded(child: _quadRow(c, retRow, TripType.returnOnly)),
+            ],
+          ),
+          Positioned(
+            top: 2,
+            left: 4,
+            child: Text(
+              cell.seatId ?? '',
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(color: c.ink3, fontSize: 7),
+              ),
+            ),
+          ),
+          if (priority)
+            Positioned(
+              top: 2,
+              right: 3,
+              child: Icon(Icons.star_rounded, size: 10, color: c.warm),
+            ),
+          if (moneyDotColor != null)
+            Positioned(bottom: 2, right: 3, child: _dot(moneyDotColor!, 6)),
+          if (extra > 0) _extraBadge(c, extra),
+        ],
+      ),
+    );
+  }
+
+  // One leg row of a [_quadTile]: up to two rider cells tinted by [rowLeg],
+  // padded to two with an empty placeholder so the 2×2 grid stays square.
+  Widget _quadRow(UgamColorSet c, List<Passenger> riders, TripType rowLeg) {
+    final cells = <Widget>[];
+    for (var i = 0; i < 2; i++) {
+      if (i > 0) cells.add(Container(width: 1, color: c.border));
+      final p = i < riders.length ? riders[i] : null;
+      cells.add(Expanded(
+        child: p == null ? _emptyHalf(c) : _quadCell(c, p, rowLeg),
+      ));
+    }
+    return Row(children: cells);
+  }
+
+  // One rider cell in a [_quadTile]: initials on the row's leg tint (GO cyan /
+  // RET violet) plus a group dot. The full name + phone are one tap away.
+  Widget _quadCell(UgamColorSet c, Passenger p, TripType rowLeg) {
+    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
+    final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
+    return Container(
+      color: _fill(_legBgFill(c, rowLeg) ?? c.cardElev),
+      alignment: Alignment.center,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            child: Text(
+              initials(p.displayName),
+              maxLines: 1,
+              overflow: TextOverflow.clip,
+              style: UgamText.micro.copyWith(
+                color: c.ink,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          if (gColor != null) ...[
+            const SizedBox(width: 2),
+            Container(
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(color: gColor, shape: BoxShape.circle),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   /// A small "+N" pill (bottom-left) flagging riders the tile can't draw — see
   /// [_extraOccupants]. Bottom-left keeps it clear of the seat id (top-left),
   /// the priority star (top-right) and the money dot (bottom-right).
-  Widget _extraBadge(UgamColorSet c) => Positioned(
+  Widget _extraBadge(UgamColorSet c, int n) => Positioned(
     bottom: 3,
     left: 4,
     child: Container(
@@ -860,7 +891,7 @@ class SeatChartTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(UgamRadius.chip),
       ),
       child: Text(
-        '+$_extraOccupants',
+        '+$n',
         style: UgamText.micro.copyWith(
           color: c.onAccent,
           fontSize: 7.5,
