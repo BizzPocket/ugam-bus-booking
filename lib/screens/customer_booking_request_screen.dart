@@ -36,6 +36,10 @@ import '../widgets/booking_capture_form.dart';
 /// to the shared [BookingCaptureForm] so every booking surface stays in sync.
 /// This screen owns only the Scaffold, the tour preview, the submit CTA, and
 /// the persistence + WhatsApp handoff.
+/// Outcome of the device-local create preflight. `tooFast` hard-blocks;
+/// `duplicate` soft-warns (submit-anyway); `ok` proceeds silently.
+enum _PreflightResult { ok, tooFast, duplicate }
+
 class CustomerBookingRequestScreen extends StatefulWidget {
   final Tour tour;
   final CustomerRequestEntry? existing;
@@ -104,13 +108,30 @@ class _CustomerBookingRequestScreenState
     final hasOrganiser = adminPhone != null && adminPhone.isNotEmpty;
     final normalisedPhone = data.normalisedPhone;
 
-    // Anti-abuse (no external verification): block a repeat pending request for
-    // this trip from the same number, and rate-limit rapid-fire submissions.
+    // Anti-abuse (no external verification): rate-limit rapid-fire submissions
+    // (hard block) and SOFT-warn on an exact-duplicate pending request — same
+    // phone + tour + name + seats — letting the customer submit anyway.
     if (!widget.isEditing) {
-      final blocked = await _preflightCreate(normalisedPhone);
-      if (blocked != null) {
-        AppSnackBar.error(blocked);
+      final preflight = await _preflightCreate(
+        normalisedPhone: normalisedPhone,
+        name: data.name,
+        doubleSofa: data.doubleSofa,
+        singleSofa: data.singleSofa,
+      );
+      if (preflight == _PreflightResult.tooFast) {
+        AppSnackBar.error(tr('customer_booking.err_too_fast'));
         return;
+      }
+      if (preflight == _PreflightResult.duplicate) {
+        if (!mounted) return;
+        final submitAnyway = await UgamDialog.confirm(
+          context,
+          title: tr('customer_booking.warn_duplicate_title'),
+          message: tr('customer_booking.warn_duplicate_body'),
+          confirmLabel: tr('customer_booking.warn_duplicate_submit'),
+          cancelLabel: tr('customer_booking.warn_duplicate_cancel'),
+        );
+        if (!submitAnyway) return;
       }
     }
 
@@ -143,25 +164,38 @@ class _CustomerBookingRequestScreenState
   static const _kLastRequestMsKey = 'last_request_ms';
   static const _cooldownMs = 15000;
 
-  /// Returns an error message to block submission, or null to allow it.
-  /// Guards (device-local, no server/verification): one pending request per
-  /// trip per number, and a short cooldown between submissions.
-  Future<String?> _preflightCreate(String normalisedPhone) async {
+  /// Device-local preflight (no server/verification). Returns:
+  ///   • [_PreflightResult.tooFast]  — rapid-fire submission; HARD block.
+  ///   • [_PreflightResult.duplicate] — an EXACT-content pending request already
+  ///     exists (same phone + tour + name + seat counts); caller SOFT-warns and
+  ///     may submit anyway. A different name or seat mix is NOT a duplicate.
+  ///   • [_PreflightResult.ok]        — nothing in the way.
+  /// Cooldown is checked first so spam can't slip through behind a duplicate.
+  Future<_PreflightResult> _preflightCreate({
+    required String normalisedPhone,
+    required String name,
+    required int doubleSofa,
+    required int singleSofa,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final last = prefs.getInt(_kLastRequestMsKey) ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - last < _cooldownMs) return _PreflightResult.tooFast;
+
     final mine = normalisePhone(normalisedPhone);
+    final myName = name.trim().toLowerCase();
     final existing = await CustomerRequestsStore().list();
     final duplicate = existing.any(
       (e) =>
           e.tourId == widget.tour.id &&
           normalisePhone(e.customerPhone) == mine &&
-          e.status.toLowerCase() == 'pending',
+          e.status.toLowerCase() == 'pending' &&
+          e.customerName.trim().toLowerCase() == myName &&
+          e.doubleSofa == doubleSofa &&
+          e.singleSofa == singleSofa,
     );
-    if (duplicate) return tr('customer_booking.err_duplicate');
-
-    final prefs = await SharedPreferences.getInstance();
-    final last = prefs.getInt(_kLastRequestMsKey) ?? 0;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - last < _cooldownMs) return tr('customer_booking.err_too_fast');
-    return null;
+    if (duplicate) return _PreflightResult.duplicate;
+    return _PreflightResult.ok;
   }
 
   Future<void> _markSubmitted() async {
@@ -191,11 +225,11 @@ class _CustomerBookingRequestScreenState
     };
 
     try {
-      // Atomic create via a SECURITY DEFINER RPC: inserts the request AND
-      // upserts the passenger in ONE transaction. Unlike a raw anon upsert,
-      // this correctly handles a returning customer re-submitting the same
-      // trip (the ON CONFLICT update runs as the function owner, so it isn't
-      // blocked by the missing anon UPDATE policy on passengers).
+      // Atomic create via a SECURITY DEFINER RPC: inserts a fresh passenger
+      // AND its booking_requests audit row in ONE transaction, linking them by
+      // passenger_id. Every submission creates its own pair, so one phone can
+      // hold multiple distinct requests on the same tour (migration 030). Runs
+      // as the function owner, so the insert isn't blocked by anon RLS.
       await Supabase.instance.client.rpc(
         'submit_booking_request',
         params: {
@@ -231,9 +265,11 @@ class _CustomerBookingRequestScreenState
         note: note.isEmpty ? null : note,
         tripType: data.tripType,
       );
+      // Plain insert — a phone may now hold multiple distinct requests on one
+      // tour, so we never collapse onto an existing (tour_id, phone) row.
       await Supabase.instance.client
           .from('passengers')
-          .upsert(passenger.toMap(), onConflict: 'tour_id,phone');
+          .insert(passenger.toMap());
     }
 
     await CustomerRequestsStore().upsert(

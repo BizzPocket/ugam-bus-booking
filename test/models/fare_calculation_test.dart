@@ -3,6 +3,7 @@ import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/passenger.dart';
+import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/trip_type.dart';
 
@@ -42,6 +43,11 @@ void main() {
         ]),
       );
 
+  // The trip leg now lives per request line, and pricing reads it via
+  // [Passenger.legForSeatType] (keyed by seat type). To preserve the original
+  // intent of these tests — one [tripType] for the whole passenger — we attach
+  // one request line per seat type, each carrying [tripType] as its leg, so the
+  // per-type leg lookup returns it for every held seat type.
   Passenger passenger({
     required List<SeatAssignment> seats,
     TripType tripType = TripType.roundTrip,
@@ -51,6 +57,10 @@ void main() {
         name: 'x',
         phone: '1',
         assignedSeats: seats,
+        requestLines: [
+          for (final t in SeatType.values)
+            RequestLine(seatType: t, qty: 1, leg: tripType),
+        ],
         tripType: tripType,
       );
 

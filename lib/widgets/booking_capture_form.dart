@@ -18,10 +18,13 @@ import '../utils/phone_normalize.dart';
 /// admin add, admin edit) produces. Each consumer owns its own submit button
 /// and persistence — they just read these fields off the returned data.
 ///
-/// [lines] is already assembled (Double Sofa / Single Sofa / Seater lines with
-/// `qty > 0`), so a consumer can hand it straight to a [Passenger] /
-/// `submit_booking_request` RPC. [doubleSofa] / [singleSofa] / [seater] are the
-/// raw per-type counts (handy for the `raw_form` payload and snackbar copy).
+/// [lines] is already assembled — one [RequestLine] per visible seat row, each
+/// carrying its own `leg` (a request can now mix legs: e.g. 1 Double Sofa
+/// round-trip + 1 Double Sofa outbound-only). A consumer can hand it straight to
+/// a [Passenger] / `submit_booking_request` RPC. [doubleSofa] / [singleSofa] /
+/// [seater] are aggregate per-type counts (handy for the `raw_form` payload and
+/// snackbar copy). [tripType] is a DERIVED summary of the per-line legs (kept for
+/// backward-compat — the per-line `leg` is the source of truth).
 class BookingCaptureData {
   final String name;
 
@@ -32,6 +35,9 @@ class BookingCaptureData {
   /// `+91XXXXXXXXXX` — the normalised storage form most callers persist.
   final String normalisedPhone;
 
+  /// Derived summary of the per-line legs: round-trip if any line is round-trip
+  /// or the lines mix legs, otherwise the single shared one-leg value. No longer
+  /// the source of truth — each [RequestLine] carries its own `leg`.
   final TripType tripType;
   final List<RequestLine> lines;
   final String? note;
@@ -57,16 +63,29 @@ class BookingCaptureData {
 
 /// Pre-fill payload for edit mode. Build one from an existing
 /// `CustomerRequestEntry` or `Passenger` and pass as [BookingCaptureForm.initial].
+///
+/// The form hydrates ONE row per [line], each carrying its stored leg. A legacy
+/// initial that has no lines (only the scalar per-type counts + a single
+/// [tripType]) is supported via the default constructor: it fabricates one row
+/// per non-zero type, all sharing that [tripType].
 class BookingCaptureInitial {
   final String name;
 
   /// Any format — normalised internally to the 10-digit field value.
   final String phone;
+
+  /// Legacy single trip type. Applied to every hydrated row when [lines] is
+  /// empty, OR to any hydrated line that lacks its own (already round-trip)
+  /// stored leg — see [BookingCaptureInitial.fromLines].
   final TripType tripType;
   final int doubleSofa;
   final int singleSofa;
   final int seater;
   final String? note;
+
+  /// Per-line seat rows to hydrate (each with its own stored leg). When
+  /// non-empty this is the source of truth and the scalar counts are ignored.
+  final List<RequestLine> lines;
 
   const BookingCaptureInitial({
     this.name = '',
@@ -76,9 +95,14 @@ class BookingCaptureInitial {
     this.singleSofa = 0,
     this.seater = 0,
     this.note,
+    this.lines = const [],
   });
 
-  /// Convenience: split a list of [RequestLine] into per-type counts.
+  /// Hydrate from an existing list of [RequestLine]s, preserving each line's
+  /// stored leg. When a line lacks an explicit non-round-trip leg AND the
+  /// request was saved under the legacy single [tripType] (i.e. the line is
+  /// round-trip but the request is one-way), the legacy [tripType] is applied so
+  /// old one-way requests keep their leg on edit.
   factory BookingCaptureInitial.fromLines({
     String name = '',
     String phone = '',
@@ -87,6 +111,7 @@ class BookingCaptureInitial {
     String? note,
   }) {
     var d = 0, s = 0, st = 0;
+    final hydrated = <RequestLine>[];
     for (final l in lines) {
       switch (l.seatType) {
         case SeatType.doubleSofa:
@@ -96,6 +121,12 @@ class BookingCaptureInitial {
         case SeatType.seater:
           st += l.qty;
       }
+      // Legacy fallback: a stored round-trip leg on a one-way request means the
+      // line predates per-line legs — apply the request-wide tripType.
+      final leg = (l.leg == TripType.roundTrip && tripType.isOneWay)
+          ? tripType
+          : l.leg;
+      hydrated.add(l.copyWith(leg: leg));
     }
     return BookingCaptureInitial(
       name: name,
@@ -105,8 +136,26 @@ class BookingCaptureInitial {
       singleSofa: s,
       seater: st,
       note: note,
+      lines: hydrated,
     );
   }
+}
+
+/// Internal editable draft for ONE seat row in the form: a seat type + optional
+/// berth position + quantity + its own leg. Multiple rows of the same type with
+/// different legs are allowed.
+class _LineDraft {
+  SeatType type;
+  SeatPosition? position;
+  int qty;
+  TripType leg;
+
+  _LineDraft({
+    required this.type,
+    this.position,
+    required this.qty,
+    this.leg = TripType.roundTrip,
+  });
 }
 
 /// ONE shared booking-capture form, used by all three surfaces:
@@ -184,14 +233,11 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   final _phone = TextEditingController();
   final _note = TextEditingController();
 
-  int _doubleSofa = 0;
-  int _singleSofa = 0;
-  int _seater = 0;
-  TripType _tripType = TripType.roundTrip;
+  /// One draft per visible seat row. Each row = type + optional position + qty +
+  /// its own leg. Two rows of the same type on different legs are allowed.
+  final List<_LineDraft> _drafts = [];
 
   bool _showNote = false;
-  bool _showOneWay =
-      false; // GO/RET options expanded (round-trip-default-invisible)
 
   String? _nameError;
   String? _phoneError;
@@ -201,11 +247,19 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   UserController? _userCtrl;
   List<AppUser> _contactMatches = const [];
 
-  int get _totalSeats => _doubleSofa + _singleSofa + _seater;
+  int get _totalSeats =>
+      _drafts.fold<int>(0, (sum, d) => sum + d.qty);
 
   /// Live count of how many distinct seats this booking is for — a consumer
   /// can read it to label its own submit button / count chip.
   int get totalSeats => _totalSeats;
+
+  /// Seat types selectable in this surface — Seater only when [showSeater].
+  List<SeatType> get _selectableTypes => [
+    SeatType.doubleSofa,
+    SeatType.singleSofa,
+    if (widget.showSeater) SeatType.seater,
+  ];
 
   @override
   void initState() {
@@ -217,17 +271,56 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     if (e != null) {
       _name.text = e.name;
       _phone.text = normalisePhone(e.phone);
-      _doubleSofa = e.doubleSofa.clamp(0, widget.maxPerType);
-      _singleSofa = e.singleSofa.clamp(0, widget.maxPerType);
-      _seater = e.seater.clamp(0, widget.maxPerType);
-      _tripType = e.tripType;
-      // If the booking is one-way, the GO/RET picker must start expanded so the
-      // chosen leg is visible (and changeable) without hunting for "One-way?".
-      _showOneWay = e.tripType.isOneWay;
+      _hydrateDrafts(e);
       if (e.note != null && e.note!.isNotEmpty) {
         _note.text = e.note!;
         _showNote = true;
       }
+    }
+  }
+
+  /// Build the row drafts from the initial. Prefer the per-line list (each row
+  /// keeps its stored leg); fall back to the legacy scalar counts (one row per
+  /// non-zero type, all on the legacy [BookingCaptureInitial.tripType]).
+  void _hydrateDrafts(BookingCaptureInitial e) {
+    final selectable = _selectableTypes.toSet();
+    if (e.lines.isNotEmpty) {
+      for (final l in e.lines) {
+        if (l.qty <= 0) continue;
+        // Only hydrate types this surface can edit. Non-selectable lines (e.g. a
+        // Seater on a sofa-only surface) are preserved by the consumer, not here
+        // — surfacing one would double-count it on collect().
+        if (!selectable.contains(l.seatType)) continue;
+        _drafts.add(
+          _LineDraft(
+            type: l.seatType,
+            position: l.position,
+            qty: l.qty.clamp(1, widget.maxPerType),
+            leg: l.leg,
+          ),
+        );
+      }
+    } else {
+      void addType(SeatType t, int qty) {
+        if (qty <= 0) return;
+        _drafts.add(
+          _LineDraft(
+            type: t,
+            qty: qty.clamp(1, widget.maxPerType),
+            leg: e.tripType,
+          ),
+        );
+      }
+
+      addType(SeatType.doubleSofa, e.doubleSofa);
+      addType(SeatType.singleSofa, e.singleSofa);
+      if (widget.showSeater) addType(SeatType.seater, e.seater);
+    }
+    // Always start with at least one editable row so the section isn't empty.
+    if (_drafts.isEmpty) {
+      _drafts.add(
+        _LineDraft(type: SeatType.doubleSofa, qty: 1, leg: TripType.roundTrip),
+      );
     }
   }
 
@@ -277,25 +370,58 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     }
 
     final note = _note.text.trim();
+
+    // One RequestLine per non-empty draft, each carrying its own leg. Rows with
+    // qty 0 are dropped.
     final lines = <RequestLine>[
-      if (_doubleSofa > 0)
-        RequestLine(seatType: SeatType.doubleSofa, qty: _doubleSofa),
-      if (_singleSofa > 0)
-        RequestLine(seatType: SeatType.singleSofa, qty: _singleSofa),
-      if (_seater > 0) RequestLine(seatType: SeatType.seater, qty: _seater),
+      for (final d in _drafts)
+        if (d.qty > 0)
+          RequestLine(
+            seatType: d.type,
+            position: d.position,
+            qty: d.qty,
+            leg: d.leg,
+          ),
     ];
+
+    // Aggregate per-type counts (sum across rows of the same type / leg).
+    var doubleSofa = 0, singleSofa = 0, seater = 0;
+    for (final l in lines) {
+      switch (l.seatType) {
+        case SeatType.doubleSofa:
+          doubleSofa += l.qty;
+        case SeatType.singleSofa:
+          singleSofa += l.qty;
+        case SeatType.seater:
+          seater += l.qty;
+      }
+    }
 
     return BookingCaptureData(
       name: name,
       phone: phone,
       normalisedPhone: '+91${normalisePhone(phone)}',
-      tripType: _tripType,
+      tripType: _summaryTripType(lines),
       lines: lines,
       note: note.isEmpty ? null : note,
-      doubleSofa: _doubleSofa,
-      singleSofa: _singleSofa,
-      seater: _seater,
+      doubleSofa: doubleSofa,
+      singleSofa: singleSofa,
+      seater: seater,
     );
+  }
+
+  /// Derive the backward-compat single trip-type summary from per-line legs:
+  /// round-trip if any line is round-trip OR the legs are mixed; otherwise the
+  /// common one-leg value shared by every line.
+  TripType _summaryTripType(List<RequestLine> lines) {
+    if (lines.isEmpty) return TripType.roundTrip;
+    final first = lines.first.leg;
+    for (final l in lines) {
+      if (l.leg != first || l.leg == TripType.roundTrip) {
+        return TripType.roundTrip;
+      }
+    }
+    return first;
   }
 
   // ─── CONTACTS ───────────────────────────────────────────────────────────
@@ -360,23 +486,59 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
-  // ─── SEAT QTY ───────────────────────────────────────────────────────────
+  // ─── SEAT ROWS ──────────────────────────────────────────────────────────
 
-  void _setDouble(int v) => setState(() {
-    _doubleSofa = v.clamp(0, widget.maxPerType);
+  void _setRowQty(int index, int v) => setState(() {
+    if (index < 0 || index >= _drafts.length) return;
+    _drafts[index].qty = v.clamp(0, widget.maxPerType);
     if (_totalSeats > 0) _seatsError = null;
     _notify();
   });
 
-  void _setSingle(int v) => setState(() {
-    _singleSofa = v.clamp(0, widget.maxPerType);
-    if (_totalSeats > 0) _seatsError = null;
+  void _setRowType(int index, SeatType type) => setState(() {
+    if (index < 0 || index >= _drafts.length) return;
+    final d = _drafts[index];
+    d.type = type;
+    // Position is sofa-only metadata the form doesn't surface; clear it so a
+    // type change never leaves a stale Upper/Lower on (e.g.) a Seater.
+    d.position = null;
     _notify();
   });
 
-  void _setSeater(int v) => setState(() {
-    _seater = v.clamp(0, widget.maxPerType);
-    if (_totalSeats > 0) _seatsError = null;
+  /// Cycle a row's leg: Full trip → Go only → Return only → Full trip.
+  void _cycleRowLeg(int index) => setState(() {
+    if (index < 0 || index >= _drafts.length) return;
+    final d = _drafts[index];
+    switch (d.leg) {
+      case TripType.roundTrip:
+        d.leg = TripType.outboundOnly;
+      case TripType.outboundOnly:
+        d.leg = TripType.returnOnly;
+      case TripType.returnOnly:
+        d.leg = TripType.roundTrip;
+    }
+    HapticFeedback.selectionClick();
+    _notify();
+  });
+
+  /// Append a new row. Default doubleSofa qty 1 round-trip, or the first seat
+  /// type not yet used (so two taps don't stack the same type by accident).
+  void _addRow() => setState(() {
+    final used = _drafts.map((d) => d.type).toSet();
+    final type = _selectableTypes.firstWhere(
+      (t) => !used.contains(t),
+      orElse: () => SeatType.doubleSofa,
+    );
+    _drafts.add(_LineDraft(type: type, qty: 1, leg: TripType.roundTrip));
+    _seatsError = null;
+    HapticFeedback.selectionClick();
+    _notify();
+  });
+
+  void _removeRow(int index) => setState(() {
+    if (index < 0 || index >= _drafts.length) return;
+    _drafts.removeAt(index);
+    HapticFeedback.lightImpact();
     _notify();
   });
 
@@ -435,6 +597,85 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     }
   }
 
+  /// Pick a seat type for a row via the shared Ugam sheet. Only offered when
+  /// more than one type is selectable (i.e. [showSeater] surfaces).
+  Future<void> _pickRowType(int index) async {
+    if (index < 0 || index >= _drafts.length) return;
+    FocusScope.of(context).unfocus();
+    final picked = await UgamSheet.show<SeatType>(
+      context,
+      title: tr('booking_form.label_seat_count'),
+      builder: (_) => _SeatTypePickerSheet(
+        types: _selectableTypes,
+        selected: _drafts[index].type,
+        labelOf: _seatLabel,
+        sublabelOf: _seatSublabel,
+        iconOf: _seatIcon,
+      ),
+    );
+    if (picked == null || !mounted) return;
+    _setRowType(index, picked);
+  }
+
+  // ─── SEAT-TYPE / LEG PRESENTATION ─────────────────────────────────────────
+
+  IconData _seatIcon(SeatType t) {
+    switch (t) {
+      case SeatType.doubleSofa:
+        return Icons.king_bed_rounded;
+      case SeatType.singleSofa:
+        return Icons.single_bed_rounded;
+      case SeatType.seater:
+        return Icons.event_seat_rounded;
+    }
+  }
+
+  String _seatLabel(SeatType t) {
+    switch (t) {
+      case SeatType.doubleSofa:
+        return tr('booking_form.seat_double_sofa_label');
+      case SeatType.singleSofa:
+        return tr('booking_form.seat_single_sofa_label');
+      case SeatType.seater:
+        return tr('booking_form.seat_seater_label');
+    }
+  }
+
+  String _seatSublabel(SeatType t) {
+    switch (t) {
+      case SeatType.doubleSofa:
+        return tr('booking_form.seat_double_sofa_sub');
+      case SeatType.singleSofa:
+        return tr('booking_form.seat_single_sofa_sub');
+      case SeatType.seater:
+        return tr('booking_form.seat_seater_sub');
+    }
+  }
+
+  /// Concise leg label for the per-row chip. Reuses the leg semantics of the old
+  /// trip-type picker (Full trip / Go only / Return only).
+  String _legLabel(TripType leg) {
+    switch (leg) {
+      case TripType.roundTrip:
+        return tr('booking_form.leg_full');
+      case TripType.outboundOnly:
+        return tr('booking_form.leg_go');
+      case TripType.returnOnly:
+        return tr('booking_form.leg_ret');
+    }
+  }
+
+  IconData _legIcon(TripType leg) {
+    switch (leg) {
+      case TripType.roundTrip:
+        return Icons.sync_alt_rounded;
+      case TripType.outboundOnly:
+        return Icons.arrow_forward_rounded;
+      case TripType.returnOnly:
+        return Icons.arrow_back_rounded;
+    }
+  }
+
   // ─── BUILD ──────────────────────────────────────────────────────────────
 
   @override
@@ -473,71 +714,34 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
                 },
         ),
         const SizedBox(height: UgamSpacing.xl),
-        _SectionEyebrow(label: tr('booking_form.label_trip_type'), c: c),
-        const SizedBox(height: UgamSpacing.md),
-        _TripTypePicker(
-          value: _tripType,
-          expanded: _showOneWay,
-          fromCity: widget.fromCity,
-          toCity: widget.toCity,
-          onChanged: (v) => setState(() {
-            _tripType = v;
-            _notify();
-          }),
-          onToggleOneWay: () => setState(() {
-            _showOneWay = !_showOneWay;
-            // Collapsing the picker means the user backed out of one-way: snap
-            // the value back to round trip so the chip and value never disagree.
-            if (!_showOneWay) _tripType = TripType.roundTrip;
-            _notify();
-          }),
-        ),
-        const SizedBox(height: UgamSpacing.xl),
         _SectionEyebrow(label: tr('booking_form.label_seat_count'), c: c),
         const SizedBox(height: UgamSpacing.md),
-        _SeatTile(
-          icon: Icons.king_bed_rounded,
-          label: tr('booking_form.seat_double_sofa_label'),
-          sublabel: tr('booking_form.seat_double_sofa_sub'),
-          value: _doubleSofa,
-          maxPerType: widget.maxPerType,
-          onChanged: _setDouble,
-          onTapValue: () => _promptQuantity(
-            title: tr('booking_form.seat_double_sofa_label'),
-            current: _doubleSofa,
-            onSet: _setDouble,
-          ),
-        ),
-        const SizedBox(height: UgamSpacing.sm),
-        _SeatTile(
-          icon: Icons.single_bed_rounded,
-          label: tr('booking_form.seat_single_sofa_label'),
-          sublabel: tr('booking_form.seat_single_sofa_sub'),
-          value: _singleSofa,
-          maxPerType: widget.maxPerType,
-          onChanged: _setSingle,
-          onTapValue: () => _promptQuantity(
-            title: tr('booking_form.seat_single_sofa_label'),
-            current: _singleSofa,
-            onSet: _setSingle,
-          ),
-        ),
-        if (widget.showSeater) ...[
-          const SizedBox(height: UgamSpacing.sm),
-          _SeatTile(
-            icon: Icons.event_seat_rounded,
-            label: tr('booking_form.seat_seater_label'),
-            sublabel: tr('booking_form.seat_seater_sub'),
-            value: _seater,
+        for (var i = 0; i < _drafts.length; i++) ...[
+          if (i > 0) const SizedBox(height: UgamSpacing.sm),
+          _SeatRowTile(
+            key: ObjectKey(_drafts[i]),
+            icon: _seatIcon(_drafts[i].type),
+            label: _seatLabel(_drafts[i].type),
+            sublabel: _seatSublabel(_drafts[i].type),
+            value: _drafts[i].qty,
+            legLabel: _legLabel(_drafts[i].leg),
+            legIcon: _legIcon(_drafts[i].leg),
+            legActive: _drafts[i].leg.isOneWay,
             maxPerType: widget.maxPerType,
-            onChanged: _setSeater,
+            canRemove: _drafts.length > 1,
+            onChanged: (v) => _setRowQty(i, v),
             onTapValue: () => _promptQuantity(
-              title: tr('booking_form.seat_seater_label'),
-              current: _seater,
-              onSet: _setSeater,
+              title: _seatLabel(_drafts[i].type),
+              current: _drafts[i].qty,
+              onSet: (v) => _setRowQty(i, v),
             ),
+            onCycleLeg: () => _cycleRowLeg(i),
+            onTapType: widget.showSeater ? () => _pickRowType(i) : null,
+            onRemove: () => _removeRow(i),
           ),
         ],
+        const SizedBox(height: UgamSpacing.sm),
+        _AddSeatRowButton(c: c, onTap: _addRow),
         if (_seatsError != null) ...[
           const SizedBox(height: UgamSpacing.sm),
           Padding(
@@ -746,316 +950,43 @@ class _SectionEyebrow extends StatelessWidget {
   }
 }
 
-// ─── TRIP TYPE PICKER (round-trip-default-invisible) ────────────────────────
+// ─── SEAT ROW TILE (type + tappable typed qty + per-row leg chip) ───────────
 
-/// A single "Round trip" chip with a "One-way?" affordance. The GO/RET options
-/// only appear when the user opts into one-way — round trip stays a one-tap
-/// default that needs no thought.
-class _TripTypePicker extends StatelessWidget {
-  final TripType value;
-  final bool expanded;
-  final String fromCity;
-  final String toCity;
-  final ValueChanged<TripType> onChanged;
-  final VoidCallback onToggleOneWay;
-
-  const _TripTypePicker({
-    required this.value,
-    required this.expanded,
-    required this.fromCity,
-    required this.toCity,
-    required this.onChanged,
-    required this.onToggleOneWay,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    final roundSelected = value == TripType.roundTrip;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _TripChip(
-                icon: Icons.sync_alt_rounded,
-                title: tr('booking_form.trip_round_title'),
-                subtitle: tr(
-                  'booking_form.trip_round_sub',
-                  namedArgs: {'from': fromCity, 'to': toCity},
-                ),
-                selected: roundSelected && !expanded,
-                onTap: () {
-                  if (expanded) onToggleOneWay();
-                  onChanged(TripType.roundTrip);
-                },
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                onToggleOneWay();
-              },
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: UgamMotion.tab,
-                curve: UgamMotion.easeOut,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.md,
-                  vertical: 14,
-                ),
-                decoration: BoxDecoration(
-                  color: expanded ? c.accentFill : c.cardElev,
-                  borderRadius: BorderRadius.circular(UgamRadius.row),
-                  border: Border.all(
-                    color: expanded ? c.accent : c.border,
-                    width: expanded ? 1.5 : 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tr('booking_form.trip_oneway_toggle'),
-                      style: UgamText.bodyStrong.copyWith(
-                        color: expanded ? c.accent : c.ink2,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      expanded
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 18,
-                      color: expanded ? c.accent : c.ink3,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (expanded) ...[
-          const SizedBox(height: UgamSpacing.sm),
-          _TripTypeOption(
-            icon: Icons.arrow_forward_rounded,
-            title: tr(
-              'booking_form.trip_outbound_title',
-              namedArgs: {'from': fromCity, 'to': toCity},
-            ),
-            subtitle: tr('booking_form.trip_outbound_sub'),
-            selected: value == TripType.outboundOnly,
-            onTap: () => onChanged(TripType.outboundOnly),
-          ),
-          const SizedBox(height: UgamSpacing.sm),
-          _TripTypeOption(
-            icon: Icons.arrow_back_rounded,
-            title: tr(
-              'booking_form.trip_return_title',
-              namedArgs: {'from': toCity, 'to': fromCity},
-            ),
-            subtitle: tr('booking_form.trip_return_sub'),
-            selected: value == TripType.returnOnly,
-            onTap: () => onChanged(TripType.returnOnly),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _TripChip extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _TripChip({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: UgamMotion.tab,
-        curve: UgamMotion.easeOut,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.gutter,
-          vertical: UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: selected ? c.accentFill : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-          border: Border.all(
-            color: selected ? c.accent : c.border,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 20, color: selected ? c.accent : c.ink2),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: UgamText.caption.copyWith(
-                      color: c.ink2,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TripTypeOption extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _TripTypeOption({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: UgamMotion.tab,
-        curve: UgamMotion.easeOut,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.gutter,
-          vertical: UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: selected ? c.accentFill : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 20, color: selected ? c.accent : c.ink2),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: UgamText.caption.copyWith(
-                      color: c.ink2,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_off_rounded,
-              size: 20,
-              color: selected ? c.accent : c.ink3,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ─── SEAT TILE (tappable typed qty + fine-adjust +/-) ───────────────────────
-
-class _SeatTile extends StatelessWidget {
+/// One editable seat row: type label/icon, a tappable typed qty with +/- fine
+/// adjust (same stepper style as before), a tap-cycle LEG chip (Full → Go →
+/// Return), an optional type-swap affordance, and a remove button.
+class _SeatRowTile extends StatelessWidget {
   final IconData icon;
   final String label;
   final String sublabel;
   final int value;
+  final String legLabel;
+  final IconData legIcon;
+  final bool legActive;
   final int maxPerType;
+  final bool canRemove;
   final ValueChanged<int> onChanged;
   final VoidCallback onTapValue;
+  final VoidCallback onCycleLeg;
+  final VoidCallback? onTapType;
+  final VoidCallback onRemove;
 
-  const _SeatTile({
+  const _SeatRowTile({
+    super.key,
     required this.icon,
     required this.label,
     required this.sublabel,
     required this.value,
+    required this.legLabel,
+    required this.legIcon,
+    required this.legActive,
     required this.maxPerType,
+    required this.canRemove,
     required this.onChanged,
     required this.onTapValue,
+    required this.onCycleLeg,
+    required this.onTapType,
+    required this.onRemove,
   });
 
   @override
@@ -1075,86 +1006,354 @@ class _SeatTile extends StatelessWidget {
         color: selected ? c.accentFill : c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 22, color: selected ? c.accent : c.ink2),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  sublabel,
-                  style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11),
-                ),
-              ],
-            ),
-          ),
-          _StepperButton(
-            icon: Icons.remove_rounded,
-            enabled: value > 0,
-            onTap: () {
-              HapticFeedback.lightImpact();
-              onChanged(value - 1);
-            },
-          ),
-          // Tappable value — opens the numeric keypad so a large quantity is
-          // one type action instead of N taps. The number doubles as the
-          // affordance (underlined-feel via the bordered tap target).
-          GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onTapValue();
-            },
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 36),
-              height: 32,
-              alignment: Alignment.center,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: selected ? c.accent.withValues(alpha: 0.4) : c.border,
-                ),
-              ),
-              child: Text(
-                '$value',
-                textAlign: TextAlign.center,
-                style: UgamText.tabular(
-                  UgamText.titleM.copyWith(
-                    color: selected ? c.accent : c.ink,
-                    fontSize: 18,
+          Row(
+            children: [
+              GestureDetector(
+                onTap: onTapType == null
+                    ? null
+                    : () {
+                        HapticFeedback.selectionClick();
+                        onTapType!();
+                      },
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(
+                    icon,
+                    size: 22,
+                    color: selected ? c.accent : c.ink2,
                   ),
                 ),
               ),
-            ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: GestureDetector(
+                  onTap: onTapType == null
+                      ? null
+                      : () {
+                          HapticFeedback.selectionClick();
+                          onTapType!();
+                        },
+                  behavior: HitTestBehavior.opaque,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: UgamText.titleS.copyWith(
+                                color: c.ink,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ),
+                          if (onTapType != null) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.unfold_more_rounded,
+                              size: 16,
+                              color: c.ink3,
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        sublabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: UgamText.caption.copyWith(
+                          color: c.ink2,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              _StepperButton(
+                icon: Icons.remove_rounded,
+                enabled: value > 0,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  onChanged(value - 1);
+                },
+              ),
+              // Tappable value — opens the numeric keypad so a large quantity is
+              // one type action instead of N taps.
+              GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  onTapValue();
+                },
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 36),
+                  height: 32,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: selected
+                          ? c.accent.withValues(alpha: 0.4)
+                          : c.border,
+                    ),
+                  ),
+                  child: Text(
+                    '$value',
+                    textAlign: TextAlign.center,
+                    style: UgamText.tabular(
+                      UgamText.titleM.copyWith(
+                        color: selected ? c.accent : c.ink,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              _StepperButton(
+                icon: Icons.add_rounded,
+                enabled: value < maxPerType,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  onChanged(value + 1);
+                },
+              ),
+            ],
           ),
-          _StepperButton(
-            icon: Icons.add_rounded,
-            enabled: value < maxPerType,
-            onTap: () {
-              HapticFeedback.lightImpact();
-              onChanged(value + 1);
-            },
+          const SizedBox(height: UgamSpacing.sm),
+          Row(
+            children: [
+              // Per-row LEG chip — tap to cycle Full trip → Go only → Return.
+              GestureDetector(
+                onTap: onCycleLeg,
+                behavior: HitTestBehavior.opaque,
+                child: AnimatedContainer(
+                  duration: UgamMotion.tab,
+                  curve: UgamMotion.easeOut,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.md,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: legActive ? c.accentFill : c.card,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    border: Border.all(
+                      color: legActive ? c.accent : c.border,
+                      width: legActive ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        legIcon,
+                        size: 14,
+                        color: legActive ? c.accent : c.ink2,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        legLabel,
+                        style: UgamText.bodyStrong.copyWith(
+                          color: legActive ? c.accent : c.ink2,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              if (canRemove)
+                GestureDetector(
+                  onTap: onRemove,
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: UgamSpacing.sm,
+                      vertical: 4,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.close_rounded,
+                          size: 14,
+                          color: c.ink3,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          tr('booking_form.remove_row'),
+                          style: UgamText.caption.copyWith(
+                            color: c.ink3,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── ADD SEAT ROW BUTTON ────────────────────────────────────────────────────
+
+class _AddSeatRowButton extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback onTap;
+  const _AddSeatRowButton({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.add_rounded, size: 18, color: c.accent),
+            const SizedBox(width: UgamSpacing.sm),
+            Text(
+              tr('booking_form.add_seat_row'),
+              style: UgamText.bodyStrong.copyWith(color: c.accent, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── SEAT TYPE PICKER SHEET ─────────────────────────────────────────────────
+
+/// Lets a row swap its seat type. Only shown on surfaces that offer more than
+/// one selectable type (i.e. Seater-enabled surfaces).
+class _SeatTypePickerSheet extends StatelessWidget {
+  final List<SeatType> types;
+  final SeatType selected;
+  final String Function(SeatType) labelOf;
+  final String Function(SeatType) sublabelOf;
+  final IconData Function(SeatType) iconOf;
+
+  const _SeatTypePickerSheet({
+    required this.types,
+    required this.selected,
+    required this.labelOf,
+    required this.sublabelOf,
+    required this.iconOf,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final t in types) ...[
+          GestureDetector(
+            onTap: () => Navigator.of(context).pop(t),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              margin: const EdgeInsets.only(bottom: UgamSpacing.sm),
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.gutter,
+                vertical: UgamSpacing.md,
+              ),
+              decoration: BoxDecoration(
+                color: t == selected ? c.accentFill : c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.row),
+                border: Border.all(
+                  color: t == selected ? c.accent : c.border,
+                  width: t == selected ? 1.5 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: t == selected
+                          ? c.accent.withValues(alpha: 0.18)
+                          : c.card,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      iconOf(t),
+                      size: 20,
+                      color: t == selected ? c.accent : c.ink2,
+                    ),
+                  ),
+                  const SizedBox(width: UgamSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          labelOf(t),
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.ink,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          sublabelOf(t),
+                          style: UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (t == selected)
+                    Icon(
+                      Icons.check_circle_rounded,
+                      size: 20,
+                      color: c.accent,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

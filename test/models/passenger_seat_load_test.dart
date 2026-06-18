@@ -8,12 +8,14 @@ import 'package:occubusbooking/models/trip_type.dart';
 // a round-trip booking weighs a full 1.0 seat while a one-leg booking weighs
 // 0.5 — and per-leg berth load (goBerths/retBerths) is the capacity truth.
 
+// The leg now lives per request line, so apply [trip] to each line's leg
+// (the new per-line getters ignore the passenger-level tripType).
 Passenger _p(List<RequestLine> lines, TripType trip) => Passenger(
       id: 'p',
       tourId: 't',
       name: 'n',
       phone: '+910000000000',
-      requestLines: lines,
+      requestLines: lines.map((l) => l.copyWith(leg: trip)).toList(),
       tripType: trip,
     );
 

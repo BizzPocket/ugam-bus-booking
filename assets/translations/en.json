@@ -497,7 +497,8 @@
     "chip_oneway_return": "ONE-WAY RETURN",
     "chip_seats": "SEATS: {seats}",
     "chip_seats_finalizing": "Seats being finalized",
-    "seats_pending_toast": "Seats aren't finalized yet — you'll see them once the trip is confirmed."
+    "seats_pending_toast": "Seats aren't finalized yet — you'll see them once the trip is confirmed.",
+    "add_another": "Add another request"
   },
   "add_bus": {
     "title": "Add Bus",
@@ -807,6 +808,10 @@
     "button_submit": "Submit request",
     "err_phone_fake": "Please enter a real 10-digit mobile number.",
     "err_duplicate": "You already have a pending request for this trip.",
+    "warn_duplicate_title": "Submit a duplicate?",
+    "warn_duplicate_body": "You already have a pending request just like this — same name and seats. Submit another anyway?",
+    "warn_duplicate_submit": "Submit anyway",
+    "warn_duplicate_cancel": "Cancel",
     "err_too_fast": "Please wait a few seconds before submitting again.",
     "cta_seat_count": "{n} seats",
     "cta_seat_count_one": "1 seat",
@@ -847,7 +852,12 @@
     "err_name_required": "Please enter your name",
     "err_phone_invalid": "Please enter a 10-digit phone number",
     "err_phone_fake": "Please enter a real 10-digit mobile number.",
-    "err_no_seats": "Pick at least one seat"
+    "err_no_seats": "Pick at least one seat",
+    "add_seat_row": "Add seat row",
+    "remove_row": "Remove",
+    "leg_full": "Full trip",
+    "leg_go": "Go only",
+    "leg_ret": "Return only"
   },
   "occupant": {
     "make_priority": "Make priority",

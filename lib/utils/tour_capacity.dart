@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../models/passenger.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
@@ -93,16 +94,29 @@ TourCapacity computeTourCapacity(Tour tour) {
 
   // Leg-aware occupancy per bus from the PLAN's placements: each physical berth
   // offers one GO slot + one RET slot, so the honest load is the busier leg.
-  final tripById = <String, TripType>{
-    for (final p in tour.passengers) p.id: p.tripType,
+  //
+  // The leg now lives PER REQUEST LINE, not on the passenger, so a single
+  // request can mix legs. A [SeatAssignment] carries no leg, so we gate each
+  // placed seat against the passenger's per-line GO/RET berth quotas
+  // ([Passenger.goBerths]/[Passenger.retBerths]): the first `goBerths` placed
+  // seats load GO, the first `retBerths` load RET. Exact when a passenger's
+  // seats sit on one bus (the engine keeps them together), a safe upper bound
+  // otherwise — and identical to the old whole-passenger gate for a
+  // single-leg request.
+  final passengerById = <String, Passenger>{
+    for (final p in tour.passengers) p.id: p,
   };
   final go = <String, int>{};
   final ret = <String, int>{};
   plan.assignmentsByPassenger.forEach((passengerId, seats) {
-    final trip = tripById[passengerId] ?? TripType.roundTrip;
+    final p = passengerById[passengerId];
+    final goQuota = p?.goBerths ?? seats.length;
+    final retQuota = p?.retBerths ?? seats.length;
+    var i = 0;
     for (final a in seats) {
-      if (trip.usesOutbound) go[a.busId] = (go[a.busId] ?? 0) + 1;
-      if (trip.usesReturn) ret[a.busId] = (ret[a.busId] ?? 0) + 1;
+      if (i < goQuota) go[a.busId] = (go[a.busId] ?? 0) + 1;
+      if (i < retQuota) ret[a.busId] = (ret[a.busId] ?? 0) + 1;
+      i++;
     }
   });
   // Per-bus capacity so leg-free is bounded by the seats that bus actually has —
@@ -124,16 +138,20 @@ TourCapacity computeTourCapacity(Tour tour) {
     }
   }
   // Per-type berth-legs the engine actually PLACES (each assignment = 1 berth,
-  // a whole double = two entries on the same seatId). Gated by the rider's legs.
+  // a whole double = two entries on the same seatId). Gated PER SEAT by the leg
+  // of the matching request line via [Passenger.legForSeatType] — the leg now
+  // lives per line, so a mixed request charges each placed seat to its own type's
+  // leg rather than the whole-passenger trip. Round-trip is unchanged.
   final goByType = <SeatType, int>{};
   final retByType = <SeatType, int>{};
   plan.assignmentsByPassenger.forEach((passengerId, seats) {
-    final trip = tripById[passengerId] ?? TripType.roundTrip;
+    final p = passengerById[passengerId];
     for (final a in seats) {
       final st = typeBySeat['${a.busId}:${a.seatId}'];
       if (st == null) continue;
-      if (trip.usesOutbound) goByType[st] = (goByType[st] ?? 0) + 1;
-      if (trip.usesReturn) retByType[st] = (retByType[st] ?? 0) + 1;
+      final leg = p?.legForSeatType(st) ?? TripType.roundTrip;
+      if (leg.usesOutbound) goByType[st] = (goByType[st] ?? 0) + 1;
+      if (leg.usesReturn) retByType[st] = (retByType[st] ?? 0) + 1;
     }
   });
   final freeByType = <SeatType, int>{

@@ -497,7 +497,8 @@
     "chip_oneway_return": "एक तरफ · वापसी",
     "chip_seats": "सीटें: {seats}",
     "chip_seats_finalizing": "सीटें तय की जा रही हैं",
-    "seats_pending_toast": "सीटें अभी तय नहीं हुई हैं — यात्रा पक्की होने पर आपको दिख जाएँगी।"
+    "seats_pending_toast": "सीटें अभी तय नहीं हुई हैं — यात्रा पक्की होने पर आपको दिख जाएँगी।",
+    "add_another": "एक और अनुरोध जोड़ें"
   },
   "add_bus": {
     "title": "बस जोड़ें",
@@ -807,6 +808,10 @@
     "button_submit": "अनुरोध भेजें",
     "err_phone_fake": "कृपया सही 10-अंकों का मोबाइल नंबर दर्ज करें।",
     "err_duplicate": "इस ट्रिप के लिए आपका अनुरोध पहले से लंबित है।",
+    "warn_duplicate_title": "डुप्लिकेट भेजें?",
+    "warn_duplicate_body": "इसी जैसा — वही नाम और सीटें — एक अनुरोध पहले से लंबित है। फिर भी एक और भेजें?",
+    "warn_duplicate_submit": "फिर भी भेजें",
+    "warn_duplicate_cancel": "रद्द करें",
     "err_too_fast": "दोबारा भेजने से पहले कुछ सेकंड प्रतीक्षा करें।",
     "cta_seat_count": "{n} सीटें",
     "cta_seat_count_one": "1 सीट",
@@ -847,7 +852,12 @@
     "err_name_required": "कृपया अपना नाम दर्ज करें",
     "err_phone_invalid": "कृपया 10 अंकों का फ़ोन नंबर दर्ज करें",
     "err_phone_fake": "कृपया सही 10-अंकों का मोबाइल नंबर दर्ज करें।",
-    "err_no_seats": "कम से कम एक सीट चुनें"
+    "err_no_seats": "कम से कम एक सीट चुनें",
+    "add_seat_row": "सीट पंक्ति जोड़ें",
+    "remove_row": "हटाएँ",
+    "leg_full": "पूरी यात्रा",
+    "leg_go": "केवल जाना",
+    "leg_ret": "केवल वापसी"
   },
   "occupant": {
     "make_priority": "प्राथमिकता दें",

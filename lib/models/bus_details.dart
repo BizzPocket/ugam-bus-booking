@@ -519,9 +519,13 @@ class Bus {
       if (a.busId != id) continue;
       final c = cellById[a.seatId.split('#').first];
       if (c == null) continue;
-      sum += berthPriceFor(c.seatType!, c.row);
+      // Apply the trip factor PER BERTH from the leg of the matching request
+      // line (legs now live per line). A whole double sofa is two entries on the
+      // same seatId, so this still sums to the full sofa price.
+      final leg = passenger.legForSeatType(c.seatType!, position: c.position);
+      sum += berthPriceFor(c.seatType!, c.row) * tripFactor(leg);
     }
-    return sum * tripFactor(passenger.tripType);
+    return sum;
   }
 
   /// Amount due for one DISTINCT seat held by [passenger] on this bus, after the
@@ -546,7 +550,8 @@ class Bus {
     final berths = c.seatType == SeatType.doubleSofa
         ? _berthsHeld(passenger, baseSeatId).clamp(1, 2)
         : 1;
-    return berthPrice * berths * tripFactor(passenger.tripType);
+    final leg = passenger.legForSeatType(c.seatType!, position: c.position);
+    return berthPrice * berths * tripFactor(leg);
   }
 
   @override

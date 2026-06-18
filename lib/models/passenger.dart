@@ -9,12 +9,15 @@ import 'trip_type.dart';
 
 /// A passenger (customer) who has requested seats on a tour.
 ///
-/// One Passenger = one WhatsApp contact = one app submission.
+/// One Passenger = one booking request = one app submission.
 /// A single passenger can request multiple seat types via [requestLines],
 /// e.g. "1 Double Lower + 1 Single Upper + 2 Seater".
 ///
-/// Idempotency key: `(tourId, phone)` — resubmitting from the app updates
-/// the existing record rather than creating a duplicate.
+/// Identity is [id] (a UUID), NOT `(tourId, phone)`. A single phone may now
+/// hold MULTIPLE distinct requests on the same tour (e.g. an agent submitting
+/// for several travellers from one handset) — each is its own Passenger row,
+/// linked to its booking_requests audit row via `booking_requests.passenger_id`
+/// (migration 030). Resubmitting no longer overwrites an earlier request.
 class Passenger {
   final String id;
   final String tourId;
@@ -106,24 +109,92 @@ class Passenger {
     (sum, l) => sum + l.qty * (l.seatType == SeatType.doubleSofa ? 2 : 1),
   );
 
-  /// Trip-aware seat *weight*. A physical seat spans the whole trip, so a
-  /// round-trip booking weighs a full seat (1.0 per single berth) while a
-  /// one-leg booking weighs HALF (0.5) — the other leg of that seat stays
-  /// bookable for an opposite-leg rider. A Double Sofa weighs twice a single
-  /// (round-trip double = 2.0, one-way double = 1.0). Used for demand display
+  /// Physical berths of a single request line: a Double Sofa line counts as 2
+  /// (upper+lower pair), every other seat counts as 1, times its qty.
+  static int _berthsOfLine(RequestLine l) =>
+      l.qty * (l.seatType == SeatType.doubleSofa ? 2 : 1);
+
+  /// Trip-aware seat *weight*, summed PER REQUEST LINE (the leg now lives on
+  /// each line, not on the passenger). A physical seat spans the whole trip, so
+  /// a round-trip line weighs a full seat (1.0 per single berth) while a one-leg
+  /// line weighs HALF (0.5) — the other leg of that seat stays bookable for an
+  /// opposite-leg rider. A Double Sofa weighs twice a single (round-trip double
+  /// = 2.0, one-way double = 1.0). A single request can mix legs, so each line
+  /// is weighted independently and the results summed. Used for demand display
   /// and the "0.5 / 1.0" per-passenger label — NOT for assignment completeness
   /// (which stays physical, see [isFullyAssigned]).
-  double get seatLoad => seatBerths * (tripType.isOneWay ? 0.5 : 1.0);
+  double get seatLoad => requestLines.fold(
+    0.0,
+    (sum, l) => sum + _berthsOfLine(l) * (l.leg.isOneWay ? 0.5 : 1.0),
+  );
 
-  /// Berths this passenger loads on the OUTBOUND (GO) leg — [seatBerths] if they
-  /// ride outbound, else 0. The per-leg counterpart that makes capacity honest:
-  /// each physical seat offers one GO slot + one RET slot, so a one-way rider
-  /// consumes only their leg and frees the other for someone else.
-  int get goBerths => tripType.usesOutbound ? seatBerths : 0;
+  /// Berths this passenger loads on the OUTBOUND (GO) leg, summed PER REQUEST
+  /// LINE: only lines whose leg uses outbound contribute their berths. The
+  /// per-leg counterpart that makes capacity honest — each physical seat offers
+  /// one GO slot + one RET slot, so a one-way line consumes only its leg and
+  /// frees the other for someone else. Because the leg is per line, a mixed
+  /// request contributes only its outbound-bound lines here.
+  int get goBerths => requestLines.fold(
+    0,
+    (sum, l) => sum + (l.leg.usesOutbound ? _berthsOfLine(l) : 0),
+  );
 
-  /// Berths this passenger loads on the RETURN (RET) leg — [seatBerths] if they
-  /// ride the return, else 0.
-  int get retBerths => tripType.usesReturn ? seatBerths : 0;
+  /// Berths this passenger loads on the RETURN (RET) leg, summed PER REQUEST
+  /// LINE: only lines whose leg uses return contribute their berths. The leg is
+  /// per line, so a mixed request contributes only its return-bound lines here.
+  int get retBerths => requestLines.fold(
+    0,
+    (sum, l) => sum + (l.leg.usesReturn ? _berthsOfLine(l) : 0),
+  );
+
+  /// Coarse trip-leg SUMMARY derived from the per-line legs, for callers that
+  /// want a single value (e.g. legacy display). Returns [TripType.roundTrip]
+  /// when there are no lines, when any line is round-trip, or when lines
+  /// disagree (mixed legs); [TripType.outboundOnly] when every line is
+  /// outbound-only; [TripType.returnOnly] when every line is return-only.
+  /// The stored [tripType] field is kept separately for backward-compat
+  /// serialization and is NOT replaced by this getter.
+  TripType get derivedTripType {
+    if (requestLines.isEmpty) return TripType.roundTrip;
+    final legs = requestLines.map((l) => l.leg).toSet();
+    if (legs.length == 1) return legs.first;
+    return TripType.roundTrip;
+  }
+
+  /// The trip [TripType] (leg) to charge / count for a held seat of [type]
+  /// (optionally narrowed by [position]).
+  ///
+  /// Collects the request lines matching [type]. If an EXACT [position] match
+  /// exists among them, only those lines are considered; otherwise all lines of
+  /// that type are. From the chosen set:
+  /// - none → [TripType.roundTrip];
+  /// - all share one leg → that leg;
+  /// - mixed legs → the HEAVIER leg (round-trip if any line is round-trip, else
+  ///   outbound-only if any, else return-only).
+  ///
+  /// DOCUMENTED APPROXIMATION: a [SeatAssignment] carries no leg, so once seats
+  /// are assigned a specific seat cannot be tied back to a specific request line.
+  /// In the rare case where a passenger has multiple SAME-TYPE lines on DIFFERENT
+  /// legs (e.g. 1 single-sofa round-trip + 1 single-sofa outbound-only), this
+  /// returns the heavier leg for ALL held seats of that type rather than
+  /// pinpointing each — the conservative choice that never under-charges or
+  /// under-counts capacity.
+  TripType legForSeatType(SeatType type, {SeatPosition? position}) {
+    final typeLines = requestLines.where((l) => l.seatType == type).toList();
+    if (typeLines.isEmpty) return TripType.roundTrip;
+    // Narrow to an exact position match only if one exists; otherwise keep all
+    // lines of this type (ignore position).
+    final positionMatch =
+        position == null ? const <RequestLine>[] : typeLines.where((l) => l.position == position).toList();
+    final lines = positionMatch.isNotEmpty ? positionMatch : typeLines;
+
+    final legs = lines.map((l) => l.leg).toSet();
+    if (legs.length == 1) return legs.first;
+    // Mixed legs → heavier leg.
+    if (legs.contains(TripType.roundTrip)) return TripType.roundTrip;
+    if (legs.contains(TripType.outboundOnly)) return TripType.outboundOnly;
+    return TripType.returnOnly;
+  }
 
   /// Total number of seats actually assigned.
   int get totalSeatsAssigned => assignedSeats.length;

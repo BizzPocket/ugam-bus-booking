@@ -112,6 +112,23 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
     _refresh();
   }
 
+  /// Opens a BLANK create form for [entry]'s tour, so a customer can lodge a
+  /// SECOND distinct request from the same number (a different traveller / seat
+  /// mix). `existing` is null → the form is in create mode and inserts a fresh
+  /// passenger + request (migration 030 lets one phone hold many per tour).
+  Future<void> _openAddAnother(CustomerRequestEntry entry) async {
+    HapticFeedback.selectionClick();
+    Tour? tour;
+    if (Get.isRegistered<TourController>()) {
+      tour = Get.find<TourController>().getTour(entry.tourId);
+    }
+    tour ??= _tourFromEntry(entry);
+    await Get.to<void>(
+      () => CustomerBookingRequestScreen(tour: tour!),
+    );
+    _refresh();
+  }
+
   Tour _tourFromEntry(CustomerRequestEntry e) => Tour(
     id: e.tourId,
     title: e.tourTitle,
@@ -248,6 +265,7 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                           onTap: () => _onRowTap(_visible[i]),
                           onEdit: () => _openEdit(_visible[i]),
                           onViewChart: () => _openFullChart(_visible[i]),
+                          onAddAnother: () => _openAddAnother(_visible[i]),
                         ),
                       ),
                     ),
@@ -328,6 +346,7 @@ class _RequestRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onViewChart;
+  final VoidCallback onAddAnother;
 
   const _RequestRow({
     required this.entry,
@@ -335,6 +354,7 @@ class _RequestRow extends StatelessWidget {
     required this.onTap,
     required this.onEdit,
     required this.onViewChart,
+    required this.onAddAnother,
   });
 
   @override
@@ -477,6 +497,8 @@ class _RequestRow extends StatelessWidget {
               const SizedBox(height: UgamSpacing.sm + 2),
               _HandlerChartButton(c: c, onTap: onViewChart),
             ],
+            const SizedBox(height: UgamSpacing.sm + 2),
+            _AddAnotherButton(c: c, onTap: onAddAnother),
           ],
         ),
       ),
@@ -707,6 +729,54 @@ class _HandlerChartButton extends StatelessWidget {
               ),
             ),
             Icon(Icons.chevron_right_rounded, size: 18, color: c.onAccent),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Add another request" — opens a blank create form for THIS row's tour so a
+/// customer can lodge a second distinct request from the same number. Styled as
+/// a low-emphasis bordered action (accent reserved for the primary edit/chart
+/// CTAs) so it never competes with the row's main affordance.
+class _AddAnotherButton extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _AddAnotherButton({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.sm + 2,
+        ),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: c.border),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add_rounded, size: 16, color: c.accent),
+            const SizedBox(width: UgamSpacing.sm),
+            Flexible(
+              child: Text(
+                tr('customer_my_requests.add_another'),
+                style: UgamText.bodyStrong.copyWith(
+                  color: c.ink,
+                  fontSize: 12.5,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
       ),

@@ -1559,10 +1559,12 @@ class _StickyAction extends StatelessWidget {
                   ),
         );
       case 2:
+        // When empty, the body's UgamEmpty already owns the "Add bus" CTA
+        // (next to its explanatory text) — don't duplicate it here. The sticky
+        // bar only owns the "Add another bus" affordance once buses exist.
+        if (tour.buses.isEmpty) return null;
         return UgamCTA(
-          label: tour.buses.isEmpty
-              ? tr('tour_detail.add_bus')
-              : tr('tour_detail.add_another_bus'),
+          label: tr('tour_detail.add_another_bus'),
           leadingIcon: Icons.add_rounded,
           onPressed: () => Get.to(
             () => AddBusScreen(tourId: tour.id),

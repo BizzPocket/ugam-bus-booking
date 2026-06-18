@@ -32,6 +32,10 @@ class FinanceController extends GetxController {
   final Map<String, double> _revenueByTour = {};
   final Map<String, double> _expensesByTour = {};
 
+  // Extra income (cabin/gallery/other) per tour — kept separate from revenue
+  // because it is not a billed passenger fare; it still adds to net profit.
+  final Map<String, double> _incomeByTour = {};
+
   TourController get _tours => Get.find<TourController>();
 
   static const int _pageSize = 1000;
@@ -52,6 +56,7 @@ class FinanceController extends GetxController {
     try {
       final revenue = <String, double>{};
       final expenses = <String, double>{};
+      final income = <String, double>{};
 
       await _pageThrough(
         table: 'collections',
@@ -95,9 +100,10 @@ class FinanceController extends GetxController {
           final tid = row['tour_id'] as String?;
           if (tid == null) return;
           final amount = (row['amount'] as num?)?.toDouble() ?? 0;
-          // Extra income (cabin/gallery/other) is real earned revenue — fold it
-          // into the tour's revenue so the cross-tour net P&L isn't understated.
-          revenue[tid] = (revenue[tid] ?? 0) + amount;
+          // Extra income (cabin/gallery/other) is real earned cash but is NOT a
+          // billed passenger fare — keep it in its own map so the report can show
+          // it as a distinct line, while it still folds into net profit.
+          income[tid] = (income[tid] ?? 0) + amount;
         },
       );
 
@@ -107,6 +113,9 @@ class FinanceController extends GetxController {
       _expensesByTour
         ..clear()
         ..addAll(expenses);
+      _incomeByTour
+        ..clear()
+        ..addAll(income);
       loadedOnce.value = true;
     } catch (e, st) {
       dev.log('finance load failed: $e\n$st', name: 'FinanceController');
@@ -158,6 +167,7 @@ class FinanceController extends GetxController {
         tour,
         _revenueByTour[tour.id] ?? 0,
         _expensesByTour[tour.id] ?? 0,
+        income: _incomeByTour[tour.id] ?? 0,
       );
       if (!_inPeriod(tf.date, period, now)) continue;
       out.add(tf);

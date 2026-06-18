@@ -2,8 +2,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/bus_type.dart';
 import 'package:occubusbooking/models/passenger.dart';
+import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
+import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/models/trip_type.dart';
 
@@ -27,6 +29,12 @@ Passenger _p(
       name: id,
       phone: '+910000000000',
       tripType: trip,
+      // Leg now lives per request line; occupancy reads goBerths/retBerths from
+      // the lines, not the passenger-level tripType. One line carrying [trip]
+      // with a berth per assigned seat preserves the original per-passenger leg.
+      requestLines: [
+        RequestLine(seatType: SeatType.seater, qty: seats.length, leg: trip),
+      ],
       assignedSeats: [
         for (final s in seats) SeatAssignment(busId: bus, seatId: s),
       ],

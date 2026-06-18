@@ -497,7 +497,8 @@
     "chip_oneway_return": "એક બાજુ · પાછી",
     "chip_seats": "સીટ: {seats}",
     "chip_seats_finalizing": "સીટ નક્કી થઈ રહી છે",
-    "seats_pending_toast": "સીટ હજી નક્કી થઈ નથી — પ્રવાસ પાકો થતાં તમને દેખાશે."
+    "seats_pending_toast": "સીટ હજી નક્કી થઈ નથી — પ્રવાસ પાકો થતાં તમને દેખાશે.",
+    "add_another": "બીજી વિનંતી ઉમેરો"
   },
   "add_bus": {
     "title": "બસ ઉમેરો",
@@ -807,6 +808,10 @@
     "button_submit": "વિનંતી મોકલો",
     "err_phone_fake": "કૃપા કરી સાચો 10-અંકનો મોબાઇલ નંબર દાખલ કરો.",
     "err_duplicate": "આ ટ્રિપ માટે તમારી વિનંતી પહેલેથી બાકી છે.",
+    "warn_duplicate_title": "ડુપ્લિકેટ મોકલવી છે?",
+    "warn_duplicate_body": "આના જેવી જ — એ જ નામ અને સીટ — એક વિનંતી પહેલેથી બાકી છે. છતાં બીજી મોકલવી છે?",
+    "warn_duplicate_submit": "છતાં મોકલો",
+    "warn_duplicate_cancel": "રદ કરો",
     "err_too_fast": "ફરી મોકલતા પહેલા થોડી ક્ષણ રાહ જુઓ.",
     "cta_seat_count": "{n} સીટ",
     "cta_seat_count_one": "1 સીટ",
@@ -847,7 +852,12 @@
     "err_name_required": "કૃપા કરી તમારું નામ દાખલ કરો",
     "err_phone_invalid": "કૃપા કરી 10-અંકનો ફોન નંબર દાખલ કરો",
     "err_phone_fake": "કૃપા કરી સાચો 10-અંકનો મોબાઇલ નંબર દાખલ કરો.",
-    "err_no_seats": "ઓછામાં ઓછી એક સીટ પસંદ કરો"
+    "err_no_seats": "ઓછામાં ઓછી એક સીટ પસંદ કરો",
+    "add_seat_row": "સીટ રો ઉમેરો",
+    "remove_row": "દૂર કરો",
+    "leg_full": "પૂરી મુસાફરી",
+    "leg_go": "ફક્ત જવાનું",
+    "leg_ret": "ફક્ત પાછા આવવાનું"
   },
   "occupant": {
     "make_priority": "પ્રાથમિકતા આપો",

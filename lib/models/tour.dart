@@ -104,18 +104,27 @@ class Tour {
   /// the busier leg, which never exceeds capacity and never reads full while a
   /// berth is free. Distinct from [totalSeatsAssigned] (raw entries), which
   /// stays the unit for "seats sold" — a leg-shared berth is still two fares.
+  ///
+  /// Leg load is now PER REQUEST LINE: a [SeatAssignment] carries no leg, so we
+  /// can't tag each seat, but [Passenger.goBerths]/[Passenger.retBerths] are the
+  /// whole-passenger per-line leg totals. For each passenger we contribute
+  /// `min(seatsOnBus, goBerths)` to GO and `min(seatsOnBus, retBerths)` to RET —
+  /// EXACT when the passenger's seats sit on one bus (the engine keeps them
+  /// together), a safe upper bound otherwise.
   Map<String, int> occupiedBerthsByBus() {
     final go = <String, int>{};
     final ret = <String, int>{};
     final busIds = <String>{};
     for (final p in passengers) {
-      final usesGo = p.tripType.usesOutbound;
-      final usesRet = p.tripType.usesReturn;
+      final perBus = <String, int>{};
       for (final a in p.assignedSeats) {
         busIds.add(a.busId);
-        if (usesGo) go[a.busId] = (go[a.busId] ?? 0) + 1;
-        if (usesRet) ret[a.busId] = (ret[a.busId] ?? 0) + 1;
+        perBus[a.busId] = (perBus[a.busId] ?? 0) + 1;
       }
+      perBus.forEach((busId, seatsOnBus) {
+        go[busId] = (go[busId] ?? 0) + math.min(seatsOnBus, p.goBerths);
+        ret[busId] = (ret[busId] ?? 0) + math.min(seatsOnBus, p.retBerths);
+      });
     }
     return {
       for (final id in busIds) id: math.max(go[id] ?? 0, ret[id] ?? 0),
@@ -123,18 +132,19 @@ class Tour {
   }
 
   /// Leg-aware berths occupied on one bus — `max(GO, RET)`. See
-  /// [occupiedBerthsByBus].
+  /// [occupiedBerthsByBus]. Leg load is per request line: each passenger
+  /// contributes `min(seatsOnBus, goBerths)` / `min(seatsOnBus, retBerths)`.
   int occupiedBerthsFor(String busId) {
     var go = 0;
     var ret = 0;
     for (final p in passengers) {
-      var n = 0;
+      var seatsOnBus = 0;
       for (final a in p.assignedSeats) {
-        if (a.busId == busId) n++;
+        if (a.busId == busId) seatsOnBus++;
       }
-      if (n == 0) continue;
-      if (p.tripType.usesOutbound) go += n;
-      if (p.tripType.usesReturn) ret += n;
+      if (seatsOnBus == 0) continue;
+      go += math.min(seatsOnBus, p.goBerths);
+      ret += math.min(seatsOnBus, p.retBerths);
     }
     return math.max(go, ret);
   }

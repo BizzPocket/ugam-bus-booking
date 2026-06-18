@@ -64,7 +64,15 @@ Passenger _p(
       tourId: 't1',
       name: name.isEmpty ? id : name,
       phone: '+910000000000',
-      requestLines: lines,
+      // The leg now lives PER REQUEST LINE. These tests express a passenger's
+      // travel leg via [tripType]; relocate it onto each line that did not set
+      // its own leg, so the per-line engine sees the same intent.
+      requestLines: [
+        for (final l in lines)
+          l.leg == TripType.roundTrip && tripType != TripType.roundTrip
+              ? l.copyWith(leg: tripType)
+              : l,
+      ],
       assignedSeats: assigned,
       groupId: groupId,
       priorityStatus: priority,

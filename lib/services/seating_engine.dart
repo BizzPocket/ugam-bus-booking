@@ -166,7 +166,15 @@ class SeatingPlan {
   /// different legs. This helper lets the UI render that: for every seat that
   /// holds at least one berth, it reports how many berths are occupied on the
   /// outbound (GO) leg vs the return (RETURN) leg, derived from each holder's
-  /// [Passenger.tripType].
+  /// coarse [Passenger.derivedTripType] summary.
+  ///
+  /// NOTE: the leg now lives per request LINE, but the plan output keys
+  /// assignments only by passenger, with no per-seat→line linkage, so this
+  /// display helper attributes legs at the whole-passenger granularity via the
+  /// [Passenger.derivedTripType] SUMMARY (round-trip when a passenger's lines
+  /// disagree). A passenger that mixes a GO-only line with a RET-only line will
+  /// therefore read as round-trip on each of its seats here — acceptable for the
+  /// occupancy overlay; the engine itself remains exact per line.
   ///
   /// Pass the SAME passenger list given to [SeatingEngine.propose]; passengers
   /// absent from the plan are ignored. Keyed by `"busId:seatId"`. A whole double
@@ -174,7 +182,7 @@ class SeatingPlan {
   /// holder per leg.
   Map<String, SeatLegOccupancy> legOccupancy(Iterable<Passenger> passengers) {
     final tripById = <String, TripType>{
-      for (final p in passengers) p.id: p.tripType,
+      for (final p in passengers) p.id: p.derivedTripType,
     };
     final out = <String, SeatLegOccupancy>{};
     for (final entry in assignmentsByPassenger.entries) {
@@ -248,10 +256,21 @@ class SeatingEngine {
     // Reserved seats are marked occupied so nothing auto-fills them.
     state.seedReserved();
     // Locked assignments are preserved verbatim and their berths reserved.
+    //
+    // The leg a locked berth blocks now lives per request LINE, so we recover it
+    // by matching each locked seat to one of the passenger's request lines of
+    // the SAME seat type (each line consumed once). A locked berth on a cell
+    // type the passenger has no matching line for (e.g. legacy data) falls back
+    // to the coarse [Passenger.derivedTripType] summary — never the removed-
+    // meaning per-passenger `tripType`.
     for (final p in sorted) {
-      final legs = TripLeg.forTrip(p.tripType);
+      // Mutable remaining-leg buckets per (seatType) so two locked berths of the
+      // same type consume two distinct lines in order.
+      final legBuckets = _LockedLegResolver(p);
       for (final a in p.assignedSeats) {
         if (!a.locked) continue;
+        final cell = state.cellFor(a.busId, a.seatId);
+        final legs = legBuckets.legsFor(cell?.seatType);
         state.seedLocked(p.id, a, legs, groupId: p.groupId);
         reasons.add(PlacementReason(
           busId: a.busId,
@@ -539,16 +558,18 @@ class SeatingEngine {
           groupLabel: groupId,
         );
         // Lines that remain unplaced under the strict rule, blocked precisely
-        // by a stranger-double on this bus → this member needs review.
-        final legs = TripLeg.forTrip(m.tripType);
+        // by a stranger-double on this bus → this member needs review. The
+        // blocking leg is read PER LINE (leg lives on the request line now), so
+        // a one-leg line is only blocked by a stranger-double on its own leg.
         final blocked = pending.any((l) =>
             l.remaining > 0 &&
             ((l.seatType == SeatType.singleSofa &&
-                    strict.hasBlockedShareDoubleOnBus(bus.id, legs, m.groupId,
+                    strict.hasBlockedShareDoubleOnBus(
+                        bus.id, l.tripLegs, m.groupId,
                         position: l.position)) ||
                 (l.seatType == SeatType.doubleSofa &&
                     strict.hasBlockedShareDoubleOnBus(
-                        bus.id, legs, m.groupId))));
+                        bus.id, l.tripLegs, m.groupId))));
         if (blocked) affected.add(m);
       }
       if (affected.isNotEmpty) {
@@ -787,11 +808,13 @@ class SeatingEngine {
     // prefer lower-berth sofas over upper ones, so an approved-priority passenger
     // lands on a lower berth whenever one is free.
     final preferLower = priority && !requireLower;
-    // Leg-aware capacity: this passenger only consumes the leg(s) their
-    // tripType travels (outbound-only = GO, return-only = RETURN, round-trip =
-    // BOTH). A berth is takeable only when free on EVERY leg in [legs], so a
-    // disjoint-leg passenger can reuse a berth a one-way passenger already holds.
-    final legs = TripLeg.forTrip(passenger.tripType);
+    // Leg-aware capacity: this LINE only consumes the leg(s) it travels
+    // (outbound-only = GO, return-only = RETURN, round-trip = BOTH). The leg now
+    // lives on the request LINE, not the whole passenger, so a single passenger
+    // can hold a round-trip line and a one-leg line at once. A berth is takeable
+    // only when free on EVERY leg in [legs], so a disjoint-leg line can reuse a
+    // berth a one-way line already holds.
+    final legs = line.tripLegs;
 
     switch (line.seatType) {
       case SeatType.seater:
@@ -995,27 +1018,29 @@ class SeatingEngine {
     required List<SeatingException> exceptions,
     required bool priority,
   }) {
-    // Leg-aware: capacity is "free" only on the leg(s) THIS passenger travels.
-    // A berth whose sole free slot is on a leg this passenger does not use is
-    // not capacity for them. With this view, overflowWaitlist fires only when
-    // there is genuinely zero berth-leg they could occupy anywhere; otherwise a
+    // Leg-aware, PER LINE: capacity is "free" only on the leg(s) THE LINE
+    // travels (the leg now lives on the request line, not the passenger). A
+    // berth whose sole free slot is on a leg this line does not use is not
+    // capacity for it. With this view, overflowWaitlist fires only when there is
+    // genuinely zero berth-leg the line could occupy anywhere; otherwise a
     // compatible-but-wrong-type seat exists → seatTypeUnavailable.
-    final legs = TripLeg.forTrip(passenger.tripType);
     final reqGroup = passenger.groupId;
-    final anyFreeCapacity =
-        state.buses.any((b) => state.freeBerths(b.id, legs) > 0);
     for (final line in pending) {
       if (line.remaining <= 0) continue;
+      final legs = line.tripLegs;
+      final anyFreeCapacity =
+          state.buses.any((b) => state.freeBerths(b.id, legs) > 0);
       final rl = RequestLine(
         seatType: line.seatType,
         position: line.position,
         qty: line.remaining,
+        leg: line.leg,
       );
-      // STRANGER-SHARE: this passenger could ONLY be seated by sharing a Double
-      // Sofa whose other berth an unrelated passenger already holds (a single
-      // line takes one such berth; a double line would cross-fill onto one).
-      // The engine refuses to auto-pair strangers, so surface it for the agent
-      // to broker rather than as a generic seat/overflow miss.
+      // STRANGER-SHARE: this line could ONLY be seated by sharing a Double Sofa
+      // whose other berth an unrelated passenger already holds on an OVERLAPPING
+      // leg (a single line takes one such berth; a double line would cross-fill
+      // onto one). The engine refuses to auto-pair strangers, so surface it for
+      // the agent to broker rather than as a generic seat/overflow miss.
       final blockedShare = (line.seatType == SeatType.singleSofa &&
               state.hasBlockedShareDouble(legs, reqGroup,
                   position: line.position)) ||
@@ -1079,6 +1104,7 @@ class SeatingEngine {
           seatType: l.seatType,
           position: l.position,
           remaining: l.qty,
+          leg: l.leg,
         ),
     ];
 
@@ -1129,14 +1155,19 @@ class SeatingEngine {
             // `_drainDoubleCrossFill` would consume the line and, on refusal,
             // never restore it (the old `&&` short-circuit bug), silently
             // marking the passenger satisfied while holding only one berth.
-            final hasDoubleLine = pending.any((l) =>
+            final doubleLineIdx = pending.indexWhere((l) =>
                 l.seatType == SeatType.doubleSofa && l.remaining > 0);
-            if (hasDoubleLine &&
+            final matchedDouble =
+                doubleLineIdx >= 0 ? pending[doubleLineIdx] : null;
+            if (matchedDouble != null &&
                 state.tryClaimPartnerBerth(
-                    g.busId, g.seatId, TripLeg.forTrip(p.tripType))) {
+                    g.busId, g.seatId, matchedDouble.tripLegs)) {
+              // Complete this passenger's OWN half-locked double in place using
+              // the LEG of the matched pending double line — not a coarse
+              // whole-passenger value — so a one-leg line only blocks its leg.
               _drainDoubleCrossFill(pending);
               state.assign(p.id, g.busId, g.seatId,
-                  groupId: p.groupId, legs: TripLeg.forTrip(p.tripType));
+                  groupId: p.groupId, legs: matchedDouble.tripLegs);
             } else if (!_drain(pending, [SeatType.singleSofa], cell.position)) {
               leftoverSingleBerths++;
             }
@@ -1192,6 +1223,7 @@ class SeatingEngine {
             seatType: l.seatType,
             position: l.position,
             remaining: l.remaining,
+            leg: l.leg,
           ),
       ];
 
@@ -1276,21 +1308,36 @@ class SeatingEngine {
 // ── Internal mutable state ──────────────────────────────────────────────────
 
 /// A pending request line during planning (a mutable view of [RequestLine]).
+///
+/// Carries the originating line's [leg] so placement is PER-LINE leg-aware: a
+/// round-trip line occupies BOTH legs of its physical berth, while a one-leg
+/// line occupies only its leg and leaves the other leg of that seat bookable by
+/// an opposite-leg rider.
 class _PendingLine {
   final SeatType seatType;
   final SeatPosition? position;
   final int remaining;
 
+  /// Which legs of the tour this line travels (round-trip = both, one-way =
+  /// just that leg). Defaults to round-trip so existing callers / tests that do
+  /// not set it keep the old whole-seat behavior.
+  final TripType leg;
+
   const _PendingLine({
     required this.seatType,
     this.position,
     required this.remaining,
+    this.leg = TripType.roundTrip,
   });
+
+  /// The concrete [TripLeg]s this line occupies on its physical berth.
+  List<TripLeg> get tripLegs => TripLeg.forTrip(leg);
 
   _PendingLine copyDecrementedBy(int n) => _PendingLine(
         seatType: seatType,
         position: position,
         remaining: (remaining - n).clamp(0, remaining),
+        leg: leg,
       );
 }
 
@@ -1299,6 +1346,49 @@ class _LockedCell {
   final String seatId;
   int berths = 0;
   _LockedCell(this.busId, this.seatId);
+}
+
+/// Recovers the LEG a locked berth blocks by matching it to one of the
+/// passenger's request lines of the same seat type. The per-line leg replaced
+/// the per-passenger leg, so a locked seat must inherit the leg of the line it
+/// fulfils — not a coarse whole-passenger value. Each request line's legs are
+/// handed out in qty order so two locked berths of one type pick up two
+/// distinct lines. When no matching line remains (legacy / over-locked data)
+/// it falls back to the coarse [Passenger.derivedTripType] summary.
+class _LockedLegResolver {
+  final TripType _fallback;
+
+  /// seatType -> queue of per-berth legs still unconsumed (a doubleSofa line
+  /// contributes 2 berths of the same leg). doubleSofa cells also draw from the
+  /// singleSofa queue (cross-fill: two singles satisfy a double) when no double
+  /// line is left, mirroring the pending-line drain.
+  final Map<SeatType, List<TripType>> _byType;
+
+  _LockedLegResolver(Passenger p)
+      : _fallback = p.derivedTripType,
+        _byType = {} {
+    for (final l in p.requestLines) {
+      final berths =
+          l.qty * (l.seatType == SeatType.doubleSofa ? 2 : 1);
+      final q = _byType.putIfAbsent(l.seatType, () => <TripType>[]);
+      for (var i = 0; i < berths; i++) {
+        q.add(l.leg);
+      }
+    }
+  }
+
+  List<TripLeg> legsFor(SeatType? type) {
+    if (type != null) {
+      final q = _byType[type];
+      if (q != null && q.isNotEmpty) return TripLeg.forTrip(q.removeAt(0));
+      // doubleSofa berth with no double line left → cross-fill from singles.
+      if (type == SeatType.doubleSofa) {
+        final s = _byType[SeatType.singleSofa];
+        if (s != null && s.isNotEmpty) return TripLeg.forTrip(s.removeAt(0));
+      }
+    }
+    return TripLeg.forTrip(_fallback);
+  }
 }
 
 /// One held berth on a doubleSofa cell, tagged with its holder's group and the

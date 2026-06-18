@@ -234,7 +234,11 @@ class _HeroCard extends StatelessWidget {
             style: UgamText.tabular(UgamText.numXl.copyWith(color: netColor)),
           ),
           const SizedBox(height: UgamSpacing.md),
-          _MarginBar(revenue: totals.revenue, expenses: totals.expenses, c: c),
+          _MarginBar(
+            revenue: totals.revenue + totals.income,
+            expenses: totals.expenses,
+            c: c,
+          ),
           const SizedBox(height: UgamSpacing.md),
           Divider(height: 1, color: c.border),
           const SizedBox(height: UgamSpacing.md),
@@ -249,6 +253,16 @@ class _HeroCard extends StatelessWidget {
                   c: c,
                 ),
               ),
+              if (totals.income != 0)
+                Expanded(
+                  child: _HeroMetric(
+                    label: tr('bus_money.stat_income'),
+                    value: _inr(totals.income),
+                    color: c.ink,
+                    dot: c.accent,
+                    c: c,
+                  ),
+                ),
               Expanded(
                 child: _HeroMetric(
                   label: tr('finance.expenses'),
@@ -427,9 +441,12 @@ class _TourFinanceRow extends StatelessWidget {
         : tr('finance.bus_other', namedArgs: {'n': '${tf.buses}'});
     final meta = '${_dateLabel(context, tf.date)} · $busLabel';
 
-    final marginPct = tf.revenue > 0
+    // Margin is net over GROSS income (passenger fares + extra income), so
+    // cabin/gallery cash isn't ignored in the percentage.
+    final grossIn = tf.revenue + tf.income;
+    final marginPct = grossIn > 0
         ? tr('finance.margin_pct',
-            namedArgs: {'n': '${(tf.net / tf.revenue * 100).round()}'})
+            namedArgs: {'n': '${(tf.net / grossIn * 100).round()}'})
         : '—';
 
     return UgamCard.plain(

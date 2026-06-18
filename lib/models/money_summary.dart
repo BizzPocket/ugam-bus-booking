@@ -25,6 +25,12 @@ class BusMoneySummary {
   /// must hand over, and to both profit figures.
   final double income;
 
+  /// The bus owner's rent, already folded into [expensesTotal] for the P&L
+  /// nets. The ADMIN settles the bus owner directly (not the handler), so rent
+  /// is EXCLUDED from the handover expectation — the handler hands over the full
+  /// cash they hold, and the admin pays the owner from it.
+  final double busRent;
+
   const BusMoneySummary({
     required this.busId,
     required this.collected,
@@ -34,12 +40,16 @@ class BusMoneySummary {
     required this.toCollectTotal,
     this.revenueBilled = 0,
     this.income = 0,
+    this.busRent = 0,
   });
 
-  /// Net cash the bus should hand over (collections + extra income − expenses).
-  /// Mirrors the handler's "in hand" = collected + income − spent, so the
-  /// admin's settlement expectation matches what the handler is actually holding.
-  double get expectedHandover => collected + income - expensesTotal;
+  /// Net cash the bus should hand over: collections + extra income − the
+  /// handler's OWN ground expenses (everything in [expensesTotal] EXCEPT the bus
+  /// rent, which the admin settles with the owner). Mirrors the handler's "in
+  /// hand" = collected + income − spent, so the admin's settlement expectation
+  /// matches what the handler is actually holding.
+  double get expectedHandover =>
+      collected + income - (expensesTotal - busRent);
 
   /// Still-owed handover (expected minus what was actually handed over).
   double get outstandingHandover => expectedHandover - handedOver;
@@ -50,7 +60,8 @@ class BusMoneySummary {
   double get netBilled => revenueBilled + income - expensesTotal;
 
   /// CASH profit/loss so far: money actually collected + extra income − (rent +
-  /// expenses). Same figure as [expectedHandover]; named for the P&L view.
+  /// expenses). Unlike [expectedHandover] this DOES subtract rent, because rent
+  /// is a real cost in the P&L even though the admin (not the handler) pays it.
   double get netCollected => collected + income - expensesTotal;
 
   factory BusMoneySummary.compute({
@@ -71,6 +82,7 @@ class BusMoneySummary {
       busId: busId,
       collected: busCollections.fold(0.0, (sum, c) => sum + c.netCollected),
       income: busIncomes.fold(0.0, (sum, i) => sum + i.amount),
+      busRent: busRent,
       revenueBilled: revenueBilled,
       // The bus owner's rent is the single source of truth (not a DB expense
       // row), so it is added to the expense rows here rather than counted twice.
@@ -109,6 +121,10 @@ class HandlerMoneySummary {
   /// Extra income (cabin / gallery / other) across this handler's buses.
   final double income;
 
+  /// Bus owner rent across this handler's buses (in [expensesTotal] for P&L,
+  /// excluded from the handover expectation — the admin pays the owner).
+  final double busRent;
+
   const HandlerMoneySummary({
     required this.handlerPassengerId,
     required this.busIds,
@@ -119,11 +135,17 @@ class HandlerMoneySummary {
     required this.toCollectTotal,
     required this.toReturnTotal,
     this.income = 0,
+    this.busRent = 0,
   });
 
   double get netBilled => revenueBilled + income - expensesTotal;
   double get netCollected => collected + income - expensesTotal;
-  double get outstandingHandover => netCollected - handedOver;
+
+  /// Cash this handler should hand over: collections + income − their own
+  /// ground expenses (rent excluded — the admin settles the owner).
+  double get expectedHandover =>
+      collected + income - (expensesTotal - busRent);
+  double get outstandingHandover => expectedHandover - handedOver;
 
   /// Roll a set of per-bus summaries up into one handler total.
   factory HandlerMoneySummary.fromBuses(
@@ -136,6 +158,7 @@ class HandlerMoneySummary {
       revenueBilled: buses.fold(0.0, (s, b) => s + b.revenueBilled),
       collected: buses.fold(0.0, (s, b) => s + b.collected),
       income: buses.fold(0.0, (s, b) => s + b.income),
+      busRent: buses.fold(0.0, (s, b) => s + b.busRent),
       expensesTotal: buses.fold(0.0, (s, b) => s + b.expensesTotal),
       handedOver: buses.fold(0.0, (s, b) => s + b.handedOver),
       toCollectTotal: buses.fold(0.0, (s, b) => s + b.toCollectTotal),
@@ -158,6 +181,10 @@ class TourMoneySummary {
   /// Total extra income (cabin / gallery / other) across every bus on the tour.
   final double totalIncome;
 
+  /// Total bus owner rent across the tour (in [totalExpenses] for P&L, excluded
+  /// from the handover expectation — the admin pays the owners).
+  final double totalBusRent;
+
   const TourMoneySummary({
     required this.totalCollected,
     required this.totalExpenses,
@@ -166,6 +193,7 @@ class TourMoneySummary {
     required this.totalToCollect,
     this.totalRevenueBilled = 0,
     this.totalIncome = 0,
+    this.totalBusRent = 0,
   });
 
   /// Net cash for the tour (collections + extra income − expenses).
@@ -175,8 +203,14 @@ class TourMoneySummary {
   /// expenses).
   double get totalNetBilled => totalRevenueBilled + totalIncome - totalExpenses;
 
+  /// Cash the handlers should hand over across the tour: collections + income −
+  /// their ground expenses (rent excluded — the admin settles the owners).
+  double get totalExpectedHandover =>
+      totalCollected + totalIncome - (totalExpenses - totalBusRent);
+
   /// Still-owed handover across the whole tour.
-  double get totalOutstandingHandover => totalNet - totalHandedOver;
+  double get totalOutstandingHandover =>
+      totalExpectedHandover - totalHandedOver;
 
   factory TourMoneySummary.compute({
     required List<Collection> collections,
@@ -189,6 +223,7 @@ class TourMoneySummary {
     return TourMoneySummary(
       totalCollected: collections.fold(0.0, (sum, c) => sum + c.netCollected),
       totalIncome: incomes.fold(0.0, (sum, i) => sum + i.amount),
+      totalBusRent: busRentsTotal,
       totalRevenueBilled: totalRevenueBilled,
       // Bus owner rents are the single source of truth (not DB expense rows),
       // so they are folded into the expense total here rather than double-counted.
