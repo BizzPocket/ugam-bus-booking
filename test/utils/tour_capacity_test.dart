@@ -24,6 +24,8 @@ Bus _bus(String id, List<SeatCell> cells) {
   );
 }
 
+// The leg now lives PER REQUEST LINE, so apply [trip] to each line's leg (the
+// capacity engine reads the per-line legs, not the passenger-level tripType).
 Passenger _p(String id,
         {required List<RequestLine> lines,
         String? groupId,
@@ -33,7 +35,7 @@ Passenger _p(String id,
       tourId: 't1',
       name: id,
       phone: '+910000000000',
-      requestLines: lines,
+      requestLines: lines.map((l) => l.copyWith(leg: trip)).toList(),
       groupId: groupId,
       tripType: trip,
     );

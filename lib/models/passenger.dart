@@ -258,6 +258,10 @@ class Passenger {
   }
 
   factory Passenger.fromMap(Map<String, dynamic> map) {
+    // Parse the legacy passenger-level leg first so it can backfill any request
+    // line that predates the per-line `leg` field (rows written before the
+    // migration carried the leg only here, in `trip_type`).
+    final tripType = TripType.fromString(map['trip_type'] as String?);
     return Passenger(
       id: (map['id'] ?? '').toString(),
       tourId: (map['tour_id'] ?? '').toString(),
@@ -265,7 +269,7 @@ class Passenger {
       name: (map['name'] ?? '').toString(),
       phone: (map['phone'] ?? '').toString(),
       ageGroup: AgeGroup.fromString(map['age_group'] as String?),
-      requestLines: _parseRequestLines(map['request_lines']),
+      requestLines: _parseRequestLines(map['request_lines'], tripType),
       assignedSeats: _parseAssignedSeats(map['assigned_seats']),
       paymentStatus: PaymentStatus.values.firstWhere(
         (s) => s.name == map['payment_status'],
@@ -275,7 +279,7 @@ class Passenger {
       isWaitlisted: map['is_waitlisted'] as bool? ?? false,
       isConfirmed: map['is_confirmed'] as bool? ?? false,
       note: map['note'] as String?,
-      tripType: TripType.fromString(map['trip_type'] as String?),
+      tripType: tripType,
       groupId: map['group_id'] as String?,
       priorityStatus: PriorityStatus.fromString(map['priority_status'] as String?),
       priorityReason: map['priority_reason'] as String?,
@@ -284,11 +288,17 @@ class Passenger {
     );
   }
 
-  static List<RequestLine> _parseRequestLines(dynamic value) {
+  static List<RequestLine> _parseRequestLines(
+    dynamic value,
+    TripType fallbackLeg,
+  ) {
     if (value == null) return [];
     if (value is List) {
       return value
-          .map((e) => RequestLine.fromMap(Map<String, dynamic>.from(e as Map)))
+          .map((e) => RequestLine.fromMap(
+                Map<String, dynamic>.from(e as Map),
+                fallbackLeg: fallbackLeg,
+              ))
           .toList();
     }
     // Backward compat: old format had seatPreference + requestedSeats

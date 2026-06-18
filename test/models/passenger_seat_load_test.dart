@@ -63,4 +63,50 @@ void main() {
       expect(p.retBerths, 2);
     });
   });
+
+  // Rows written before the per-line `leg` field carried the leg ONLY on the
+  // passenger's `trip_type`; their request_lines have no `leg` key. fromMap must
+  // backfill those legless lines from trip_type, or every pre-migration one-way
+  // rider silently reads as round-trip (wrong capacity, seat never frees on the
+  // completed leg).
+  group('legacy leg backfill (Passenger.fromMap)', () {
+    Map<String, dynamic> legacyMap(String tripType) => {
+          'id': 'p1',
+          'tour_id': 't1',
+          'name': 'Legacy',
+          'phone': '+910000000000',
+          'trip_type': tripType,
+          // legacy line: NO 'leg' key
+          'request_lines': [
+            {'seatType': 'singleSofa', 'position': null, 'qty': 1},
+          ],
+        };
+
+    test('legless line inherits an outbound-only trip_type', () {
+      final p = Passenger.fromMap(legacyMap('outboundOnly'));
+      expect(p.requestLines.single.leg, TripType.outboundOnly);
+      expect(p.goBerths, 1);
+      expect(p.retBerths, 0);
+    });
+
+    test('legless line inherits a return-only trip_type', () {
+      final p = Passenger.fromMap(legacyMap('returnOnly'));
+      expect(p.requestLines.single.leg, TripType.returnOnly);
+      expect(p.goBerths, 0);
+      expect(p.retBerths, 1);
+    });
+
+    test('legless line with round-trip trip_type stays round-trip', () {
+      final p = Passenger.fromMap(legacyMap('roundTrip'));
+      expect(p.requestLines.single.leg, TripType.roundTrip);
+    });
+
+    test('an explicit per-line leg always wins over trip_type', () {
+      final map = legacyMap('outboundOnly');
+      (map['request_lines'] as List)[0]['leg'] = 'returnOnly';
+      final p = Passenger.fromMap(map);
+      expect(p.requestLines.single.leg, TripType.returnOnly,
+          reason: 'new rows serialize an explicit leg; never overridden');
+    });
+  });
 }

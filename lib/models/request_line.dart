@@ -68,12 +68,21 @@ class RequestLine {
     };
   }
 
-  factory RequestLine.fromMap(Map<String, dynamic> map) {
+  /// [fallbackLeg] is used ONLY when the stored map has no explicit `leg` key —
+  /// i.e. legacy rows written before the per-line leg existed, whose leg lived
+  /// on the passenger's `trip_type`. New rows always serialize an explicit
+  /// `leg`, so the fallback never overrides real per-line data.
+  factory RequestLine.fromMap(
+    Map<String, dynamic> map, {
+    TripType fallbackLeg = TripType.roundTrip,
+  }) {
     return RequestLine(
       seatType: SeatType.fromString(map['seatType'] as String),
       position: SeatPosition.fromString(map['position'] as String?),
       qty: (map['qty'] as num).toInt(),
-      leg: TripType.fromString(map['leg'] as String?),
+      leg: map.containsKey('leg')
+          ? TripType.fromString(map['leg'] as String?)
+          : fallbackLeg,
     );
   }
 
