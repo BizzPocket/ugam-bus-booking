@@ -1,4 +1,14 @@
 {
+  "swap_reason": {
+    "swap_seats": "सीट अदला-बदली",
+    "exact_match": "सटीक मेल",
+    "type_match": "समान प्रकार",
+    "different_deck": "अलग डेक",
+    "you_wanted": "आपने चाहा था",
+    "cross_fill_single": "क्रॉस-फिल · डबल सोफ़ा के लिए एक बर्थ",
+    "cross_fill_single_other": "क्रॉस-फिल · डबल सोफ़ा के लिए एक बर्थ (दूसरा बर्थ भी खाली करें)",
+    "cross_fill_half": "क्रॉस-फिल · डबल सोफ़ा के आधे पर सिंगल"
+  },
   "app": {
     "title": "उगम बुकिंग",
     "action": {

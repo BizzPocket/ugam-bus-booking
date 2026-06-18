@@ -11,6 +11,8 @@
 // stay on one bus and approved-priority passengers are protected, so neither can
 // be silently bumped to make room.
 
+import 'package:easy_localization/easy_localization.dart';
+
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_layout.dart';
@@ -309,7 +311,8 @@ class SwapCandidateFinder {
           passengerName: _name(p),
           seatId: row.seatId,
           rank: _kSwapOnlyRank,
-          reason: 'swap seats: ${seatTypeLabel(row.cell.seatType!, row.cell.position)}',
+          reason:
+              '${tr('swap_reason.swap_seats')}: ${seatTypeLabel(row.cell.seatType!, row.cell.position)}',
         ));
       }
     }
@@ -440,7 +443,11 @@ class SwapCandidateFinder {
     switch (cell.seatType) {
       case SeatType.seater:
         if (needs.seater) {
-          return const _Fit(rank: 0, reason: 'exact match: Seater');
+          return _Fit(
+            rank: 0,
+            reason:
+                '${tr('swap_reason.exact_match')}: ${seatTypeLabel(SeatType.seater, null)}',
+          );
         }
         return null;
       case SeatType.singleSofa:
@@ -450,13 +457,18 @@ class SwapCandidateFinder {
             (pos == SeatPosition.lower && needs.singleLower)) {
           return _Fit(
             rank: 0,
-            reason: 'exact match: ${seatTypeLabel(SeatType.singleSofa, pos)}',
+            reason:
+                '${tr('swap_reason.exact_match')}: ${seatTypeLabel(SeatType.singleSofa, pos)}',
           );
         }
         // Same type, mover stated NO deck preference → either deck is a clean
         // type match.
         if (needs.singleAny) {
-          return const _Fit(rank: 1, reason: 'type match: Single Sofa');
+          return _Fit(
+            rank: 1,
+            reason:
+                '${tr('swap_reason.type_match')}: ${seatTypeLabel(SeatType.singleSofa, null)}',
+          );
         }
         // The mover specified the OPPOSITE deck. The engine treats deck as a
         // hard gate, so this is NOT a clean match — surface it as a distinct,
@@ -467,15 +479,16 @@ class SwapCandidateFinder {
               needs.singleUpper ? SeatPosition.upper : SeatPosition.lower;
           return _Fit(
             rank: 2,
-            reason: 'different deck: ${seatTypeLabel(SeatType.singleSofa, pos)} '
-                '(you wanted ${wanted.displayName})',
+            reason: '${tr('swap_reason.different_deck')}: '
+                '${seatTypeLabel(SeatType.singleSofa, pos)} '
+                '(${tr('swap_reason.you_wanted')} ${wanted.displayName})',
           );
         }
         // Cross-fill: a single berth toward a Double Sofa need.
         if (needs.doubleUpper || needs.doubleLower || needs.doubleAny) {
-          return const _Fit(
+          return _Fit(
             rank: 2,
-            reason: 'cross-fill: a single berth toward a Double Sofa',
+            reason: tr('swap_reason.cross_fill_single'),
           );
         }
         return null;
@@ -490,12 +503,17 @@ class SwapCandidateFinder {
               (pos == SeatPosition.lower && needs.doubleLower)) {
             return _Fit(
               rank: 0,
-              reason: 'exact match: ${seatTypeLabel(SeatType.doubleSofa, pos)}',
+              reason:
+                  '${tr('swap_reason.exact_match')}: ${seatTypeLabel(SeatType.doubleSofa, pos)}',
             );
           }
           // Mover stated NO deck preference → either deck is a clean type match.
           if (needs.doubleAny) {
-            return const _Fit(rank: 1, reason: 'type match: Double Sofa');
+            return _Fit(
+              rank: 1,
+              reason:
+                  '${tr('swap_reason.type_match')}: ${seatTypeLabel(SeatType.doubleSofa, null)}',
+            );
           }
           // Mover specified the OPPOSITE deck — deck is a hard gate, so this is a
           // distinct different-deck option, not a clean match.
@@ -505,9 +523,9 @@ class SwapCandidateFinder {
                 needs.doubleUpper ? SeatPosition.upper : SeatPosition.lower;
             return _Fit(
               rank: 2,
-              reason:
-                  'different deck: ${seatTypeLabel(SeatType.doubleSofa, pos)} '
-                  '(you wanted ${wanted.displayName})',
+              reason: '${tr('swap_reason.different_deck')}: '
+                  '${seatTypeLabel(SeatType.doubleSofa, pos)} '
+                  '(${tr('swap_reason.you_wanted')} ${wanted.displayName})',
             );
           }
         } else if (needs.doubleUpper || needs.doubleLower || needs.doubleAny) {
@@ -515,10 +533,9 @@ class SwapCandidateFinder {
           // frees a single berth toward a Double Sofa need — a cross-fill, NOT a
           // whole-double match. The cell's other berth must be freed too for a
           // full double.
-          return const _Fit(
+          return _Fit(
             rank: 2,
-            reason: 'cross-fill: a single berth toward a Double Sofa '
-                '(other berth of this double must be freed too)',
+            reason: tr('swap_reason.cross_fill_single_other'),
           );
         }
         // Cross-fill the other way: a single need can sit on one berth of a
@@ -526,9 +543,9 @@ class SwapCandidateFinder {
         if (needs.singleUpper ||
             needs.singleLower ||
             needs.singleAny) {
-          return const _Fit(
+          return _Fit(
             rank: 2,
-            reason: 'cross-fill: a single on half of a Double Sofa',
+            reason: tr('swap_reason.cross_fill_half'),
           );
         }
         return null;

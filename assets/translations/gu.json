@@ -1,4 +1,14 @@
 {
+  "swap_reason": {
+    "swap_seats": "સીટ અદલાબદલી",
+    "exact_match": "ચોક્કસ મેળ",
+    "type_match": "સમાન પ્રકાર",
+    "different_deck": "અલગ ડેક",
+    "you_wanted": "તમે માગ્યું હતું",
+    "cross_fill_single": "ક્રોસ-ફિલ · ડબલ સોફા માટે એક બર્થ",
+    "cross_fill_single_other": "ક્રોસ-ફિલ · ડબલ સોફા માટે એક બર્થ (બીજો બર્થ પણ ખાલી કરો)",
+    "cross_fill_half": "ક્રોસ-ફિલ · ડબલ સોફાના અડધા પર સિંગલ"
+  },
   "app": {
     "title": "ઉગમ બુકિંગ",
     "action": {

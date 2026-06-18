@@ -93,10 +93,10 @@ void main() {
       // rank 2 (regression for finding 2, singleSofa symmetric case).
       final o1 = r.movable.singleWhere((c) => c.passengerId == 'o1');
       expect(o1.rank, 2);
-      expect(o1.reason, contains('different deck'));
+      expect(o1.reason, contains('swap_reason.different_deck'));
       // EasyLocalization is not initialised under test, so the engine's
       // seat-position label renders as the raw key; "Upper" -> the upper key.
-      expect(o1.reason, contains('you wanted enums.seat_position.upper'));
+      expect(o1.reason, contains('swap_reason.you_wanted enums.seat_position.upper'));
     });
 
     test('a fully-occupied bus offers no free seats', () {
@@ -309,7 +309,7 @@ void main() {
       // "type match" (regression for finding 2, singleSofa symmetric case).
       expect(r.movable[1].passengerId, 'b_other');
       expect(r.movable[1].rank, 2);
-      expect(r.movable[1].reason, contains('different deck'));
+      expect(r.movable[1].reason, contains('swap_reason.different_deck'));
     });
 
     test('incompatible seat type is excluded entirely', () {
@@ -369,7 +369,7 @@ void main() {
 
       expect(r.movable.single.passengerId, 'o1');
       expect(r.movable.single.rank, 2);
-      expect(r.movable.single.reason, contains('cross-fill'));
+      expect(r.movable.single.reason, contains('swap_reason.cross_fill'));
     });
 
     test('a double-holding occupant is cross-fill compatible for a single need',
@@ -388,7 +388,7 @@ void main() {
 
       expect(r.movable.single.passengerId, 'o1');
       expect(r.movable.single.rank, 2);
-      expect(r.movable.single.reason, contains('cross-fill'));
+      expect(r.movable.single.reason, contains('swap_reason.cross_fill'));
     });
   });
 
@@ -455,12 +455,9 @@ void main() {
       // and the message flags that the other berth must also be freed.
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 2);
-      expect(c.reason, contains('cross-fill'));
-      // This cross-fill reason is a hardcoded English literal in the engine
-      // (not via seatTypeLabel), so it stays English even with EasyLocalization
-      // uninitialised under test.
-      expect(c.reason, contains('Double Sofa'));
-      expect(c.reason, contains('other berth'));
+      // Localised under test (EasyLocalization uninitialised) → the "free the
+      // other berth too" cross-fill resolves to its own raw key.
+      expect(c.reason, 'swap_reason.cross_fill_single_other');
       // The mover needs a WHOLE double, and DL1 has only one free berth, so it
       // is correctly NOT offered as a takeable free seat — the cross-fill reason
       // already flags that the other berth must be freed too.
@@ -485,9 +482,9 @@ void main() {
 
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 1);
-      // 'type match: Double Sofa' is a hardcoded English literal in the engine,
-      // so it stays English under test (no seatTypeLabel here).
-      expect(c.reason, 'type match: Double Sofa');
+      // Localised under test (EasyLocalization uninitialised): the prefix and
+      // the seat label each resolve to their raw key.
+      expect(c.reason, 'swap_reason.type_match: enums.seat_type.double_sofa');
     });
 
     test(
@@ -510,9 +507,9 @@ void main() {
 
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 2);
-      expect(c.reason, contains('different deck'));
+      expect(c.reason, contains('swap_reason.different_deck'));
       // Raw seat-position key under test; "Lower" -> the lower key.
-      expect(c.reason, contains('you wanted enums.seat_position.lower'));
+      expect(c.reason, contains('swap_reason.you_wanted enums.seat_position.lower'));
     });
 
     test(
@@ -533,9 +530,9 @@ void main() {
 
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 1);
-      // 'type match: Double Sofa' is a hardcoded English literal in the engine,
-      // so it stays English under test (no seatTypeLabel here).
-      expect(c.reason, 'type match: Double Sofa');
+      // Localised under test (EasyLocalization uninitialised): the prefix and
+      // the seat label each resolve to their raw key.
+      expect(c.reason, 'swap_reason.type_match: enums.seat_type.double_sofa');
     });
 
     test(
@@ -557,9 +554,9 @@ void main() {
 
       final c = r.movable.singleWhere((x) => x.passengerId == 'o1');
       expect(c.rank, 2);
-      expect(c.reason, contains('different deck'));
+      expect(c.reason, contains('swap_reason.different_deck'));
       // Raw seat-position key under test; "Upper" -> the upper key.
-      expect(c.reason, contains('you wanted enums.seat_position.upper'));
+      expect(c.reason, contains('swap_reason.you_wanted enums.seat_position.upper'));
     });
   });
 

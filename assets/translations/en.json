@@ -1,4 +1,14 @@
 {
+  "swap_reason": {
+    "swap_seats": "Swap seats",
+    "exact_match": "Exact match",
+    "type_match": "Same type",
+    "different_deck": "Different deck",
+    "you_wanted": "you wanted",
+    "cross_fill_single": "Cross-fill · one berth toward a Double Sofa",
+    "cross_fill_single_other": "Cross-fill · one berth toward a Double Sofa (free the other berth too)",
+    "cross_fill_half": "Cross-fill · a single on half a Double Sofa"
+  },
   "app": {
     "title": "Ugam Booking",
     "action": {
