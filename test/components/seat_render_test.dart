@@ -160,6 +160,38 @@ void main() {
       expect(r.quadRet.map((p) => p.id), containsAll(<String>['r', 'rt']));
     });
 
+    test('three riders on the SAME leg (over-booked GO) → 3rd surfaces as +N, never hidden', () {
+      final r = resolveSeatRender(
+        cell: _cell(SeatType.doubleSofa),
+        occupants: [
+          _p('g1', TripType.outboundOnly),
+          _p('g2', TripType.outboundOnly),
+          _p('g3', TripType.outboundOnly),
+        ],
+        markHalfDouble: true,
+      );
+      expect(r.kind, SeatRenderKind.quad);
+      // The GO row only seats two; the 3rd must be COUNTED, not silently dropped.
+      expect(r.quadGo.length, 2);
+      expect(r.extra, 1);
+    });
+
+    test('two round-trip + one one-way → the one-way rider surfaces as +N', () {
+      final r = resolveSeatRender(
+        cell: _cell(SeatType.doubleSofa),
+        occupants: [
+          _p('a', TripType.roundTrip),
+          _p('b', TripType.roundTrip),
+          _p('g', TripType.outboundOnly),
+        ],
+        markHalfDouble: true,
+      );
+      expect(r.kind, SeatRenderKind.quad);
+      // a & b fill BOTH rows (round-trip holds each berth on both legs), so the
+      // one-way rider has no slot on its leg → it must be counted, not hidden.
+      expect(r.extra, 1);
+    });
+
     test('a single sofa never quads — GO+RET stays legShare', () {
       final r = resolveSeatRender(
         cell: _cell(SeatType.singleSofa),

@@ -7,9 +7,10 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
-import '../routes/app_routes.dart';
+import 'create_tour_screen.dart';
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
+import 'seats_screen.dart';
 import 'tour_detail_screen.dart';
 
 /// Tours tab — chronologically grouped instead of filter-pill-driven.
@@ -83,7 +84,11 @@ class _ToursScreenState extends State<ToursScreen> {
                   tooltip: tr('tours.create'),
                   onTap: () {
                     HapticFeedback.lightImpact();
-                    Get.toNamed('/create-tour');
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const CreateTourScreen(),
+                      ),
+                    );
                   },
                 ),
               ],
@@ -125,7 +130,11 @@ class _ToursScreenState extends State<ToursScreen> {
                     cta: UgamCTA(
                       label: tr('tours.empty.cta'),
                       leadingIcon: Icons.add_rounded,
-                      onPressed: () => Get.toNamed('/create-tour'),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const CreateTourScreen(),
+                        ),
+                      ),
                     ),
                   );
                 }
@@ -181,9 +190,10 @@ class _ToursScreenState extends State<ToursScreen> {
                                 tour: g.tours[j],
                                 c: c,
                                 dim: isPast,
-                                onTap: () => Get.to(
-                                  () => TourDetailScreen(tourId: g.tours[j].id),
-                                  transition: Transition.cupertino,
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => TourDetailScreen(tourId: g.tours[j].id),
+                                  ),
                                 ),
                               ),
                               if (j != g.tours.length - 1)
@@ -525,7 +535,7 @@ class _TourRow extends StatelessWidget {
               UgamCTA(
                 label: action.label,
                 leadingIcon: action.icon,
-                onPressed: () => _runRowAction(action.kind, tour),
+                onPressed: () => _runRowAction(context, action.kind, tour),
               ),
             ],
           ],
@@ -587,7 +597,7 @@ class _TourRow extends StatelessWidget {
         kind: _RowActionKind.addBus,
       );
     }
-    if (t.buses.isNotEmpty && t.totalSeatsAssigned < t.totalSeatsRequested) {
+    if (t.buses.isNotEmpty && t.pendingSeatsToAssign > 0) {
       // Standardized seating entry: single "Seats" label that opens the
       // SeatsScreen SUMMARY — never the banned "Assign N" synonym/grid.
       return _RowAction(
@@ -622,19 +632,32 @@ class _TourRow extends StatelessWidget {
   ///                   added and the handler is picked (NOT the seat screen).
   ///   • lockNotify -> NotifyScreen focused on this tour (the one lock+send
   ///                   path).
-  void _runRowAction(_RowActionKind kind, Tour t) {
+  void _runRowAction(BuildContext context, _RowActionKind kind, Tour t) {
     switch (kind) {
       case _RowActionKind.seats:
-        Get.toNamed(AppRoutes.tourOverview, arguments: {'tourId': t.id});
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => SeatsScreen(
+              tourId: t.id,
+              initialMode: SeatsMode.summary,
+            ),
+          ),
+        );
         break;
       case _RowActionKind.addBus:
       case _RowActionKind.pickHandler:
-        Get.to(() => ManageBusesScreen(tourId: t.id),
-            transition: Transition.cupertino);
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => ManageBusesScreen(tourId: t.id),
+          ),
+        );
         break;
       case _RowActionKind.lockNotify:
-        Get.to(() => NotifyScreen(tourId: t.id),
-            transition: Transition.cupertino);
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => NotifyScreen(tourId: t.id),
+          ),
+        );
         break;
     }
   }

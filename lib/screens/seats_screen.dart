@@ -4,7 +4,7 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
-import 'main_shell.dart';
+
 import 'manage_buses_screen.dart';
 import 'tour_overview_screen.dart';
 import 'tour_seat_assignment_screen.dart';
@@ -130,7 +130,6 @@ class _SeatsScreenState extends State<SeatsScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         bottom: false,
         child: Column(

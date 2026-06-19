@@ -14,6 +14,11 @@ import 'settings_screen.dart';
 class ShellController extends GetxController {
   final currentIndex = 0.obs;
   void switchTab(int i) => currentIndex.value = i;
+
+  final List<GlobalKey<NavigatorState>> navigatorKeys = List.generate(
+    5,
+    (index) => GlobalKey<NavigatorState>(),
+  );
 }
 
 /// The five admin dock tabs, built once so the shell's bottom dock and the
@@ -50,48 +55,7 @@ List<UgamDockItem> buildAdminDockItems() => [
       ),
     ];
 
-/// The persistent bottom dock for screens pushed *over* the shell (the tour
-/// workspace: Tour Detail → buses → seat chart → assignment). Tapping a tab
-/// pops back to the shell and selects that tab, so the dock behaves the same
-/// in here as it does on the home surfaces. Defaults to highlighting Tours,
-/// since all tour work lives under that section.
-///
-/// Drop it in as a screen's `bottomNavigationBar`. When the screen already has
-/// a sticky CTA, stack them: `Column(mainAxisSize: MainAxisSize.min, children:
-/// [theCTA, const UgamWorkspaceDock()])`.
-class UgamWorkspaceDock extends StatelessWidget {
-  /// Tab to render as active while in the workspace. Defaults to Tours (1).
-  final int activeTab;
-  const UgamWorkspaceDock({super.key, this.activeTab = 1});
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.center,
-      heightFactor: 1.0,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
-        // Obx so the requests badge stays live while drilled into a tour.
-        child: Obx(() {
-          // Touch the badge source so Obx re-runs when it changes.
-          final _ = Get.find<TourController>().pendingRequestCount;
-          return UgamDockNav(
-            currentIndex: activeTab,
-            onTap: (i) {
-              // Pop the whole tour-workspace stack back to the shell, then
-              // select the tapped tab. The ShellController is resolved lazily
-              // here (only on tap) rather than at build time, so a screen that
-              // embeds the dock without the shell registered still renders.
-              Get.until((route) => route.isFirst);
-              Get.find<ShellController>().switchTab(i);
-            },
-            items: buildAdminDockItems(),
-          );
-        }),
-      ),
-    );
-  }
-}
+// UgamWorkspaceDock removed in favor of true nested navigation.
 
 /// Max body width for the admin shell. The app is designed phone-first, so
 /// on wide screens (tablet, desktop, web) we cap and center the content
@@ -155,36 +119,60 @@ class _MainShellState extends State<MainShell> {
     return Obx(() {
       final currentIndex = shell.currentIndex.value;
       _visitedTabs.add(currentIndex);
-      return Scaffold(
-        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-        extendBody: true,
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
-            child: IndexedStack(
-              index: currentIndex,
-              children: [
-                for (int i = 0; i < _adminPages.length; i++)
-                  // Unvisited tabs render a placeholder of the same
-                  // dimensions as the real screen so the IndexedStack
-                  // sizes correctly — but the placeholder doesn't
-                  // observe any reactive state, so no rebuild churn.
-                  _visitedTabs.contains(i)
-                      ? _adminPages[i]
-                      : const SizedBox.expand(),
-              ],
+
+      final currentNavigatorKey = shell.navigatorKeys[currentIndex];
+      final canTabPop = currentNavigatorKey.currentState?.canPop() ?? false;
+      final canRootPop = currentIndex == 0 && !canTabPop;
+
+      return PopScope(
+        canPop: canRootPop,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) return;
+          if (canTabPop) {
+            currentNavigatorKey.currentState?.pop();
+          } else if (currentIndex != 0) {
+            shell.switchTab(0);
+          }
+        },
+        child: Scaffold(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          extendBody: true,
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
+              child: IndexedStack(
+                index: currentIndex,
+                children: [
+                  for (int i = 0; i < _adminPages.length; i++)
+                    // Unvisited tabs render a placeholder of the same
+                    // dimensions as the real screen so the IndexedStack
+                    // sizes correctly — but the placeholder doesn't
+                    // observe any reactive state, so no rebuild churn.
+                    _visitedTabs.contains(i)
+                        ? Navigator(
+                            key: shell.navigatorKeys[i],
+                            onGenerateRoute: (settings) {
+                              return MaterialPageRoute(
+                                settings: settings,
+                                builder: (context) => _adminPages[i],
+                              );
+                            },
+                          )
+                        : const SizedBox.expand(),
+                ],
+              ),
             ),
           ),
-        ),
-        bottomNavigationBar: Align(
-          alignment: Alignment.center,
-          heightFactor: 1.0,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
-            child: UgamDockNav(
-              currentIndex: shell.currentIndex.value,
-              onTap: shell.switchTab,
-              items: buildAdminDockItems(),
+          bottomNavigationBar: Align(
+            alignment: Alignment.center,
+            heightFactor: 1.0,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
+              child: UgamDockNav(
+                currentIndex: shell.currentIndex.value,
+                onTap: shell.switchTab,
+                items: buildAdminDockItems(),
+              ),
             ),
           ),
         ),

@@ -449,7 +449,10 @@ class TourController extends GetxController {
     String? departureTime,
     DateTime? returnDate,
     String? returnTime,
-    required double pricePerSeat,
+    // Tour-level price is no longer collected at creation — pricing is set
+    // per-bus during bus creation. Kept (defaulting to 0) so the model field
+    // and edit-tour flow stay intact; add_bus only prefills when it's > 0.
+    double pricePerSeat = 0,
     String? description,
     String? broadcastMessage,
     String? broadcastImageUrl,
@@ -633,15 +636,57 @@ class TourController extends GetxController {
         .length;
   }
 
+  /// Cancel the RETURN leg for the rider currently holding a return seat, so
+  /// the agent can rebook it. A return-only rider never rode, so they are
+  /// removed outright. A round-trip rider already rode the GO leg, so we keep
+  /// their record but drop the return: convert every round-trip request line
+  /// to outbound-only, clear their seats (freeing the berth), and flag
+  /// journeyDone — exactly like completeOutboundLeg does for one-way riders.
+  Future<void> cancelReturnSeat(String tourId, String passengerId) async {
+    final tour = getTour(tourId);
+    if (tour == null) return;
+    final p = tour.passengers.firstWhereOrNull((x) => x.id == passengerId);
+    if (p == null) return;
+
+    final updated = cancelReturnSeatTransform(p);
+    if (updated == null) {
+      // Return-only rider never rode the GO leg → remove outright.
+      await removePassenger(tourId, passengerId);
+      return;
+    }
+
+    // Round-trip / mixed rider: keep the record, demote to outbound-only. Same
+    // optimistic-local + persist pattern as completeOutboundLeg.
+    await _write(
+      optimistic: () =>
+          _updatePassengerLocal(tourId, passengerId, (_) => updated),
+      persist: () => _sync.smartUpdate(
+        table: 'passengers',
+        entityId: passengerId,
+        data: updated.toMap(),
+      ),
+      failure: tr('errors.save_passenger'),
+    );
+  }
+
   // Passenger Management
-  Future<void> addPassenger(String tourId, Passenger passenger) async {
+  Future<void> addPassenger(
+    String tourId,
+    Passenger passenger, {
+    bool overrideLock = false,
+  }) async {
     // Bookings close once the tour is locked/completed. This is the single
     // server-write chokepoint for every admin/handler "Add request" path
     // (Requests screen, tour workspace, future callers), so the guard lives
     // here rather than at each button — no new request can be created from
     // anywhere once the allocation is final.
+    //
+    // [overrideLock] is the deliberate escape hatch for an admin booking a new
+    // RETURN-only ticket into a freed seat during the return phase: the tour is
+    // locked, yet the agent explicitly wants to seat a late return rider. It
+    // skips ONLY the acceptsBookings gate; everything else is identical.
     final existing = getTour(tourId);
-    if (existing != null && !existing.acceptsBookings) {
+    if (!overrideLock && existing != null && !existing.acceptsBookings) {
       AppSnackBar.error(tr('errors.bookings_closed'));
       return;
     }
@@ -2459,4 +2504,39 @@ class TourController extends GetxController {
       return t.copyWith(passengers: list);
     });
   }
+}
+
+/// Pure transformation behind [TourController.cancelReturnSeat] — kept top-level
+/// so it can be unit-tested without GetX/SyncService.
+///
+/// Returns `null` when the rider should be REMOVED outright: a return-only rider
+/// (every request line is [TripType.returnOnly]) never rode any leg, so dropping
+/// the return drops them entirely.
+///
+/// Otherwise returns the demoted passenger: every round-trip line becomes
+/// outbound-only, outbound-only lines are kept as-is, return-only lines are
+/// dropped (the cancelled return portion), seats are freed, and [journeyDone] is
+/// set — mirroring how completeOutboundLeg retires a one-way rider after their
+/// only leg.
+Passenger? cancelReturnSeatTransform(Passenger p) {
+  final lines = p.requestLines;
+  final usesReturnOnly =
+      lines.isNotEmpty && lines.every((l) => l.leg == TripType.returnOnly);
+  if (usesReturnOnly) return null;
+
+  final newLines = <RequestLine>[
+    for (final l in lines)
+      if (l.leg == TripType.roundTrip)
+        l.copyWith(leg: TripType.outboundOnly)
+      else if (l.leg == TripType.outboundOnly)
+        l,
+    // returnOnly lines are intentionally dropped (the cancelled return portion).
+  ];
+
+  return p.copyWith(
+    requestLines: newLines,
+    assignedSeats: const [],
+    journeyDone: true,
+    tripType: TripType.outboundOnly,
+  );
 }

@@ -247,9 +247,13 @@ class SeatingEngine {
     // must never seat them and never raise an exception for them (no phantom
     // overflowWaitlist for someone the agent already chose to defer). They
     // re-enter placement only once the agent takes them off the waitlist.
+    // journeyDone riders have FINISHED their travelled leg — completeOutboundLeg
+    // freed their seats and flagged them. They are off the bus, so the engine
+    // must never re-seat them or raise an exception for them; otherwise a
+    // completed GO leg resurfaces them as pending demand and a "needs decision".
     final sorted = [
       for (final p in passengers)
-        if (!p.isWaitlisted) p,
+        if (!p.isWaitlisted && !p.journeyDone) p,
     ]..sort((a, b) => a.id.compareTo(b.id));
 
     // ── 0. Seed reserved + locked ─────────────────────────────────────────

@@ -142,12 +142,24 @@ SeatRender resolveSeatRender({
   if (isDouble && occ.length > 2) {
     final qgo = occ.where((p) => _legOf(p).usesOutbound).toList();
     final qret = occ.where((p) => _legOf(p).usesReturn).toList();
+    final goRow = qgo.length > 2 ? qgo.sublist(0, 2) : qgo;
+    final retRow = qret.length > 2 ? qret.sublist(0, 2) : qret;
+    // Each leg row only seats two. A rider beyond that (an OVER-BOOKED leg —
+    // 3+ on GO or RET, e.g. two round-trip holders + a one-way squeezed in)
+    // has no slot in either row; count everyone NOT drawn so the "+N" badge
+    // surfaces them instead of vanishing. occ.length > 4 alone missed this,
+    // because the overflow can sit on one leg while the other has room.
+    final shownIds = <String>{
+      for (final p in goRow) p.id,
+      for (final p in retRow) p.id,
+    };
+    final hidden = occ.where((p) => !shownIds.contains(p.id)).length;
     return SeatRender(
       kind: SeatRenderKind.quad,
       occ: occ,
-      quadGo: qgo.length > 2 ? qgo.sublist(0, 2) : qgo,
-      quadRet: qret.length > 2 ? qret.sublist(0, 2) : qret,
-      extra: occ.length > 4 ? occ.length - 4 : 0,
+      quadGo: goRow,
+      quadRet: retRow,
+      extra: hidden,
     );
   }
 

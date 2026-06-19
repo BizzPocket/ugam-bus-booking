@@ -9,10 +9,11 @@ import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
-import '../routes/app_routes.dart';
 import '../utils/tour_capacity.dart';
 import 'create_tour_screen.dart';
 import 'main_shell.dart';
+import 'seating_exceptions_screen.dart';
+import 'seats_screen.dart';
 import 'tour_detail_screen.dart';
 
 /// Admin home — actual control center. Tells the agent what matters
@@ -130,7 +131,7 @@ class DashboardScreen extends StatelessWidget {
                 }),
                 const SizedBox(height: UgamSpacing.xl + UgamSpacing.xs),
                 Obx(() {
-                  final attention = _needsAttention(tourCtrl.tours);
+                  final attention = _needsAttention(context, tourCtrl.tours);
                   if (attention.isEmpty) return const SizedBox.shrink();
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -264,7 +265,7 @@ class DashboardScreen extends StatelessWidget {
   }
 
   /// Tours that need agent action. Ordered by departure date (soonest first).
-  List<_AttentionItem> _needsAttention(List<Tour> tours) {
+  List<_AttentionItem> _needsAttention(BuildContext context, List<Tour> tours) {
     final items = <_AttentionItem>[];
     final relevant = tours
         .where((t) =>
@@ -286,9 +287,10 @@ class DashboardScreen extends StatelessWidget {
           ctaLabel: tr('dashboard.cta_add_bus'),
           ctaIcon: Icons.directions_bus_rounded,
           tone: UgamStatusTone.warm,
-          onTap: () => Get.to(
-            () => TourDetailScreen(tourId: tour.id),
-            transition: Transition.cupertino,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => TourDetailScreen(tourId: tour.id),
+            ),
           ),
         ));
         continue;
@@ -308,27 +310,30 @@ class DashboardScreen extends StatelessWidget {
             ctaLabel: tr('dashboard.cta_decide'),
             ctaIcon: Icons.error_outline_rounded,
             tone: UgamStatusTone.warm,
-            onTap: () => Get.toNamed(
-              AppRoutes.seatingExceptions,
-              arguments: {'tourId': tour.id},
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => SeatingExceptionsScreen(tourId: tour.id),
+              ),
             ),
           ));
           continue;
         }
       }
-      if (tour.buses.isNotEmpty &&
-          tour.totalSeatsAssigned < tour.totalSeatsRequested) {
-        final remaining =
-            tour.totalSeatsRequested - tour.totalSeatsAssigned;
+      if (tour.buses.isNotEmpty && tour.pendingSeatsToAssign > 0) {
+        final remaining = tour.pendingSeatsToAssign;
         items.add(_AttentionItem(
           tour: tour,
           reason: tr('dashboard.attention_unassigned', args: ['$remaining']),
           ctaLabel: tr('dashboard.cta_assign'),
           ctaIcon: Icons.grid_view_rounded,
           tone: UgamStatusTone.accent,
-          onTap: () => Get.toNamed(
-            AppRoutes.seatAssignment,
-            arguments: {'tourId': tour.id},
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => SeatsScreen(
+                tourId: tour.id,
+                initialMode: SeatsMode.grid,
+              ),
+            ),
           ),
         ));
         continue;
@@ -340,9 +345,10 @@ class DashboardScreen extends StatelessWidget {
           ctaLabel: tr('dashboard.cta_pick'),
           ctaIcon: Icons.person_pin_rounded,
           tone: UgamStatusTone.good,
-          onTap: () => Get.to(
-            () => TourDetailScreen(tourId: tour.id),
-            transition: Transition.cupertino,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => TourDetailScreen(tourId: tour.id),
+            ),
           ),
         ));
         continue;
@@ -495,9 +501,10 @@ class _TodayHeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final bus = tour.buses.isNotEmpty ? tour.buses.first : null;
     return GestureDetector(
-      onTap: () => Get.to(
-        () => TourDetailScreen(tourId: tour.id),
-        transition: Transition.cupertino,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => TourDetailScreen(tourId: tour.id),
+        ),
       ),
       behavior: HitTestBehavior.opaque,
       child: ClipRRect(
@@ -702,9 +709,10 @@ class _NoTripsTodayTile extends StatelessWidget {
             ),
           ),
           GestureDetector(
-            onTap: () => Get.to(
-              () => const CreateTourScreen(),
-              transition: Transition.cupertino,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const CreateTourScreen(),
+              ),
             ),
             behavior: HitTestBehavior.opaque,
             child: Container(
@@ -760,8 +768,11 @@ class _QuickActions extends StatelessWidget {
             c: c,
             onTap: () {
               HapticFeedback.lightImpact();
-              Get.to(() => const CreateTourScreen(),
-                  transition: Transition.cupertino);
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const CreateTourScreen(),
+                ),
+              );
             },
           ),
         ),

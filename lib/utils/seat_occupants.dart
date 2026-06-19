@@ -126,3 +126,54 @@ Map<String, List<Passenger>> occupantListForBus(
   }
   return out;
 }
+
+/// The journey leg a money-collection chooser is currently scoped to. A shared
+/// sofa can carry different riders on each leg (an outbound-only + a return-only,
+/// or a round-trip sharing with a one-way rider), so the handler collects from
+/// one leg at a time: the GO riders while the bus is going out, the RETURN riders
+/// once the outbound leg is done.
+enum CollectLeg { go, ret }
+
+/// The riders on a shared seat relevant to [leg] for money collection:
+/// [CollectLeg.go] keeps everyone whose trip uses the outbound leg (round-trip +
+/// outbound-only); [CollectLeg.ret] keeps everyone whose trip uses the return leg
+/// (round-trip + return-only). A round-trip rider therefore appears under both.
+List<Passenger> occupantsForCollectLeg(
+  List<Passenger> occupants,
+  CollectLeg leg,
+) => occupants
+    .where(
+      (p) => leg == CollectLeg.go
+          ? p.tripType.usesOutbound
+          : p.tripType.usesReturn,
+    )
+    .toList();
+
+/// Whether a shared seat's roster differs across legs, so the chooser should
+/// offer a GO/Return toggle. True only when riders exist on BOTH legs and the
+/// two leg rosters aren't the same set — e.g. an outbound-only + a return-only,
+/// or a round-trip sharing with a one-way rider. A double held by round-trip
+/// riders (same people on both legs), or one leg held by same-leg one-way riders
+/// (nobody on the other leg), needs no toggle.
+bool seatHasLegSplit(List<Passenger> occupants) {
+  final go = occupantsForCollectLeg(occupants, CollectLeg.go)
+      .map((p) => p.id)
+      .toSet();
+  final ret = occupantsForCollectLeg(occupants, CollectLeg.ret)
+      .map((p) => p.id)
+      .toSet();
+  if (go.isEmpty || ret.isEmpty) return false;
+  return !(go.length == ret.length && go.containsAll(ret));
+}
+
+/// The leg the chooser should open on. RETURN when the outbound leg is already
+/// done [outboundDone] or no rider on this seat travels GO at all; otherwise GO
+/// (the active leg while the bus is going out).
+CollectLeg defaultCollectLeg(
+  List<Passenger> occupants, {
+  required bool outboundDone,
+}) {
+  final hasGo = occupants.any((p) => p.tripType.usesOutbound);
+  if (outboundDone || !hasGo) return CollectLeg.ret;
+  return CollectLeg.go;
+}

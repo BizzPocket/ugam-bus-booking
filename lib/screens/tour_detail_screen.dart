@@ -10,18 +10,23 @@ import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/trip_type.dart';
-import '../routes/app_routes.dart';
+
 import '../services/whatsapp_service.dart';
 import '../utils/app_dialogs.dart';
 import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/tour_capacity.dart';
 import 'add_bus_screen.dart';
+import 'add_return_ticket_sheet.dart';
 import 'edit_tour_screen.dart';
 import 'bus_status_screen.dart';
-import 'main_shell.dart';
+
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
 import 'requests_screen.dart';
+import 'seats_screen.dart';
+import 'tour_money_board_screen.dart';
+import 'tour_groups_screen.dart';
 
 /// Admin's single-tour workspace.
 ///
@@ -85,12 +90,13 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
               SliverToBoxAdapter(
                 child: _HeroSection(
                   tour: tour,
-                  onBack: () => Get.back(),
-                  onEdit: () => Get.to(
-                    () => EditTourScreen(tourId: widget.tourId),
-                    transition: Transition.cupertino,
+                  onBack: () => Navigator.of(context).pop(),
+                  onEdit: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => EditTourScreen(tourId: widget.tourId),
+                    ),
                   ),
-                  onDelete: () => _confirmDelete(tourCtrl, tour),
+                  onDelete: () => _confirmDelete(context, tourCtrl, tour),
                 ),
               ),
               SliverToBoxAdapter(
@@ -125,25 +131,18 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
             ],
           ),
         ),
-        // Sticky tab action stacked above the persistent workspace dock, so
-        // the bottom nav stays reachable throughout the tour workspace.
-        bottomNavigationBar: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _StickyAction(
-              tour: tour,
-              tab: _tabIndex,
-              c: c,
-              onSwitchTab: (i) => setState(() => _tabIndex = i),
-            ),
-            const UgamWorkspaceDock(),
-          ],
+        // Sticky tab action bar.
+        bottomNavigationBar: _StickyAction(
+          tour: tour,
+          tab: _tabIndex,
+          c: c,
+          onSwitchTab: (i) => setState(() => _tabIndex = i),
         ),
       );
     });
   }
 
-  Future<void> _confirmDelete(TourController tourCtrl, Tour tour) async {
+  Future<void> _confirmDelete(BuildContext context, TourController tourCtrl, Tour tour) async {
     final ok = await AppDialogs.confirm(
       title: tr('tour_detail.delete_confirm_title'),
       message: tr('tour_detail.delete_confirm_body',
@@ -154,7 +153,7 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
     if (!ok) return;
     try {
       await tourCtrl.deleteTour(tour.id);
-      Get.back();
+      Navigator.of(context).pop();
       AppSnackBar.success(tr('tour_detail.snack_tour_deleted'));
     } catch (_) {
       // deleteTour already surfaces its own error snackbar.
@@ -603,7 +602,7 @@ class _NextActionCard extends StatelessWidget {
     // _runAction) so the card and the sticky button stay in lock-step.
     return UgamCard.plain(
       tone: _cardToneFor(tone),
-      onTap: () => _runAction(action, tour, onSwitchTab),
+      onTap: () => _runAction(context, action, tour, onSwitchTab),
       padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -651,6 +650,28 @@ class _NextActionCard extends StatelessWidget {
             Text(
               action.subtitle!,
               style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+            ),
+          ],
+          if (action.secondaryKind != null &&
+              action.secondaryCtaLabel != null) ...[
+            const SizedBox(height: UgamSpacing.md),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () =>
+                  _runKind(context, action.secondaryKind!, tour, onSwitchTab),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_outline_rounded,
+                      size: 16, color: fg),
+                  const SizedBox(width: 6),
+                  Text(
+                    action.secondaryCtaLabel!,
+                    style: UgamText.bodyStrong
+                        .copyWith(color: fg, fontSize: 13),
+                  ),
+                ],
+              ),
             ),
           ],
         ],
@@ -837,9 +858,10 @@ class _PassengersTab extends StatelessWidget {
               // has booked.
               _ManageRequestsButton(
                 c: c,
-                onTap: () => Get.to(
-                  () => RequestsScreen(initialTourId: tour.id),
-                  transition: Transition.cupertino,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => RequestsScreen(initialTourId: tour.id),
+                  ),
                 ),
               ),
             ],
@@ -861,9 +883,10 @@ class _PassengersTab extends StatelessWidget {
         // on the dedicated RequestsScreen — this tab is read-only.
         _ManageRequestsButton(
           c: c,
-          onTap: () => Get.to(
-            () => RequestsScreen(initialTourId: tour.id),
-            transition: Transition.cupertino,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => RequestsScreen(initialTourId: tour.id),
+            ),
           ),
         ),
         const SizedBox(height: UgamSpacing.md),
@@ -1135,9 +1158,10 @@ class _BusesTab extends StatelessWidget {
             cta: UgamCTA(
               label: tr('tour_detail.add_bus'),
               leadingIcon: Icons.add_rounded,
-              onPressed: () => Get.to(
-                () => AddBusScreen(tourId: tour.id),
-                transition: Transition.cupertino,
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => AddBusScreen(tourId: tour.id),
+                ),
               ),
             ),
           ),
@@ -1176,9 +1200,10 @@ class _BusListItem extends StatelessWidget {
       // ManageBuses hop that previously forced a second tap to reach the chart.
       onTap: () {
         HapticFeedback.selectionClick();
-        Get.to(
-          () => BusStatusScreen(tourId: bus.tourId ?? '', busId: bus.id),
-          transition: Transition.cupertino,
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => BusStatusScreen(tourId: bus.tourId ?? '', busId: bus.id),
+          ),
         );
       },
       child: Row(
@@ -1553,9 +1578,13 @@ class _StickyAction extends StatelessWidget {
               : null,
           onPressed: tour.buses.isEmpty
               ? null
-              : () => Get.toNamed(
-                    AppRoutes.tourOverview,
-                    arguments: {'tourId': tour.id},
+              : () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => SeatsScreen(
+                        tourId: tour.id,
+                        initialMode: SeatsMode.summary,
+                      ),
+                    ),
                   ),
         );
       case 2:
@@ -1566,55 +1595,72 @@ class _StickyAction extends StatelessWidget {
         return UgamCTA(
           label: tr('tour_detail.add_another_bus'),
           leadingIcon: Icons.add_rounded,
-          onPressed: () => Get.to(
-            () => AddBusScreen(tourId: tour.id),
-            transition: Transition.cupertino,
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => AddBusScreen(tourId: tour.id),
+            ),
           ),
         );
       case 0:
       default:
-        final action = _nextActionFor(tour);
-        return UgamCTA(
-          label: action.ctaLabel,
-          leadingIcon: action.icon,
-          onPressed: () => _runAction(action, tour, onSwitchTab),
-        );
+        // Overview (1st) tab: NO sticky CTA. The Next-Action card in the tab
+        // body is itself tappable and fires the exact same _runAction (and also
+        // exposes the secondary action + the full _TourTools grid above), so a
+        // bottom CTA here only duplicates what the tab already covers. Every
+        // action it could offer is already reachable from the tab body.
+        return null;
     }
   }
 }
 
 void _runAction(
+  BuildContext context,
   _NextAction action,
   Tour tour,
   ValueChanged<int> onSwitchTab,
+) =>
+    _runKind(context, action.kind, tour, onSwitchTab);
+
+void _runKind(
+  BuildContext context,
+  _NextActionKind kind,
+  Tour tour,
+  ValueChanged<int> onSwitchTab,
 ) {
-  switch (action.kind) {
+  switch (kind) {
     case _NextActionKind.addBus:
-      Get.to(
-        () => ManageBusesScreen(tourId: tour.id),
-        transition: Transition.cupertino,
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ManageBusesScreen(tourId: tour.id),
+        ),
       );
       break;
     case _NextActionKind.assignSeats:
       // "Seats" entry -> SeatsScreen SUMMARY (tourOverview), never the bare grid.
-      Get.toNamed(
-        AppRoutes.tourOverview,
-        arguments: {'tourId': tour.id},
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => SeatsScreen(
+            tourId: tour.id,
+            initialMode: SeatsMode.summary,
+          ),
+        ),
       );
       break;
     case _NextActionKind.pickHandler:
       // Handler picking lives in ManageBusesScreen (per-bus handler picker),
       // not the seat screen — route the agent there.
-      Get.to(
-        () => ManageBusesScreen(tourId: tour.id),
-        transition: Transition.cupertino,
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ManageBusesScreen(tourId: tour.id),
+        ),
       );
       break;
     case _NextActionKind.lockAndNotify:
       // Push the tour-scoped Notify screen for THIS tour.
-      Get.to(
-        () => NotifyScreen(tourId: tour.id),
-        transition: Transition.cupertino,
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => NotifyScreen(tourId: tour.id),
+        ),
       );
       break;
     case _NextActionKind.completeGoLeg:
@@ -1646,6 +1692,12 @@ void _runAction(
           await Get.find<TourController>().completeTour(tour.id);
         }
       }();
+      break;
+    case _NextActionKind.addReturnTicket:
+      // Return phase: book a new return-only ticket past the lock gate. Uses the
+      // overlay context since this dispatcher is a top-level function.
+      final ctx = Get.context;
+      if (ctx != null) AddReturnTicketSheet.show(ctx, tour);
       break;
     case _NextActionKind.allSet:
       onSwitchTab(3); // jump to activity
@@ -1702,45 +1754,53 @@ class _TourTools extends StatelessWidget {
           label: tr('tour_detail.tool_seats'),
           c: c,
           // Seats SUMMARY (tourOverview), never the bare grid.
-          onTap: () => Get.toNamed(
-            AppRoutes.tourOverview,
-            arguments: {'tourId': tour.id},
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => SeatsScreen(
+                tourId: tour.id,
+                initialMode: SeatsMode.summary,
+              ),
+            ),
           ),
         ),
       _TourToolTile(
         icon: Icons.directions_bus_rounded,
         label: tr('tour_detail.tab_buses'),
         c: c,
-        onTap: () => Get.to(
-          () => ManageBusesScreen(tourId: tour.id),
-          transition: Transition.cupertino,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => ManageBusesScreen(tourId: tour.id),
+          ),
         ),
       ),
       _TourToolTile(
         icon: Icons.account_balance_wallet_rounded,
         label: tr('tour_detail.tool_money'),
         c: c,
-        onTap: () => Get.toNamed(
-          AppRoutes.tourMoney,
-          arguments: {'tourId': tour.id},
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => TourMoneyBoardScreen(tourId: tour.id),
+          ),
         ),
       ),
       _TourToolTile(
         icon: Icons.groups_rounded,
         label: tr('tour_detail.tool_groups'),
         c: c,
-        onTap: () => Get.toNamed(
-          AppRoutes.tourGroups,
-          arguments: {'tourId': tour.id},
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => TourGroupsScreen(tourId: tour.id),
+          ),
         ),
       ),
       _TourToolTile(
         icon: Icons.edit_note_rounded,
         label: tr('requests.title'),
         c: c,
-        onTap: () => Get.to(
-          () => RequestsScreen(initialTourId: tour.id),
-          transition: Transition.cupertino,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => RequestsScreen(initialTourId: tour.id),
+          ),
         ),
       ),
       _TourToolTile(
@@ -1748,9 +1808,10 @@ class _TourTools extends StatelessWidget {
         label: locked ? tr('notify.title') : tr('tour_detail.tool_lock'),
         c: c,
         highlight: readyToLock || locked,
-        onTap: () => Get.to(
-          () => NotifyScreen(tourId: tour.id),
-          transition: Transition.cupertino,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => NotifyScreen(tourId: tour.id),
+          ),
         ),
       ),
     ];
@@ -1855,6 +1916,7 @@ enum _NextActionKind {
   pickHandler,
   lockAndNotify,
   completeGoLeg,
+  addReturnTicket,
   markCompleted,
   allSet,
 }
@@ -1866,6 +1928,13 @@ class _NextAction {
   final String ctaLabel;
   final IconData icon;
   final UgamStatusTone tone;
+
+  /// Optional second action shown as a subtle in-card link (e.g. the return
+  /// phase offers "Add return ticket" as the primary CTA and "Complete trip"
+  /// here as the secondary).
+  final _NextActionKind? secondaryKind;
+  final String? secondaryCtaLabel;
+
   const _NextAction({
     required this.kind,
     required this.title,
@@ -1873,6 +1942,8 @@ class _NextAction {
     required this.ctaLabel,
     required this.icon,
     required this.tone,
+    this.secondaryKind,
+    this.secondaryCtaLabel,
   });
 }
 
@@ -1890,9 +1961,14 @@ _NextAction _nextActionFor(Tour tour) {
       tone: UgamStatusTone.warm,
     );
   }
-  if (tour.buses.isNotEmpty &&
-      tour.totalSeatsAssigned < tour.totalSeatsRequested) {
-    final remaining = tour.totalSeatsRequested - tour.totalSeatsAssigned;
+  if (tour.buses.isNotEmpty && tour.pendingSeatsToAssign > 0) {
+    final remaining = tour.pendingSeatsToAssign;
+    // Active-only totals so a finished GO-leg rider neither inflates the
+    // fraction nor resurfaces as pending demand (mirrors pendingSeatsToAssign).
+    final active = tour.passengers.where((p) => !p.journeyDone);
+    final activeAssigned =
+        active.fold(0, (s, p) => s + p.totalSeatsAssigned);
+    final activeRequested = active.fold(0, (s, p) => s + p.seatBerths);
     return _NextAction(
       kind: _NextActionKind.assignSeats,
       title: remaining == 1
@@ -1900,8 +1976,8 @@ _NextAction _nextActionFor(Tour tour) {
           : tr('tour_detail.action_assign_title_other',
               namedArgs: {'n': '$remaining'}),
       subtitle: tr('tour_detail.action_assign_subtitle', namedArgs: {
-        'assigned': '${tour.totalSeatsAssigned}',
-        'requested': '${tour.totalSeatsRequested}',
+        'assigned': '$activeAssigned',
+        'requested': '$activeRequested',
       }),
       ctaLabel: tr('seats.title'),
       icon: Icons.event_seat_rounded,
@@ -1942,6 +2018,20 @@ _NextAction _nextActionFor(Tour tour) {
       ctaLabel: tr('tour_detail.complete_go_cta'),
       icon: Icons.logout_rounded,
       tone: UgamStatusTone.good,
+    );
+  }
+  if (tour.isReturnPhase) {
+    final free = computeTourCapacity(tour).returnSeatsFree;
+    return _NextAction(
+      kind: _NextActionKind.addReturnTicket,
+      title: tr('tour_detail.action_return_leg_title'),
+      subtitle: tr('tour_detail.action_return_leg_subtitle',
+          namedArgs: {'free': '$free'}),
+      ctaLabel: tr('tour_detail.add_return_ticket'),
+      icon: Icons.event_seat_rounded,
+      tone: UgamStatusTone.good,
+      secondaryKind: _NextActionKind.markCompleted,
+      secondaryCtaLabel: tr('tour_detail.mark_completed'),
     );
   }
   if (tour.status == TourStatus.locked) {

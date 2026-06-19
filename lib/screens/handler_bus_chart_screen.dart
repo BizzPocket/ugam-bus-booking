@@ -12,6 +12,7 @@ import '../models/attendance.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/expense.dart';
+import '../models/handler_bus_money.dart';
 import '../models/handler_manifest.dart';
 import '../models/income_entry.dart';
 import '../models/passenger.dart';
@@ -23,19 +24,11 @@ import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/seat_money_state.dart';
 import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
 import 'fullscreen_chart_screen.dart';
 
-/// Resolves the leg-aware occupants for EVERY seat on [busId] in a single
-/// O(passengers × assignedSeats) pass, keyed by seatId — delegating to the
-/// shared [seatOccupantsForBus]. This handler was the reference implementation
-/// that the resolver was promoted from, so behaviour is byte-for-byte
-/// identical; identity resolution now lives in one place.
-Map<String, SeatOccupancy> _occupantsBySeatForBus(
-  HandlerManifest manifest,
-  String busId,
-) => seatOccupantsForBus(manifest.passengers, busId);
 
 /// The ways the handler reads the chart: the visual seat [grid], the
 /// call-first [list] (a roster of full name + mobile per seat), or the
@@ -221,49 +214,23 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     }
   }
 
-  /// Aggregates collection figures across every passenger holding a seat on
-  /// [bus], mirroring collection_screen's per-bus summary.
-  _BusSummary _summaryForBus(HandlerManifest manifest, Bus bus) {
-    double collected = 0;
-    double toReturn = 0;
-    double toCollect = 0;
-    double spent = 0;
-    double income = 0;
-    for (final e in _expensesForBus(bus.id)) {
-      spent += e.amount;
-    }
-    for (final i in _incomesForBus(bus.id)) {
-      income += i.amount;
-    }
-    for (final p in manifest.passengers) {
-      // Distinct seats only: a whole double-sofa = TWO entries on one seatId,
-      // already full-priced by amountDueForSeat — iterate per distinct seatId
-      // (not per entry) so it isn't counted twice.
-      final seatIds = p.assignedSeats
-          .where((a) => a.busId == bus.id)
-          .map((a) => a.seatId)
-          .toSet();
-      for (final seatId in seatIds) {
-        final due = bus.amountDueForSeat(p, seatId);
-        final col = _collectionFor(p.id, bus.id, seatId);
-        if (col != null) {
-          collected += col.netCollected;
-          toReturn += col.changeToReturn;
-          toCollect += col.stillToCollect;
-        } else {
-          // No collection yet → this seat's due is still to collect.
-          toCollect += due;
-        }
-      }
-    }
-    return _BusSummary(
-      collected: collected,
-      toReturn: toReturn,
-      toCollect: toCollect,
-      spent: spent,
-      income: income,
-    );
-  }
+  /// Per-bus money totals for [bus], built on the shared [HandlerBusMoney] /
+  /// [BusMoneySummary] so the handler can never disagree with the admin's money
+  /// board on what was collected.
+  ///
+  /// Cash is summed per COLLECTION ROW scoped to the bus — NOT matched to a
+  /// rider's current seat. The old per-seat lookup orphaned the row when a paid
+  /// rider changed seats, dropping their cash from "collected" and double-
+  /// counting it into "to collect".
+  HandlerBusMoney _summaryForBus(HandlerManifest manifest, Bus bus) =>
+      HandlerBusMoney.compute(
+        busId: bus.id,
+        passengers: manifest.passengers,
+        collections: _collections.values.toList(),
+        expenses: _expensesForBus(bus.id),
+        incomes: _incomesForBus(bus.id),
+        dueForSeat: bus.amountDueForSeat,
+      );
 
   @override
   void initState() {
@@ -353,12 +320,17 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     String seatId,
     List<Passenger> occupants,
   ) {
+    // Has the agent completed the outbound (GO) leg? Once they have, GO-only
+    // riders are journeyDone — the chooser should open on the RETURN leg.
+    final outboundDone =
+        _manifest?.passengers.any((p) => p.journeyDone) ?? false;
     return UgamSheet.show<void>(
       context,
       title: tr('handler_chart.seat_shared_title', namedArgs: {'seat': seatId}),
       builder: (sheetCtx) => _OccupantChooserSheet(
         seatId: seatId,
         occupants: occupants,
+        outboundDone: outboundDone,
         onPick: (p) {
           Navigator.of(sheetCtx).pop();
           _showOccupantSheet(bus, seatId, p);
@@ -734,11 +706,10 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     final summary = _summaryForBus(manifest, bus);
 
     // Resolve occupants for the whole bus once, not per seat cell.
-    // [occupantsBySeat] keeps one holder per leg (drives the tile's GO/RET split
-    // + the money dot's primary). [fullOccupantsBySeat] keeps EVERY rider on a
-    // seat (a Double Sofa seats up to four across GO+RET), so the tile shows all
-    // of them and a seat tap can offer the full roster.
-    final occupantsBySeat = _occupantsBySeatForBus(manifest, bus.id);
+    // [fullOccupantsBySeat] keeps EVERY rider on a seat (a Double Sofa seats up
+    // to four across GO+RET), so the tile shows all of them, the money dot can
+    // aggregate across the whole berth, and a seat tap can offer the full
+    // roster. The tile detects the GO/RET leg split itself from this list.
     final fullOccupantsBySeat = occupantListForBus(manifest.passengers, bus.id);
 
     final grid = _viewMode == _ViewMode.grid;
@@ -823,7 +794,6 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                 if (grid) ...[
                   _SeatGrid(
                     bus: bus,
-                    occupantsBySeat: occupantsBySeat,
                     fullOccupantsBySeat: fullOccupantsBySeat,
                     collectionFor: (pId, seatId) =>
                         _collectionFor(pId, bus.id, seatId),
@@ -962,68 +932,36 @@ class _LoadingSkeleton extends StatelessWidget {
 // copied 6-hue `_GroupPalette` was deleted so the handler reads exactly the
 // same colour the agent seat-detail screen shows for a given group.
 
-/// The per-seat collection state, derived from the manifest's collection row
-/// (if any) against what the seat owes. Drives a small corner indicator on the
-/// occupied tile so the handler reads paid / owing / return-due at a glance —
-/// the agent seat-detail tile has no money state, so this is the handler's
-/// extra layer over the SAME tile look.
-enum _MoneyState { uncollected, paid, owing, returnDue }
-
-extension _MoneyStateView on _MoneyState {
-  /// The dot colour for this money state. `uncollected` reads as a neutral
-  /// hairline so it never competes with the group/priority ring.
-  Color color(UgamColorSet c) {
-    switch (this) {
-      case _MoneyState.paid:
-        return c.good;
-      case _MoneyState.owing:
-        return c.danger;
-      case _MoneyState.returnDue:
-        return c.warm;
-      case _MoneyState.uncollected:
-        return c.ink3;
-    }
-  }
-}
-
 // ─── Seat grid card ────────────────────────────────────────────────────
 
 class _SeatGrid extends StatelessWidget {
   final Bus bus;
 
-  /// One holder per leg — drives the tile's GO/RET split and the money dot's
-  /// primary passenger.
-  final Map<String, SeatOccupancy> occupantsBySeat;
-
   /// EVERY distinct rider per seat — handed to the tile (so a sofa shared by up
-  /// to four riders shows them all + the "+N" badge) and to the tap handler.
+  /// to four riders shows them all + the "+N" badge), drives the seat-level
+  /// money dot, and is passed to the tap handler.
   final Map<String, List<Passenger>> fullOccupantsBySeat;
   final Collection? Function(String passengerId, String seatId) collectionFor;
   final void Function(String seatId, List<Passenger> occupants) onTapSeat;
 
   const _SeatGrid({
     required this.bus,
-    required this.occupantsBySeat,
     required this.fullOccupantsBySeat,
     required this.collectionFor,
     required this.onTapSeat,
   });
 
-  /// The collection state for an occupied seat, mirroring collection_screen's
-  /// _PassengerRow chip logic: return-due (warm) wins, then a shortfall is
-  /// owing (danger), then a squared-off collection with cash in is paid (good),
-  /// otherwise nothing has been collected yet.
-  _MoneyState _moneyState(Passenger passenger, String seatId) {
-    final due = bus.amountDueForSeat(passenger, seatId);
-    final col = collectionFor(passenger.id, seatId);
-    if (col == null) {
-      return due > 0 ? _MoneyState.owing : _MoneyState.uncollected;
-    }
-    if (col.isReturnDue) return _MoneyState.returnDue;
-    if (col.balance < 0) return _MoneyState.owing;
-    if (col.isSquare && col.amountReceived > 0) return _MoneyState.paid;
-    return _MoneyState.uncollected;
-  }
+  /// The collection state for the WHOLE seat, aggregated across every rider
+  /// sharing it: green only when ALL have squared off, otherwise the worst
+  /// outstanding state wins — so a shared sofa with only one person's cash
+  /// entered stays red instead of looking settled.
+  SeatMoneyState _seatMoneyState(List<Passenger> occupants, String seatId) =>
+      seatMoneyStateOf(occupants.map(
+        (p) => riderMoneyStateOf(
+          bus.amountDueForSeat(p, seatId),
+          collectionFor(p.id, seatId),
+        ),
+      ));
 
   @override
   Widget build(BuildContext context) {
@@ -1051,26 +989,19 @@ class _SeatGrid extends StatelessWidget {
         rowGap: 8,
         driverLabel: tr('handler_chart.driver'),
         tileBuilder: (ctx, cell) {
-          // Leg-aware: a seat may hold a GO occupant and a DIFFERENT RETURN
-          // occupant (an outbound-only + a return-only sharing the seat on
-          // disjoint legs). Resolve both so the shared tile can split + badge
-          // them. The canonical tile detects the GO/RET split itself by trip
-          // type, so we just hand it the occupant list.
-          final occ = cell.seatId == null
-              ? const SeatOccupancy()
-              : (occupantsBySeat[cell.seatId!] ?? const SeatOccupancy());
           // EVERY rider on this seat (up to four on a Double Sofa across
           // GO+RET). The canonical tile draws the leg split for the first two
           // and badges the rest; the tap hands the whole list to the chooser.
+          // The tile detects the GO/RET split itself by trip type.
           final List<Passenger> occList = cell.seatId == null
               ? const <Passenger>[]
               : (fullOccupantsBySeat[cell.seatId!] ?? const <Passenger>[]);
-          // The money dot follows the GO occupant first (then RETURN) — the
-          // primary person whose due/collection drives the at-a-glance state.
-          final primary = occ.go ?? occ.ret;
-          final money = primary == null
-              ? _MoneyState.uncollected
-              : _moneyState(primary, cell.seatId!);
+          // The money dot is a SEAT-level summary across EVERY rider sharing
+          // the berth — green only when ALL have squared off, so a shared sofa
+          // with just one person's cash entered stays red, not green.
+          final money = occList.isEmpty
+              ? SeatMoneyState.uncollected
+              : _seatMoneyState(occList, cell.seatId!);
           // Price-band wash for this seat's row, so the rows read as price
           // stripes (booked AND free seats). Null when the row is unbanded.
           final bandIdx = bus.bandIndexForRow(cell.row);
@@ -1086,9 +1017,9 @@ class _SeatGrid extends StatelessWidget {
                 // the empty resolver falls back to stable id-hash colours.
                 groupColors: const GroupColorResolver({}),
                 bandColor: bandColor,
-                moneyDotColor: primary == null
+                moneyDotColor: occList.isEmpty
                     ? null
-                    : money.color(UgamColors.of(ctx)),
+                    : money.dotColor(UgamColors.of(ctx)),
                 onTapBooked: occList.isEmpty
                     ? null
                     : () => onTapSeat(cell.seatId!, occList),
@@ -1260,17 +1191,11 @@ class _SeatRoster extends StatelessWidget {
     required this.onTapSeat,
   });
 
-  _MoneyState _moneyState(Passenger passenger, String seatId) {
-    final due = bus.amountDueForSeat(passenger, seatId);
-    final col = collectionFor(passenger.id, seatId);
-    if (col == null) {
-      return due > 0 ? _MoneyState.owing : _MoneyState.uncollected;
-    }
-    if (col.isReturnDue) return _MoneyState.returnDue;
-    if (col.balance < 0) return _MoneyState.owing;
-    if (col.isSquare && col.amountReceived > 0) return _MoneyState.paid;
-    return _MoneyState.uncollected;
-  }
+  SeatMoneyState _moneyState(Passenger passenger, String seatId) =>
+      riderMoneyStateOf(
+        bus.amountDueForSeat(passenger, seatId),
+        collectionFor(passenger.id, seatId),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -1338,7 +1263,7 @@ class _SeatRoster extends StatelessWidget {
 class _RosterRow extends StatelessWidget {
   final String seatId;
   final Passenger passenger;
-  final _MoneyState money;
+  final SeatMoneyState money;
   final VoidCallback onTap;
   final UgamColorSet c;
 
@@ -1352,13 +1277,13 @@ class _RosterRow extends StatelessWidget {
 
   String get _moneyLabel {
     switch (money) {
-      case _MoneyState.paid:
+      case SeatMoneyState.paid:
         return tr('handler_chart.money_paid');
-      case _MoneyState.owing:
+      case SeatMoneyState.owing:
         return tr('handler_chart.money_owing');
-      case _MoneyState.returnDue:
+      case SeatMoneyState.returnDue:
         return tr('handler_chart.money_return_due');
-      case _MoneyState.uncollected:
+      case SeatMoneyState.uncollected:
         return tr('handler_chart.money_not_collected');
     }
   }
@@ -1437,7 +1362,7 @@ class _RosterRow extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      _Dot(color: money.color(c), size: 7),
+                      _Dot(color: money.dotColor(c), size: 7),
                       const SizedBox(width: 5),
                       Text(
                         _moneyLabel,
@@ -1526,23 +1451,48 @@ class _TripBadge extends StatelessWidget {
 
 // ─── Leg-shared chooser sheet ───────────────────────────────────────────
 
-/// A chooser for a leg-shared seat: lists the GO occupant and the RETURN
-/// occupant, each with phone + a Call button, so the handler picks whom to
-/// collect from / call before the collect sheet opens.
-class _OccupantChooserSheet extends StatelessWidget {
+/// A chooser for a shared seat. When the seat is leg-divided — different riders
+/// per leg (an outbound-only + a return-only, or a round-trip sharing with a
+/// one-way rider) — the handler collects from ONE leg at a time: the GO riders
+/// while the bus is going out, the RETURN riders once GO is done. A GO/Return
+/// toggle (mirroring the attendance view) switches between them, opening on the
+/// active leg by default. A non-divided seat (same riders on both legs, or all
+/// on one leg) lists everyone with no toggle. Each row carries phone + a Call
+/// button, so the handler picks whom to collect from / call before the collect
+/// sheet opens.
+class _OccupantChooserSheet extends StatefulWidget {
   final String seatId;
   final List<Passenger> occupants;
+
+  /// Whether the agent has completed the outbound leg — seeds the default leg
+  /// to RETURN so the handler collects from the riders still aboard.
+  final bool outboundDone;
   final ValueChanged<Passenger> onPick;
 
   const _OccupantChooserSheet({
     required this.seatId,
     required this.occupants,
+    required this.outboundDone,
     required this.onPick,
   });
 
   @override
+  State<_OccupantChooserSheet> createState() => _OccupantChooserSheetState();
+}
+
+class _OccupantChooserSheetState extends State<_OccupantChooserSheet> {
+  late CollectLeg _leg = defaultCollectLeg(
+    widget.occupants,
+    outboundDone: widget.outboundDone,
+  );
+
+  @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final hasSplit = seatHasLegSplit(widget.occupants);
+    final shown = hasSplit
+        ? occupantsForCollectLeg(widget.occupants, _leg)
+        : widget.occupants;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1551,14 +1501,28 @@ class _OccupantChooserSheet extends StatelessWidget {
           tr('handler_chart.leg_shared_intro'),
           style: UgamText.body.copyWith(color: c.ink2),
         ),
+        if (hasSplit) ...[
+          const SizedBox(height: UgamSpacing.md),
+          // GO / Return leg toggle — same control the attendance view uses.
+          UgamTabPills(
+            items: [
+              UgamTabItem(label: tr('handler_chart.att_leg_go')),
+              UgamTabItem(label: tr('handler_chart.att_leg_ret')),
+            ],
+            currentIndex: _leg == CollectLeg.go ? 0 : 1,
+            onChanged: (i) => setState(
+              () => _leg = i == 0 ? CollectLeg.go : CollectLeg.ret,
+            ),
+          ),
+        ],
         const SizedBox(height: UgamSpacing.md),
-        for (var i = 0; i < occupants.length; i++) ...[
+        for (var i = 0; i < shown.length; i++) ...[
           if (i > 0) const SizedBox(height: UgamSpacing.sm),
           _LegSharedTile(
-            passenger: occupants[i],
+            passenger: shown[i],
             // The badge reads each rider's own leg (GO / RET / round-trip).
-            leg: occupants[i].tripType,
-            onPick: () => onPick(occupants[i]),
+            leg: shown[i].tripType,
+            onPick: () => widget.onPick(shown[i]),
             c: c,
           ),
         ],
@@ -1847,33 +1811,6 @@ class _DriverContact extends StatelessWidget {
 }
 
 // ─── Summary header ────────────────────────────────────────────────────
-
-/// Aggregated collection figures for the selected bus.
-class _BusSummary {
-  final double collected;
-  final double toReturn;
-  final double toCollect;
-
-  /// Total of every expense logged against this bus.
-  final double spent;
-
-  /// Total of every income entry logged against this bus (cabin / gallery /
-  /// other cash taken in outside the seat fares).
-  final double income;
-
-  const _BusSummary({
-    required this.collected,
-    required this.toReturn,
-    required this.toCollect,
-    required this.spent,
-    required this.income,
-  });
-
-  /// Net cash the handler should be holding for this bus — what was collected
-  /// plus extra income taken in, less what was spent. This is what they hand
-  /// over to the admin.
-  double get inHand => collected + income - spent;
-}
 
 /// Boarding tally for one bus + leg: how many of the [total] expected
 /// passengers are marked [present], and by subtraction how many were left

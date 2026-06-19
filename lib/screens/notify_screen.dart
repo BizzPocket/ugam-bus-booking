@@ -4,7 +4,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../components/bus_message_composer_field.dart';
 import '../controllers/tour_controller.dart';
@@ -13,11 +12,8 @@ import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
-import '../services/chart_footer_store.dart';
-import '../services/seat_chart_pdf.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_outbound.dart';
-import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 
@@ -78,92 +74,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
     });
   }
 
-  void _onSent(String id) => setState(() => _sentIds.add(id));
   void _resetSent() => setState(_sentIds.clear);
-
-  Future<void> _sendOne(
-    Passenger p, {
-    required Tour tour,
-    required String busNo,
-    required String driverName,
-    required String? driverPhone,
-  }) async {
-    // Try sharing the highlighted seating chart image(s) + ticket caption via
-    // the OS share sheet. If the chart can't be built (no seats, font/raster
-    // failure), fall back to the text-only WhatsApp deep-link below.
-    final caption = WhatsAppService().buildTicketMessage(
-      passenger: p,
-      tour: tour,
-      busNumber: busNo,
-      driverName: driverName,
-      driverPhone: driverPhone,
-      handlerPhone: tour.handler?.phone,
-    );
-
-    // Every recipient — handler included — gets THEIR OWN bus chart with their
-    // seats highlighted.
-    List<Uint8List> images = const [];
-    try {
-      final footer = await ChartFooterStore.load(tour.id);
-      images = await SeatChartPdf.buildPassengerChartImages(
-        tour: tour,
-        passenger: p,
-        footer: footer,
-      );
-    } catch (_) {
-      images = const [];
-    }
-    if (!mounted) return;
-
-    if (images.isNotEmpty) {
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [
-            for (final (i, png) in images.indexed)
-              XFile.fromData(
-                png,
-                name: 'seating_${i + 1}.png',
-                mimeType: 'image/png',
-              ),
-          ],
-          text: caption,
-        ),
-      );
-      if (!mounted) return;
-      _onSent(p.id);
-      AppSnackBar.success(
-        tr('notify.send_now_help'),
-        title: tr(
-          'notify.send_now_opened_title',
-          namedArgs: {'name': p.displayName},
-        ),
-      );
-      return;
-    }
-
-    // Fallback: text-only WhatsApp deep-link (unchanged behaviour).
-    final ok = await WhatsAppService().sendToPassenger(
-      passenger: p,
-      tour: tour,
-      busNumber: busNo,
-      driverName: driverName,
-      driverPhone: driverPhone,
-      handlerPhone: tour.handler?.phone,
-    );
-    if (!mounted) return;
-    if (ok) {
-      _onSent(p.id);
-      AppSnackBar.success(
-        tr('notify.send_now_help'),
-        title: tr(
-          'notify.send_now_opened_title',
-          namedArgs: {'name': p.displayName},
-        ),
-      );
-    } else {
-      AppSnackBar.error(tr('notify.whatsapp_unavailable'));
-    }
-  }
 
   // ── Build ─────────────────────────────────────────────────────
   @override
@@ -401,15 +312,12 @@ class _NotifyScreenState extends State<NotifyScreen> {
               busInfo: busInfo,
               isSent: _sentIds.contains(filtered[i].id),
               c: c,
-              onSend: () => _sendOne(
-                filtered[i],
-                tour: tour,
-                // Customer-facing caption: bus NAME only (no plate). The agent's
-                // own panel still shows busInfo.busNo (name · reg).
-                busNo: tour.buses.map((b) => b.customerLabel).join(', '),
-                driverName: busInfo.driverName,
-                driverPhone: busInfo.driverPhone,
-              ),
+              // Repeat the EXACT after-lock message to just this one person:
+              // the `seat_allotment` Cloud API template (highlighted seat-chart
+              // image header + boarding/departure/handler body) — the same
+              // payload the bulk "send to all pending" CTA fires, scoped to one
+              // id. Not the old "Ticket Confirmed!" deep-link/OS-share caption.
+              onSend: () => _dispatchSeatAllocations(tour, {filtered[i].id}),
             ),
             if (i != filtered.length - 1)
               const SizedBox(height: UgamSpacing.sm + 2),

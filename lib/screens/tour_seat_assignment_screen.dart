@@ -28,6 +28,7 @@ import '../widgets/chart_expand_button.dart';
 import '../widgets/occupant_action_sheet.dart';
 import '../widgets/chart_footer_sheet.dart';
 import '../widgets/edit_request_sheet.dart';
+import 'add_return_ticket_sheet.dart';
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
 
@@ -598,7 +599,42 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       // "Move or swap" → pick a destination bus → hand back here so the agent
       // lands on that bus's chart and taps the exact target seat by hand.
       onRelocateToBus: _beginRelocate,
+      // Return phase: cancel a return seat, then offer to rebook it in place.
+      onCancelReturn: _cancelReturnSeatFlow,
     );
+  }
+
+  /// Cancel an occupant's return seat (freeing it), then offer to book a
+  /// replacement return ticket straight into the just-freed seat. Only reachable
+  /// once the tour is in its return phase (the sheet gates the entry point).
+  Future<void> _cancelReturnSeatFlow(Passenger occ) async {
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('tour_detail.cancel_return_confirm_title'),
+      message: tr('tour_detail.cancel_return_confirm_body',
+          namedArgs: {'name': occ.displayName}),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('tour_detail.cancel_return_cta'),
+      destructive: true,
+      confirmIcon: Icons.event_busy_rounded,
+    );
+    if (!ok) return;
+    await _ctrl.cancelReturnSeat(widget.tourId, occ.id);
+    if (!mounted) return;
+    AppSnackBar.success(tr('tour_detail.cancel_return_done',
+        namedArgs: {'name': occ.displayName}));
+
+    final rebook = await UgamDialog.confirm(
+      context,
+      title: tr('tour_detail.cancel_return_rebook_title'),
+      message: tr('tour_detail.cancel_return_rebook_body'),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('tour_detail.add_return_ticket'),
+      confirmIcon: Icons.event_seat_rounded,
+    );
+    if (!rebook || !mounted) return;
+    final tour = _tour;
+    if (tour != null) AddReturnTicketSheet.show(context, tour);
   }
 
   // ── Cross-bus relocate (tap-to-place hand-off) ──────────────────────────

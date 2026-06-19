@@ -11,7 +11,6 @@ import '../models/tour.dart';
 import '../utils/formatters.dart';
 import 'bus_money_screen.dart';
 import 'collection_screen.dart';
-import 'main_shell.dart';
 import 'trip_pnl_screen.dart';
 
 /// TOUR MONEY BOARD — a scannable, mostly read-only roll-up of every bus on
@@ -75,7 +74,6 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         bottom: false,
         child: Column(

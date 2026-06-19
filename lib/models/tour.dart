@@ -92,6 +92,32 @@ class Tour {
   int get totalSeatsAssigned =>
       passengers.fold(0, (sum, p) => sum + p.totalSeatsAssigned);
 
+  /// Berths still needing assignment for ACTIVE riders only — the count that
+  /// drives the "allocate N more seats" next-step everywhere.
+  ///
+  /// A passenger whose leg is finished ([Passenger.journeyDone]) is
+  /// intentionally seatless and is excluded, so completing the GO leg never
+  /// re-shows the card. Measured PER RIDER in physical berths
+  /// (`max(0, seatBerths − totalSeatsAssigned)`) so it matches
+  /// [Passenger.isFullyAssigned]: a Double Sofa counts as two on both sides
+  /// (never the old unit-vs-berth skew that could go negative or hide a
+  /// half-filled double), and it is never negative. The raw `totalSeats*`
+  /// getters stay whole-roster for seats-sold / revenue.
+  int get pendingSeatsToAssign => passengers
+      .where((p) => !p.journeyDone)
+      .fold(0, (sum, p) => sum + math.max(0, p.seatBerths - p.totalSeatsAssigned));
+
+  /// True once the GO (outbound) leg has been completed: completeOutboundLeg
+  /// marks every one-way rider [Passenger.journeyDone], so that flag IS the
+  /// "GO done" signal — no separate DB column needed.
+  bool get goLegCompleted => passengers.any((p) => p.journeyDone);
+
+  /// The tour is locked AND its GO leg is done → the RETURN-leg phase: outbound
+  /// riders have left, their seats are free to resell as return tickets, and the
+  /// agent can still cancel/replace return riders before completing the trip.
+  bool get isReturnPhase =>
+      status == TourStatus.locked && goLegCompleted;
+
   int get totalBusSeats => buses.fold(0, (sum, b) => sum + b.totalSeats);
 
   /// Leg-aware berths occupied per bus — the BUSIER leg's load, `max(GO, RET)`.

@@ -42,6 +42,21 @@ Passenger _p(String id,
 
 RequestLine _line(SeatType t, int qty) => RequestLine(seatType: t, qty: qty);
 
+// A passenger whose travelled leg is finished: completeOutboundLeg() clears
+// their seats and flags journeyDone. Their request lines stay on record.
+Passenger _pDone(String id,
+        {required List<RequestLine> lines, TripType trip = TripType.outboundOnly}) =>
+    Passenger(
+      id: id,
+      tourId: 't1',
+      name: id,
+      phone: '+910000000000',
+      requestLines: lines.map((l) => l.copyWith(leg: trip)).toList(),
+      tripType: trip,
+      assignedSeats: const [],
+      journeyDone: true,
+    );
+
 Tour _tour(List<Bus> buses, List<Passenger> ps) => Tour(
       title: 'T',
       fromCity: 'A',
@@ -163,6 +178,31 @@ void main() {
       expect(cap.goOnlyFree, 0, reason: 'no phantom outbound-only-free seat');
       expect(cap.retOnlyFree, 0, reason: 'placed legs are balanced');
       expect(cap.free, 1);
+    });
+  });
+
+  group('computeTourCapacity — a finished GO leg is excluded', () {
+    test('journeyDone outbound rider no longer occupies a berth or blocks one',
+        () {
+      // Two single berths. One outbound-only rider finished the GO leg
+      // (journeyDone, seats cleared) and one round-trip rider remains. The
+      // finished rider must NOT be re-seated by the engine: only the round-trip
+      // rider counts, leaving one berth genuinely free.
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ], [
+        _pDone('A', lines: [_line(SeatType.singleSofa, 1)]),
+        _p('B', lines: [_line(SeatType.singleSofa, 1)]),
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      expect(cap.occupied, 1, reason: 'only the round-trip rider B is on the bus');
+      expect(cap.free, 1, reason: "A's berth returns empty — sellable for return");
+      expect(cap.needsDecision, 0, reason: 'a finished rider is not pending');
+      expect(cap.returnSeatsFree, 1, reason: 'one return seat is sellable');
     });
   });
 }

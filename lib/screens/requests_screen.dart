@@ -693,7 +693,7 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     // is never overbooked.
     var loadDemand = 0.0;
     for (final p in tour.passengers) {
-      if (p.isWaitlisted) continue;
+      if (p.isWaitlisted || p.journeyDone) continue;
       loadDemand += p.seatLoad;
     }
     final noBus = tour.buses.isEmpty;
@@ -1047,8 +1047,7 @@ class _AssignmentCTA extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final remaining = (tour.totalSeatsRequested - tour.totalSeatsAssigned)
-        .clamp(0, 99999);
+    final remaining = tour.pendingSeatsToAssign;
     final hasBus = tour.buses.isNotEmpty;
     return UgamStickyCTA(
       child: UgamCTA(

@@ -21,7 +21,6 @@ import 'add_bus_screen.dart';
 import 'bus_money_screen.dart';
 import 'collection_screen.dart';
 import 'fullscreen_chart_screen.dart';
-import 'main_shell.dart';
 import 'seats_screen.dart';
 
 /// Read-only seat layout for a single bus on a tour. Renders each seat
@@ -52,7 +51,6 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         child: Obx(() {
           final tour = tourCtrl.getTour(widget.tourId);

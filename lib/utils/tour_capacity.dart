@@ -75,6 +75,11 @@ class TourCapacity {
     required this.freeByType,
   });
 
+  /// Berths with a free RETURN slot across every bus — the seats an agent can
+  /// still sell as a return-only ticket once the GO leg is done: `capacity −
+  /// retOccupied`. Exact for a single-bus tour; a safe total across buses.
+  int get returnSeatsFree => (capacity - retOccupied).clamp(0, capacity);
+
   /// True when the tour has at least one bus with seats to reason about.
   bool get hasBuses => capacity > 0;
 

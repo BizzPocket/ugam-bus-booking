@@ -59,7 +59,16 @@ class UgamAppBar extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onTap: () {
                   HapticFeedback.selectionClick();
-                  (onBack ?? Get.back).call();
+                  if (onBack != null) {
+                    onBack!.call();
+                  } else {
+                    final nav = Navigator.of(context);
+                    if (nav.canPop()) {
+                      nav.pop();
+                    } else {
+                      Get.back();
+                    }
+                  }
                 },
                 child: Container(
                   width: 42,

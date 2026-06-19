@@ -14,7 +14,7 @@ import '../utils/passenger_display.dart';
 import '../utils/time_format.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
-import 'main_shell.dart';
+
 
 /// List of buses attached to a tour. Topbar + capacity stat tiles +
 /// photo-anchored bus cards (matching image-5 list pattern) + sticky
@@ -62,9 +62,10 @@ class ManageBusesScreen extends StatelessWidget {
               label: tr('manage_buses.menu_edit'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                Get.to(
-                  () => AddBusScreen(tourId: tourId, existing: bus),
-                  transition: Transition.cupertino,
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => AddBusScreen(tourId: tourId, existing: bus),
+                  ),
                 );
               },
             ),
@@ -322,12 +323,13 @@ class ManageBusesScreen extends StatelessWidget {
                             bus: bus,
                             assigned: assignedForBus,
                             handlerName: handler?.displayName,
-                            onOpen: () => Get.to(
-                              () => BusStatusScreen(
-                                tourId: tourId,
-                                busId: bus.id,
+                            onOpen: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => BusStatusScreen(
+                                  tourId: tourId,
+                                  busId: bus.id,
+                                ),
                               ),
-                              transition: Transition.cupertino,
                             ),
                             onMore: () => _openBusMenu(ctx, tour, bus),
                             onHandler: () => _openHandlerPicker(ctx, tour, bus),
@@ -339,19 +341,17 @@ class ManageBusesScreen extends StatelessWidget {
           );
         }),
       ),
-      // Add-bus CTA stacked above the persistent workspace dock.
-      bottomNavigationBar: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          UgamStickyCTA(
-            child: UgamCTA(
-              label: tr('manage_buses.add_bus'),
-              leadingIcon: Icons.add_rounded,
-              onPressed: () => Get.to(() => AddBusScreen(tourId: tourId)),
+      // Add-bus CTA.
+      bottomNavigationBar: UgamStickyCTA(
+        child: UgamCTA(
+          label: tr('manage_buses.add_bus'),
+          leadingIcon: Icons.add_rounded,
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => AddBusScreen(tourId: tourId),
             ),
           ),
-          const UgamWorkspaceDock(),
-        ],
+        ),
       ),
     );
   }

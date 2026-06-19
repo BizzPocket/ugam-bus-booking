@@ -13,7 +13,7 @@ import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/time_format.dart';
-import 'main_shell.dart';
+
 
 /// 3-step wizard for adding (or editing) a bus on a tour.
 ///
@@ -585,7 +585,6 @@ class _AddBusScreenState extends State<AddBusScreen> {
 
     return Scaffold(
       backgroundColor: c.bg,
-      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         child: Column(
           children: [

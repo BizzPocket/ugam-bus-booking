@@ -1,9 +1,30 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../utils/seat_money_state.dart';
 import '../group_color.dart';
 import '../text_styles.dart';
 import '../tokens.dart';
+
+/// The dot colour for a seat's collection state, co-located with the legend so
+/// the swatch keys (paid = good, owing = danger) and the live seat dots stay in
+/// lockstep. `uncollected` reads as a neutral hairline so it never competes
+/// with the group / priority ring. Shared by every chart that paints a money
+/// dot (handler, manual seat assignment, charts, bus status).
+extension SeatMoneyStateColor on SeatMoneyState {
+  Color dotColor(UgamColorSet c) {
+    switch (this) {
+      case SeatMoneyState.paid:
+        return c.good;
+      case SeatMoneyState.owing:
+        return c.danger;
+      case SeatMoneyState.returnDue:
+        return c.warm;
+      case SeatMoneyState.uncollected:
+        return c.ink3;
+    }
+  }
+}
 
 /// The canonical seat-chart legend, shared by every occupancy screen so the
 /// seat-state key looks and reads identically for every role — admin

@@ -27,7 +27,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   final _titleCtrl = TextEditingController();
   final _fromCtrl = TextEditingController();
   final _toCtrl = TextEditingController();
-  final _priceCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _broadcastCtrl = TextEditingController();
   XFile? _broadcastImage;
@@ -47,7 +46,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
     _titleCtrl.addListener(_previewListener);
     _fromCtrl.addListener(_previewListener);
     _toCtrl.addListener(_previewListener);
-    _priceCtrl.addListener(_previewListener);
   }
 
   void _previewListener() {
@@ -62,12 +60,10 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
     _titleCtrl.removeListener(_previewListener);
     _fromCtrl.removeListener(_previewListener);
     _toCtrl.removeListener(_previewListener);
-    _priceCtrl.removeListener(_previewListener);
     _previewDebounce?.cancel();
     _titleCtrl.dispose();
     _fromCtrl.dispose();
     _toCtrl.dispose();
-    _priceCtrl.dispose();
     _descCtrl.dispose();
     _broadcastCtrl.dispose();
     super.dispose();
@@ -180,7 +176,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
         returnTime: (_returnDate != null && _returnTime != null)
             ? hhmmFromTimeOfDay(_returnTime!)
             : null,
-        pricePerSeat: double.tryParse(_priceCtrl.text) ?? 0,
         description: _descCtrl.text.trim().isEmpty
             ? null
             : _descCtrl.text.trim(),
@@ -242,7 +237,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       fromCity: _fromCtrl.text.trim(),
                       toCity: _toCtrl.text.trim(),
                       departureDate: _departureDate,
-                      price: _priceCtrl.text.trim(),
                       coverImage: _broadcastImage,
                     ),
                     const SizedBox(height: UgamSpacing.xl),
@@ -397,14 +391,6 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                     ],
                     const SizedBox(height: UgamSpacing.lg),
                     UgamInput(
-                      label:
-                          '${tr('create_tour.label.price_per_seat')} (${tr('create_tour.label.optional')})',
-                      hint: tr('create_tour.hint.price'),
-                      controller: _priceCtrl,
-                      keyboardType: TextInputType.number,
-                    ),
-                    const SizedBox(height: UgamSpacing.lg),
-                    UgamInput(
                       label: tr('create_tour.label.tour_description'),
                       hint: tr('create_tour.hint.description'),
                       controller: _descCtrl,
@@ -477,7 +463,6 @@ class _TourPreviewCard extends StatelessWidget {
   final String fromCity;
   final String toCity;
   final DateTime? departureDate;
-  final String price;
   final XFile? coverImage;
 
   const _TourPreviewCard({
@@ -486,7 +471,6 @@ class _TourPreviewCard extends StatelessWidget {
     required this.fromCity,
     required this.toCity,
     required this.departureDate,
-    required this.price,
     this.coverImage,
   });
 
@@ -514,15 +498,6 @@ class _TourPreviewCard extends StatelessWidget {
             locale: context.locale.languageCode,
           )
         : tr('create_tour.preview.pick_date');
-    final setPriceLabel = tr('create_tour.preview.set_price');
-    final priceText = () {
-      final n = double.tryParse(price);
-      if (n == null || n <= 0) return setPriceLabel;
-      return tr(
-        'create_tour.preview.per_seat',
-        namedArgs: {'price': n.toStringAsFixed(0)},
-      );
-    }();
 
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.md),
@@ -589,12 +564,6 @@ class _TourPreviewCard extends StatelessWidget {
                     UgamReqChip(
                       label: dateText,
                       variant: departureDate == null
-                          ? UgamChipVariant.neutral
-                          : UgamChipVariant.accent,
-                    ),
-                    UgamReqChip(
-                      label: priceText,
-                      variant: priceText == setPriceLabel
                           ? UgamChipVariant.neutral
                           : UgamChipVariant.accent,
                     ),

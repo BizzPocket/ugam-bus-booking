@@ -65,6 +65,12 @@ class OccupantActionSheet extends StatefulWidget {
     String fromSeatId,
   )? onRelocateToBus;
 
+  /// Return phase only: cancel this occupant's return seat so it can be rebooked
+  /// (the caller owns the confirm + cancel + guided-rebook flow). Offered only
+  /// when set, the tour is in its return phase, and the occupant rides the
+  /// return leg.
+  final void Function(Passenger occupant)? onCancelReturn;
+
   const OccupantActionSheet({
     super.key,
     required this.occupants,
@@ -77,6 +83,7 @@ class OccupantActionSheet extends StatefulWidget {
     this.onSeatHere,
     this.onSwapIn,
     this.onRelocateToBus,
+    this.onCancelReturn,
   });
 
   static Future<void> show(
@@ -96,6 +103,7 @@ class OccupantActionSheet extends StatefulWidget {
       String sourceBusId,
       String fromSeatId,
     )? onRelocateToBus,
+    void Function(Passenger occupant)? onCancelReturn,
   }) {
     if (occupants.isEmpty) return Future.value();
     final c = UgamColors.of(context);
@@ -119,6 +127,7 @@ class OccupantActionSheet extends StatefulWidget {
         onSeatHere: onSeatHere,
         onSwapIn: onSwapIn,
         onRelocateToBus: onRelocateToBus,
+        onCancelReturn: onCancelReturn,
       ),
     );
   }
@@ -372,6 +381,25 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
                 _free();
               },
             ),
+
+            // Return phase: cancel this return seat so it can be rebooked. Only
+            // for a rider on the return leg once the GO leg is complete — the
+            // caller owns the confirm + cancel + guided-rebook flow.
+            if (widget.onCancelReturn != null &&
+                occ.retBerths > 0 &&
+                (_ctrl.getTour(widget.tourId)?.isReturnPhase ?? false)) ...[
+              const SizedBox(height: UgamSpacing.sm),
+              _ActionRow(
+                icon: Icons.event_busy_rounded,
+                label: tr('tour_detail.cancel_return_seat'),
+                c: c,
+                danger: true,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onCancelReturn!(occ);
+                },
+              ),
+            ],
 
             // Share with the passenger currently being placed.
             if (widget.placing != null && widget.onSeatHere != null) ...[

@@ -165,4 +165,89 @@ void main() {
           ['solo']);
     });
   });
+
+  // The money-collection chooser for a shared sofa must be leg-scoped: while the
+  // bus is going out you can only collect from the GO-leg riders; once GO is
+  // done they drop off and only the RETURN riders remain. These pure helpers
+  // back the chooser's GO/Return toggle and its smart default.
+  group('collect-leg chooser helpers', () {
+    final g1 = _p('g1', trip: TripType.outboundOnly, seats: ['DU1']);
+    final g2 = _p('g2', trip: TripType.outboundOnly, seats: ['DU1']);
+    final r1 = _p('r1', trip: TripType.returnOnly, seats: ['DU1']);
+    final r2 = _p('r2', trip: TripType.returnOnly, seats: ['DU1']);
+    final rt = _p('rt', trip: TripType.roundTrip, seats: ['DU1']);
+
+    group('occupantsForCollectLeg', () {
+      test('GO leg keeps outbound + round-trip riders only', () {
+        expect(
+          occupantsForCollectLeg([g1, g2, r1, r2], CollectLeg.go)
+              .map((p) => p.id),
+          ['g1', 'g2'],
+        );
+        expect(
+          occupantsForCollectLeg([rt, r1], CollectLeg.go).map((p) => p.id),
+          ['rt'],
+        );
+      });
+
+      test('RETURN leg keeps return + round-trip riders only', () {
+        expect(
+          occupantsForCollectLeg([g1, g2, r1, r2], CollectLeg.ret)
+              .map((p) => p.id),
+          ['r1', 'r2'],
+        );
+        expect(
+          occupantsForCollectLeg([rt, g1], CollectLeg.ret).map((p) => p.id),
+          ['rt'],
+        );
+      });
+    });
+
+    group('seatHasLegSplit', () {
+      test('true when riders differ per leg (2 GO + 2 RET)', () {
+        expect(seatHasLegSplit([g1, g2, r1, r2]), isTrue);
+      });
+
+      test('true when a round-trip shares with a one-way rider', () {
+        expect(seatHasLegSplit([rt, r1]), isTrue);
+        expect(seatHasLegSplit([rt, g1]), isTrue);
+      });
+
+      test('false when nobody travels one of the legs', () {
+        // Two GO-only riders: no RETURN occupant to switch to.
+        expect(seatHasLegSplit([g1, g2]), isFalse);
+        // Two return-only riders: no GO occupant.
+        expect(seatHasLegSplit([r1, r2]), isFalse);
+      });
+
+      test('false when both legs hold the SAME round-trip riders', () {
+        final rtA = _p('rtA', trip: TripType.roundTrip, seats: ['DS1']);
+        final rtB = _p('rtB', trip: TripType.roundTrip, seats: ['DS1']);
+        expect(seatHasLegSplit([rtA, rtB]), isFalse);
+      });
+    });
+
+    group('defaultCollectLeg', () {
+      test('opens on GO during the outbound phase', () {
+        expect(
+          defaultCollectLeg([g1, r1], outboundDone: false),
+          CollectLeg.go,
+        );
+      });
+
+      test('opens on RETURN once the outbound leg is done', () {
+        expect(
+          defaultCollectLeg([g1, r1], outboundDone: true),
+          CollectLeg.ret,
+        );
+      });
+
+      test('opens on RETURN when no rider travels GO on this seat', () {
+        expect(
+          defaultCollectLeg([r1, r2], outboundDone: false),
+          CollectLeg.ret,
+        );
+      });
+    });
+  });
 }

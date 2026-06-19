@@ -212,6 +212,11 @@ class BookingCaptureForm extends StatefulWidget {
   /// passenger-count chip on its own submit button). Optional.
   final VoidCallback? onChanged;
 
+  /// When set, every row is FORCED to this leg and the per-row leg chip is
+  /// hidden — used by the return-ticket surface where the GO leg has already
+  /// departed, so only [TripType.returnOnly] makes sense.
+  final TripType? forcedLeg;
+
   const BookingCaptureForm({
     super.key,
     required this.fromCity,
@@ -222,6 +227,7 @@ class BookingCaptureForm extends StatefulWidget {
     this.showSeater = false,
     this.maxPerType = 10,
     this.onChanged,
+    this.forcedLeg,
   });
 
   @override
@@ -319,7 +325,11 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     // Always start with at least one editable row so the section isn't empty.
     if (_drafts.isEmpty) {
       _drafts.add(
-        _LineDraft(type: SeatType.doubleSofa, qty: 1, leg: TripType.roundTrip),
+        _LineDraft(
+          type: SeatType.doubleSofa,
+          qty: 1,
+          leg: widget.forcedLeg ?? TripType.roundTrip,
+        ),
       );
     }
   }
@@ -380,7 +390,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
             seatType: d.type,
             position: d.position,
             qty: d.qty,
-            leg: d.leg,
+            leg: widget.forcedLeg ?? d.leg,
           ),
     ];
 
@@ -529,7 +539,9 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       (t) => !used.contains(t),
       orElse: () => SeatType.doubleSofa,
     );
-    _drafts.add(_LineDraft(type: type, qty: 1, leg: TripType.roundTrip));
+    _drafts.add(
+      _LineDraft(type: type, qty: 1, leg: widget.forcedLeg ?? TripType.roundTrip),
+    );
     _seatsError = null;
     HapticFeedback.selectionClick();
     _notify();
@@ -727,6 +739,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
             legLabel: _legLabel(_drafts[i].leg),
             legIcon: _legIcon(_drafts[i].leg),
             legActive: _drafts[i].leg.isOneWay,
+            showLeg: widget.forcedLeg == null,
             maxPerType: widget.maxPerType,
             canRemove: _drafts.length > 1,
             onChanged: (v) => _setRowQty(i, v),
@@ -963,6 +976,10 @@ class _SeatRowTile extends StatelessWidget {
   final String legLabel;
   final IconData legIcon;
   final bool legActive;
+
+  /// Hide the per-row leg chip entirely (the return-ticket surface forces the
+  /// leg, so cycling it makes no sense).
+  final bool showLeg;
   final int maxPerType;
   final bool canRemove;
   final ValueChanged<int> onChanged;
@@ -980,6 +997,7 @@ class _SeatRowTile extends StatelessWidget {
     required this.legLabel,
     required this.legIcon,
     required this.legActive,
+    this.showLeg = true,
     required this.maxPerType,
     required this.canRemove,
     required this.onChanged,
@@ -1140,6 +1158,7 @@ class _SeatRowTile extends StatelessWidget {
           Row(
             children: [
               // Per-row LEG chip — tap to cycle Full trip → Go only → Return.
+              if (showLeg)
               GestureDetector(
                 onTap: onCycleLeg,
                 behavior: HitTestBehavior.opaque,

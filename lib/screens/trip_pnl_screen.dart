@@ -8,7 +8,7 @@ import '../design/ugam.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
 import '../utils/formatters.dart';
-import 'main_shell.dart';
+
 
 /// Per-trip Profit & Loss — the breakdown the agent lands on when they open a
 /// trip's money and want "did this trip make money, and where".
@@ -59,7 +59,6 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
     final c = UgamColors.of(context);
     return Scaffold(
       backgroundColor: c.bg,
-      bottomNavigationBar: const UgamWorkspaceDock(),
       body: SafeArea(
         bottom: false,
         child: Column(
