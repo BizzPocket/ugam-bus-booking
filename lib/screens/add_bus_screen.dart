@@ -11,7 +11,6 @@ import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
-import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 
 
@@ -693,17 +692,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
           busPrice: _busPrice,
           singleSofaPrice: _singleSofaPrice,
           doubleSofaPrice: _doubleSofaPrice,
-          rearRows: _rearRows,
-          rearPrice: _rearPrice,
           priceBands: _priceBands,
           onBandsChanged: (bands) => setState(() => _priceBands = bands),
           layout: _previewLayout,
           tour: _tour,
-          slotLabel: _slotLabel.text.trim().isEmpty
-              ? _slotPositionLabel
-              : _slotLabel.text.trim(),
-          busNumber: _busNumber.text.trim(),
-          isAC: _isAC,
           totalSeats: _totalSeats,
           onChanged: () => setState(() {}),
         );
@@ -1423,8 +1415,10 @@ class _StepperBtn extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Step 3 — Price + preview
+// Step 3 — Price
 // ════════════════════════════════════════════════════════════════════════
+
+enum _PriceMode { fixed, bands }
 
 class _Step3Price extends StatefulWidget {
   final UgamColorSet c;
@@ -1432,8 +1426,6 @@ class _Step3Price extends StatefulWidget {
   final TextEditingController busPrice;
   final TextEditingController singleSofaPrice;
   final TextEditingController doubleSofaPrice;
-  final TextEditingController rearRows;
-  final TextEditingController rearPrice;
 
   /// Flexible price bands edited by the agent, owned by the parent state so they
   /// survive step navigation. [onBandsChanged] hands an updated copy back up.
@@ -1441,13 +1433,10 @@ class _Step3Price extends StatefulWidget {
   final ValueChanged<List<PriceBand>> onBandsChanged;
 
   /// The saved layout (edit mode). Null in add mode — the layout is only built
-  /// at save time there, so the rear-zone row count can't be clamped/previewed
-  /// against a concrete grid until then.
+  /// at save time there, so the band row range can't be clamped against a
+  /// concrete grid until then.
   final BusLayout? layout;
   final Tour? tour;
-  final String slotLabel;
-  final String busNumber;
-  final bool isAC;
   final int totalSeats;
   final VoidCallback onChanged;
 
@@ -1457,15 +1446,10 @@ class _Step3Price extends StatefulWidget {
     required this.busPrice,
     required this.singleSofaPrice,
     required this.doubleSofaPrice,
-    required this.rearRows,
-    required this.rearPrice,
     required this.priceBands,
     required this.onBandsChanged,
     required this.layout,
     required this.tour,
-    required this.slotLabel,
-    required this.busNumber,
-    required this.isAC,
     required this.totalSeats,
     required this.onChanged,
   });
@@ -1475,18 +1459,20 @@ class _Step3Price extends StatefulWidget {
 }
 
 class _Step3PriceState extends State<_Step3Price> {
-  late bool _overridesOpen;
-  late bool _bandsOpen;
+  /// Whether this bus uses one uniform price ([_PriceMode.fixed]) or explicit
+  /// per-row price bands ([_PriceMode.bands]). Seeded from whether the bus
+  /// already carries bands.
+  late _PriceMode _mode;
+
+  /// Bands stashed when the agent switches back to "Same for all" — keeping them
+  /// here lets a same-session toggle to "Price bands" restore the work, while
+  /// the parent state (and thus _save) sees an empty band list meaning uniform.
+  List<PriceBand> _stashedBands = const [];
 
   @override
   void initState() {
     super.initState();
-    // Auto-expand the per-type overrides if any are already set (edit mode).
-    _overridesOpen =
-        widget.singleSofaPrice.text.trim().isNotEmpty ||
-        widget.doubleSofaPrice.text.trim().isNotEmpty;
-    // Auto-expand price bands when the bus already carries some.
-    _bandsOpen = widget.priceBands.isNotEmpty;
+    _mode = widget.priceBands.isNotEmpty ? _PriceMode.bands : _PriceMode.fixed;
   }
 
   List<PriceBand> get _bands => widget.priceBands;
@@ -1522,42 +1508,54 @@ class _Step3PriceState extends State<_Step3Price> {
   TextEditingController get busPrice => widget.busPrice;
   TextEditingController get singleSofaPrice => widget.singleSofaPrice;
   TextEditingController get doubleSofaPrice => widget.doubleSofaPrice;
-  TextEditingController get rearRows => widget.rearRows;
-  TextEditingController get rearPrice => widget.rearPrice;
-  String get slotLabel => widget.slotLabel;
-  String get busNumber => widget.busNumber;
-  bool get isAC => widget.isAC;
   int get totalSeats => widget.totalSeats;
   VoidCallback get onChanged => widget.onChanged;
 
-  /// Row count of the bus, when known (edit mode). Used to clamp the rear-zone
-  /// input and label the highlight legend. Null in add mode.
+  /// Row count of the bus, when known (edit mode). Used to clamp the band row
+  /// range. Null in add mode.
   int? get _rowCount => widget.layout?.rows;
 
-  /// Rear-zone rows currently entered, clamped to the known row count.
-  int get _rearRowsValue {
-    final raw = int.tryParse(rearRows.text.trim()) ?? 0;
-    if (raw <= 0) return 0;
-    final rows = _rowCount;
-    return rows == null ? raw : raw.clamp(0, rows);
+  /// When the agent edits the full bus price, auto-fill the per-seat field by
+  /// dividing across the total seats. Setting the controller text directly does
+  /// NOT fire the per-seat field's own onChanged, so this stays a soft default
+  /// the agent can freely type over.
+  void _onBusPriceChanged() {
+    final parsed = double.tryParse(busPrice.text.trim());
+    if (parsed != null && parsed > 0 && totalSeats > 0) {
+      final v = parsed / totalSeats;
+      price.text =
+          v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+    }
+    onChanged();
   }
 
-  double get _parsedPrice {
-    final raw = price.text.trim();
-    if (raw.isEmpty) return tour?.pricePerSeat ?? 0;
-    return double.tryParse(raw) ?? tour?.pricePerSeat ?? 0;
+  /// Switch between uniform pricing and explicit price bands. Switching to
+  /// "Same for all" stashes any current bands and clears them from the parent
+  /// (so _save persists priceBands=[]); switching back restores the stash.
+  void _onModeChanged(int i) {
+    final next = _PriceMode.values[i];
+    if (next == _PriceMode.fixed && widget.priceBands.isNotEmpty) {
+      _stashedBands = List<PriceBand>.of(widget.priceBands);
+      widget.onBandsChanged(const []);
+    } else if (next == _PriceMode.bands &&
+        widget.priceBands.isEmpty &&
+        _stashedBands.isNotEmpty) {
+      widget.onBandsChanged(List<PriceBand>.of(_stashedBands));
+    }
+    HapticFeedback.selectionClick();
+    setState(() => _mode = next);
   }
 
   @override
   Widget build(BuildContext context) {
-    final per = _parsedPrice;
-    final ifFull = per * totalSeats;
     final hint = tour != null && tour!.pricePerSeat > 0
         ? tr(
             'add_bus.hint.price_default',
             namedArgs: {'price': tour!.pricePerSeat.toStringAsFixed(0)},
           )
         : tr('add_bus.hint.price_plain');
+
+    final busPriceParsed = double.tryParse(busPrice.text.trim()) ?? 0;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -1576,6 +1574,18 @@ class _Step3PriceState extends State<_Step3Price> {
         ),
         const SizedBox(height: UgamSpacing.xl),
         UgamInput(
+          label: tr('add_bus.label.bus_price'),
+          controller: busPrice,
+          hint: tr('add_bus.hint.bus_price'),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+          ],
+          prefix: _RupeePrefix(c: c),
+          onChanged: (_) => _onBusPriceChanged(),
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        UgamInput(
           label: tr('add_bus.label.price_per_seat'),
           controller: price,
           hint: hint,
@@ -1586,11 +1596,62 @@ class _Step3PriceState extends State<_Step3Price> {
           prefix: _RupeePrefix(c: c),
           onChanged: (_) => onChanged(),
         ),
+        if (busPriceParsed > 0 && totalSeats > 0) ...[
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            tr('add_bus.per_seat.auto_note', namedArgs: {'seats': '$totalSeats'}),
+            style: UgamText.caption.copyWith(color: c.ink3, height: 1.4),
+          ),
+        ],
+        const SizedBox(height: UgamSpacing.xl),
+        _Label(c: c, text: tr('add_bus.price_mode.question')),
+        const SizedBox(height: UgamSpacing.sm),
+        UgamTabPills(
+          items: [
+            UgamTabItem(
+              label: tr('add_bus.price_mode.same_label'),
+              icon: Icons.attach_money_rounded,
+            ),
+            UgamTabItem(
+              label: tr('add_bus.price_mode.bands_label'),
+              icon: Icons.tune_rounded,
+              count: widget.priceBands.isNotEmpty
+                  ? widget.priceBands.length
+                  : null,
+            ),
+          ],
+          currentIndex: _mode.index,
+          onChanged: _onModeChanged,
+        ),
+        const SizedBox(height: UgamSpacing.lg),
+        AnimatedSize(
+          duration: UgamMotion.tab,
+          curve: UgamMotion.easeOut,
+          alignment: Alignment.topCenter,
+          child: _mode == _PriceMode.fixed
+              ? _buildFixedBody()
+              : _buildBandsBody(),
+        ),
+        const SizedBox(height: UgamSpacing.xl),
+      ],
+    );
+  }
+
+  /// Uniform-pricing body: the optional per-type single/double sofa overrides.
+  Widget _buildFixedBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          tr('add_bus.price_mode.same_body'),
+          style: UgamText.caption.copyWith(color: c.ink3, height: 1.4),
+        ),
         const SizedBox(height: UgamSpacing.lg),
         UgamInput(
-          label: tr('add_bus.label.bus_price'),
-          controller: busPrice,
-          hint: tr('add_bus.hint.bus_price'),
+          label: tr('add_bus.overrides.single_price'),
+          controller: singleSofaPrice,
+          hint: tr('add_bus.overrides.defaults_to_base'),
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           inputFormatters: [
             FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
@@ -1598,218 +1659,58 @@ class _Step3PriceState extends State<_Step3Price> {
           prefix: _RupeePrefix(c: c),
           onChanged: (_) => onChanged(),
         ),
-        const SizedBox(height: UgamSpacing.xl),
-        _buildRearZone(),
-        const SizedBox(height: UgamSpacing.xl),
-        _buildBandsSection(),
-        const SizedBox(height: UgamSpacing.xl),
-        _buildOverridesSection(),
-        const SizedBox(height: UgamSpacing.xl),
-        Container(
-          padding: const EdgeInsets.all(UgamSpacing.lg),
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(UgamRadius.card),
-            border: Border.all(color: c.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                tr('add_bus.preview.eyebrow'),
-                style: UgamText.micro.copyWith(color: c.ink3),
-              ),
-              const SizedBox(height: UgamSpacing.sm),
-              Text(slotLabel, style: UgamText.titleM.copyWith(color: c.ink)),
-              const SizedBox(height: 2),
-              Text(
-                [
-                  if (busNumber.isNotEmpty) busNumber,
-                  isAC ? tr('add_bus.ac') : tr('add_bus.non_ac'),
-                  tr('add_bus.seats_count', namedArgs: {'count': '$totalSeats'}),
-                ].join(' · '),
-                style: UgamText.caption.copyWith(color: c.ink2),
-              ),
-              const SizedBox(height: UgamSpacing.lg),
-              Container(
-                padding: const EdgeInsets.all(UgamSpacing.md),
-                decoration: BoxDecoration(
-                  color: c.card,
-                  borderRadius: BorderRadius.circular(UgamRadius.row),
-                  border: Border.all(color: c.border),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.calculate_rounded, size: 18, color: c.ink2),
-                    const SizedBox(width: UgamSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        tr(
-                          'add_bus.preview.seats_times_price',
-                          namedArgs: {
-                            'count': '$totalSeats',
-                            'price': per.toStringAsFixed(0),
-                          },
-                        ),
-                        style: UgamText.bodyStrong.copyWith(
-                          color: c.ink,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      '= ${Formatters.formatMoneyInrCompact(ifFull)}',
-                      style: UgamText.tabular(
-                        UgamText.titleS.copyWith(color: c.ink, fontSize: 14),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: UgamSpacing.sm),
-              Text(
-                tr('add_bus.preview.if_fully_booked'),
-                style: UgamText.caption.copyWith(color: c.ink3, fontSize: 11),
-              ),
-            ],
-          ),
+        const SizedBox(height: UgamSpacing.lg),
+        UgamInput(
+          label: tr('add_bus.overrides.double_price'),
+          controller: doubleSofaPrice,
+          hint: tr('add_bus.overrides.defaults_to_base'),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+          ],
+          prefix: _RupeePrefix(c: c),
+          onChanged: (_) => onChanged(),
         ),
       ],
     );
   }
 
-  /// Rear-zone pricing group: how many of the LAST rows are priced differently,
-  /// and the per-person price for them. The price field only appears once the
-  /// row count is > 0. In edit mode (where the layout is known) the rear rows
-  /// are highlighted in a legend so the agent sees exactly which seats apply.
-  Widget _buildRearZone() {
-    final rearRows = _rearRowsValue;
-    final rowCount = _rowCount;
+  /// Price-bands body: the editable list of named row-range bands.
+  Widget _buildBandsBody() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _StepIntro(
-          c: c,
-          eyebrow: tr('add_bus.section.rear_zone_eyebrow'),
-          title: tr('add_bus.section.rear_zone_title'),
-          body: tr('add_bus.section.rear_zone_body'),
+        Text(
+          tr('add_bus.price_mode.bands_body'),
+          style: UgamText.caption.copyWith(color: c.ink3, height: 1.4),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        UgamInput(
-          label: tr('add_bus.label.rear_rows'),
-          controller: this.rearRows,
-          hint: rowCount == null
-              ? tr('add_bus.hint.rear_rows')
-              : tr(
-                  'add_bus.hint.rear_rows_max',
-                  namedArgs: {'max': '$rowCount'},
-                ),
-          keyboardType: const TextInputType.numberWithOptions(decimal: false),
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9]')),
-          ],
-          onChanged: (_) => onChanged(),
-        ),
-        AnimatedSize(
-          duration: UgamMotion.tab,
-          curve: UgamMotion.easeOut,
-          alignment: Alignment.topCenter,
-          child: rearRows > 0
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(height: UgamSpacing.lg),
-                    UgamInput(
-                      label: tr('add_bus.label.rear_price'),
-                      controller: rearPrice,
-                      hint: tr('add_bus.hint.rear_price'),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      ],
-                      prefix: _RupeePrefix(c: c),
-                      onChanged: (_) => onChanged(),
-                    ),
-                    const SizedBox(height: UgamSpacing.sm),
-                    _RearZoneLegend(
-                      c: c,
-                      rearRows: rearRows,
-                      layout: widget.layout,
-                    ),
-                  ],
-                )
-              : const SizedBox.shrink(),
-        ),
-      ],
-    );
-  }
-
-  /// Collapsible "Price bands" sub-section. Lets the agent add named bands —
-  /// a premium front range, a discounted back range, or any explicit row range
-  /// — each with a per-person price that overrides the base/per-type pricing for
-  /// the rows it covers. Bands are owned by the parent state (so they survive
-  /// step navigation) and are surfaced to pricing alongside the legacy rear zone.
-  Widget _buildBandsSection() {
-    final rowCount = _rowCount;
-    return UgamExpander(
-      title: tr('add_bus.bands.title'),
-      subtitle: tr('add_bus.bands.subtitle'),
-      icon: Icons.tune_rounded,
-      initiallyExpanded: _bandsOpen,
-      trailing: _bands.isNotEmpty
-          ? Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-                border: Border.all(color: c.border),
-              ),
-              child: Text(
-                '${_bands.length}',
-                style: UgamText.tabular(
-                  UgamText.micro.copyWith(color: c.ink2),
-                ),
-              ),
-            )
-          : null,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (var i = 0; i < _bands.length; i++) ...[
-            _BandRow(
-              c: c,
-              band: _bands[i],
-              onEdit: () => _openBandSheet(index: i),
-              onRemove: () => _removeBand(i),
-            ),
-            const SizedBox(height: UgamSpacing.sm),
-          ],
-          const SizedBox(height: UgamSpacing.xs),
-          UgamButton(
-            label: tr('add_bus.bands.add'),
-            kind: UgamButtonKind.tonal,
-            icon: Icons.add_rounded,
-            expand: true,
-            onPressed: () => _openBandSheet(),
+        for (var i = 0; i < _bands.length; i++) ...[
+          _BandRow(
+            c: c,
+            band: _bands[i],
+            onEdit: () => _openBandSheet(index: i),
+            onRemove: () => _removeBand(i),
           ),
-          if (rowCount == null) ...[
-            const SizedBox(height: UgamSpacing.sm),
-            Text(
-              tr('add_bus.bands.rows_clamped_note'),
-              style: UgamText.micro.copyWith(color: c.ink3),
-            ),
-          ],
+          const SizedBox(height: UgamSpacing.sm),
         ],
-      ),
+        const SizedBox(height: UgamSpacing.xs),
+        UgamButton(
+          label: tr('add_bus.bands.add'),
+          kind: UgamButtonKind.tonal,
+          icon: Icons.add_rounded,
+          expand: true,
+          onPressed: () => _openBandSheet(),
+        ),
+        if (_rowCount == null) ...[
+          const SizedBox(height: UgamSpacing.sm),
+          Text(
+            tr('add_bus.bands.rows_clamped_note'),
+            style: UgamText.micro.copyWith(color: c.ink3),
+          ),
+        ],
+      ],
     );
   }
 
@@ -1974,142 +1875,6 @@ class _Step3PriceState extends State<_Step3Price> {
     );
   }
 
-  /// Collapsible "Per-type overrides (optional)" section housing the three
-  /// existing single/double/seater price fields. Collapsed by default to reduce
-  /// clutter; their wiring (controllers + onChanged) is unchanged.
-  Widget _buildOverridesSection() {
-    return UgamExpander(
-      title: tr('add_bus.section.overrides_title'),
-      subtitle: tr('add_bus.section.overrides_body'),
-      icon: Icons.price_change_rounded,
-      initiallyExpanded: _overridesOpen,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          UgamInput(
-            label: tr('add_bus.overrides.single_price'),
-            controller: singleSofaPrice,
-            hint: tr('add_bus.overrides.defaults_to_base'),
-            keyboardType: const TextInputType.numberWithOptions(
-              decimal: true,
-            ),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-            ],
-            prefix: _RupeePrefix(c: c),
-            onChanged: (_) => onChanged(),
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          UgamInput(
-            label: tr('add_bus.overrides.double_price'),
-            controller: doubleSofaPrice,
-            hint: tr('add_bus.overrides.defaults_to_base'),
-            keyboardType: const TextInputType.numberWithOptions(
-              decimal: true,
-            ),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-            ],
-            prefix: _RupeePrefix(c: c),
-            onChanged: (_) => onChanged(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Legend showing which rows fall in the rear zone. When the layout is known
-/// (edit mode) it renders a row-strip where each row is marked using
-/// [BusLayout.isRearRow] — rear rows get an accent tint/border so the agent sees
-/// exactly which seats are affected. In add mode (no layout yet) it falls back
-/// to a single caption line.
-class _RearZoneLegend extends StatelessWidget {
-  final UgamColorSet c;
-  final int rearRows;
-  final BusLayout? layout;
-
-  const _RearZoneLegend({
-    required this.c,
-    required this.rearRows,
-    required this.layout,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final l = layout;
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.layers_rounded, size: 16, color: c.ink2),
-              const SizedBox(width: UgamSpacing.sm),
-              Expanded(
-                child: Text(
-                  l == null
-                      ? tr(
-                          'add_bus.rear_zone.legend_plain',
-                          namedArgs: {'rows': '$rearRows'},
-                        )
-                      : tr(
-                          'add_bus.rear_zone.legend',
-                          namedArgs: {
-                            'rows': '$rearRows',
-                            'total': '${l.rows}',
-                          },
-                        ),
-                  style: UgamText.caption.copyWith(color: c.ink2, height: 1.4),
-                ),
-              ),
-            ],
-          ),
-          if (l != null) ...[
-            const SizedBox(height: UgamSpacing.sm),
-            Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              children: List.generate(l.rows, (row) {
-                final rear = l.isRearRow(row, rearRows);
-                return Container(
-                  width: 26,
-                  height: 22,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: rear ? c.accentFill : c.cardElev,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: rear ? c.accent : c.border,
-                      width: rear ? 1.4 : 1,
-                    ),
-                  ),
-                  child: Text(
-                    '${row + 1}',
-                    style: UgamText.tabular(
-                      UgamText.micro.copyWith(
-                        color: rear ? c.accent : c.ink3,
-                        fontSize: 9.5,
-                      ),
-                    ),
-                  ),
-                );
-              }),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
 /// One row in the "Price bands" list: the band's label, its 1-based row range,

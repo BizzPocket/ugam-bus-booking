@@ -666,6 +666,16 @@
     "band_row": {
       "single": "Row {row}",
       "range": "Rows {from}–{to}"
+    },
+    "price_mode": {
+      "question": "How are seats priced?",
+      "same_label": "Same for all",
+      "bands_label": "Price bands",
+      "same_body": "Every seat costs the same. Add single / double sofa prices only if those seats are priced differently.",
+      "bands_body": "Charge specific rows a different per-person price. Any row without a band uses the per-seat price above."
+    },
+    "per_seat": {
+      "auto_note": "Auto-filled from full bus price ÷ {seats} seats — tap to set your own."
     }
   },
   "admin_setup": {
