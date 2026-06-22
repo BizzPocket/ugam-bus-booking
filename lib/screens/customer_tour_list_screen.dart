@@ -182,7 +182,7 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                       UgamSpacing.gutter,
                       UgamSpacing.md,
                       UgamSpacing.gutter,
-                      140,
+                      UgamSpacing.dockClearance,
                     ),
                     itemCount: groups.length,
                     itemBuilder: (_, i) {
@@ -190,7 +190,7 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                       if (g.tours.isEmpty) return const SizedBox.shrink();
                       return Padding(
                         padding: EdgeInsets.only(
-                          bottom: i == groups.length - 1 ? 0 : UgamSpacing.lg,
+                          bottom: i == groups.length - 1 ? 0 : UgamSpacing.xl,
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -540,7 +540,7 @@ class _GroupHeader extends StatelessWidget {
       children: [
         Text(
           label,
-          style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
+          style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17),
         ),
         const SizedBox(width: UgamSpacing.sm),
         Container(
@@ -585,10 +585,10 @@ class _TourRow extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.sm),
+        padding: const EdgeInsets.all(UgamSpacing.sm + 2),
         decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(20),
+          color: c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.card),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -598,7 +598,7 @@ class _TourRow extends StatelessWidget {
               children: [
                 // Photo-anchored 88-px thumbnail with date pill overlay.
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(UgamRadius.photo),
                   child: SizedBox(
                     width: 96,
                     height: 88,
@@ -619,7 +619,7 @@ class _TourRow extends StatelessWidget {
                             ),
                             decoration: BoxDecoration(
                               color: c.cardElev,
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               _formatDate(tour.departureDate),
@@ -832,6 +832,13 @@ class _BookPill extends StatelessWidget {
         decoration: BoxDecoration(
           color: c.accent,
           borderRadius: BorderRadius.circular(UgamRadius.chip),
+          boxShadow: [
+            BoxShadow(
+              color: c.glow,
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -861,13 +868,13 @@ class _LoadingShimmer extends StatelessWidget {
       children: const [
         UgamSkeleton(height: 28, width: 120, radius: 8),
         SizedBox(height: UgamSpacing.md),
-        UgamSkeleton(height: 110, radius: 20),
-        SizedBox(height: UgamSpacing.sm),
-        UgamSkeleton(height: 110, radius: 20),
+        UgamSkeleton(height: 110, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.sm + 2),
+        UgamSkeleton(height: 110, radius: UgamRadius.card),
         SizedBox(height: UgamSpacing.xl),
         UgamSkeleton(height: 28, width: 120, radius: 8),
         SizedBox(height: UgamSpacing.md),
-        UgamSkeleton(height: 110, radius: 20),
+        UgamSkeleton(height: 110, radius: UgamRadius.card),
       ],
     );
   }

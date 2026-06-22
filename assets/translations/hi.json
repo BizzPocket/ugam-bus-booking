@@ -252,7 +252,18 @@
     "mini_waitlist": "वेटलिस्ट",
     "ago_now": "अभी",
     "recent_subtitle": "{title} · {n} सीटें",
-    "qa_notify": "नोटिफाई"
+    "qa_notify": "नोटिफाई",
+    "passengers": "यात्री",
+    "seats_left": "{total} में से {left} सीट बाकी",
+    "no_bus_added": "अभी बस नहीं जोड़ी",
+    "nearest_trip": "नज़दीकी ट्रिप",
+    "departs": "प्रस्थान · {date}",
+    "departs_short": "प्रस्थान {date}",
+    "open_trip": "ट्रिप खोलें",
+    "choose_trip": "ट्रिप चुनें",
+    "leg_go": "जाना",
+    "leg_return": "वापसी",
+    "leg_free": "खाली"
   },
   "tours": {
     "title": "मेरी यात्राएँ",
@@ -545,7 +556,14 @@
       "driver_name_plain": "मालिक के पुष्टि करने पर बाद में जोड़ें",
       "bus_price": "बस मालिक को दिया जाने वाला कुल किराया",
       "boarding_point": "यह बस कहाँ से रवाना होती है",
-      "departure_time": "यह बस कब रवाना होती है"
+      "departure_time": "यह बस कब रवाना होती है",
+      "boarding_point_short": "उदा. सूरत",
+      "departure_time_short": "समय"
+    },
+    "group": {
+      "bus": "बस",
+      "boarding": "बोर्डिंग",
+      "driver": "ड्राइवर · वैकल्पिक"
     },
     "section": {
       "rear_zone_eyebrow": "पिछला ज़ोन (वैकल्पिक)",
@@ -877,7 +895,8 @@
     "remove_row": "हटाएँ",
     "leg_full": "पूरी यात्रा",
     "leg_go": "केवल जाना",
-    "leg_ret": "केवल वापसी"
+    "leg_ret": "केवल वापसी",
+    "seats_total": "कुल सीटें: {count}"
   },
   "occupant": {
     "make_priority": "प्राथमिकता दें",
@@ -1032,6 +1051,13 @@
     "back_to_summary": "सारांश पर वापस",
     "summary_subtitle": "अवलोकन और ऑटो-भरें",
     "grid_subtitle": "सीटें हाथ से सेट करें"
+  },
+  "seat_history": {
+    "title": "सीट इतिहास",
+    "leg_go": "जाने वाली",
+    "leg_return": "वापसी",
+    "empty": "इस यात्रा के लिए कोई सीट इतिहास सहेजा नहीं गया।",
+    "fallback_note": "मौजूदा बैठक दिखा रहे हैं — इस यात्रा के लिए पुराना चार्ट सहेजा नहीं गया था।"
   },
   "seating_exceptions": {
     "title": "आपके निर्णय की आवश्यकता",
@@ -1365,6 +1391,9 @@
     "snack_broadcast_error": "ब्रॉडकास्ट विफल: {error}",
     "sending_broadcast": "ब्रॉडकास्ट भेज रहे हैं…",
     "send_broadcast_whatsapp": "WhatsApp पर ब्रॉडकास्ट भेजें",
+    "share_to_collect_riders": "यात्री जुटाने के लिए WhatsApp पर शेयर करें",
+    "add_riders": "यात्री जोड़ें",
+    "more_tools": "और टूल",
     "no_passengers_title": "अभी तक कोई यात्री नहीं",
     "no_passengers_body": "अनुरोध एकत्र करने के लिए यह टूर WhatsApp पर शेयर करें — या किसी ग्राहक के लिए खुद एक जोड़ें।",
     "filter_all": "सभी",
@@ -1402,6 +1431,9 @@
     "complete_confirm_body": "यह \"{title}\" को आर्काइव में ले जाता है। आप अब भी इसका चार्ट और पैसा देख सकते हैं, पर यह सक्रिय टूर में नहीं दिखेगा।",
     "mark_completed": "पूर्ण के रूप में चिह्नित करें",
     "tool_seats": "सीट",
+    "tool_buses": "बस",
+    "tool_requests": "अनुरोध",
+    "actions_section": "क्रियाएँ",
     "tool_send": "भेजें",
     "tool_lock": "लॉक करें",
     "tool_money": "पैसा",
@@ -1455,6 +1487,10 @@
       "move_confirm_body": "{name} को {bus} की सीट {seat} पर ले जाएँ?",
       "move_confirm_yes": "ले जाएँ",
       "moved": "{name} को {seat} पर ले गए",
+      "pair_title": "दोनों सिंगल ले जाएँ?",
+      "pair_body": "{name} के पास एक और सिंगल है, और {seat} डबल है (दो लोग बैठें). दोनों सिंगल यहाँ ले जाएँ, या सिर्फ़ यह एक?",
+      "pair_both": "दोनों ले जाएँ",
+      "pair_one": "सिर्फ़ यह एक",
       "swap_confirm_title": "सीटें अदला-बदली करें?",
       "swap_confirm_body": "सीट {seat} पर {mover} की {other} से अदला-बदली करें?",
       "swap_confirm_yes": "अदला-बदली",

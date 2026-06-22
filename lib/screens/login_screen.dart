@@ -55,25 +55,53 @@ class LoginScreen extends GetView<AuthController> {
                             ),
                           ],
                           const SizedBox(height: UgamSpacing.huge),
-                          // Brand block — logo, wordmark, tagline.
-                          const UgamLogo(size: 56),
-                          const SizedBox(height: UgamSpacing.xxl),
-                          Text(
-                            'UGAM',
-                            style: UgamText.display.copyWith(
-                              color: c.ink,
-                              fontSize: 52,
-                              letterSpacing: -1.2,
-                            ),
-                          ),
-                          const SizedBox(height: UgamSpacing.sm),
-                          Text(
-                            tr('login.tagline'),
-                            style: UgamText.body.copyWith(
-                              color: c.ink2,
-                              fontSize: 15,
-                              height: 1.45,
-                            ),
+                          // Brand block — centred logo (on a soft copper halo),
+                          // Sora wordmark, and tagline. The radial glow is the
+                          // signature futuristic flourish, echoing the dashboard
+                          // passenger hero.
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                height: 132,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    Container(
+                                      width: 188,
+                                      height: 188,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        gradient: RadialGradient(
+                                          colors: [
+                                            c.glow,
+                                            c.glow.withValues(alpha: 0),
+                                          ],
+                                          stops: const [0.0, 0.7],
+                                        ),
+                                      ),
+                                    ),
+                                    const UgamLogo(size: 64),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: UgamSpacing.lg),
+                              Text(
+                                'UGAM',
+                                style: UgamText.hero.copyWith(
+                                  color: c.ink,
+                                  fontSize: 52,
+                                  letterSpacing: 2.0,
+                                ),
+                              ),
+                              const SizedBox(height: UgamSpacing.sm),
+                              Text(
+                                tr('login.tagline'),
+                                textAlign: TextAlign.center,
+                                style: UgamText.body.copyWith(color: c.ink2),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: UgamSpacing.huge2),
                           UgamPhoneInput(

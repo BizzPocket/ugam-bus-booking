@@ -378,7 +378,7 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
                             c: c,
                           ),
                         ),
-                      const SizedBox(height: UgamSpacing.md),
+                      const SizedBox(height: UgamSpacing.xl),
                     ],
 
                     // ── Passenger roster ─────────────────────────────────
@@ -690,11 +690,11 @@ class _SuggestionCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 34,
-            height: 34,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
-              color: c.accent.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(10),
+              color: c.accentFill,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
             ),
             alignment: Alignment.center,
             child: Icon(Icons.history_rounded, size: 18, color: c.accent),
@@ -712,7 +712,7 @@ class _SuggestionCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   names,
-                  style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                  style: UgamText.body.copyWith(color: c.ink),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),

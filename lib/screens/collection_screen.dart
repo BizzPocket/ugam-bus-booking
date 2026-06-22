@@ -399,7 +399,7 @@ class _SummaryHeader extends StatelessWidget {
                 height: 42,
                 decoration: BoxDecoration(
                   color: settled ? c.goodFill : c.accentFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.seat),
+                  shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
                 child: Icon(

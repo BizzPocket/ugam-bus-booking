@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../config/app_info.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/finance_controller.dart';
 import '../controllers/theme_controller.dart';
@@ -12,9 +13,6 @@ import '../widgets/language_picker_sheet.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
-
-  /// Displayed in the footer. Mirrors the pubspec marketing version.
-  static const String _appVersion = '1.0.3';
 
   @override
   Widget build(BuildContext context) {
@@ -27,47 +25,12 @@ class SettingsScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.md,
-                UgamSpacing.sm,
-                UgamSpacing.md,
-                UgamSpacing.md,
-              ),
-              child: Row(
-                children: [
-                  // Settings is shell tab 4 and normally cannot pop, so the
-                  // back affordance is hidden in tab mode. It only appears (and
-                  // acts) when a future caller actually pushes this screen.
-                  if (Navigator.canPop(context)) ...[
-                    GestureDetector(
-                      onTap: () => Get.back(),
-                      behavior: HitTestBehavior.opaque,
-                      child: Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: c.cardElev,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.arrow_back_rounded,
-                          size: 19,
-                          color: c.ink,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: UgamSpacing.md),
-                  ],
-                  Expanded(
-                    child: Text(
-                      tr('settings.profile_title'),
-                      style: UgamText.titleL.copyWith(color: c.ink),
-                    ),
-                  ),
-                ],
-              ),
+            // Settings is shell tab 4 and normally cannot pop, so the back
+            // affordance is hidden in tab mode. It only appears (and acts)
+            // when a future caller actually pushes this screen.
+            UgamAppBar(
+              title: tr('settings.profile_title'),
+              showBack: Navigator.canPop(context),
             ),
             Expanded(
               child: SingleChildScrollView(
@@ -75,7 +38,7 @@ class SettingsScreen extends StatelessWidget {
                   UgamSpacing.gutter,
                   UgamSpacing.sm,
                   UgamSpacing.gutter,
-                  UgamSpacing.xxl,
+                  UgamSpacing.dockClearance,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -117,7 +80,7 @@ class SettingsScreen extends StatelessWidget {
                     Container(
                       decoration: BoxDecoration(
                         color: c.cardElev,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(UgamRadius.card),
                       ),
                       child: Column(
                         children: [
@@ -173,7 +136,7 @@ class SettingsScreen extends StatelessWidget {
                           Text(
                             tr(
                               'settings.footer_version',
-                              namedArgs: {'version': _appVersion},
+                              namedArgs: {'version': AppInfo.version},
                             ),
                             style: UgamText.caption.copyWith(color: c.ink3),
                           ),
@@ -316,7 +279,7 @@ class _ProfileHero extends StatelessWidget {
       padding: const EdgeInsets.all(UgamSpacing.lg),
       decoration: BoxDecoration(
         color: c.cardElev,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
       child: Row(
         children: [
@@ -373,7 +336,7 @@ class _AccountCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: c.cardElev,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
       child: _AccountRow(
         c: c,
@@ -413,19 +376,19 @@ class _AccountRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.md + 2,
+        vertical: UgamSpacing.md + 4,
       ),
       child: Row(
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               color: iconBg,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
             ),
             alignment: Alignment.center,
-            child: Icon(icon, size: 18, color: iconFg),
+            child: Icon(icon, size: 20, color: iconFg),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -433,22 +396,49 @@ class _AccountRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
-                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: UgamText.caption.copyWith(
+                    color: c.ink2,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const UgamReqChip(
-                      label: '+91',
-                      variant: UgamChipVariant.neutral,
+                    // Country-code badge. Uses the darker base `card` against
+                    // the `cardElev` card so the pill actually reads — the old
+                    // neutral chip was `cardElev` on `cardElev` (invisible).
+                    // No border: the darker fill alone separates it (soft-card
+                    // style — depth from fill, not strokes).
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: c.card,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '+91',
+                        style: UgamText.micro.copyWith(
+                          color: c.ink2,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 8),
                     Flexible(
                       child: Text(
                         value.isNotEmpty ? value : '—',
                         style: UgamText.tabular(
                           UgamText.bodyStrong.copyWith(
                             color: c.ink,
-                            fontSize: 14,
+                            fontSize: 15,
                           ),
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -602,7 +592,7 @@ class _SettingsRow extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(UgamRadius.card),
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.lg,
@@ -615,7 +605,7 @@ class _SettingsRow extends StatelessWidget {
               height: 38,
               decoration: BoxDecoration(
                 color: iconBg,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(11),
               ),
               alignment: Alignment.center,
               child: Icon(icon, size: 18, color: iconFg),
@@ -694,7 +684,7 @@ class _DangerRow extends StatelessWidget {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(UgamRadius.card),
       child: Container(
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.lg,
@@ -702,7 +692,7 @@ class _DangerRow extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: c.cardElev,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(UgamRadius.card),
         ),
         child: Row(
           children: [
@@ -711,7 +701,7 @@ class _DangerRow extends StatelessWidget {
               height: 38,
               decoration: BoxDecoration(
                 color: c.danger.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(11),
               ),
               alignment: Alignment.center,
               child: Icon(icon, size: 18, color: c.danger),

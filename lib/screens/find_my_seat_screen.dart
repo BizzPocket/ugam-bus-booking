@@ -108,30 +108,44 @@ class _FindMySeatScreenState extends State<FindMySeatScreen> {
                       style: UgamText.body.copyWith(color: c.ink2),
                     ),
                     const SizedBox(height: UgamSpacing.lg),
-                    UgamInput(
-                      label: tr('find_seat.phone_label'),
-                      controller: _phoneCtrl,
-                      hint: tr('find_seat.phone_hint'),
-                      keyboardType: TextInputType.phone,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9+ ]')),
-                      ],
-                      onSubmitted: (_) => _search(),
-                    ),
-                    if (_error != null) ...[
-                      const SizedBox(height: UgamSpacing.sm),
-                      Text(
-                        _error!,
-                        style: UgamText.caption.copyWith(color: c.danger),
+                    Container(
+                      padding: const EdgeInsets.all(UgamSpacing.xl),
+                      decoration: BoxDecoration(
+                        color: c.card,
+                        borderRadius: BorderRadius.circular(UgamRadius.card),
                       ),
-                    ],
-                    const SizedBox(height: UgamSpacing.lg),
-                    UgamCTA(
-                      label: _searching
-                          ? tr('find_seat.searching')
-                          : tr('find_seat.find_btn'),
-                      leadingIcon: Icons.event_seat_rounded,
-                      onPressed: _searching ? null : _search,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          UgamInput(
+                            label: tr('find_seat.phone_label'),
+                            controller: _phoneCtrl,
+                            hint: tr('find_seat.phone_hint'),
+                            keyboardType: TextInputType.phone,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                  RegExp(r'[0-9+ ]')),
+                            ],
+                            onSubmitted: (_) => _search(),
+                          ),
+                          if (_error != null) ...[
+                            const SizedBox(height: UgamSpacing.sm),
+                            Text(
+                              _error!,
+                              style:
+                                  UgamText.caption.copyWith(color: c.danger),
+                            ),
+                          ],
+                          const SizedBox(height: UgamSpacing.lg),
+                          UgamCTA(
+                            label: _searching
+                                ? tr('find_seat.searching')
+                                : tr('find_seat.find_btn'),
+                            leadingIcon: Icons.event_seat_rounded,
+                            onPressed: _searching ? null : _search,
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     _results(c),
@@ -147,9 +161,13 @@ class _FindMySeatScreenState extends State<FindMySeatScreen> {
 
   Widget _results(UgamColorSet c) {
     if (_searching) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: UgamSpacing.xxl),
-        child: Center(child: CircularProgressIndicator()),
+      return const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          UgamSkeleton(height: 132, radius: UgamRadius.card),
+          SizedBox(height: UgamSpacing.lg),
+          UgamSkeleton(height: 132, radius: UgamRadius.card),
+        ],
       );
     }
     if (!_searched) return const SizedBox.shrink();
@@ -217,15 +235,14 @@ class _TicketCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.card,
         borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(color: c.border),
       ),
-      padding: const EdgeInsets.all(UgamSpacing.lg),
+      padding: const EdgeInsets.all(UgamSpacing.xl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             ticket.tourTitle,
-            style: UgamText.titleS.copyWith(color: c.ink),
+            style: UgamText.titleM.copyWith(color: c.ink),
           ),
           const SizedBox(height: 2),
           Text(
@@ -235,12 +252,12 @@ class _TicketCard extends StatelessWidget {
           const SizedBox(height: UgamSpacing.sm),
           Row(
             children: [
-              Icon(Icons.person_rounded, size: 14, color: c.ink3),
-              const SizedBox(width: 4),
+              Icon(Icons.person_rounded, size: 15, color: c.ink3),
+              const SizedBox(width: UgamSpacing.xs + 2),
               Expanded(
                 child: Text(
                   ticket.passengerName,
-                  style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -252,7 +269,7 @@ class _TicketCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: UgamSpacing.md,
-                vertical: 6,
+                vertical: UgamSpacing.sm,
               ),
               decoration: BoxDecoration(
                 color: c.accentFill,
@@ -309,15 +326,14 @@ class _HandlerEntryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.card,
         borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(color: c.border),
       ),
-      padding: const EdgeInsets.all(UgamSpacing.lg),
+      padding: const EdgeInsets.all(UgamSpacing.xl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             ref.tourTitle,
-            style: UgamText.titleS.copyWith(color: c.ink),
+            style: UgamText.titleM.copyWith(color: c.ink),
           ),
           const SizedBox(height: 2),
           Text(
@@ -383,8 +399,7 @@ class _BusDiagram extends StatelessWidget {
             padding: const EdgeInsets.all(UgamSpacing.md),
             decoration: BoxDecoration(
               color: c.cardElev,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: c.border),
+              borderRadius: BorderRadius.circular(UgamRadius.input),
             ),
             child: CombinedSeatGrid(
               layout: layout,

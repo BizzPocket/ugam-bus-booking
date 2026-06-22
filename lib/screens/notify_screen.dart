@@ -988,7 +988,7 @@ class _ProgressCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
               value: pct,
-              minHeight: 8,
+              minHeight: 6,
               backgroundColor: c.cardElev,
               valueColor: AlwaysStoppedAnimation(color),
             ),
@@ -1367,9 +1367,6 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
                       decoration: BoxDecoration(
                         color: _busId == b.id ? c.accentFill : c.cardElev,
                         borderRadius: BorderRadius.circular(UgamRadius.chip),
-                        border: Border.all(
-                          color: _busId == b.id ? c.accent : c.border,
-                        ),
                       ),
                       child: Text(
                         _busLabel(b),
@@ -1462,7 +1459,7 @@ class _SendProgressDialog extends StatelessWidget {
                     child: CircularProgressIndicator(
                       value: ready ? null : pct,
                       color: c.accent,
-                      backgroundColor: c.border,
+                      backgroundColor: c.cardElev,
                       strokeWidth: 4,
                     ),
                   ),
@@ -1475,11 +1472,7 @@ class _SendProgressDialog extends StatelessWidget {
                             'total': '$total',
                           }),
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: c.ink,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: UgamText.titleS.copyWith(color: c.ink),
                   ),
                 ],
               );

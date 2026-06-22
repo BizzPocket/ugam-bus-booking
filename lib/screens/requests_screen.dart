@@ -16,6 +16,7 @@ import '../models/trip_type.dart';
 import '../routes/app_routes.dart';
 import '../services/whatsapp_outbound.dart';
 import '../services/whatsapp_service.dart';
+import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
@@ -66,10 +67,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
   final Set<String> _selectedIds = <String>{};
 
   // Bottom list clearance so the last card never hides under the floating
-  // bars. Token-derived (8pt grid) — selection bar vs sticky CTA.
+  // bars. Both derive from the shared dock-clearance token so the list scrolls
+  // clear of the floating dock + sticky CTA / bulk-action bar.
   static const double _listBottomPadSelection =
-      UgamSpacing.huge3 + UgamSpacing.huge2 + UgamSpacing.lg; // 56+40+16 = 112
-  static const double _listBottomPadNormal = UgamSpacing.huge2 * 4; // 40*4 = 160
+      UgamSpacing.dockClearance - UgamSpacing.xxl; // 140-24 = 116
+  static const double _listBottomPadNormal = UgamSpacing.dockClearance; // 140
 
   @override
   void initState() {
@@ -292,6 +294,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
           final Tour? selectedTour = activeTours.isEmpty
               ? null
               : activeTours[_selectedTourIndex];
+          // Hide the sticky assignment CTA until there's at least one live
+          // request: on an empty roster "Add a bus"/"Seats" is a dead-end
+          // action (BUG-003). journeyDone passengers are off the active roster.
+          final bool hasRequests = selectedTour != null &&
+              selectedTour.passengers.any((p) => !p.journeyDone);
 
           return Stack(
             children: [
@@ -299,18 +306,13 @@ class _RequestsScreenState extends State<RequestsScreen> {
                 children: [
                   _TopBar(
                     c: c,
-                    // Selected tour's route shown as the eyebrow above the
-                    // title (e.g. "Surat → Ambaji").
-                    eyebrow: selectedTour == null
-                        ? null
-                        : '${selectedTour.fromCity} → ${selectedTour.toCity}',
                     // Pushed/scoped mode (opened from a tour workspace with a
                     // tour pre-selected) strands the user with no dock nav — so
                     // render a back affordance. The shell tab (initialTourId
                     // null, nothing to pop) keeps the plain title.
                     showBack: widget.initialTourId != null &&
                         Navigator.canPop(context),
-                    onBack: Get.back,
+                    onBack: () => AppNav.pop(context),
                     searchActive: _searchVisible,
                     onToggleSearch: _toggleSearch,
                     onAdd: selectedTour == null
@@ -384,7 +386,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
                           onDecline: () => _bulkDecline(selectedTour),
                           onCancel: _exitSelection,
                         )
-                      : _AssignmentCTA(tour: selectedTour, c: c),
+                      : (hasRequests
+                          ? _AssignmentCTA(tour: selectedTour, c: c)
+                          : const SizedBox.shrink()),
                 ),
             ],
           );
@@ -594,11 +598,6 @@ class _TopBar extends StatelessWidget {
   final int selectedCount;
   final VoidCallback onExitSelection;
 
-  /// Optional small champagne label above the title — the selected tour's
-  /// route (e.g. "Surat → Ambaji"), so the agent always sees which tour these
-  /// requests belong to. Null when no tour is selected.
-  final String? eyebrow;
-
   const _TopBar({
     required this.c,
     this.showBack = false,
@@ -610,7 +609,6 @@ class _TopBar extends StatelessWidget {
     required this.selectionMode,
     required this.selectedCount,
     required this.onExitSelection,
-    this.eyebrow,
   });
 
   @override
@@ -631,9 +629,6 @@ class _TopBar extends StatelessWidget {
     // disabled via UgamIconButton's muted token, not an accent-at-40% hack.
     return UgamAppBar(
       title: tr('requests.title'),
-      // Selected tour's route as the eyebrow, so the agent always sees which
-      // tour these requests belong to.
-      eyebrow: eyebrow,
       // Pushed/scoped mode shows the back affordance; the shell tab hides it.
       showBack: showBack,
       onBack: onBack,
@@ -730,12 +725,16 @@ class _CapacityBannerState extends State<_CapacityBanner> {
           (st.displayName, cap.freeByType[st] ?? 0),
     ];
 
+    // The bar is a quiet soft card — depth from fill, not a border (the look
+    // is borderless on neutral dark surfaces). Only the no-bus *attention*
+    // state tints the whole surface (warm); a healthy/full bus stays neutral
+    // and lets the tone live in the icon, fill-bar and status text instead.
     final (Color tone, Color fill, IconData icon, String statusValue,
         String statusLabel) = noBus
         ? (c.warm, c.warmFill, Icons.directions_bus_outlined, '—',
             tr('requests.capacity.no_buses'))
         : free > 0
-        ? (c.good, c.goodFill, Icons.event_seat_outlined, '$free',
+        ? (c.good, c.card, Icons.event_seat_outlined, '$free',
             tr('requests.capacity.free'))
         : (c.ink3, c.card, Icons.event_seat_outlined, '0',
             tr('requests.capacity.free'));
@@ -752,13 +751,12 @@ class _CapacityBannerState extends State<_CapacityBanner> {
         alignment: Alignment.topCenter,
         child: Container(
           padding: const EdgeInsets.symmetric(
-            horizontal: UgamSpacing.md,
-            vertical: UgamSpacing.sm + 2,
+            horizontal: UgamSpacing.lg,
+            vertical: UgamSpacing.md,
           ),
           decoration: BoxDecoration(
             color: fill,
-            borderRadius: BorderRadius.circular(UgamRadius.stat),
-            border: Border.all(color: tone.withValues(alpha: 0.35)),
+            borderRadius: BorderRadius.circular(UgamRadius.card),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -787,8 +785,8 @@ class _CapacityBannerState extends State<_CapacityBanner> {
                           value: capacity <= 0
                               ? 0
                               : (occupied / capacity).clamp(0.0, 1.0),
-                          minHeight: 4,
-                          backgroundColor: c.border,
+                          minHeight: 5,
+                          backgroundColor: c.cardElev,
                           valueColor: AlwaysStoppedAnimation<Color>(tone),
                         ),
                       ),
@@ -849,6 +847,8 @@ class _CapacityBannerState extends State<_CapacityBanner> {
               // reclaim row. Hidden by default so cards surface sooner.
               if (_expanded) ...[
                 const SizedBox(height: UgamSpacing.sm + 2),
+                // Three calm segments separated by space, not hairlines — the
+                // surface is borderless so the dividers were visual clutter.
                 Row(
                   children: [
                     _CapSeg(
@@ -857,14 +857,12 @@ class _CapacityBannerState extends State<_CapacityBanner> {
                       label: tr('requests.capacity.requested'),
                       color: c.ink,
                     ),
-                    _CapDivider(c: c),
                     _CapSeg(
                       c: c,
                       value: noBus ? '—' : '$capacity',
                       label: tr('requests.capacity.seats'),
                       color: c.ink,
                     ),
-                    _CapDivider(c: c),
                     _CapSeg(
                       c: c,
                       value: statusValue,
@@ -1025,19 +1023,6 @@ class _CapSeg extends StatelessWidget {
   }
 }
 
-class _CapDivider extends StatelessWidget {
-  final UgamColorSet c;
-  const _CapDivider({required this.c});
-  @override
-  Widget build(BuildContext context) => Container(
-        width: 1,
-        height: 26,
-        margin: const EdgeInsets.symmetric(horizontal: UgamSpacing.sm),
-        color: c.border,
-      );
-}
-
-
 // ─── Assignment CTA ───────────────────────────────────────────────────
 
 class _AssignmentCTA extends StatelessWidget {
@@ -1133,7 +1118,6 @@ class _BulkActionBar extends StatelessWidget {
           decoration: BoxDecoration(
             color: c.card,
             borderRadius: BorderRadius.circular(UgamRadius.chip),
-            border: Border.all(color: c.border),
           ),
           // Cancel lives in the top bar (the close-X shown in selection mode),
           // so the bar focuses on the real moves. The first slot flips between

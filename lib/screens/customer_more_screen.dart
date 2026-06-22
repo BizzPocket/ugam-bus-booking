@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../components/ugam_logo.dart';
+import '../config/app_info.dart';
 import '../config/i18n_config.dart';
 import '../content/legal_content.dart';
 import '../design/ugam.dart';
@@ -18,8 +19,6 @@ import 'legal_document_screen.dart';
 /// brand mark and the destinations they can reach without signing in.
 class CustomerMoreScreen extends StatelessWidget {
   const CustomerMoreScreen({super.key});
-
-  static const String _appVersion = '1.0.0';
 
   @override
   Widget build(BuildContext context) {
@@ -95,41 +94,42 @@ class CustomerMoreScreen extends StatelessWidget {
                   ),
                   UgamCard.plain(
                     padding: EdgeInsets.zero,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _MoreRow(
-                          c: c,
-                          icon: Icons.info_outline_rounded,
-                          tone: UgamStatVariant.neutral,
-                          title: tr('customer_more.about'),
-                          subtitle: tr('customer_more.about_subtitle'),
-                          onTap: () => _openDoc(LegalContent.about),
-                        ),
-                        _Divider(c: c),
-                        _MoreRow(
-                          c: c,
-                          icon: Icons.shield_outlined,
-                          tone: UgamStatVariant.neutral,
-                          title: tr('customer_more.privacy'),
-                          subtitle: tr('customer_more.privacy_subtitle'),
-                          onTap: () => _openDoc(LegalContent.privacy),
-                        ),
-                        _Divider(c: c),
-                        _MoreRow(
-                          c: c,
-                          icon: Icons.description_outlined,
-                          tone: UgamStatVariant.neutral,
-                          title: tr('customer_more.terms'),
-                          subtitle: tr('customer_more.terms_subtitle'),
-                          onTap: () => _openDoc(LegalContent.terms),
-                        ),
-                      ],
+                    child: _MoreRow(
+                      c: c,
+                      icon: Icons.info_outline_rounded,
+                      tone: UgamStatVariant.neutral,
+                      title: tr('customer_more.about'),
+                      subtitle: tr('customer_more.about_subtitle'),
+                      onTap: () => _openDoc(LegalContent.about),
+                    ),
+                  ),
+                  const SizedBox(height: UgamSpacing.sm),
+                  UgamCard.plain(
+                    padding: EdgeInsets.zero,
+                    child: _MoreRow(
+                      c: c,
+                      icon: Icons.shield_outlined,
+                      tone: UgamStatVariant.neutral,
+                      title: tr('customer_more.privacy'),
+                      subtitle: tr('customer_more.privacy_subtitle'),
+                      onTap: () => _openDoc(LegalContent.privacy),
+                    ),
+                  ),
+                  const SizedBox(height: UgamSpacing.sm),
+                  UgamCard.plain(
+                    padding: EdgeInsets.zero,
+                    child: _MoreRow(
+                      c: c,
+                      icon: Icons.description_outlined,
+                      tone: UgamStatVariant.neutral,
+                      title: tr('customer_more.terms'),
+                      subtitle: tr('customer_more.terms_subtitle'),
+                      onTap: () => _openDoc(LegalContent.terms),
                     ),
                   ),
                   const SizedBox(height: UgamSpacing.xl),
 
-                  _Footer(c: c, version: _appVersion),
+                  _Footer(c: c, version: AppInfo.version),
                 ],
               ),
             ),
@@ -157,10 +157,11 @@ class _BrandHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Row(
         children: [
           const UgamLogo(size: 56),
-          const SizedBox(width: UgamSpacing.md),
+          const SizedBox(width: UgamSpacing.lg),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,12 +169,12 @@ class _BrandHero extends StatelessWidget {
               children: [
                 Text(
                   'Ugam Foj',
-                  style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17),
+                  style: UgamText.titleM.copyWith(color: c.ink),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   tr('customer_tour_list.brand_tagline'),
-                  style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                  style: UgamText.caption.copyWith(color: c.ink2),
                 ),
               ],
             ),
@@ -196,16 +197,11 @@ class _SectionLabel extends StatelessWidget {
         UgamSpacing.xs,
         0,
         UgamSpacing.xs,
-        UgamSpacing.sm,
+        UgamSpacing.sm + 2,
       ),
       child: Text(
         label.toUpperCase(),
-        style: UgamText.micro.copyWith(
-          color: c.ink3,
-          fontSize: 11,
-          letterSpacing: 0.6,
-          fontWeight: FontWeight.w700,
-        ),
+        style: UgamText.micro.copyWith(color: c.ink3),
       ),
     );
   }
@@ -254,7 +250,7 @@ class _MoreRow extends StatelessWidget {
                 height: 44,
                 decoration: BoxDecoration(
                   color: iconBg,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 alignment: Alignment.center,
                 child: Icon(icon, size: 20, color: iconFg),
@@ -267,18 +263,12 @@ class _MoreRow extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: UgamText.titleS.copyWith(
-                        color: c.ink,
-                        fontSize: 15,
-                      ),
+                      style: UgamText.titleS.copyWith(color: c.ink),
                     ),
                     const SizedBox(height: 1),
                     Text(
                       subtitle,
-                      style: UgamText.caption.copyWith(
-                        color: c.ink3,
-                        fontSize: 12,
-                      ),
+                      style: UgamText.caption.copyWith(color: c.ink3),
                     ),
                   ],
                 ),
@@ -288,19 +278,6 @@ class _MoreRow extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _Divider extends StatelessWidget {
-  final UgamColorSet c;
-  const _Divider({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
-      child: Divider(height: 1, color: c.border),
     );
   }
 }
@@ -316,12 +293,12 @@ class _Footer extends StatelessWidget {
       children: [
         Text(
           tr('customer_more.version', namedArgs: {'version': version}),
-          style: UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
+          style: UgamText.caption.copyWith(color: c.ink3),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: UgamSpacing.xs),
         Text(
           tr('customer_more.footer_made_by'),
-          style: UgamText.micro.copyWith(color: c.ink3, fontSize: 11),
+          style: UgamText.micro.copyWith(color: c.ink3),
         ),
       ],
     );

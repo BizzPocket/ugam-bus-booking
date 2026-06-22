@@ -254,11 +254,11 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                           UgamSpacing.gutter,
                           UgamSpacing.sm,
                           UgamSpacing.gutter,
-                          140,
+                          UgamSpacing.dockClearance,
                         ),
                         itemCount: _visible.length,
                         separatorBuilder: (_, _) =>
-                            const SizedBox(height: UgamSpacing.sm + 2),
+                            const SizedBox(height: UgamSpacing.md),
                         itemBuilder: (_, i) => _RequestRow(
                           entry: _visible[i],
                           isHandler: _handlerStatus[_visible[i].id] ?? false,
@@ -366,10 +366,10 @@ class _RequestRow extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.sm),
+        padding: const EdgeInsets.all(UgamSpacing.md),
         decoration: BoxDecoration(
           color: c.cardElev,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(UgamRadius.card),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,7 +379,7 @@ class _RequestRow extends StatelessWidget {
               children: [
                 // Small backdrop + date pill.
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
                   child: SizedBox(
                     width: 76,
                     height: 88,
@@ -398,12 +398,12 @@ class _RequestRow extends StatelessWidget {
                           top: 4,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
+                              horizontal: 6,
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
                               color: c.cardElev,
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(UgamRadius.chip),
                             ),
                             child: Text(
                               _formatDate(entry.tourDepartureDate),
@@ -638,15 +638,10 @@ class _RowFooter extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.sm,
-        UgamSpacing.sm,
-        UgamSpacing.sm,
-        UgamSpacing.sm,
-      ),
+      padding: const EdgeInsets.all(UgamSpacing.sm),
       decoration: BoxDecoration(
         color: c.card,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(UgamRadius.input),
       ),
       child: Row(
         children: [
@@ -710,25 +705,25 @@ class _HandlerChartButton extends StatelessWidget {
           vertical: UgamSpacing.sm + 2,
         ),
         decoration: BoxDecoration(
-          color: c.accent,
-          borderRadius: BorderRadius.circular(14),
+          color: c.accentFill,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
         ),
         child: Row(
           children: [
-            Icon(Icons.grid_view_rounded, size: 16, color: c.onAccent),
+            Icon(Icons.grid_view_rounded, size: 16, color: c.accent),
             const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: Text(
                 tr('customer_my_requests.view_full_chart'),
                 style: UgamText.bodyStrong.copyWith(
-                  color: c.onAccent,
+                  color: c.accent,
                   fontSize: 12.5,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: c.onAccent),
+            Icon(Icons.chevron_right_rounded, size: 18, color: c.accent),
           ],
         ),
       ),
@@ -758,8 +753,7 @@ class _AddAnotherButton extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: c.card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: c.border),
+          borderRadius: BorderRadius.circular(UgamRadius.input),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -791,11 +785,11 @@ class _LoadingShimmer extends StatelessWidget {
       padding: const EdgeInsets.all(UgamSpacing.gutter),
       physics: const NeverScrollableScrollPhysics(),
       children: const [
-        UgamSkeleton(height: 110, radius: 20),
-        SizedBox(height: UgamSpacing.sm),
-        UgamSkeleton(height: 110, radius: 20),
-        SizedBox(height: UgamSpacing.sm),
-        UgamSkeleton(height: 110, radius: 20),
+        UgamSkeleton(height: 110, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 110, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 110, radius: UgamRadius.card),
       ],
     );
   }

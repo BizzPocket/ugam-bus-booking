@@ -413,12 +413,7 @@ class _Tally extends StatelessWidget {
               ),
               Text(
                 tr('bus_status.legend_booked').toUpperCase(),
-                style: UgamText.caption.copyWith(
-                  color: c.ink2,
-                  fontSize: 10.5,
-                  letterSpacing: 0.6,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: UgamText.micro.copyWith(color: c.ink2),
               ),
             ],
           ),
@@ -440,7 +435,9 @@ class _Tally extends StatelessWidget {
                     value: ratio.clamp(0.0, 1.0),
                     minHeight: 6,
                     backgroundColor: c.card,
-                    valueColor: AlwaysStoppedAnimation(c.accent),
+                    // Neutral fill — the status tally is meta, not a primary
+                    // action, so copper stays rationed to the focal CTA.
+                    valueColor: AlwaysStoppedAnimation(c.ink2),
                   ),
                 ),
               ],

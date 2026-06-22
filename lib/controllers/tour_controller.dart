@@ -15,6 +15,7 @@ import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
+import '../models/tour_seat_snapshot.dart';
 import '../models/trip_type.dart';
 import '../services/group_cascade.dart';
 import '../services/realtime_service.dart';
@@ -22,7 +23,9 @@ import '../services/seating_engine.dart';
 import '../services/seating_plan_applier.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/passenger_display.dart';
 import '../utils/phone_normalize.dart';
+import '../utils/seat_occupants.dart';
 import 'auth_controller.dart';
 import 'customer_memory_controller.dart';
 
@@ -43,6 +46,13 @@ class TourController extends GetxController {
   /// plan has been generated this session).
   List<SeatingException> exceptionsForTour(String tourId) =>
       lastPlanByTour[tourId]?.exceptions ?? const <SeatingException>[];
+
+  /// Frozen per-leg seat charts, keyed by tourId. Populated lazily by
+  /// [loadSeatSnapshots] (when a past-tour seat view opens) and written through
+  /// by [_captureSeatSnapshot] so a freshly-captured leg is visible without a
+  /// round-trip. Never rides along with the tours-list fetch.
+  final RxMap<String, List<TourSeatSnapshot>> _seatSnapshots =
+      <String, List<TourSeatSnapshot>>{}.obs;
 
   SyncService get _sync => Get.find<SyncService>();
   AuthController get _auth => Get.find<AuthController>();
@@ -576,8 +586,23 @@ class TourController extends GetxController {
   Future<void> lockTour(String tourId) =>
       updateStatus(tourId, TourStatus.locked);
 
-  Future<void> completeTour(String tourId) =>
-      updateStatus(tourId, TourStatus.completed);
+  /// Mark a tour completed (also the auto-archive path for expired tours).
+  ///
+  /// Before flipping status we freeze the seat history so a past tour keeps its
+  /// chart. Both captures are best-effort (their own try/catch swallows any
+  /// failure), so the status transition always proceeds:
+  /// - outbound, `overwriteIfExists: false` — covers tours that expire without
+  ///   a GO-leg completion (seats still intact) and never clobbers the
+  ///   authoritative pre-wipe capture from [completeOutboundLeg].
+  /// - return, `overwriteIfExists: true` — round-trip + return-only riders
+  ///   (`.ret`); skipped automatically when empty (one-way tours).
+  Future<void> completeTour(String tourId) async {
+    await _captureSeatSnapshot(tourId, SnapshotLeg.outbound,
+        overwriteIfExists: false);
+    await _captureSeatSnapshot(tourId, SnapshotLeg.return_,
+        overwriteIfExists: true);
+    await updateStatus(tourId, TourStatus.completed);
+  }
 
   /// Clearing seats on a LOCKED tour un-finalizes the allocation — drop it back
   /// to `assigning` so the agent can re-seat and the "Lock & notify" action
@@ -598,6 +623,14 @@ class TourController extends GetxController {
   Future<int> completeOutboundLeg(String tourId) async {
     final tour = getTour(tourId);
     if (tour == null) return 0;
+
+    // Freeze the authoritative GO chart BEFORE the optimistic clear below wipes
+    // outbound-only riders' seats. This must run even when there are no
+    // outbound-only riders to clear (the loop below adds nothing): completing
+    // the leg should always preserve the GO chart. Best-effort & idempotent on
+    // the (tour_id, leg) key — overwrite so a re-run reflects the latest state.
+    await _captureSeatSnapshot(tourId, SnapshotLeg.outbound,
+        overwriteIfExists: true);
 
     final changed = <Passenger>[];
     await _write(
@@ -624,6 +657,104 @@ class TourController extends GetxController {
       failure: tr('errors.save_passenger'),
     );
     return changed.length;
+  }
+
+  // ── Seat-history snapshots ────────────────────────────────
+
+  /// Freeze the LIVE per-leg seat chart for [tourId] and upsert it into
+  /// `tour_seat_snapshots`. This is the one piece of seat data the live editor
+  /// destroys (GO seats are recycled for the return leg), so we capture it at
+  /// the leg/tour completion edges and keep it for the past-tour history view.
+  ///
+  /// The occupant per seat is resolved with [seatOccupantsForBus]: for
+  /// [SnapshotLeg.outbound] we take each seat's `.go` rider, for
+  /// [SnapshotLeg.return_] its `.ret` rider. Buses with no captured seats are
+  /// skipped, and a snapshot with zero seats across all buses is NOT written
+  /// (e.g. a one-way tour has no return occupants).
+  ///
+  /// The natural key is `(tour_id, leg)`, so we use a deterministic entity id
+  /// `'<tourId>_<leg.wire>'` to make the upsert idempotent — an existing row is
+  /// updated in place, never duplicated. When [overwriteIfExists] is false an
+  /// already-present snapshot is left untouched (so a later, lossy re-capture
+  /// can't clobber the authoritative pre-wipe chart).
+  ///
+  /// Best-effort by contract: the whole body is guarded; any failure (including
+  /// a missing migration) is swallowed and logged, NEVER rethrown — capturing
+  /// history must not break a completion.
+  Future<void> _captureSeatSnapshot(String tourId, SnapshotLeg leg,
+      {required bool overwriteIfExists}) async {
+    try {
+      final tour = getTour(tourId);
+      if (tour == null) return;
+
+      // Is there already a stored snapshot for this (tourId, leg)? Drives both
+      // the don't-clobber guard and the insert-vs-update choice below.
+      final existing = await loadSeatSnapshots(tourId);
+      final hasExisting = existing.any((s) => s.leg == leg);
+      if (hasExisting && !overwriteIfExists) return;
+
+      // Build the per-leg chart from the LIVE tour; null means nothing occupied
+      // for this leg (e.g. a one-way tour has no return riders) — skip storing.
+      final snapshot = buildSeatSnapshot(
+        tourId: tourId,
+        leg: leg,
+        buses: tour.buses,
+        passengers: tour.passengers,
+        capturedAt: DateTime.now(),
+      );
+      if (snapshot == null) return;
+
+      // Deterministic id over the natural (tour_id, leg) key keeps the upsert
+      // idempotent; include it in the insert payload so the row id matches.
+      final entityId = '${tourId}_${leg.wire}';
+      final data = snapshot.toMap();
+      if (hasExisting) {
+        await _sync.smartUpdate(
+          table: 'tour_seat_snapshots',
+          entityId: entityId,
+          data: data,
+        );
+      } else {
+        await _sync.smartInsert(
+          table: 'tour_seat_snapshots',
+          entityId: entityId,
+          data: {'id': entityId, ...data},
+        );
+      }
+
+      // Write through to the in-memory cache so a freshly-opened history view
+      // sees this leg without waiting on a refetch.
+      final cached = List<TourSeatSnapshot>.from(_seatSnapshots[tourId] ?? const [])
+        ..removeWhere((s) => s.leg == leg)
+        ..add(snapshot);
+      _seatSnapshots[tourId] = cached;
+    } catch (e, st) {
+      // Best-effort: history capture must never break a completion.
+      dev.log('seat snapshot capture failed: $e\n$st', name: 'TourController');
+    }
+  }
+
+  /// Lazy-load the frozen seat charts for [tourId] (used by the past-tour seat
+  /// history view). Returns the in-memory cache when present, otherwise fetches
+  /// from `tour_seat_snapshots` and caches the result.
+  ///
+  /// [SyncService.smartFetch] returns `[]` on any error or a missing table, so
+  /// an un-applied migration yields an empty list rather than a crash — the
+  /// history view degrades to its live-chart fallback.
+  Future<List<TourSeatSnapshot>> loadSeatSnapshots(String tourId) async {
+    final cached = _seatSnapshots[tourId];
+    if (cached != null) return cached;
+
+    final rows = await _sync.smartFetch(
+      table: 'tour_seat_snapshots',
+      cacheKey: 'seat_snapshots_$tourId',
+      filters: {'tour_id': tourId},
+      orderBy: 'captured_at',
+      maxAge: 120000,
+    );
+    final snapshots = rows.map(TourSeatSnapshot.fromMap).toList();
+    _seatSnapshots[tourId] = snapshots;
+    return snapshots;
   }
 
   /// GO-only passengers still active (not yet cleared by [completeOutboundLeg]).
@@ -2538,5 +2669,47 @@ Passenger? cancelReturnSeatTransform(Passenger p) {
     assignedSeats: const [],
     journeyDone: true,
     tripType: TripType.outboundOnly,
+  );
+}
+
+/// Pure builder: freeze the [leg] seat chart for a tour. Returns null when no
+/// seat on any bus is occupied for this leg (e.g. a one-way tour has no return
+/// riders) — callers skip storing an empty snapshot. Outbound takes each seat's
+/// `.go` rider, return its `.ret` (via [seatOccupantsForBus]).
+TourSeatSnapshot? buildSeatSnapshot({
+  required String tourId,
+  required SnapshotLeg leg,
+  required List<Bus> buses,
+  required List<Passenger> passengers,
+  required DateTime capturedAt,
+}) {
+  // Build one SnapshotBus per bus, skipping buses with no captured seats.
+  final snapshotBuses = <SnapshotBus>[];
+  var seatCount = 0;
+  for (final bus in buses) {
+    final occupants = seatOccupantsForBus(passengers, bus.id);
+    final seats = <SnapshotSeat>[];
+    occupants.forEach((seatId, occ) {
+      final p = leg == SnapshotLeg.outbound ? occ.go : occ.ret;
+      if (p == null) return;
+      seats.add(SnapshotSeat(
+        seatId: seatId,
+        name: p.displayName,
+        phone: p.phone,
+      ));
+    });
+    if (seats.isEmpty) continue;
+    seatCount += seats.length;
+    snapshotBuses.add(SnapshotBus(busId: bus.id, seats: seats));
+  }
+
+  // Don't store an empty snapshot (e.g. one-way tour → no return riders).
+  if (seatCount == 0) return null;
+
+  return TourSeatSnapshot(
+    tourId: tourId,
+    leg: leg,
+    buses: snapshotBuses,
+    capturedAt: capturedAt,
   );
 }

@@ -15,6 +15,11 @@ class LegalDocumentScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
+    final headerAlign =
+        doc.showLogo ? TextAlign.center : TextAlign.start;
+    final headerCross =
+        doc.showLogo ? CrossAxisAlignment.center : CrossAxisAlignment.start;
+
     return Scaffold(
       backgroundColor: c.bg,
       body: SafeArea(
@@ -25,6 +30,7 @@ class LegalDocumentScreen extends StatelessWidget {
             Expanded(
               child: ListView(
                 physics: const BouncingScrollPhysics(),
+                // Wider reading gutter for long-form legal text.
                 padding: const EdgeInsets.fromLTRB(
                   UgamSpacing.xl,
                   UgamSpacing.sm,
@@ -32,27 +38,32 @@ class LegalDocumentScreen extends StatelessWidget {
                   UgamSpacing.huge2,
                 ),
                 children: [
-                  if (doc.showLogo) ...[
-                    const Center(child: UgamLogo(size: 84)),
-                    const SizedBox(height: UgamSpacing.lg),
-                  ],
-                  Text(
-                    doc.title,
-                    style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 26),
-                    textAlign: doc.showLogo ? TextAlign.center : TextAlign.start,
+                  // ── Document header: logo (about), title, meta ──
+                  Column(
+                    crossAxisAlignment: headerCross,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (doc.showLogo) ...[
+                        const UgamLogo(size: 84),
+                        const SizedBox(height: UgamSpacing.lg),
+                      ],
+                      Text(
+                        doc.title,
+                        style: UgamText.titleXl.copyWith(color: c.ink),
+                        textAlign: headerAlign,
+                      ),
+                      if (doc.meta != null) ...[
+                        const SizedBox(height: UgamSpacing.sm),
+                        Text(
+                          doc.meta!,
+                          style: UgamText.caption
+                              .copyWith(color: c.ink3, height: 1.4),
+                          textAlign: headerAlign,
+                        ),
+                      ],
+                    ],
                   ),
-                  if (doc.meta != null) ...[
-                    const SizedBox(height: UgamSpacing.sm),
-                    Text(
-                      doc.meta!,
-                      style: UgamText.caption.copyWith(color: c.ink3, height: 1.4),
-                      textAlign:
-                          doc.showLogo ? TextAlign.center : TextAlign.start,
-                    ),
-                  ],
-                  const SizedBox(height: UgamSpacing.md),
-                  Container(height: 3, width: 48, color: c.accent),
-                  const SizedBox(height: UgamSpacing.lg),
+                  const SizedBox(height: UgamSpacing.xl),
                   for (final block in doc.blocks) _Block(block: block, c: c),
                 ],
               ),
@@ -74,28 +85,26 @@ class _Block extends StatelessWidget {
     switch (block.kind) {
       case LegalBlockKind.section:
         return Padding(
-          padding: const EdgeInsets.only(top: UgamSpacing.xl, bottom: UgamSpacing.sm),
+          padding:
+              const EdgeInsets.only(top: UgamSpacing.xl, bottom: UgamSpacing.sm),
           child: Text(
             block.text!,
-            style: UgamText.titleM.copyWith(
-              color: c.ink,
-              fontWeight: FontWeight.w700,
-              fontSize: 17,
-            ),
+            style: UgamText.titleM.copyWith(color: c.ink),
           ),
         );
       case LegalBlockKind.sub:
         return Padding(
-          padding: const EdgeInsets.only(top: UgamSpacing.md, bottom: UgamSpacing.xs),
+          padding:
+              const EdgeInsets.only(top: UgamSpacing.md, bottom: UgamSpacing.xs),
           child: Text(
             block.text!,
-            style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+            style: UgamText.titleS.copyWith(color: c.ink),
           ),
         );
       case LegalBlockKind.paragraph:
         final body = Text(
           block.text!,
-          style: UgamText.body.copyWith(color: c.ink2, height: 1.55, fontSize: 14.5),
+          style: UgamText.body.copyWith(color: c.ink2, height: 1.55),
         );
         if (!block.boxed) {
           return Padding(
@@ -103,21 +112,22 @@ class _Block extends StatelessWidget {
             child: body,
           );
         }
+        // Boxed callout — a soft floating surface, no border (depth from fill).
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm),
           child: Container(
             padding: const EdgeInsets.all(UgamSpacing.lg),
             decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.row),
-              border: Border.all(color: c.border),
+              color: c.card,
+              borderRadius: BorderRadius.circular(UgamRadius.card),
             ),
             child: body,
           ),
         );
       case LegalBlockKind.bullets:
         return Padding(
-          padding: const EdgeInsets.only(top: UgamSpacing.xs, bottom: UgamSpacing.sm),
+          padding:
+              const EdgeInsets.only(top: UgamSpacing.xs, bottom: UgamSpacing.sm),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -128,12 +138,13 @@ class _Block extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.only(top: 7, right: UgamSpacing.sm),
+                        padding: const EdgeInsets.only(
+                            top: 8, right: UgamSpacing.sm + 2),
                         child: Container(
                           width: 5,
                           height: 5,
                           decoration: BoxDecoration(
-                            color: c.ink3,
+                            color: c.accent,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -143,8 +154,7 @@ class _Block extends StatelessWidget {
                           item,
                           style: UgamText.body.copyWith(
                             color: c.ink2,
-                            height: 1.5,
-                            fontSize: 14.5,
+                            height: 1.55,
                           ),
                         ),
                       ),

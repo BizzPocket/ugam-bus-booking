@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'design/theme.dart';
 import 'design/tokens.dart';
-import 'design/components/ugam_chrome.dart';
 import 'routes/app_routes.dart';
 import 'controllers/tour_controller.dart';
 import 'controllers/money_controller.dart';
@@ -40,7 +39,6 @@ class MyApp extends StatelessWidget {
         locale: context.locale,
         initialRoute: AppRoutes.splash,
         getPages: AppRoutes.routes,
-        navigatorObservers: [UgamChromeObserver()],
         initialBinding: AppBinding(),
         defaultTransition: Transition.fadeIn,
         transitionDuration: UgamMotion.route,

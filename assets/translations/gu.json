@@ -252,7 +252,18 @@
     "mini_waitlist": "વેઇટલિસ્ટ",
     "ago_now": "હમણાં",
     "recent_subtitle": "{title} · {n} સીટ",
-    "qa_notify": "નોટિફાય"
+    "qa_notify": "નોટિફાય",
+    "passengers": "મુસાફરો",
+    "seats_left": "{total} માંથી {left} સીટ બાકી",
+    "no_bus_added": "હજુ બસ ઉમેરી નથી",
+    "nearest_trip": "નજીકની ટ્રિપ",
+    "departs": "પ્રસ્થાન · {date}",
+    "departs_short": "પ્રસ્થાન {date}",
+    "open_trip": "ટ્રિપ ખોલો",
+    "choose_trip": "ટ્રિપ પસંદ કરો",
+    "leg_go": "જતી",
+    "leg_return": "પરત",
+    "leg_free": "ખાલી"
   },
   "tours": {
     "title": "મારી ટૂર",
@@ -545,7 +556,14 @@
       "driver_name_plain": "માલિક પુષ્ટિ કરે પછી ઉમેરો",
       "bus_price": "બસ માલિકને ચૂકવાતું કુલ ભાડું",
       "boarding_point": "આ બસ ક્યાંથી ઉપડે છે",
-      "departure_time": "આ બસ ક્યારે ઉપડે છે"
+      "departure_time": "આ બસ ક્યારે ઉપડે છે",
+      "boarding_point_short": "દા.ત. સુરત",
+      "departure_time_short": "સમય"
+    },
+    "group": {
+      "bus": "બસ",
+      "boarding": "ઉપડવાનું",
+      "driver": "ડ્રાઈવર · વૈકલ્પિક"
     },
     "section": {
       "rear_zone_eyebrow": "પાછલો ઝોન (વૈકલ્પિક)",
@@ -875,9 +893,10 @@
     "err_no_seats": "ઓછામાં ઓછી એક સીટ પસંદ કરો",
     "add_seat_row": "સીટ રો ઉમેરો",
     "remove_row": "દૂર કરો",
-    "leg_full": "પૂરી મુસાફરી",
-    "leg_go": "ફક્ત જવાનું",
-    "leg_ret": "ફક્ત પાછા આવવાનું"
+    "leg_full": "આવક-જાવક",
+    "leg_go": "ફક્ત જવું",
+    "leg_ret": "ફક્ત આવવા",
+    "seats_total": "કુલ સીટ: {count}"
   },
   "occupant": {
     "make_priority": "પ્રાથમિકતા આપો",
@@ -1032,6 +1051,13 @@
     "back_to_summary": "સારાંશ પર પાછા",
     "summary_subtitle": "વિહંગાવલોકન અને ઑટો ભરો",
     "grid_subtitle": "જાતે બેઠકો ગોઠવો"
+  },
+  "seat_history": {
+    "title": "બેઠક ઇતિહાસ",
+    "leg_go": "જતી",
+    "leg_return": "પરત",
+    "empty": "આ સફર માટે કોઈ બેઠક ઇતિહાસ સાચવાયો નથી.",
+    "fallback_note": "હાલની બેઠક ગોઠવણ બતાવી રહ્યા છીએ — આ સફર માટે જૂનો ચાર્ટ સાચવાયો ન હતો."
   },
   "seating_exceptions": {
     "title": "તમારો નિર્ણય જરૂરી",
@@ -1365,6 +1391,9 @@
     "snack_broadcast_error": "બ્રોડકાસ્ટ નિષ્ફળ: {error}",
     "sending_broadcast": "બ્રોડકાસ્ટ મોકલી રહ્યા છીએ…",
     "send_broadcast_whatsapp": "WhatsApp પર બ્રોડકાસ્ટ મોકલો",
+    "share_to_collect_riders": "પ્રવાસી મેળવવા WhatsApp પર શેર કરો",
+    "add_riders": "પ્રવાસી ઉમેરો",
+    "more_tools": "વધુ સાધનો",
     "no_passengers_title": "હજી કોઈ પ્રવાસી નથી",
     "no_passengers_body": "વિનંતીઓ એકઠી કરવા આ ટૂર WhatsApp પર શેર કરો — અથવા ગ્રાહક માટે જાતે એક ઉમેરો.",
     "filter_all": "બધા",
@@ -1402,6 +1431,9 @@
     "complete_confirm_body": "આ \"{title}\" ને આર્કાઇવમાં ખસેડે છે. તમે હજી તેનો ચાર્ટ અને પૈસા જોઈ શકશો, પણ તે ચાલુ ટૂરમાં દેખાશે નહીં.",
     "mark_completed": "પૂર્ણ તરીકે ચિહ્નિત કરો",
     "tool_seats": "સીટ",
+    "tool_buses": "બસ",
+    "tool_requests": "વિનંતીઓ",
+    "actions_section": "ક્રિયાઓ",
     "tool_send": "મોકલો",
     "tool_lock": "લૉક કરો",
     "tool_money": "પૈસા",
@@ -1455,6 +1487,10 @@
       "move_confirm_body": "{name} ને {bus} ની સીટ {seat} પર ખસેડવા?",
       "move_confirm_yes": "ખસેડો",
       "moved": "{name} ને {seat} પર ખસેડ્યા",
+      "pair_title": "બંને સિંગલ ખસેડવા?",
+      "pair_body": "{name} પાસે બીજી સિંગલ છે, અને {seat} ડબલ છે (બે જણ બેસે). બંને સિંગલ અહીં ખસેડવી, કે ફક્ત આ એક?",
+      "pair_both": "બંને ખસેડો",
+      "pair_one": "ફક્ત આ એક",
       "swap_confirm_title": "સીટ અદલાબદલી કરવી?",
       "swap_confirm_body": "સીટ {seat} પર {mover} ની {other} સાથે અદલાબદલી કરવી?",
       "swap_confirm_yes": "અદલાબદલી",

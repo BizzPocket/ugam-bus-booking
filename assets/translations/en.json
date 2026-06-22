@@ -252,7 +252,18 @@
     "mini_waitlist": "Waitlist",
     "ago_now": "now",
     "recent_subtitle": "{title} · {n} seat(s)",
-    "qa_notify": "Notify"
+    "qa_notify": "Notify",
+    "passengers": "Passengers",
+    "seats_left": "{left} of {total} seats left",
+    "no_bus_added": "No bus added yet",
+    "nearest_trip": "Nearest trip",
+    "departs": "Departs {date}",
+    "departs_short": "departs {date}",
+    "open_trip": "Open trip",
+    "choose_trip": "Choose a trip",
+    "leg_go": "Go",
+    "leg_return": "Return",
+    "leg_free": "Free"
   },
   "tours": {
     "title": "My Tours",
@@ -545,7 +556,14 @@
       "driver_name_plain": "Add later when owner confirms",
       "bus_price": "Total rent paid to the bus owner",
       "boarding_point": "Where this bus departs from",
-      "departure_time": "When this bus departs"
+      "departure_time": "When this bus departs",
+      "boarding_point_short": "e.g. Surat",
+      "departure_time_short": "Set time"
+    },
+    "group": {
+      "bus": "The bus",
+      "boarding": "Boarding",
+      "driver": "Driver · optional"
     },
     "section": {
       "rear_zone_eyebrow": "REAR ZONE (OPTIONAL)",
@@ -877,7 +895,8 @@
     "remove_row": "Remove",
     "leg_full": "Full trip",
     "leg_go": "Go only",
-    "leg_ret": "Return only"
+    "leg_ret": "Return only",
+    "seats_total": "Total seats: {count}"
   },
   "occupant": {
     "make_priority": "Make priority",
@@ -1032,6 +1051,13 @@
     "back_to_summary": "Back to summary",
     "summary_subtitle": "Overview & auto-fill",
     "grid_subtitle": "Edit seats by hand"
+  },
+  "seat_history": {
+    "title": "Seat history",
+    "leg_go": "Outbound",
+    "leg_return": "Return",
+    "empty": "No seat history was captured for this trip.",
+    "fallback_note": "Showing current seating — historical chart wasn't captured for this trip."
   },
   "seating_exceptions": {
     "title": "Needs your decision",
@@ -1365,6 +1391,9 @@
     "snack_broadcast_error": "Broadcast failed: {error}",
     "sending_broadcast": "Sending broadcast…",
     "send_broadcast_whatsapp": "Send broadcast on WhatsApp",
+    "share_to_collect_riders": "Share on WhatsApp to collect riders",
+    "add_riders": "Add riders",
+    "more_tools": "MORE TOOLS",
     "no_passengers_title": "No passengers yet",
     "no_passengers_body": "Share this tour on WhatsApp to collect requests — or add one yourself for a customer.",
     "filter_all": "All",
@@ -1402,6 +1431,9 @@
     "complete_confirm_body": "This moves \"{title}\" to the archive. You can still view its chart and money, but it won't show in active tours.",
     "mark_completed": "Mark completed",
     "tool_seats": "Seats",
+    "tool_buses": "Buses",
+    "tool_requests": "Requests",
+    "actions_section": "ACTIONS",
     "tool_send": "Send",
     "tool_lock": "Lock",
     "tool_money": "Money",
@@ -1455,6 +1487,10 @@
       "move_confirm_body": "Move {name} to seat {seat} on {bus}?",
       "move_confirm_yes": "Move",
       "moved": "{name} moved to {seat}",
+      "pair_title": "Move both singles?",
+      "pair_body": "{name} has another single, and {seat} is a double (seats two). Move both singles here, or just this one?",
+      "pair_both": "Move both",
+      "pair_one": "Just this one",
       "swap_confirm_title": "Swap seats?",
       "swap_confirm_body": "Swap {mover} with {other} on seat {seat}?",
       "swap_confirm_yes": "Swap",

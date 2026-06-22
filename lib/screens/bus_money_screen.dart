@@ -72,9 +72,9 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                 return ListView(
                   padding: const EdgeInsets.fromLTRB(
                     UgamSpacing.gutter,
-                    UgamSpacing.sm,
+                    UgamSpacing.lg,
                     UgamSpacing.gutter,
-                    UgamSpacing.huge,
+                    UgamSpacing.dockClearance,
                   ),
                   children: [
                     // ── Hero figure: the ONE action number ─────────────
@@ -85,7 +85,7 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                       amount: s.outstandingHandover,
                       expected: s.expectedHandover,
                     ),
-                    const SizedBox(height: UgamSpacing.md),
+                    const SizedBox(height: UgamSpacing.xl),
                     // ── Supporting stat grid (demoted) ─────────────────
                     Row(
                       children: [
@@ -117,7 +117,7 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: UgamSpacing.lg),
+                    const SizedBox(height: UgamSpacing.xl),
                     // Demoted to a TONAL quiet-primary: this is a navigation
                     // jump, not the screen's single focal action, so solid
                     // champagne stays rationed (accent-rationing law).
@@ -499,45 +499,68 @@ class _OutstandingHero extends StatelessWidget {
     final figureColor = settled ? c.good : c.accent;
     return UgamCard.plain(
       elev: true,
-      padding: const EdgeInsets.all(UgamSpacing.lg),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.xl,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+          Text(
+            tr('bus_money.stat_outstanding').toUpperCase(),
+            style: UgamText.micro.copyWith(
+              color: c.ink3,
+              letterSpacing: 0.6,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          // The screen's single focal figure — a big Sora number set over a
+          // soft copper halo, mirroring the dashboard passenger hero.
+          SizedBox(
+            height: 96,
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
               children: [
-                Text(
-                  tr('bus_money.stat_outstanding').toUpperCase(),
-                  style: UgamText.micro.copyWith(
-                    color: c.ink3,
-                    letterSpacing: 0.6,
-                    fontWeight: FontWeight.w700,
+                Container(
+                  width: 200,
+                  height: 200,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [c.glow, c.glow.withValues(alpha: 0)],
+                      stops: const [0.0, 0.7],
+                    ),
                   ),
                 ),
-                const SizedBox(height: UgamSpacing.xs),
-                Text(
-                  Formatters.formatMoneyInr(amount),
-                  style: UgamText.tabular(
-                    UgamText.numLg.copyWith(color: figureColor, fontSize: 30),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.lg,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  tr('bus_money.stat_expected_handover'),
-                  style: UgamText.caption.copyWith(color: c.ink2),
+                  child: Text(
+                    Formatters.formatMoneyInr(amount),
+                    style: UgamText.tabular(
+                      UgamText.hero.copyWith(color: figureColor, fontSize: 44),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.md),
+          // Expected handover sits beneath as quiet context.
+          Text(
+            tr('bus_money.stat_expected_handover').toUpperCase(),
+            style: UgamText.micro.copyWith(color: c.ink3),
+          ),
+          const SizedBox(height: UgamSpacing.xs),
           Text(
             Formatters.formatMoneyInr(expected),
             style: UgamText.tabular(
-              UgamText.bodyStrong.copyWith(color: c.ink2),
+              UgamText.numLg.copyWith(color: c.ink2),
             ),
           ),
         ],
@@ -607,6 +630,7 @@ class _ExpenseRow extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: UgamCard.plain(
+        radius: UgamRadius.row,
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.gutter,
           vertical: UgamSpacing.md,
@@ -669,6 +693,7 @@ class _BusOwnerRentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     return UgamCard.plain(
+      radius: UgamRadius.row,
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.gutter,
         vertical: UgamSpacing.md,
@@ -722,6 +747,7 @@ class _IncomeRow extends StatelessWidget {
         ? income.category.displayName
         : income.label;
     return UgamCard.plain(
+      radius: UgamRadius.row,
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.gutter,
         vertical: UgamSpacing.md,
@@ -798,6 +824,7 @@ class _HandoverRow extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: UgamCard.plain(
+        radius: UgamRadius.row,
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.gutter,
           vertical: UgamSpacing.md,
@@ -852,6 +879,7 @@ class _TourRollupCard extends StatelessWidget {
     final c = UgamColors.of(context);
     return UgamCard.plain(
       elev: true,
+      padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

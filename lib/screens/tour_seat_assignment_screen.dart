@@ -725,14 +725,53 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     if (seatId == null) return;
     final targetCap = cell.seatType == SeatType.doubleSofa ? 2 : 1;
     final moverBerths = _relocateMoverBerths(reloc, mover);
-    if (moverBerths > targetCap) {
-      AppSnackBar.warning(
-        tr(
-          'tour_seat_assignment.relocate.too_small',
-          namedArgs: {'seat': seatId, 'name': mover.displayName},
-        ),
-      );
-      return;
+    // When the mover holds MORE berths on the source cell than the target can
+    // take — e.g. two single-request berths cross-filled onto one Double Sofa,
+    // now moving back to a Single Sofa (2 > 1) — PEEL a single berth onto the
+    // target instead of refusing the move. The remaining berth(s) stay on the
+    // source cell, so a second drag relocates them too. This mirrors
+    // SeatMoveFlow.moveTo / the swap-sheet "take free" path, so drag and sheet
+    // behave identically (previously the drag path alone rejected with a
+    // "too small" warning, stranding split berths on a double).
+    final berthsToMove = moverBerths > targetCap ? targetCap : null;
+
+    // Dropping ONE single berth onto a FREE Double Sofa, and the passenger holds
+    // another single elsewhere on this bus? Offer to pair BOTH singles onto the
+    // double (a double seats two) or just this one. This choice dialog doubles
+    // as the move confirmation.
+    if (cell.seatType == SeatType.doubleSofa && moverBerths == 1) {
+      final otherSeatId = _otherSingleSeatId(tour, bus, mover, reloc.fromSeatId);
+      if (otherSeatId != null) {
+        final both = await _askMoveBothOrOne(seatId: seatId, name: mover.displayName);
+        if (both == null) return; // cancelled
+        await _ctrl.moveSeat(
+          tourId: tour.id,
+          passengerId: mover.id,
+          busId: reloc.fromBusId,
+          fromSeatId: reloc.fromSeatId,
+          toSeatId: seatId,
+          toBusId: bus.id,
+        );
+        if (both) {
+          await _ctrl.moveSeat(
+            tourId: tour.id,
+            passengerId: mover.id,
+            busId: bus.id,
+            fromSeatId: otherSeatId,
+            toSeatId: seatId,
+            toBusId: bus.id,
+          );
+        }
+        if (!mounted) return;
+        setState(() => _relocate = null);
+        AppSnackBar.success(
+          tr(
+            'tour_seat_assignment.relocate.moved',
+            namedArgs: {'name': mover.displayName, 'seat': seatId},
+          ),
+        );
+        return;
+      }
     }
 
     final confirmed = await UgamDialog.confirm(
@@ -754,6 +793,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       fromSeatId: reloc.fromSeatId,
       toSeatId: seatId,
       toBusId: bus.id,
+      berths: berthsToMove,
     );
     if (!mounted) return;
     setState(() => _relocate = null);
@@ -762,6 +802,52 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         'tour_seat_assignment.relocate.moved',
         namedArgs: {'name': mover.displayName, 'seat': seatId},
       ),
+    );
+  }
+
+  /// The seatId of ANOTHER single-sofa berth [mover] holds on [bus] (other than
+  /// [fromSeatId]) — the pairing candidate when a single is dropped onto a free
+  /// double. Null when the passenger has no second single on this bus.
+  String? _otherSingleSeatId(
+    Tour tour,
+    Bus bus,
+    Passenger mover,
+    String fromSeatId,
+  ) {
+    for (final a in mover.assignedSeats) {
+      if (a.busId != bus.id) continue;
+      if (a.seatId == fromSeatId) continue;
+      if (_findCell(tour, bus.id, a.seatId)?.seatType == SeatType.singleSofa) {
+        return a.seatId;
+      }
+    }
+    return null;
+  }
+
+  /// Ask whether to move BOTH of the passenger's singles onto the double, or
+  /// just the dragged one. true = both, false = just this one, null = cancelled.
+  Future<bool?> _askMoveBothOrOne({
+    required String seatId,
+    required String name,
+  }) {
+    return UgamDialog.show<bool>(
+      context,
+      title: tr('tour_seat_assignment.relocate.pair_title'),
+      message: tr(
+        'tour_seat_assignment.relocate.pair_body',
+        namedArgs: {'name': name, 'seat': seatId},
+      ),
+      actions: (ctx) => [
+        UgamButton(
+          kind: UgamButtonKind.tonal,
+          label: tr('tour_seat_assignment.relocate.pair_one'),
+          onPressed: () => Navigator.of(ctx).pop(false),
+        ),
+        UgamButton(
+          label: tr('tour_seat_assignment.relocate.pair_both'),
+          onPressed: () => Navigator.of(ctx).pop(true),
+        ),
+      ],
     );
   }
 
@@ -1131,8 +1217,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// per-person via the occupant sheet instead.
   bool _canDragSeat(Tour tour, Bus bus, SeatCell cell) {
     if (_editMode) return false;
-    if (cell.reserved)
+    if (cell.reserved) {
       return false; // a held seat stays put — can't drag it off
+    }
     final occs = _occupantsOn(tour, bus, cell);
     if (occs.isEmpty) return false;
     if (occs.length >= 2 &&
@@ -2587,10 +2674,7 @@ class _PassengerCard extends StatelessWidget {
     final stillNeeded = pending.fold<int>(0, (sum, l) => sum + l.remaining);
 
     return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        border: Border(top: BorderSide(color: c.border)),
-      ),
+      decoration: BoxDecoration(color: c.card),
       padding: const EdgeInsets.fromLTRB(
         UgamSpacing.gutter,
         UgamSpacing.md,
@@ -2755,7 +2839,7 @@ class _PassengerCard extends StatelessWidget {
                 ),
                 decoration: BoxDecoration(
                   color: c.warmFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.input - 6),
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 child: Row(
                   children: [
@@ -2843,7 +2927,6 @@ class _AssignmentDock extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: c.card,
-        border: Border(top: BorderSide(color: c.border)),
         // Lift the sheet off the chart only while it overlays it (expanded).
         boxShadow: showDetail
             ? [
@@ -3065,7 +3148,6 @@ class _AssignmentDock extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(
                                   UgamRadius.row,
                                 ),
-                                border: Border.all(color: c.border),
                               ),
                               alignment: Alignment.center,
                               child: Column(
@@ -3283,10 +3365,11 @@ class _PendingCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: active ? c.accentFill : c.cardElev,
           borderRadius: BorderRadius.circular(UgamRadius.row),
-          border: Border.all(
-            color: active ? c.accent : c.border,
-            width: active ? 1.2 : 1,
-          ),
+          // One signal: the active card carries the copper ring; inactive cards
+          // stay quiet fills (no neutral hairline).
+          border: active
+              ? Border.all(color: c.accent, width: 1.2)
+              : null,
         ),
         child: Row(
           children: [
@@ -3547,9 +3630,10 @@ class _FlagSwitch extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.row),
-        border: Border.all(
-          color: value ? activeColor.withValues(alpha: 0.5) : c.border,
-        ),
+        // Lit tone border only while on; off state is a quiet neutral fill.
+        border: value
+            ? Border.all(color: activeColor.withValues(alpha: 0.5))
+            : null,
       ),
       child: Row(
         children: [

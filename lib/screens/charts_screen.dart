@@ -17,6 +17,8 @@ import '../utils/seat_occupants.dart';
 import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
 import '../widgets/occupant_action_sheet.dart';
+import 'add_bus_screen.dart';
+import 'create_tour_screen.dart';
 import 'fullscreen_chart_screen.dart';
 
 /// Top-level CHARTS tab — a one-tap, read-only seat-chart browser.
@@ -134,6 +136,17 @@ class _ChartsScreenState extends State<ChartsScreen> {
         child: Obx(() {
           final eligible = _eligibleTours();
           if (eligible.isEmpty) {
+            // No active tour has a bus yet — make the empty state actionable.
+            // If an active tour exists, jump into adding a bus to the nearest
+            // upcoming one; otherwise there's no tour to add a bus to, so the
+            // CTA offers tour creation instead of being a dead end.
+            final activeTours = tourCtrl.activeTours;
+            final Tour? addBusTarget = activeTours.isEmpty
+                ? null
+                : (activeTours.toList()
+                      ..sort((a, b) =>
+                          a.departureDate.compareTo(b.departureDate)))
+                    .first;
             return Column(
               children: [
                 _Header(c: c),
@@ -142,6 +155,25 @@ class _ChartsScreenState extends State<ChartsScreen> {
                     icon: Icons.event_seat_outlined,
                     title: tr('charts.empty.title'),
                     body: tr('charts.empty.body'),
+                    cta: UgamCTA(
+                      label: addBusTarget != null
+                          ? tr('add_bus.title')
+                          : tr('create_tour.title'),
+                      leadingIcon: Icons.add_rounded,
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        final target = addBusTarget;
+                        if (target != null) {
+                          Get.to(() => AddBusScreen(tourId: target.id));
+                        } else {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const CreateTourScreen(),
+                            ),
+                          );
+                        }
+                      },
+                    ),
                   ),
                 ),
               ],
@@ -242,7 +274,8 @@ class _ChartsScreenState extends State<ChartsScreen> {
                 child: UgamButton(
                   label: tr('charts.edit_seats'),
                   icon: Icons.grid_view_rounded,
-                  kind: UgamButtonKind.ghost,
+                  kind: UgamButtonKind.tonal,
+                  expand: true,
                   onPressed: () => _editSeats(tour.id, bus.id),
                 ),
               ),
@@ -315,14 +348,12 @@ class _Tally extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ratio = total == 0 ? 0.0 : assigned / total;
-    return Container(
+    return UgamCard.plain(
+      elev: true,
+      radius: UgamRadius.row,
       padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm + 2,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.md,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -335,18 +366,19 @@ class _Tally extends StatelessWidget {
                 '$assigned/$total',
                 style: UgamText.numLg.copyWith(color: c.ink),
               ),
+              const SizedBox(height: 2),
               Text(
                 bus.name.toUpperCase(),
                 style: UgamText.micro.copyWith(color: c.ink2),
               ),
             ],
           ),
-          const SizedBox(width: UgamSpacing.md),
+          const SizedBox(width: UgamSpacing.lg),
           // Count + bar only (the % was redundant with both). Bar is NEUTRAL
           // ink — champagne stays rationed to true accent signals.
           Expanded(
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
               child: LinearProgressIndicator(
                 value: ratio.clamp(0.0, 1.0),
                 minHeight: 6,
@@ -395,16 +427,12 @@ class _SeatChartCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
     final l = layout;
     if (l == null || l.totalCells == 0) {
       return UgamCard.plain(
-        child: Center(
-          child: Text(
-            tr('charts.no_layout'),
-            textAlign: TextAlign.center,
-            style: UgamText.body.copyWith(color: c.ink2),
-          ),
+        child: UgamEmpty(
+          icon: Icons.event_seat_outlined,
+          title: tr('charts.no_layout'),
         ),
       );
     }

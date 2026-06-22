@@ -42,6 +42,15 @@ class UgamSheet {
       isDismissible: isDismissible,
       enableDrag: enableDrag,
       useSafeArea: true,
+      // Present over the ROOT navigator (matching the iOS
+      // showCupertinoModalPopup path, whose useRootNavigator defaults to
+      // true). The shell ([MainShell]) hosts each tab in its own nested
+      // Navigator inside a Scaffold with extendBody: true. A sheet pushed on
+      // the nested navigator is confined to the Scaffold body slot, so the
+      // bottomNavigationBar (UgamDockNav) paints on top of the sheet's bottom
+      // and the scrim never covers the dock — clipping the last row(s) of
+      // content (e.g. the third language option). Root navigator escapes that.
+      useRootNavigator: true,
       builder: (ctx) =>
           _SheetShell(title: title, showClose: showClose, child: builder(ctx)),
     );

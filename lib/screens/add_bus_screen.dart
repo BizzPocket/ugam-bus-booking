@@ -10,6 +10,7 @@ import '../models/bus_type.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
+import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/time_format.dart';
 
@@ -311,7 +312,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
     if (idx > 0) {
       setState(() => _currentStep = _stepSequence[idx - 1]);
     } else {
-      Get.back();
+      AppNav.pop(context);
     }
   }
 
@@ -506,7 +507,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
         AppSnackBar.success(
           tr('add_bus.snackbar.updated', namedArgs: {'name': updated.name}),
         );
-        Get.back();
+        AppNav.pop(context);
         return;
       }
 
@@ -547,7 +548,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
       AppSnackBar.success(
         tr('add_bus.snackbar.added', namedArgs: {'name': bus.name}),
       );
-      Get.back();
+      AppNav.pop(context);
     } catch (_) {
       AppSnackBar.error(tr('add_bus.snackbar.error_save'));
     } finally {
@@ -890,13 +891,17 @@ class _Step1Identity extends StatelessWidget {
       ),
       physics: const BouncingScrollPhysics(),
       children: [
-        _StepIntro(
-          c: c,
-          eyebrow: tr('add_bus.step1.eyebrow'),
-          title: tr('add_bus.step1.title'),
-          body: tr('add_bus.step1.body', namedArgs: {'slot': slotBadge}),
+        // Title only — the old intro paragraph just restated the field hints,
+        // so it's dropped to cut the wall of text at the top of this step.
+        Text(
+          tr('add_bus.step1.title'),
+          style: UgamText.titleXl.copyWith(color: c.ink),
         ),
         const SizedBox(height: UgamSpacing.xl),
+
+        // ── The bus ───────────────────────────────────────────────
+        _GroupHeader(c: c, text: tr('add_bus.group.bus')),
+        const SizedBox(height: UgamSpacing.md),
         _Label(c: c, text: tr('add_bus.label.slot')),
         const SizedBox(height: UgamSpacing.sm),
         _SlotBadge(c: c, label: slotBadge),
@@ -915,23 +920,45 @@ class _Step1Identity extends StatelessWidget {
           onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        UgamInput(
-          label: tr('add_bus.label.boarding_point'),
-          controller: boardingPoint,
-          hint: tr('add_bus.hint.boarding_point'),
-          onChanged: (_) => onAnyChange(),
+        _ACToggle(c: c, value: isAC, onChanged: onToggleAC),
+        const SizedBox(height: UgamSpacing.xl),
+
+        // ── Boarding — place (wide) + time (narrow) share a row, so the
+        //    step is no longer a stack of identical full-width boxes. ──
+        _GroupHeader(c: c, text: tr('add_bus.group.boarding')),
+        const SizedBox(height: UgamSpacing.md),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 3,
+              child: UgamInput(
+                label: tr('add_bus.label.boarding_point'),
+                controller: boardingPoint,
+                hint: tr('add_bus.hint.boarding_point_short'),
+                onChanged: (_) => onAnyChange(),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              flex: 2,
+              child: UgamPickerField(
+                label: tr('add_bus.label.departure_time'),
+                value: departureTime != null
+                    ? (formatHhMm(hhmmFromTimeOfDay(departureTime!)) ?? '')
+                    : '',
+                placeholder: tr('add_bus.hint.departure_time_short'),
+                icon: Icons.access_time_rounded,
+                onTap: onPickDepartureTime,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: UgamSpacing.lg),
-        UgamPickerField(
-          label: tr('add_bus.label.departure_time'),
-          value: departureTime != null
-              ? (formatHhMm(hhmmFromTimeOfDay(departureTime!)) ?? '')
-              : '',
-          placeholder: tr('add_bus.hint.departure_time'),
-          icon: Icons.access_time_rounded,
-          onTap: onPickDepartureTime,
-        ),
-        const SizedBox(height: UgamSpacing.lg),
+        const SizedBox(height: UgamSpacing.xl),
+
+        // ── Driver (optional) ─────────────────────────────────────
+        _GroupHeader(c: c, text: tr('add_bus.group.driver')),
+        const SizedBox(height: UgamSpacing.md),
         UgamInput(
           label: tr('add_bus.label.driver_name'),
           controller: driverName,
@@ -942,8 +969,6 @@ class _Step1Identity extends StatelessWidget {
           label: tr('add_bus.label.driver_phone'),
           controller: driverPhone,
         ),
-        const SizedBox(height: UgamSpacing.lg),
-        _ACToggle(c: c, value: isAC, onChanged: onToggleAC),
         const SizedBox(height: UgamSpacing.xl),
       ],
     );
@@ -1172,7 +1197,6 @@ class _RegenerateLayoutButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: c.cardElev,
           borderRadius: BorderRadius.circular(UgamRadius.input),
-          border: Border.all(color: c.border),
         ),
         child: Row(
           children: [
@@ -1227,11 +1251,10 @@ class _ResizeWarning extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(UgamSpacing.md),
+      padding: const EdgeInsets.all(UgamSpacing.lg),
       decoration: BoxDecoration(
         color: c.warmFill,
         borderRadius: BorderRadius.circular(UgamRadius.row),
-        border: Border.all(color: c.warm.withValues(alpha: 0.4)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1905,11 +1928,13 @@ class _BandRow extends StatelessWidget {
       onTap: onEdit,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.md),
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.lg,
+          vertical: UgamSpacing.md,
+        ),
         decoration: BoxDecoration(
           color: c.card,
           borderRadius: BorderRadius.circular(UgamRadius.row),
-          border: Border.all(color: c.border),
         ),
         child: Row(
           children: [
@@ -1998,6 +2023,28 @@ class _StepIntro extends StatelessWidget {
   }
 }
 
+/// Section header that splits the identity step into meaningful groups
+/// ("The bus", "Boarding", "Driver") so it reads as structure, not a uniform
+/// stack of inputs. Brighter + bolder than a field [_Label] so the two never
+/// read as the same level.
+class _GroupHeader extends StatelessWidget {
+  final UgamColorSet c;
+  final String text;
+  const _GroupHeader({required this.c, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text.toUpperCase(),
+      style: UgamText.micro.copyWith(
+        color: c.ink,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.6,
+      ),
+    );
+  }
+}
+
 class _Label extends StatelessWidget {
   final UgamColorSet c;
   final String text;
@@ -2057,7 +2104,6 @@ class _SlotBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.input),
-        border: Border.all(color: c.border),
       ),
       child: Row(
         children: [

@@ -90,6 +90,11 @@ class SeatMoveFlow {
     final c = UgamColors.of(flowContext);
     showModalBottomSheet<void>(
       context: flowContext,
+      // Root navigator + safe area: escape the shell's nested tab Navigator so
+      // the sheet paints above (not behind) the bottom dock nav. See
+      // UgamSheet.show for the full rationale.
+      useRootNavigator: true,
+      useSafeArea: true,
       backgroundColor: c.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
@@ -159,6 +164,11 @@ class SeatMoveFlow {
       context: context,
       backgroundColor: c.card,
       isScrollControlled: true,
+      // Root navigator + safe area: escape the shell's nested tab Navigator so
+      // the sheet paints above (not behind) the bottom dock nav. See
+      // UgamSheet.show for the full rationale.
+      useRootNavigator: true,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(UgamRadius.sheet),

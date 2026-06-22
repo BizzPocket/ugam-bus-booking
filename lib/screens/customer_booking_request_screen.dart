@@ -439,7 +439,7 @@ class _CustomerBookingRequestScreenState
                   UgamSpacing.gutter,
                   UgamSpacing.sm,
                   UgamSpacing.gutter,
-                  UgamSpacing.xxl,
+                  UgamSpacing.huge,
                 ),
                 children: [
                   _TourPreviewCard(tour: widget.tour, c: c),
@@ -495,15 +495,15 @@ class _CustomerBookingRequestScreenState
             ],
             UgamCTA(
               label: _saving
-              ? tr('customer_booking.button_saving')
-              : (widget.isEditing
-                    ? tr('customer_booking.button_update')
-                    : tr('customer_booking.button_submit')),
-          leadingIcon: Icons.send_rounded,
-          loading: _saving,
-          // Live "N seats" tabular value on the right — reads off the
-          // shared form's totalSeats getter, refreshed via onChanged.
-          trailingValue: seatCount > 0
+                  ? tr('customer_booking.button_saving')
+                  : (widget.isEditing
+                        ? tr('customer_booking.button_update')
+                        : tr('customer_booking.button_submit')),
+              leadingIcon: Icons.send_rounded,
+              loading: _saving,
+              // Live "N seats" tabular value on the right — reads off the
+              // shared form's totalSeats getter, refreshed via onChanged.
+              trailingValue: seatCount > 0
                   ? (seatCount == 1
                         ? tr('customer_booking.cta_seat_count_one')
                         : tr('customer_booking.cta_seat_count', namedArgs: {
@@ -543,15 +543,15 @@ class _TourPreviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(UgamSpacing.sm),
+      padding: const EdgeInsets.all(UgamSpacing.md - 2),
       decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(20),
+        color: c.card,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
       child: Row(
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(UgamRadius.photo),
             child: SizedBox(
               width: 88,
               height: 88,
@@ -572,7 +572,7 @@ class _TourPreviewCard extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         color: c.cardElev,
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(UgamRadius.chip),
                       ),
                       child: Text(
                         _formatDate(tour.departureDate),
@@ -597,14 +597,14 @@ class _TourPreviewCard extends StatelessWidget {
               children: [
                 Text(
                   tour.title,
-                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+                  style: UgamText.titleS.copyWith(color: c.ink),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 3),
                 Text(
                   '${tour.fromCity} → ${tour.toCity}',
-                  style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                  style: UgamText.caption.copyWith(color: c.ink2),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -646,7 +646,10 @@ class _SectionEyebrow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
+      child: Text(
+        label.toUpperCase(),
+        style: UgamText.micro.copyWith(color: c.ink3),
+      ),
     );
   }
 }

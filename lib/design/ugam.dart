@@ -10,7 +10,6 @@ export 'tokens.dart';
 export 'components/ugam_app_bar.dart';
 export 'components/ugam_bus_backdrop.dart';
 export 'components/ugam_card.dart';
-export 'components/ugam_chrome.dart';
 export 'components/ugam_cta.dart';
 export 'components/ugam_date_pill.dart';
 export 'components/ugam_dialog.dart';

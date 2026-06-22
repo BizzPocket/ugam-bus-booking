@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
-import 'ugam_chrome.dart';
 
 /// Full-width sticky pill CTA. Sits in the `Scaffold.bottomNavigationBar`
 /// slot (or above the dock nav for primary workflow buttons) and ends
@@ -151,26 +150,24 @@ class UgamStickyCTA extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return ChromeMeasure(
-      child: SafeArea(
-        top: false,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(
-            UgamSpacing.gutter,
-            UgamSpacing.lg,
-            UgamSpacing.gutter,
-            UgamSpacing.md,
-          ),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [c.bg.withValues(alpha: 0), c.bg],
-              stops: const [0, 0.45],
-            ),
-          ),
-          child: child,
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(
+          UgamSpacing.gutter,
+          UgamSpacing.lg,
+          UgamSpacing.gutter,
+          UgamSpacing.md,
         ),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [c.bg.withValues(alpha: 0), c.bg],
+            stops: const [0, 0.45],
+          ),
+        ),
+        child: child,
       ),
     );
   }

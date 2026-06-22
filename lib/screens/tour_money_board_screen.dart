@@ -117,7 +117,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                     UgamSpacing.gutter,
                     UgamSpacing.sm,
                     UgamSpacing.gutter,
-                    UgamSpacing.sm,
+                    UgamSpacing.xl,
                   ),
                   physics: const BouncingScrollPhysics(),
                   children: [
@@ -126,12 +126,15 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                       onTap: _openPnl,
                       c: c,
                     ),
-                    const SizedBox(height: UgamSpacing.md),
+                    const SizedBox(height: UgamSpacing.xl),
                     Text(
                       tr('tour_money_board.per_bus'),
-                      style: UgamText.micro.copyWith(color: c.ink3),
+                      style: UgamText.micro.copyWith(
+                        color: c.ink3,
+                        letterSpacing: 1.4,
+                      ),
                     ),
-                    const SizedBox(height: UgamSpacing.sm),
+                    const SizedBox(height: UgamSpacing.md),
                     for (var i = 0; i < buses.length; i++)
                       Padding(
                         padding: const EdgeInsets.only(bottom: UgamSpacing.md),
@@ -221,8 +224,9 @@ class _PnlEntryCard extends StatelessWidget {
             children: [
               Text(
                 Formatters.formatMoneyInr(billed.abs()),
-                style: UgamText.titleS.copyWith(color: tone),
+                style: UgamText.numLg.copyWith(color: tone, fontSize: 18),
               ),
+              const SizedBox(height: 2),
               Text(
                 billed >= 0 ? tr('trip_pnl.profit') : tr('trip_pnl.loss'),
                 style: UgamText.micro.copyWith(color: tone),
@@ -364,7 +368,7 @@ class _BusMoneyRow extends StatelessWidget {
               Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
             ],
           ),
-          const SizedBox(height: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.lg),
           // ── Headline: the ONE action number for this bus ───────────
           // Outstanding handover when there's cash still owed to admin,
           // else what's still to collect — shown large and tabular so the
@@ -397,9 +401,7 @@ class _BusMoneyRow extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     Formatters.formatMoneyInr(actionAmount),
-                    style: UgamText.tabular(
-                      UgamText.numLg.copyWith(color: figureColor, fontSize: 24),
-                    ),
+                    style: UgamText.numXl.copyWith(color: figureColor),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -407,7 +409,7 @@ class _BusMoneyRow extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.lg),
           // ── Supporting money pair: collected + handover ────────────
           Row(
             children: [
@@ -461,16 +463,14 @@ class _BusMoneyRow extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: UgamSpacing.md),
-          Divider(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.lg),
           // Status dot only — the outstanding figure now leads the row as the
           // headline, so the trailing amount duplicate is dropped here.
           Align(
             alignment: Alignment.centerLeft,
             child: UgamStatusDot(label: statusLabel, tone: tone),
           ),
-          const SizedBox(height: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.lg),
           // One-tap shortcut straight into this bus's CollectionScreen —
           // no detour through BusMoneyScreen. The row itself still opens
           // the full per-bus detail view. Tonal (quiet primary) so it never
@@ -508,12 +508,10 @@ class _Metric extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-        const SizedBox(height: UgamSpacing.xs),
+        const SizedBox(height: UgamSpacing.sm),
         Text(
           value,
-          style: UgamText.tabular(
-            UgamText.bodyStrong.copyWith(color: valueColor),
-          ),
+          style: UgamText.numLg.copyWith(color: valueColor, fontSize: 15),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -558,7 +556,7 @@ class _TotalsCapsule extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: UgamSpacing.md),
+            const SizedBox(height: UgamSpacing.lg),
             Row(
               children: [
                 Expanded(
@@ -587,20 +585,22 @@ class _TotalsCapsule extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: UgamSpacing.md),
-            Divider(height: 1, color: c.border),
-            const SizedBox(height: UgamSpacing.md),
+            const SizedBox(height: UgamSpacing.lg),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  tr('tour_money_board.outstanding_handover'),
-                  style: UgamText.body.copyWith(color: c.ink2),
+                Expanded(
+                  child: Text(
+                    tr('tour_money_board.outstanding_handover'),
+                    style: UgamText.body.copyWith(color: c.ink2),
+                  ),
                 ),
+                const SizedBox(width: UgamSpacing.md),
                 Text(
                   Formatters.formatMoneyInr(outstanding),
-                  style: UgamText.tabular(
-                    UgamText.titleS.copyWith(color: settled ? c.good : c.warm),
+                  style: UgamText.numLg.copyWith(
+                    color: settled ? c.good : c.warm,
                   ),
                 ),
               ],
@@ -632,12 +632,10 @@ class _TotalCol extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-        const SizedBox(height: UgamSpacing.xs),
+        const SizedBox(height: UgamSpacing.sm),
         Text(
           value,
-          style: UgamText.tabular(
-            UgamText.numLg.copyWith(color: color, fontSize: 17),
-          ),
+          style: UgamText.numLg.copyWith(color: color, fontSize: 18),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

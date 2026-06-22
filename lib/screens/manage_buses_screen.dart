@@ -472,11 +472,15 @@ class _BusListItem extends StatelessWidget {
                       child: ClipRRect(
                         borderRadius:
                             BorderRadius.circular(UgamRadius.chip),
+                        // Neutral progress — copper is rationed for the single
+                        // "Add bus" CTA, so the fill stays a quiet ink bar over
+                        // a recessed track (the card is elevated, so the track
+                        // drops back to the base card tone for contrast).
                         child: LinearProgressIndicator(
                           value: pct,
                           minHeight: 6,
                           backgroundColor: c.card,
-                          valueColor: AlwaysStoppedAnimation(c.accent),
+                          valueColor: AlwaysStoppedAnimation(c.ink2),
                         ),
                       ),
                     ),
@@ -527,10 +531,12 @@ class _HandlerRow extends StatelessWidget {
           horizontal: UgamSpacing.md,
           vertical: UgamSpacing.sm,
         ),
+        // No hand-rolled border on the neutral state — depth comes from a
+        // recessed fill (base card tone, sunk into the elevated bus card)
+        // instead of a hairline. The set state keeps the copper accent tint.
         decoration: BoxDecoration(
           color: hasHandler ? c.accentFill : c.card,
           borderRadius: BorderRadius.circular(UgamRadius.row),
-          border: hasHandler ? null : Border.all(color: c.border),
         ),
         child: Row(
           children: [

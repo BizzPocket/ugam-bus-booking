@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
-import 'ugam_chrome.dart';
 
 /// Floating capsule dock nav. Replaces the prior `_PillBottomNav`.
 ///
@@ -30,68 +29,66 @@ class UgamDockNav extends StatelessWidget {
     final c = UgamColors.of(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return ChromeMeasure(
-      // Bottom fade behind the floating capsule: the body uses extendBody, so
-      // the list scrolls into the transparent strip around/below the dock. This
-      // gradient hides that content (fades it into the scaffold bg) before the
-      // screen edge, so nothing peeks out below the bar.
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [c.bg.withValues(alpha: 0), c.bg],
-            stops: const [0, 0.55],
-          ),
+    // Bottom fade behind the floating capsule: the body uses extendBody, so
+    // the list scrolls into the transparent strip around/below the dock. This
+    // gradient hides that content (fades it into the scaffold bg) before the
+    // screen edge, so nothing peeks out below the bar.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [c.bg.withValues(alpha: 0), c.bg],
+          stops: const [0, 0.55],
         ),
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              UgamSpacing.md,
-              UgamSpacing.lg,
-              UgamSpacing.md,
-              UgamSpacing.md,
-            ),
-            // Solid, opaque capsule — no BackdropFilter. Real-time Gaussian
-            // blur behind the dock was re-sampling the scrolling content
-            // every frame on all 5 tabs (the single worst low-end GPU cost
-            // in the app). An opaque elevated surface reads the same as a
-            // floating dock but rasterizes once.
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.08)
-                      : Colors.black.withValues(alpha: 0.06),
-                  width: 1.0,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: isDark ? 0.32 : 0.12),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            UgamSpacing.md,
+            UgamSpacing.lg,
+            UgamSpacing.md,
+            UgamSpacing.md,
+          ),
+          // Solid, opaque capsule — no BackdropFilter. Real-time Gaussian
+          // blur behind the dock was re-sampling the scrolling content
+          // every frame on all 5 tabs (the single worst low-end GPU cost
+          // in the app). An opaque elevated surface reads the same as a
+          // floating dock but rasterizes once.
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: c.cardElev,
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.06),
+                width: 1.0,
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(UgamSpacing.xs),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List.generate(items.length, (i) {
-                    final active = i == currentIndex;
-                    return _DockButton(
-                      item: items[i],
-                      active: active,
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        onTap(i);
-                      },
-                    );
-                  }),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.32 : 0.12),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
                 ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(UgamSpacing.xs),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: List.generate(items.length, (i) {
+                  final active = i == currentIndex;
+                  return _DockButton(
+                    item: items[i],
+                    active: active,
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      onTap(i);
+                    },
+                  );
+                }),
               ),
             ),
           ),
@@ -157,11 +154,7 @@ class _DockButton extends StatelessWidget {
             children: [
               _badged(
                 c,
-                Icon(
-                  item.icon,
-                  size: 19,
-                  color: active ? c.onAccent : c.ink3,
-                ),
+                Icon(item.icon, size: 19, color: active ? c.onAccent : c.ink3),
               ),
               // The label collapses to zero width when inactive, so only the
               // current tab's name is ever shown — keeps the dock compact for

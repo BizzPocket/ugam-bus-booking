@@ -77,6 +77,9 @@ dependencies:
   firebase_messaging: ^16.3.0
   flutter_local_notifications: ^22.0.0
 
+  # App version/build for the settings + customer "more" footers
+  package_info_plus: ^9.0.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -137,6 +140,12 @@ flutter:
     - family: Inter
       fonts:
         - asset: assets/fonts/Inter-Variable.ttf
+    # Sora — geometric display face for the futuristic-simple rebuild:
+    # used for big hero figures, titles and the dock label. Variable TTF
+    # (Thin-ExtraBold) so all weights resolve locally, no runtime fetch.
+    - family: Sora
+      fonts:
+        - asset: assets/fonts/Sora-Variable.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

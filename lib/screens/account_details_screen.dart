@@ -111,10 +111,8 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
         ),
         const SizedBox(height: UgamSpacing.sm),
         Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: UgamSpacing.lg,
-            vertical: UgamSpacing.md + 4,
-          ),
+          height: 54,
+          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
           decoration: BoxDecoration(
             color: c.cardElev,
             borderRadius: BorderRadius.circular(UgamRadius.input),
@@ -127,7 +125,7 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
                 child: Text(
                   '+91 ${_authCtrl.userPhone.value}',
                   style: UgamText.tabular(
-                    UgamText.bodyStrong.copyWith(color: c.ink2),
+                    UgamText.body.copyWith(color: c.ink2, fontSize: 15),
                   ),
                 ),
               ),

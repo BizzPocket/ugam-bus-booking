@@ -102,11 +102,9 @@ class FullscreenChartScreen extends StatelessWidget {
             // ── The chart, and only the chart ──────────────────────────────
             Positioned.fill(
               child: empty
-                  ? Center(
-                      child: Text(
-                        tr('fullscreen_chart.empty'),
-                        style: UgamText.body.copyWith(color: c.ink2),
-                      ),
+                  ? UgamEmpty(
+                      icon: Icons.grid_off_rounded,
+                      title: tr('fullscreen_chart.empty'),
                     )
                   : InteractiveViewer(
                       minScale: 0.6,
@@ -172,22 +170,13 @@ class FullscreenChartScreen extends StatelessWidget {
             Positioned(
               right: UgamSpacing.gutter,
               top: UgamSpacing.sm,
-              child: GestureDetector(
+              child: UgamIconButton(
+                icon: Icons.close_rounded,
+                iconSize: 20,
                 onTap: () {
                   HapticFeedback.selectionClick();
                   Get.back<void>();
                 },
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: c.cardElev,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(Icons.close_rounded, size: 20, color: c.ink),
-                ),
               ),
             ),
           ],

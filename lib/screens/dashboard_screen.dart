@@ -31,13 +31,6 @@ import 'tour_detail_screen.dart';
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
-  // The "today's trip" hero/tile. Now that UgamBusBackdrop is a calm graphite
-  // tile (champagne reserved for the route monogram only) the section no
-  // longer fights the revenue hero for accent, so it is re-enabled to match
-  // the loading shimmer's 220-tall hero block. (Kept non-final on purpose so
-  // the gate below doesn't const-fold into dead code.)
-  // ignore: prefer_final_fields
-  static bool _showTodayTrip = true;
 
   @override
   Widget build(BuildContext context) {
@@ -87,49 +80,10 @@ class DashboardScreen extends StatelessWidget {
                       c: c,
                     )),
                 const SizedBox(height: UgamSpacing.xl),
-                // TEMP: today's-trip section gated by [_showTodayTrip]. The
-                // collection-if keeps the Obx out of the tree entirely when
-                // hidden — an Obx whose builder reads no observable throws.
-                if (_showTodayTrip)
-                  Obx(() {
-                    final today = _todaysTour(tourCtrl.tours);
-                    final card = today != null
-                        ? _TodayHeroCard(tour: today, c: c)
-                        : _NoTripsTodayTile(
-                            nextTour: _nextUpcomingTour(tourCtrl.tours),
-                            c: c,
-                          );
-                    // Bottom spacer lives inside the section so hiding it
-                    // leaves one clean gap before the quick actions.
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: UgamSpacing.xl),
-                      child: card,
-                    );
-                  }),
+                _TripHero(c: c),
+                const SizedBox(height: UgamSpacing.xl),
                 _QuickActions(c: c, shell: shell),
                 const SizedBox(height: UgamSpacing.xl),
-                Obx(() {
-                  final revenue = _thisWeekRevenue(tourCtrl.tours);
-                  final seatsSold = _thisWeekSeatsSold(tourCtrl.tours);
-                  return _RevenueHero(
-                    revenue: revenue,
-                    seatsSold: seatsSold,
-                    c: c,
-                  );
-                }),
-                const SizedBox(height: UgamSpacing.md),
-                Obx(() {
-                  final active = tourCtrl.activeTours.length;
-                  final todaySeats = _todaysTotalSeats(tourCtrl.tours);
-                  final waitlist = _waitlistCount(tourCtrl.tours);
-                  return _SmallStatsRow(
-                    active: active,
-                    todaySeats: todaySeats,
-                    waitlist: waitlist,
-                    c: c,
-                  );
-                }),
-                const SizedBox(height: UgamSpacing.xl + UgamSpacing.xs),
                 Obx(() {
                   final attention = _needsAttention(context, tourCtrl.tours);
                   if (attention.isEmpty) return const SizedBox.shrink();
@@ -190,79 +144,6 @@ class DashboardScreen extends StatelessWidget {
 
   // ── data helpers ───────────────────────────────────────────────────
 
-  /// Tour departing today or in the next 24 hours.
-  Tour? _todaysTour(List<Tour> tours) {
-    final now = DateTime.now();
-    final tomorrow = now.add(const Duration(hours: 24));
-    final candidates = tours
-        .where((t) =>
-            t.status != TourStatus.completed &&
-            t.departureDate.isAfter(now.subtract(const Duration(hours: 6))) &&
-            t.departureDate.isBefore(tomorrow))
-        .toList()
-      ..sort((a, b) => a.departureDate.compareTo(b.departureDate));
-    return candidates.isEmpty ? null : candidates.first;
-  }
-
-  Tour? _nextUpcomingTour(List<Tour> tours) {
-    final now = DateTime.now();
-    final candidates = tours
-        .where((t) =>
-            t.status != TourStatus.completed &&
-            t.departureDate.isAfter(now))
-        .toList()
-      ..sort((a, b) => a.departureDate.compareTo(b.departureDate));
-    return candidates.isEmpty ? null : candidates.first;
-  }
-
-  /// Returns (Monday, Sunday) bounds for the calendar week containing today.
-  (DateTime, DateTime) _currentWeekBounds() {
-    final now = DateTime.now();
-    final monday = now.subtract(Duration(days: now.weekday - 1));
-    final mondayStart = DateTime(monday.year, monday.month, monday.day);
-    final sundayEnd = mondayStart
-        .add(const Duration(days: 6, hours: 23, minutes: 59, seconds: 59));
-    return (mondayStart, sundayEnd);
-  }
-
-  double _thisWeekRevenue(List<Tour> tours) {
-    final (start, end) = _currentWeekBounds();
-    return tours
-        .where((t) =>
-            t.departureDate.isAfter(start) &&
-            t.departureDate.isBefore(end) &&
-            t.status != TourStatus.completed)
-        .fold<double>(
-          0,
-          (sum, t) => sum + (t.pricePerSeat * t.totalSeatsAssigned),
-        );
-  }
-
-  int _thisWeekSeatsSold(List<Tour> tours) {
-    final (start, end) = _currentWeekBounds();
-    return tours
-        .where((t) =>
-            t.departureDate.isAfter(start) &&
-            t.departureDate.isBefore(end) &&
-            t.status != TourStatus.completed)
-        .fold<int>(0, (sum, t) => sum + t.totalSeatsAssigned);
-  }
-
-  int _todaysTotalSeats(List<Tour> tours) {
-    final today = _todaysTour(tours);
-    if (today == null) return 0;
-    return today.totalSeatsRequested;
-  }
-
-  int _waitlistCount(List<Tour> tours) {
-    return tours
-        .where((t) => t.status != TourStatus.completed)
-        .fold<int>(
-          0,
-          (sum, t) =>
-              sum + t.passengers.where((p) => p.isWaitlisted).length,
-        );
-  }
 
   /// Tours that need agent action. Ordered by departure date (soonest first).
   List<_AttentionItem> _needsAttention(BuildContext context, List<Tour> tours) {
@@ -384,6 +265,366 @@ class DashboardScreen extends StatelessWidget {
 
 // ─── widget pieces ────────────────────────────────────────────────────
 
+/// Futuristic-simple dashboard hero: pick a tour (defaults to the nearest
+/// upcoming one), see its passenger count as the headline figure, and the
+/// nearest-trip details with a way in. (Labels are placeholder English pending
+/// i18n keys.)
+class _TripHero extends StatefulWidget {
+  final UgamColorSet c;
+  const _TripHero({required this.c});
+
+  @override
+  State<_TripHero> createState() => _TripHeroState();
+}
+
+class _TripHeroState extends State<_TripHero> {
+  String? _selectedId;
+
+  List<Tour> _upcoming(List<Tour> tours) {
+    // Active (non-completed) tours, soonest departure first. We don't drop
+    // already-departed tours — an agent still manages a trip up to and around
+    // its run date, so the "nearest" trip stays relevant after departure.
+    return tours.where((t) => t.status != TourStatus.completed).toList()
+      ..sort((a, b) => a.departureDate.compareTo(b.departureDate));
+  }
+
+  static String _fmt(DateTime d) {
+    const m = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return '${d.day} ${m[d.month - 1]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.c;
+    final tourCtrl = Get.find<TourController>();
+    return Obx(() {
+      final upcoming = _upcoming(tourCtrl.tours);
+      if (upcoming.isEmpty) return _emptyHero(context, c);
+
+      var tour = upcoming.first;
+      if (_selectedId != null) {
+        for (final t in upcoming) {
+          if (t.id == _selectedId) {
+            tour = t;
+            break;
+          }
+        }
+      }
+      final pax = tour.passengerCount;
+      final cap = computeTourCapacity(tour);
+      final isNearest = tour.id == upcoming.first.id;
+
+      return Column(
+        children: [
+          _selectorPill(context, c, tour, upcoming, isNearest),
+          const SizedBox(height: UgamSpacing.xl),
+          _passengerHero(c, pax, cap.free, cap.capacity),
+          const SizedBox(height: UgamSpacing.lg),
+          _tripCard(context, c, tour, cap),
+        ],
+      );
+    });
+  }
+
+  Widget _selectorPill(BuildContext context, UgamColorSet c, Tour tour,
+      List<Tour> all, bool isNearest) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: all.length > 1 ? () => _openPicker(context, c, all) : null,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.directions_bus_rounded,
+                  size: 18, color: c.accent),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${tour.fromCity} → ${tour.toCity}',
+                      style: UgamText.titleS.copyWith(color: c.ink),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(
+                      '${isNearest ? tr('dashboard.nearest_trip') : tour.title} · ${tr('dashboard.departs_short', namedArgs: {
+                            'date': _fmt(tour.departureDate)
+                          })}',
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            if (all.length > 1)
+              Icon(Icons.expand_more_rounded, color: c.accent),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _passengerHero(UgamColorSet c, int pax, int left, int cap) {
+    return SizedBox(
+      height: 184,
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 220,
+            height: 220,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [c.glow, c.glow.withValues(alpha: 0)],
+                stops: const [0.0, 0.7],
+              ),
+            ),
+          ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(tr('dashboard.passengers').toUpperCase(),
+                  style: UgamText.micro.copyWith(color: c.ink3)),
+              const SizedBox(height: UgamSpacing.sm),
+              Text('$pax',
+                  style: UgamText.hero.copyWith(color: c.ink, fontSize: 64)),
+              const SizedBox(height: UgamSpacing.sm),
+              Text(
+                  cap > 0
+                      ? tr('dashboard.seats_left',
+                          namedArgs: {'left': '$left', 'total': '$cap'})
+                      : tr('dashboard.no_bus_added'),
+                  style: UgamText.body
+                      .copyWith(color: left > 0 ? c.good : c.ink2)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _tripCard(
+      BuildContext context, UgamColorSet c, Tour tour, TourCapacity cap) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TourDetailScreen(tourId: tour.id)),
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.xl),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(tr('dashboard.nearest_trip').toUpperCase(),
+                style: UgamText.micro.copyWith(color: c.accent)),
+            const SizedBox(height: UgamSpacing.md),
+            Row(
+              children: [
+                Flexible(
+                  child: Text(tour.fromCity,
+                      style: UgamText.titleM.copyWith(color: c.ink),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+                  child: Icon(Icons.more_horiz_rounded, color: c.ink3, size: 18),
+                ),
+                Flexible(
+                  child: Text(tour.toCity,
+                      style: UgamText.titleM.copyWith(color: c.ink),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
+            const SizedBox(height: UgamSpacing.sm),
+            Text(
+                tr('dashboard.departs',
+                    namedArgs: {'date': _fmt(tour.departureDate)}),
+                style: UgamText.caption.copyWith(color: c.ink2)),
+            const SizedBox(height: UgamSpacing.lg),
+            Container(height: 1, color: c.border),
+            const SizedBox(height: UgamSpacing.lg),
+            Row(
+              children: [
+                _leg(c, tr('dashboard.leg_go').toUpperCase(), cap.goOccupied,
+                    c.ink),
+                _leg(c, tr('dashboard.leg_return').toUpperCase(),
+                    cap.retOccupied, c.ink),
+                _leg(c, tr('dashboard.leg_free').toUpperCase(), cap.free,
+                    cap.free > 0 ? c.good : c.ink2),
+              ],
+            ),
+            const SizedBox(height: UgamSpacing.lg),
+            Container(
+              height: 52,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Brand.copper, Brand.copperDeep],
+                ),
+                borderRadius: BorderRadius.circular(UgamRadius.button),
+                boxShadow: [
+                  BoxShadow(
+                      color: c.glow,
+                      blurRadius: 22,
+                      offset: const Offset(0, 10)),
+                ],
+              ),
+              alignment: Alignment.center,
+              child: Text(tr('dashboard.open_trip'),
+                  style: UgamText.titleS.copyWith(color: c.onAccent)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One column of the leg breakdown: a small caps label + a big Sora figure.
+  Widget _leg(UgamColorSet c, String label, int n, Color numColor) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
+          const SizedBox(height: 4),
+          Text('$n', style: UgamText.numXl.copyWith(color: numColor)),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyHero(BuildContext context, UgamColorSet c) {
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.xl),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Column(
+        children: [
+          Icon(Icons.explore_rounded, size: 30, color: c.ink3),
+          const SizedBox(height: UgamSpacing.md),
+          Text(tr('dashboard.no_upcoming_trips'),
+              style: UgamText.titleM.copyWith(color: c.ink)),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamCTA(
+            label: tr('tours.empty.cta'),
+            leadingIcon: Icons.add_rounded,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CreateTourScreen()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openPicker(BuildContext context, UgamColorSet c, List<Tour> all) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: c.card,
+      shape: RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.vertical(top: Radius.circular(UgamRadius.sheet)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(UgamSpacing.gutter,
+              UgamSpacing.lg, UgamSpacing.gutter, UgamSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: UgamSpacing.lg),
+                  decoration: BoxDecoration(
+                    color: c.cardElev,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              Text(tr('dashboard.choose_trip'),
+                  style: UgamText.titleM.copyWith(color: c.ink)),
+              const SizedBox(height: UgamSpacing.md),
+              for (final t in all)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() => _selectedId = t.id);
+                    Navigator.of(ctx).pop();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: UgamSpacing.sm),
+                    padding: const EdgeInsets.all(UgamSpacing.md),
+                    decoration: BoxDecoration(
+                      color: c.cardElev,
+                      borderRadius: BorderRadius.circular(UgamRadius.row),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('${t.fromCity} → ${t.toCity}',
+                                  style:
+                                      UgamText.titleS.copyWith(color: c.ink),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                              const SizedBox(height: 2),
+                              Text(
+                                  tr('dashboard.departs_short', namedArgs: {
+                                    'date': _fmt(t.departureDate)
+                                  }),
+                                  style: UgamText.caption
+                                      .copyWith(color: c.ink3)),
+                            ],
+                          ),
+                        ),
+                        Text('${t.passengerCount}',
+                            style: UgamText.numLg.copyWith(color: c.accent)),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Greeting extends StatelessWidget {
   final String name;
   final String initials;
@@ -473,285 +714,7 @@ class _Greeting extends StatelessWidget {
   }
 }
 
-/// "TODAY" hero card. Renders when a tour departs in the next 24h.
-class _TodayHeroCard extends StatelessWidget {
-  final Tour tour;
-  final UgamColorSet c;
-  const _TodayHeroCard({required this.tour, required this.c});
 
-  String _countdown() {
-    final now = DateTime.now();
-    final diff = tour.departureDate.difference(now);
-    if (diff.isNegative) return tr('dashboard.countdown_now');
-    if (diff.inHours < 1) {
-      return tr('dashboard.countdown_minutes', args: ['${diff.inMinutes}']);
-    }
-    return tr('dashboard.countdown_hours', args: ['${diff.inHours}']);
-  }
-
-  /// Champagne route monogram for the graphite backdrop, e.g. `S→M`.
-  String? _routeMonogram() {
-    final from = tour.fromCity.trim();
-    final to = tour.toCity.trim();
-    if (from.isEmpty || to.isEmpty) return null;
-    return '${from[0].toUpperCase()}→${to[0].toUpperCase()}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bus = tour.buses.isNotEmpty ? tour.buses.first : null;
-    return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => TourDetailScreen(tourId: tour.id),
-        ),
-      ),
-      behavior: HitTestBehavior.opaque,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: SizedBox(
-          height: 220,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              UgamBusBackdrop(
-                seed: '${tour.id}-today',
-                label: _routeMonogram(),
-              ),
-              // top row: TODAY pill + countdown
-              Positioned(
-                top: UgamSpacing.lg,
-                left: UgamSpacing.lg,
-                right: UgamSpacing.lg,
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: UgamSpacing.md,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.18),
-                        borderRadius:
-                            BorderRadius.circular(UgamRadius.chip),
-                      ),
-                      child: Text(
-                        tr('dashboard.today'),
-                        style: UgamText.micro
-                            .copyWith(color: Colors.white, fontSize: 10),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: UgamSpacing.md,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        borderRadius:
-                            BorderRadius.circular(UgamRadius.chip),
-                      ),
-                      child: Text(
-                        _countdown(),
-                        style: UgamText.tabular(
-                          UgamText.micro
-                              .copyWith(color: Colors.white, fontSize: 10),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Positioned(
-                left: UgamSpacing.lg,
-                right: UgamSpacing.lg,
-                bottom: UgamSpacing.lg,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tour.title,
-                      style: UgamText.display.copyWith(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        height: 1.05,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${tour.fromCity} → ${tour.toCity}'
-                      '${bus != null ? "  ·  ${bus.displayLabel}" : ""}',
-                      style: UgamText.bodyStrong
-                          .copyWith(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: UgamSpacing.md),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: UgamSpacing.md,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            borderRadius:
-                                BorderRadius.circular(UgamRadius.chip),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Icon(Icons.event_seat_rounded,
-                                  size: 12, color: Colors.white),
-                              const SizedBox(width: 4),
-                              Text(
-                                tr('dashboard.seats_count', namedArgs: {
-                                  'assigned': '${tour.totalSeatsAssigned}',
-                                  'total':
-                                      '${tour.totalBusSeats > 0 ? tour.totalBusSeats : tour.totalSeatsRequested}',
-                                }),
-                                style: UgamText.tabular(
-                                  UgamText.bodyStrong.copyWith(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Spacer(),
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.18),
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.arrow_forward_rounded,
-                            size: 18,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Quiet tile when no tour departs today.
-class _NoTripsTodayTile extends StatelessWidget {
-  final Tour? nextTour;
-  final UgamColorSet c;
-  const _NoTripsTodayTile({required this.nextTour, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    final next = nextTour;
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.lg),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.sheet),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: c.card,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.wb_sunny_rounded, size: 22, color: c.ink2),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  next == null
-                      ? tr('dashboard.no_upcoming_trips')
-                      : tr('dashboard.no_trips_today'),
-                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  next == null
-                      ? tr('dashboard.no_trips_cta')
-                      : tr('dashboard.next_trip', namedArgs: {
-                          'name': next.title,
-                          'when': _daysUntil(next.departureDate),
-                        }),
-                  style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => const CreateTourScreen(),
-              ),
-            ),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.md,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: c.card,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.add_rounded, size: 14, color: c.ink),
-                  const SizedBox(width: 4),
-                  Text(
-                    tr('dashboard.new'),
-                    style: UgamText.bodyStrong
-                        .copyWith(color: c.ink, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _daysUntil(DateTime when) {
-    final days = when.difference(DateTime.now()).inDays;
-    if (days <= 0) return tr('dashboard.days_today');
-    if (days == 1) return tr('dashboard.days_one');
-    return tr('dashboard.days_other', args: ['$days']);
-  }
-}
-
-/// 4 chunky quick-action tiles in a single row.
 class _QuickActions extends StatelessWidget {
   final UgamColorSet c;
   final ShellController shell;
@@ -776,7 +739,7 @@ class _QuickActions extends StatelessWidget {
             },
           ),
         ),
-        const SizedBox(width: UgamSpacing.md - 4),
+        const SizedBox(width: UgamSpacing.md),
         Expanded(
           child: _QA(
             label: tr('dashboard.qa_tours'),
@@ -788,7 +751,7 @@ class _QuickActions extends StatelessWidget {
             },
           ),
         ),
-        const SizedBox(width: UgamSpacing.md - 4),
+        const SizedBox(width: UgamSpacing.md),
         Expanded(
           child: _QA(
             label: tr('dashboard.qa_assign'),
@@ -800,7 +763,7 @@ class _QuickActions extends StatelessWidget {
             },
           ),
         ),
-        const SizedBox(width: UgamSpacing.md - 4),
+        const SizedBox(width: UgamSpacing.md),
         Expanded(
           child: _QA(
             label: tr('dashboard.qa_notify'),
@@ -835,231 +798,32 @@ class _QA extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          vertical: UgamSpacing.md,
-        ),
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
         decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.sheet),
+          color: c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.card),
         ),
         child: Column(
           children: [
             Container(
-              width: 44,
-              height: 44,
+              width: 46,
+              height: 46,
               decoration: BoxDecoration(
-                color: c.card,
-                shape: BoxShape.circle,
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
               ),
               alignment: Alignment.center,
-              child: Icon(
-                icon,
-                size: 20,
-                color: c.ink,
-              ),
+              child: Icon(icon, size: 20, color: c.ink),
             ),
             const SizedBox(height: UgamSpacing.sm + 2),
             Text(
               label,
-              style: UgamText.bodyStrong.copyWith(
-                color: c.ink,
-                fontSize: 12,
-              ),
+              style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11.5),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// Big revenue number, week-of-context. The hero metric of the dashboard.
-class _RevenueHero extends StatelessWidget {
-  final double revenue;
-  final int seatsSold;
-  final UgamColorSet c;
-
-  const _RevenueHero({
-    required this.revenue,
-    required this.seatsSold,
-    required this.c,
-  });
-
-  String _format() {
-    if (revenue >= 100000) {
-      final lakhs = revenue / 100000;
-      return lakhs == lakhs.roundToDouble()
-          ? '₹${lakhs.toInt()}L'
-          : '₹${lakhs.toStringAsFixed(1)}L';
-    }
-    if (revenue >= 1000) {
-      final k = revenue / 1000;
-      return k == k.roundToDouble()
-          ? '₹${k.toInt()}K'
-          : '₹${k.toStringAsFixed(1)}K';
-    }
-    return '₹${revenue.toInt()}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.xl,
-        UgamSpacing.lg,
-        UgamSpacing.xl,
-        UgamSpacing.lg,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.sheet),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Text(
-                tr('dashboard.this_week'),
-                style: UgamText.micro.copyWith(color: c.ink3),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.sm + 2, vertical: 2),
-                decoration: BoxDecoration(
-                  color: c.goodFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.chip),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.trending_up_rounded,
-                        size: 11, color: c.good),
-                    const SizedBox(width: 3),
-                    Text(
-                      tr('dashboard.stat_revenue'),
-                      style: UgamText.micro
-                          .copyWith(color: c.good, fontSize: 9.5),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.sm + 2),
-          Text(
-            _format(),
-            style: UgamText.tabular(
-              UgamText.display.copyWith(
-                // The dashboard's single rationed champagne signal.
-                color: c.accent,
-                fontSize: 40,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -1.2,
-                height: 1,
-              ),
-            ),
-          ),
-          const SizedBox(height: UgamSpacing.xs),
-          Text(
-            seatsSold == 0
-                ? tr('dashboard.no_seats_sold')
-                : tr('dashboard.seats_sold', args: ['$seatsSold']),
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SmallStatsRow extends StatelessWidget {
-  final int active;
-  final int todaySeats;
-  final int waitlist;
-  final UgamColorSet c;
-
-  const _SmallStatsRow({
-    required this.active,
-    required this.todaySeats,
-    required this.waitlist,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _MiniStat(
-            value: '$active',
-            label: tr('dashboard.mini_active'),
-            c: c,
-          ),
-        ),
-        const SizedBox(width: UgamSpacing.md - 4),
-        Expanded(
-          child: _MiniStat(
-            value: '$todaySeats',
-            label: tr('dashboard.mini_today'),
-            c: c,
-          ),
-        ),
-        const SizedBox(width: UgamSpacing.md - 4),
-        Expanded(
-          child: _MiniStat(
-            value: '$waitlist',
-            label: tr('dashboard.mini_waitlist'),
-            tint: waitlist > 0 ? UgamStatusTone.warm : null,
-            c: c,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MiniStat extends StatelessWidget {
-  final String value;
-  final String label;
-  final UgamColorSet c;
-  final UgamStatusTone? tint;
-  const _MiniStat({
-    required this.value,
-    required this.label,
-    required this.c,
-    this.tint,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Color valueColor = c.ink;
-    if (tint == UgamStatusTone.warm) valueColor = c.warm;
-    if (tint == UgamStatusTone.good) valueColor = c.good;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        vertical: UgamSpacing.md,
-        horizontal: UgamSpacing.sm,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
-      child: Column(
-        children: [
-          Text(value,
-              style: UgamText.tabular(UgamText.titleL
-                  .copyWith(color: valueColor, fontSize: 22))),
-          const SizedBox(height: 2),
-          Text(label.toUpperCase(),
-              style: UgamText.micro
-                  .copyWith(color: c.ink3, fontSize: 9.5)),
-        ],
       ),
     );
   }
@@ -1347,7 +1111,7 @@ class _LoadingShimmer extends StatelessWidget {
       children: const [
         UgamSkeleton(height: 60, radius: 16),
         SizedBox(height: UgamSpacing.xl),
-        UgamSkeleton(height: 220, radius: 28),
+        UgamSkeleton(height: 150, radius: 20),
         SizedBox(height: UgamSpacing.xl),
         Row(children: [
           Expanded(child: UgamSkeleton(height: 92, radius: 20)),

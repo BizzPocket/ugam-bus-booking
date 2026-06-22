@@ -1313,7 +1313,6 @@ class _RosterRow extends StatelessWidget {
               decoration: BoxDecoration(
                 color: c.cardElev,
                 borderRadius: BorderRadius.circular(UgamRadius.input),
-                border: Border.all(color: c.border),
               ),
               child: Text(
                 seatId,
@@ -1433,7 +1432,6 @@ class _TripBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: oneWay ? tint : c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.chip),
-        border: oneWay ? null : Border.all(color: c.border),
       ),
       child: Text(
         label,
@@ -2061,7 +2059,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                             ),
                             decoration: BoxDecoration(
                               color: c.warmFill,
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(UgamRadius.chip),
                             ),
                             child: Text(
                               tr('handler_chart.handler_badge'),
@@ -2093,7 +2091,6 @@ class _CollectSheetState extends State<_CollectSheet> {
             decoration: BoxDecoration(
               color: c.cardElev,
               borderRadius: BorderRadius.circular(UgamRadius.input),
-              border: Border.all(color: c.border),
             ),
             child: Row(
               children: [
@@ -3289,7 +3286,6 @@ class _AttendanceRow extends StatelessWidget {
             decoration: BoxDecoration(
               color: c.cardElev,
               borderRadius: BorderRadius.circular(UgamRadius.input),
-              border: Border.all(color: c.border),
             ),
             child: Text(
               seatLabel,

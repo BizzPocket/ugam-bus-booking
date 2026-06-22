@@ -344,10 +344,17 @@ class _SectionHeader extends StatelessWidget {
             style: UgamText.micro.copyWith(color: labelColor),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          Text(
-            '$count',
-            style: UgamText.tabular(
-              UgamText.micro.copyWith(color: alert ? c.danger : c.ink2),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: alert ? c.danger.withValues(alpha: 0.14) : c.cardElev,
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+            ),
+            child: Text(
+              '$count',
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(color: alert ? c.danger : c.ink2),
+              ),
             ),
           ),
         ],
@@ -409,11 +416,11 @@ class _ExceptionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 34,
-            height: 34,
+            width: 38,
+            height: 38,
             decoration: BoxDecoration(
               color: toneFill,
-              borderRadius: BorderRadius.circular(UgamRadius.seat + 2),
+              borderRadius: BorderRadius.circular(UgamRadius.input),
             ),
             alignment: Alignment.center,
             child: Icon(
@@ -513,7 +520,7 @@ class _GroupChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.sm + 2,
-        vertical: 3,
+        vertical: UgamSpacing.xs,
       ),
       decoration: BoxDecoration(
         color: c.cardElev,
@@ -524,15 +531,13 @@ class _GroupChip extends StatelessWidget {
         children: [
           Icon(Icons.group_rounded, size: 13, color: c.ink3),
           const SizedBox(width: UgamSpacing.xs + 1),
-          Text(
-            tr('seating_exceptions.group_label', namedArgs: {'label': label}),
-            style: UgamText.caption.copyWith(
-              color: c.ink2,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+          Flexible(
+            child: Text(
+              tr('seating_exceptions.group_label', namedArgs: {'label': label}),
+              style: UgamText.micro.copyWith(color: c.ink2, letterSpacing: 0.2),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

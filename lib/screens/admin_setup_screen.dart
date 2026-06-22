@@ -71,48 +71,64 @@ class AdminSetupScreen extends StatelessWidget {
                   UgamSpacing.xxl,
                 ),
                 child: UgamCard.plain(
+                  padding: const EdgeInsets.all(UgamSpacing.xl),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Clean tokenized header — the lone champagne signal:
-                      // a large support-agent mark on an elevated tile.
-                      Container(
-                        width: 72,
-                        height: 72,
-                        decoration: BoxDecoration(
-                          color: c.cardElev,
-                          borderRadius: BorderRadius.circular(UgamRadius.card),
-                          border: Border.all(
-                            color: c.accent.withValues(alpha: 0.30),
-                          ),
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.support_agent_rounded,
-                          size: 36,
-                          color: c.accent,
+                      // Clean tokenized header — the lone copper signal: a
+                      // support-agent mark floating on a soft copper halo
+                      // (depth from light, not a border).
+                      SizedBox(
+                        width: 96,
+                        height: 96,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: 96,
+                              height: 96,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: [c.glow, c.glow.withValues(alpha: 0)],
+                                  stops: const [0.0, 0.72],
+                                ),
+                              ),
+                            ),
+                            Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                color: c.accentFill,
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.card,
+                                ),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.support_agent_rounded,
+                                size: 34,
+                                color: c.accent,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: UgamSpacing.lg),
+                      const SizedBox(height: UgamSpacing.xl),
                       Text(
                         tr('admin_setup.support_heading'),
-                        style: UgamText.titleL.copyWith(
-                          color: c.ink,
-                          fontSize: 20,
-                        ),
+                        style: UgamText.titleL.copyWith(color: c.ink),
                       ),
                       const SizedBox(height: UgamSpacing.sm),
                       Text(
                         tr('admin_setup.support_body'),
-                        style: UgamText.body.copyWith(
-                          color: c.ink2,
-                          fontSize: 14,
-                          height: 1.55,
-                        ),
+                        style: UgamText.body.copyWith(color: c.ink2),
                       ),
-                      const SizedBox(height: UgamSpacing.md),
+                      const SizedBox(height: UgamSpacing.lg),
                       // Email chip: tap to open mail, long-press to copy.
+                      // No border — a quiet elevated fill separates it.
                       GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onTap: _contactSupport,
@@ -120,14 +136,13 @@ class AdminSetupScreen extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: UgamSpacing.md,
-                            vertical: UgamSpacing.sm,
+                            vertical: UgamSpacing.md,
                           ),
                           decoration: BoxDecoration(
                             color: c.cardElev,
                             borderRadius: BorderRadius.circular(
                               UgamRadius.input,
                             ),
-                            border: Border.all(color: c.border),
                           ),
                           child: Row(
                             children: [
@@ -136,18 +151,17 @@ class AdminSetupScreen extends StatelessWidget {
                                 size: 16,
                                 color: c.ink2,
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: UgamSpacing.sm),
                               Flexible(
                                 child: Text(
                                   _supportEmail,
                                   style: UgamText.bodyStrong.copyWith(
                                     color: c.ink,
-                                    fontSize: 13,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: UgamSpacing.sm),
                               Icon(
                                 Icons.copy_rounded,
                                 size: 14,

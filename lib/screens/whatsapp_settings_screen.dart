@@ -77,32 +77,69 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
       saveLabel: tr('settings_pages.save'),
       onSave: _save,
       children: [
-        UgamPhoneInput(
-          controller: _waNumber,
-          label: tr('settings_pages.whatsapp.number_label'),
-        ),
-        const SizedBox(height: UgamSpacing.sm),
-        Text(
-          tr('settings_pages.whatsapp.number_hint',
+        _SoftField(
+          c: c,
+          note: tr('settings_pages.whatsapp.number_hint',
               namedArgs: {'phone': loginPhone}),
-          style: UgamText.caption.copyWith(color: c.ink3),
+          child: UgamPhoneInput(
+            controller: _waNumber,
+            label: tr('settings_pages.whatsapp.number_label'),
+          ),
         ),
         const SizedBox(height: UgamSpacing.xl),
-        UgamInput(
-          label: tr('settings_pages.whatsapp.signature_label'),
-          hint: tr('settings_pages.whatsapp.signature_hint'),
-          controller: _signature,
-          maxLines: 4,
-          minLines: 3,
-          maxLength: 240,
-          keyboardType: TextInputType.multiline,
-        ),
-        const SizedBox(height: UgamSpacing.sm),
-        Text(
-          tr('settings_pages.whatsapp.signature_note'),
-          style: UgamText.caption.copyWith(color: c.ink3),
+        _SoftField(
+          c: c,
+          note: tr('settings_pages.whatsapp.signature_note'),
+          child: UgamInput(
+            label: tr('settings_pages.whatsapp.signature_label'),
+            hint: tr('settings_pages.whatsapp.signature_hint'),
+            controller: _signature,
+            maxLines: 4,
+            minLines: 3,
+            maxLength: 240,
+            keyboardType: TextInputType.multiline,
+          ),
         ),
       ],
+    );
+  }
+}
+
+/// A single settings field on its own soft surface — the labelled input on a
+/// quiet [UgamColorSet.cardElev] card with the helper line tucked underneath,
+/// matching the grouped-card look of the other settings sub-pages.
+class _SoftField extends StatelessWidget {
+  final UgamColorSet c;
+  final String note;
+  final Widget child;
+
+  const _SoftField({
+    required this.c,
+    required this.note,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          child,
+          const SizedBox(height: UgamSpacing.md),
+          Text(
+            note,
+            style: UgamText.caption.copyWith(color: c.ink3),
+          ),
+        ],
+      ),
     );
   }
 }

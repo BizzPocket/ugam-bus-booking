@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
+import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/time_format.dart';
@@ -202,7 +203,8 @@ class _EditTourScreenState extends State<EditTourScreen> {
             : _descCtrl.text.trim(),
       );
       AppSnackBar.success(tr('edit_tour.snack_updated'));
-      Get.back();
+      if (!mounted) return;
+      AppNav.pop(context);
     } catch (_) {
       AppSnackBar.error(tr('edit_tour.snack_save_failed'));
       setState(() => _saving = false);
@@ -776,7 +778,6 @@ class _TourPreviewCard extends StatelessWidget {
                   shownTitle,
                   style: UgamText.titleM.copyWith(
                     color: title.isNotEmpty ? c.ink : c.ink3,
-                    fontSize: 16,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
 import 'components/ugam_logo.dart';
+import 'config/app_info.dart';
 import 'config/i18n_config.dart';
 import 'config/supabase_config.dart';
 import 'design/tokens.dart';
@@ -61,6 +62,7 @@ class _BootstrapState extends State<_Bootstrap> {
     // max(localization, supabase, firebase) instead of their sum.
     await Future.wait([
       EasyLocalization.ensureInitialized(),
+      AppInfo.load(),
       Supabase.initialize(
         url: SupabaseConfig.url,
         anonKey: SupabaseConfig.anonKey,

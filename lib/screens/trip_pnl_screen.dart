@@ -75,11 +75,9 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
               child: Obx(() {
                 final tour = _tours.getTour(widget.tourId);
                 if (tour == null) {
-                  return Center(
-                    child: Text(
-                      tr('tour_money_board.tour_not_found'),
-                      style: UgamText.body.copyWith(color: c.ink2),
-                    ),
+                  return UgamEmpty(
+                    icon: Icons.search_off_rounded,
+                    title: tr('tour_money_board.tour_not_found'),
                   );
                 }
                 final buses = tour.buses;
@@ -103,15 +101,15 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                     UgamSpacing.gutter,
                     UgamSpacing.sm,
                     UgamSpacing.gutter,
-                    UgamSpacing.xl,
+                    UgamSpacing.xxl,
                   ),
                   physics: const BouncingScrollPhysics(),
                   children: [
                     _TripTotalCard(total: total, c: c),
-                    const SizedBox(height: UgamSpacing.lg),
+                    const SizedBox(height: UgamSpacing.xl),
                     if (handlers.isNotEmpty) ...[
                       _SectionLabel(tr('trip_pnl.by_handler'), c: c),
-                      const SizedBox(height: UgamSpacing.sm),
+                      const SizedBox(height: UgamSpacing.md),
                       for (final h in handlers)
                         Padding(
                           padding: const EdgeInsets.only(
@@ -129,10 +127,10 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                             c: c,
                           ),
                         ),
-                      const SizedBox(height: UgamSpacing.sm),
+                      const SizedBox(height: UgamSpacing.lg),
                     ],
                     _SectionLabel(tr('trip_pnl.by_bus'), c: c),
-                    const SizedBox(height: UgamSpacing.sm),
+                    const SizedBox(height: UgamSpacing.md),
                     for (final s in busSummaries)
                       Padding(
                         padding: const EdgeInsets.only(bottom: UgamSpacing.md),
@@ -178,6 +176,7 @@ class _TripTotalCard extends StatelessWidget {
     final billed = total.totalNetBilled;
     final tone = billed >= 0 ? c.good : c.danger;
     return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.xl),
       tone: billed >= 0 ? UgamCardTone.none : UgamCardTone.danger,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,32 +185,35 @@ class _TripTotalCard extends StatelessWidget {
             billed >= 0 ? tr('trip_pnl.net_profit') : tr('trip_pnl.net_loss'),
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
-          const SizedBox(height: UgamSpacing.xs),
+          const SizedBox(height: UgamSpacing.sm),
           Text(
             Formatters.formatMoneyInr(billed.abs()),
-            style: UgamText.titleXl.copyWith(color: tone),
+            style: UgamText.hero.copyWith(color: tone, fontSize: 44),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: UgamSpacing.xs),
           Text(
             tr('trip_pnl.true_billed'),
             style: UgamText.caption.copyWith(color: c.ink3),
           ),
-          const SizedBox(height: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.lg),
           _NetLine(
             label: tr('trip_pnl.cash_collected'),
             value: total.totalNet,
             c: c,
           ),
           if (total.totalIncome != 0) ...[
-            const SizedBox(height: UgamSpacing.xs),
+            const SizedBox(height: UgamSpacing.sm),
             _NetLine(
               label: tr('bus_money.stat_income'),
               value: total.totalIncome,
               c: c,
             ),
           ],
-          const Divider(height: UgamSpacing.lg),
+          const SizedBox(height: UgamSpacing.lg),
+          Container(height: 1, color: c.border),
+          const SizedBox(height: UgamSpacing.lg),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: _MiniStat(
@@ -274,10 +276,12 @@ class _PnlCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final tone = netBilled >= 0 ? c.good : c.danger;
     return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Column(
@@ -286,7 +290,7 @@ class _PnlCard extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: UgamText.titleS.copyWith(color: c.ink),
+                      style: UgamText.titleM.copyWith(color: c.ink),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -300,15 +304,16 @@ class _PnlCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: UgamSpacing.sm),
+              const SizedBox(width: UgamSpacing.md),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     Formatters.formatMoneyInr(netBilled.abs()),
-                    style: UgamText.titleS.copyWith(color: tone),
+                    style: UgamText.numLg.copyWith(color: tone),
                   ),
+                  const SizedBox(height: 2),
                   Text(
                     netBilled >= 0
                         ? tr('trip_pnl.profit')
@@ -319,10 +324,11 @@ class _PnlCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: UgamSpacing.sm),
-          Divider(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.sm),
+          const SizedBox(height: UgamSpacing.md),
+          Container(height: 1, color: c.border),
+          const SizedBox(height: UgamSpacing.md),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: _MiniStat(
@@ -351,7 +357,7 @@ class _PnlCard extends StatelessWidget {
             ],
           ),
           if (income != 0) ...[
-            const SizedBox(height: UgamSpacing.sm),
+            const SizedBox(height: UgamSpacing.md),
             _NetLine(label: tr('bus_money.stat_income'), value: income, c: c),
           ],
         ],
@@ -371,11 +377,12 @@ class _NetLine extends StatelessWidget {
     final tone = value >= 0 ? c.good : c.danger;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(label, style: UgamText.body.copyWith(color: c.ink2)),
         Text(
           Formatters.formatMoneyInr(value),
-          style: UgamText.bodyStrong.copyWith(color: tone),
+          style: UgamText.numLg.copyWith(color: tone, fontSize: 17),
         ),
       ],
     );
@@ -402,11 +409,11 @@ class _MiniStat extends StatelessWidget {
       children: [
         Text(
           value,
-          style: UgamText.bodyStrong.copyWith(color: tone),
+          style: UgamText.numLg.copyWith(color: tone, fontSize: 16),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: UgamSpacing.xs),
         Text(
           label,
           style: UgamText.micro.copyWith(color: c.ink3),
@@ -424,6 +431,11 @@ class _SectionLabel extends StatelessWidget {
   const _SectionLabel(this.text, {required this.c});
 
   @override
-  Widget build(BuildContext context) =>
-      Text(text, style: UgamText.micro.copyWith(color: c.ink3));
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(left: UgamSpacing.xs),
+        child: Text(
+          text,
+          style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
+        ),
+      );
 }

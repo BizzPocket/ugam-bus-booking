@@ -245,7 +245,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       hint: tr('create_tour.hint.tour_name'),
                       controller: _titleCtrl,
                     ),
-                    const SizedBox(height: UgamSpacing.lg),
+                    const SizedBox(height: UgamSpacing.xl),
                     Text(
                       tr('create_tour.label.route').toUpperCase(),
                       style: UgamText.micro.copyWith(color: c.ink2),
@@ -313,7 +313,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                         ],
                       ),
                     ],
-                    const SizedBox(height: UgamSpacing.lg),
+                    const SizedBox(height: UgamSpacing.xl),
                     Text(
                       tr('create_tour.label.date_range').toUpperCase(),
                       style: UgamText.micro.copyWith(color: c.ink2),
@@ -389,14 +389,14 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                         style: UgamText.caption.copyWith(color: c.danger),
                       ),
                     ],
-                    const SizedBox(height: UgamSpacing.lg),
+                    const SizedBox(height: UgamSpacing.xl),
                     UgamInput(
                       label: tr('create_tour.label.tour_description'),
                       hint: tr('create_tour.hint.description'),
                       controller: _descCtrl,
                       maxLength: 300,
                     ),
-                    const SizedBox(height: UgamSpacing.lg),
+                    const SizedBox(height: UgamSpacing.xl),
                     Text(
                       '${tr('create_tour.label.broadcast').toUpperCase()}  ·  ${tr('create_tour.label.optional').toUpperCase()}',
                       style: UgamText.micro.copyWith(color: c.ink2),
@@ -601,17 +601,16 @@ class _BroadcastImagePicker extends StatelessWidget {
         onTap: onPick,
         behavior: HitTestBehavior.opaque,
         child: Container(
-          height: 54,
-          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
           decoration: BoxDecoration(
             color: c.cardElev,
             borderRadius: BorderRadius.circular(UgamRadius.input),
-            border: Border.all(color: c.border, width: 1),
           ),
           child: Row(
             children: [
               Icon(Icons.add_photo_alternate_rounded, size: 18, color: c.ink2),
-              const SizedBox(width: UgamSpacing.sm),
+              const SizedBox(width: UgamSpacing.sm + 2),
               Expanded(
                 child: Text(
                   tr('create_tour.broadcast_add_image'),

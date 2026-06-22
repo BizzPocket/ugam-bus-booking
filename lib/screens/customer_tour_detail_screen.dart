@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../services/whatsapp_service.dart';
+import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/time_format.dart';
@@ -46,7 +47,7 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
           SliverToBoxAdapter(
             child: _HeroSection(
               tour: t,
-              onBack: () => Get.back(),
+              onBack: () => AppNav.pop(context),
               onShare: () async {
                 HapticFeedback.lightImpact();
                 await WhatsAppService().copyAnnouncementToClipboard(tour: t);
@@ -72,7 +73,7 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
               UgamSpacing.gutter,
               0,
               UgamSpacing.gutter,
-              140,
+              UgamSpacing.dockClearance,
             ),
             sliver: _tabIndex == 0
                 ? _AboutTab(tour: t, c: c)
@@ -178,7 +179,7 @@ class _HeroSection extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 color: c.cardElev,
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(UgamRadius.card),
                 boxShadow: const [
                   BoxShadow(
                     color: Color(0x14000000),
@@ -435,7 +436,7 @@ class _AboutTab extends StatelessWidget {
             padding: const EdgeInsets.all(UgamSpacing.lg),
             decoration: BoxDecoration(
               color: c.cardElev,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(UgamRadius.card),
             ),
             child: Text(
               tour.description!,
@@ -516,12 +517,12 @@ class _ContactOrganiserButton extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: _open,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(UgamRadius.card),
         child: Container(
           padding: const EdgeInsets.all(UgamSpacing.lg),
           decoration: BoxDecoration(
             color: c.cardElev,
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(UgamRadius.card),
           ),
           child: Row(
             children: [
@@ -531,7 +532,7 @@ class _ContactOrganiserButton extends StatelessWidget {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: c.accentFill,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 child: Icon(
                   Icons.chat_bubble_outline_rounded,
@@ -582,15 +583,15 @@ class _BusCard extends StatelessWidget {
     final bus = tour.buses.first;
     final departure = _busDeparture(bus.boardingPoint, bus.departureTime);
     return Container(
-      padding: const EdgeInsets.all(UgamSpacing.sm),
+      padding: const EdgeInsets.all(UgamSpacing.md - 2),
       decoration: BoxDecoration(
         color: c.cardElev,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
       child: Row(
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(UgamRadius.photo),
             child: SizedBox(
               width: 84,
               height: 84,
@@ -787,7 +788,7 @@ class _TimelineRow extends StatelessWidget {
                 if (isFirst)
                   const SizedBox(height: 8)
                 else
-                  Expanded(child: Container(width: 2, color: c.border)),
+                  Expanded(child: Container(width: 2, color: c.cardElev)),
                 Container(
                   width: 28,
                   height: 28,
@@ -802,7 +803,7 @@ class _TimelineRow extends StatelessWidget {
                 if (isLast)
                   const SizedBox(height: 8)
                 else
-                  Expanded(child: Container(width: 2, color: c.border)),
+                  Expanded(child: Container(width: 2, color: c.cardElev)),
               ],
             ),
           ),
@@ -811,10 +812,10 @@ class _TimelineRow extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm),
               child: Container(
-                padding: const EdgeInsets.all(UgamSpacing.md - 2),
+                padding: const EdgeInsets.all(UgamSpacing.md),
                 decoration: BoxDecoration(
                   color: c.cardElev,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(UgamRadius.row),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -866,7 +867,7 @@ class _InfoCard extends StatelessWidget {
       padding: const EdgeInsets.all(UgamSpacing.lg),
       decoration: BoxDecoration(
         color: c.cardElev,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(UgamRadius.card),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
