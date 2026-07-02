@@ -379,6 +379,14 @@ class _RequestsScreenState extends State<RequestsScreen> {
                           // already past the confirm stage.
                           canConfirm:
                               _filter != _RequestFilter.assigned,
+                          // Cancellation/decline is allowed only while the
+                          // passenger hasn't been confirmed yet. Once
+                          // confirmed, they can edit but must not be
+                          // cancelled (including the "confirmed but not yet
+                          // assigned" stage).
+                          canDecline:
+                              _filter != _RequestFilter.confirmed &&
+                                  _filter != _RequestFilter.assigned,
                           onWaitlist: () => _bulkWaitlist(selectedTour),
                           onPromote: () => _bulkPromote(selectedTour),
                           onConfirm: () => _bulkConfirm(selectedTour),
@@ -987,6 +995,9 @@ class _BulkActionBar extends StatelessWidget {
   /// Whether the Confirm slot is offered (false on the Assigned tab, where the
   /// selection is already past the confirm stage).
   final bool canConfirm;
+  /// Whether the Decline slot is offered.
+  /// Decline/cancel is only allowed while the booking is not confirmed.
+  final bool canDecline;
   final VoidCallback onWaitlist;
   final VoidCallback onPromote;
   final VoidCallback onConfirm;
@@ -999,6 +1010,7 @@ class _BulkActionBar extends StatelessWidget {
     required this.count,
     required this.isWaitlistTab,
     required this.canConfirm,
+    required this.canDecline,
     required this.onWaitlist,
     required this.onPromote,
     required this.onConfirm,
@@ -1087,7 +1099,7 @@ class _BulkActionBar extends StatelessWidget {
                   label: tr('requests.bulk.decline'),
                   kind: UgamButtonKind.dangerTonal,
                   expand: true,
-                  onPressed: enabled ? onDecline : null,
+                  onPressed: enabled && canDecline ? onDecline : null,
                 ),
               ),
             ],
@@ -1839,7 +1851,6 @@ class _CardActions extends StatelessWidget {
           Icons.hourglass_top_rounded,
           _toWaitlist,
         ),
-        declineItem,
       ];
     } else if (isWaitlisted) {
       // WAITLIST — "Confirm & seat" is the primary: it clears the waitlist flag

@@ -10,6 +10,7 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/handler_tour_ref.dart';
 import '../models/seat_ticket.dart';
+import '../models/tour_status.dart';
 import '../services/customer_requests_store.dart';
 import 'handler_bus_chart_screen.dart';
 
@@ -38,6 +39,27 @@ class _FindMySeatScreenState extends State<FindMySeatScreen> {
   List<SeatTicket> _tickets = const [];
   List<HandlerTourRef> _handlerTours = const [];
 
+  bool _isLiveDeparture(DateTime? departureDate) {
+    if (departureDate == null) return true; // can't prove it's past
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dep = DateTime(departureDate.year, departureDate.month, departureDate.day);
+    return !dep.isBefore(today);
+  }
+
+  bool _isLiveTicket(SeatTicket t) {
+    final status = t.status.toLowerCase();
+    if (status == TourStatus.completed.name) return false;
+    return _isLiveDeparture(t.departureDate);
+  }
+
+  bool _isLiveHandlerTour(HandlerTourRef ref) {
+    final status = ref.status.toLowerCase();
+    if (status == TourStatus.completed.name) return false;
+    final date = ref.departureDate == null ? null : DateTime.tryParse(ref.departureDate!);
+    return _isLiveDeparture(date);
+  }
+
   @override
   void dispose() {
     _phoneCtrl.dispose();
@@ -64,8 +86,10 @@ class _FindMySeatScreenState extends State<FindMySeatScreen> {
       ]);
       if (!mounted) return;
       setState(() {
-        _tickets = results[0] as List<SeatTicket>;
-        _handlerTours = results[1] as List<HandlerTourRef>;
+        final rawTickets = results[0] as List<SeatTicket>;
+        final rawHandlerTours = results[1] as List<HandlerTourRef>;
+        _tickets = rawTickets.where(_isLiveTicket).toList();
+        _handlerTours = rawHandlerTours.where(_isLiveHandlerTour).toList();
         _searched = true;
         _searching = false;
       });

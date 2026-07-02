@@ -58,7 +58,9 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
   Future<void> _loadRequestCount() async {
     final entries = await CustomerRequestsStore().list();
     if (!mounted) return;
-    setState(() => _myRequestCount = entries.length);
+    // Only count live requests; past tours are history and should not
+    // inflate the "My booking(s)" badge on the main screen.
+    setState(() => _myRequestCount = entries.where((e) => !e.isPast).length);
   }
 
   Future<void> _openMyRequests() async {
