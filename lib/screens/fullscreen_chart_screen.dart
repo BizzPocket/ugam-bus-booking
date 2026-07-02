@@ -94,8 +94,7 @@ class FullscreenChartScreen extends StatelessWidget {
     final c = UgamColors.of(context);
     final empty = layout.totalCells == 0;
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Stack(
           children: [
@@ -123,28 +122,30 @@ class FullscreenChartScreen extends StatelessWidget {
                           // pinch-zoom (maxScale) still enlarges for detail.
                           child: FittedBox(
                             fit: BoxFit.contain,
-                            child: CombinedSeatGrid(
-                              layout: layout,
-                              cellWidth: 64,
-                              cellHeight: 64,
-                              colGap: 6,
-                              rowGap: 6,
-                              driverLabel: driverLabel,
-                              tileBuilder: (ctx, cell) {
-                                final occupants = cell.seatId != null
-                                    ? (occupantsBySeat[cell.seatId] ??
-                                          const <Passenger>[])
-                                    : const <Passenger>[];
-                                return RepaintBoundary(
-                                  child: SeatChartTile(
-                                    cell: cell,
-                                    occupants: occupants,
-                                    groupColors: groupColors,
-                                    bandColor: bandColorFor?.call(cell),
-                                    markHalfDouble: markHalfDouble,
-                                  ),
-                                );
-                              },
+                            child: UgamBusChassis(
+                              child: CombinedSeatGrid(
+                                layout: layout,
+                                cellWidth: 64,
+                                cellHeight: 64,
+                                colGap: 6,
+                                rowGap: 6,
+                                driverLabel: driverLabel,
+                                tileBuilder: (ctx, cell) {
+                                  final occupants = cell.seatId != null
+                                      ? (occupantsBySeat[cell.seatId] ??
+                                            const <Passenger>[])
+                                      : const <Passenger>[];
+                                  return RepaintBoundary(
+                                    child: SeatChartTile(
+                                      cell: cell,
+                                      occupants: occupants,
+                                      groupColors: groupColors,
+                                      bandColor: bandColorFor?.call(cell),
+                                      markHalfDouble: markHalfDouble,
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),

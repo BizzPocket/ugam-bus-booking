@@ -82,8 +82,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
     final c = UgamColors.of(context);
     final tourCtrl = Get.find<TourController>();
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Obx(() {

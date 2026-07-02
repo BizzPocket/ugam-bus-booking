@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../controllers/user_controller.dart';
+import '../design/components/ugam_capacity_meter.dart';
 import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/passenger_group.dart';
@@ -282,8 +283,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Obx(() {
@@ -680,16 +680,16 @@ class _CapacityBannerState extends State<_CapacityBanner> {
   Widget build(BuildContext context) {
     final c = widget.c;
     final tour = widget.tour;
-    final capacity = tour.totalBusSeats;
-    // Trip-aware seat-LOAD: a round-trip rider weighs a full seat, a one-way
-    // rider half. The headline "requested" figure uses this weight so the 0.5
-    // a one-way booking adds is honest and visible (e.g. "1.5"), while the
-    // free/over maths below stay on the PHYSICAL leg demand so the busier leg
-    // is never overbooked.
-    var loadDemand = 0.0;
+    // No-bus demand, counted as WHOLE seats per leg (never the engine's
+    // fractional seatLoad, which leaks "1.5" — a number no one can book). Sum
+    // the active riders' physical berths on each leg so the no-bus headline can
+    // honestly say "Need {go} going · {ret} returning".
+    var goDemand = 0;
+    var retDemand = 0;
     for (final p in tour.passengers) {
       if (p.isWaitlisted || p.journeyDone) continue;
-      loadDemand += p.seatLoad;
+      goDemand += p.goBerths;
+      retDemand += p.retBerths;
     }
     final noBus = tour.buses.isEmpty;
     // Engine-truth occupancy (the single source) — see [computeTourCapacity].
@@ -700,7 +700,6 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     // empty, and the riders the engine can't auto-seat surface as
     // "needs your decision" instead of hiding inside a phantom full bus.
     final cap = computeTourCapacity(tour);
-    final occupied = cap.occupied;
     final free = cap.free;
     final needsDecision = cap.needsDecision;
     // Per-leg one-way surplus, derived from the SAME plan as [free] (never from
@@ -729,14 +728,13 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     // is borderless on neutral dark surfaces). Only the no-bus *attention*
     // state tints the whole surface (warm); a healthy/full bus stays neutral
     // and lets the tone live in the icon, fill-bar and status text instead.
-    final (Color tone, Color fill, IconData icon, String statusValue,
-        String statusLabel) = noBus
-        ? (c.warm, c.warmFill, Icons.directions_bus_outlined, '—',
+    final (Color tone, Color fill, IconData icon, String statusLabel) = noBus
+        ? (c.warm, c.warmFill, Icons.directions_bus_outlined,
             tr('requests.capacity.no_buses'))
         : free > 0
-        ? (c.good, c.card, Icons.event_seat_outlined, '$free',
+        ? (c.good, c.card, Icons.event_seat_outlined,
             tr('requests.capacity.free'))
-        : (c.ink3, c.card, Icons.event_seat_outlined, '0',
+        : (c.ink3, c.card, Icons.event_seat_outlined,
             tr('requests.capacity.free'));
 
     return GestureDetector(
@@ -761,46 +759,31 @@ class _CapacityBannerState extends State<_CapacityBanner> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Collapsed glance line: status icon + the headline numbers + a
-              // chevron. The bus-fill bar fills the middle so demand-vs-capacity
-              // still reads at a glance without expanding.
+              // Collapsed glance line: status icon + the per-leg capacity meter
+              // + a chevron. The meter (UgamCapacityMeter.tour) replaces the old
+              // merged "$occupied/$capacity" fraction + percentage bar + FREE
+              // cluster — it shows each leg as whole seats with its own free
+              // count, never a percentage and never the engine's fractional load.
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Icon(icon, size: 18, color: tone),
                   const SizedBox(width: UgamSpacing.sm),
-                  Text(
-                    noBus
-                        ? _fmtSeatLoad(loadDemand)
-                        : '$occupied/$capacity',
-                    style: UgamText.tabular(
-                      UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
-                    ),
+                  Expanded(
+                    child: noBus
+                        ? Text(
+                            (goDemand > 0 || retDemand > 0)
+                                ? tr('capacity.demand_legs', namedArgs: {
+                                    'go': '$goDemand',
+                                    'ret': '$retDemand',
+                                  })
+                                : statusLabel,
+                            style: UgamText.bodyStrong
+                                .copyWith(color: c.ink, fontSize: 13),
+                          )
+                        : UgamCapacityMeter.tour(cap),
                   ),
                   const SizedBox(width: UgamSpacing.sm),
-                  if (!noBus)
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(UgamRadius.chip),
-                        child: LinearProgressIndicator(
-                          value: capacity <= 0
-                              ? 0
-                              : (occupied / capacity).clamp(0.0, 1.0),
-                          minHeight: 5,
-                          backgroundColor: c.cardElev,
-                          valueColor: AlwaysStoppedAnimation<Color>(tone),
-                        ),
-                      ),
-                    )
-                  else
-                    const Spacer(),
-                  const SizedBox(width: UgamSpacing.sm),
-                  Text(
-                    '$statusValue ${statusLabel.toUpperCase()}',
-                    style: UgamText.tabular(
-                      UgamText.micro.copyWith(color: tone),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
                   Icon(
                     _expanded
                         ? Icons.expand_less_rounded
@@ -843,51 +826,20 @@ class _CapacityBannerState extends State<_CapacityBanner> {
                   ),
                 ),
               ],
-              // Expanded detail: the full three-segment breakdown + per-leg
-              // reclaim row. Hidden by default so cards surface sooner.
+              // Expanded detail: the opposite-leg reclaim hint + free-by-type
+              // pills. The headline meter already shows the per-leg placed/cap/
+              // free whole-seat counts, so the old three-segment "requested /
+              // seats / free" row (which leaked the fractional 1.5) is gone.
               if (_expanded) ...[
-                const SizedBox(height: UgamSpacing.sm + 2),
-                // Three calm segments separated by space, not hairlines — the
-                // surface is borderless so the dividers were visual clutter.
-                Row(
-                  children: [
-                    _CapSeg(
-                      c: c,
-                      value: _fmtSeatLoad(loadDemand),
-                      label: tr('requests.capacity.requested'),
-                      color: c.ink,
-                    ),
-                    _CapSeg(
-                      c: c,
-                      value: noBus ? '—' : '$capacity',
-                      label: tr('requests.capacity.seats'),
-                      color: c.ink,
-                    ),
-                    _CapSeg(
-                      c: c,
-                      value: statusValue,
-                      label: statusLabel,
-                      color: tone,
-                    ),
-                  ],
-                ),
-                // Per-leg breakdown — only meaningful when one-way riders make
-                // the two legs differ. Shows the engine-PLACED load per leg and
-                // the opposite-leg seats still open, so the agent can fill
-                // "going-out-full, coming-back-empty" seats. All plan-derived, so
-                // the GO/RET counts and the reclaim direction agree with the
+                // Per-leg reclaim hint — only meaningful when one-way riders make
+                // the two legs differ. Shows the opposite-leg seats still open,
+                // so the agent can fill "going-out-full, coming-back-empty"
+                // seats. Plan-derived, so the reclaim direction agrees with the
                 // chart instead of the old raw-demand reclaim that could invert.
                 if (!noBus && (goOnlyFree > 0 || retOnlyFree > 0)) ...[
-                  const SizedBox(height: 6),
+                  const SizedBox(height: UgamSpacing.sm + 2),
                   Row(
                     children: [
-                      Text(
-                        tr('requests.capacity.legs', namedArgs: {
-                          'go': '${cap.goOccupied}',
-                          'ret': '${cap.retOccupied}',
-                        }),
-                        style: UgamText.micro.copyWith(color: c.ink2),
-                      ),
                       const Spacer(),
                       Text(
                         [
@@ -978,44 +930,6 @@ class _TypeFreePill extends StatelessWidget {
                 fontSize: 11,
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CapSeg extends StatelessWidget {
-  final UgamColorSet c;
-  final String value;
-  final String label;
-  final Color color;
-  const _CapSeg({
-    required this.c,
-    required this.value,
-    required this.label,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            value,
-            style: UgamText.tabular(
-              UgamText.numLg.copyWith(color: color, fontSize: 18),
-            ),
-          ),
-          const SizedBox(height: 1),
-          Text(
-            label.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: UgamText.micro.copyWith(color: c.ink3, fontSize: 10),
           ),
         ],
       ),
@@ -1185,11 +1099,6 @@ class _BulkActionBar extends StatelessWidget {
 }
 
 // ─── Passenger card ───────────────────────────────────────────────────
-
-/// Compact seat-weight label: a whole number drops its decimal (1.0 → "1"),
-/// a half keeps it (0.5 → "0.5"). Used on the one-way trip chip.
-String _fmtSeatLoad(double load) =>
-    load == load.roundToDouble() ? load.toInt().toString() : load.toString();
 
 class _RequestCard extends StatelessWidget {
   final Passenger passenger;
@@ -1417,19 +1326,21 @@ class _RequestCard extends StatelessWidget {
                   UgamReqChip(
                     // One-way loads a single leg, so it weighs HALF a physical
                     // seat per berth — surface that weight on the trip chip.
-                    label: '${passenger.tripType == TripType.outboundOnly ? tr(
-                            'requests.chip.trip_outbound',
-                            namedArgs: {
-                              'from': tour.fromCity,
-                              'to': tour.toCity,
-                            },
-                          ) : tr(
-                            'requests.chip.trip_return',
-                            namedArgs: {
-                              'from': tour.toCity,
-                              'to': tour.fromCity,
-                            },
-                          )} · ${_fmtSeatLoad(passenger.seatLoad)}'
+                    label: (passenger.tripType == TripType.outboundOnly
+                            ? tr(
+                                'requests.chip.trip_outbound',
+                                namedArgs: {
+                                  'from': tour.fromCity,
+                                  'to': tour.toCity,
+                                },
+                              )
+                            : tr(
+                                'requests.chip.trip_return',
+                                namedArgs: {
+                                  'from': tour.toCity,
+                                  'to': tour.fromCity,
+                                },
+                              ))
                         .toUpperCase(),
                     variant: UgamChipVariant.warm,
                   ),

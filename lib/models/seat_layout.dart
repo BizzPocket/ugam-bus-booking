@@ -220,31 +220,88 @@ class BusLayout {
     // so 37/13 OFF → back row 3S+2D, body 10S+10D — still 13S + 12D total.
     final wantBackSingles = allDoubleBackRow ? 0 : 3;
     final wantBackDoubles = allDoubleBackRow ? 4 : 2;
-    // A bus whose composition pairs perfectly — both the single AND the double
-    // cell counts are even — lays flat into full [single | double] rows with no
-    // leftover, so it needs NO rear bench. Carving a 3S+2D bench out of such a
-    // bus is exactly what left a hole in the last body row (e.g. 36 seats / 12
-    // singles → bench takes 3S+2D, leaving body 9S+10D, so the single lane
-    // splits 5-upper/4-lower and the 5th lower single is missing). Only the
-    // mixed OFF bench is suppressed; the explicit all-double back row (toggle
-    // ON) is always honoured.
+
+    // ── No-ragged-hole invariant (OFF / default path) ───────────────────────
+    // Every lane PAIR — the two single columns (0/1) and the two double columns
+    // (3/4) — must hold an EVEN, perfectly-paired count, so col0 mirrors col1
+    // and col3 mirrors col4 row-for-row. The only place an ODD leftover berth
+    // may live is the centre AISLE (col2), which is exactly the back bench.
+    // Anything else strands a tile with a blank partner beside it (the unpaired
+    // double-upper at 38/0) or, once a short lane is separated from the bench by
+    // taller lanes, a lone tile floating mid-cabin (the 37/2 & 38/8 holes that
+    // reached the WhatsApp PDF).
+    //
+    // So the designed 3S+2D OFF bench is only honoured when, AFTER removing its
+    // cells, BOTH body counts stay EVEN. When they would NOT (e.g. 38/8 → body
+    // 5S+13D), carving it is what left the hole, so we drop back to a MINIMAL
+    // bench that just parks the odd-tail berth(s) in the aisle and keeps every
+    // body lane pair even — conserving the exact berth count either way.
+    final benchKeepsBodyEven = (totalSingleCells - wantBackSingles).isEven &&
+        (totalDoubleCells - wantBackDoubles).isEven;
+
+    // A bus whose composition already pairs perfectly — both cell counts even —
+    // lays flat into full [single | double] rows with no leftover, so it needs
+    // NO rear bench at all (e.g. 36/12 → six clean rows).
     final pairsCleanly = !allDoubleBackRow &&
         totalSingleCells.isEven &&
         totalDoubleCells.isEven;
-    final hasBackRow = isSleeperish &&
-        !pairsCleanly &&
-        totalDoubleCells >= wantBackDoubles &&
-        totalSingleCells >= wantBackSingles;
-    final backSingles = hasBackRow ? wantBackSingles : 0;
-    final backDoubles = hasBackRow ? wantBackDoubles : 0;
 
-    // The body lanes get everything the back row didn't take.
+    // The lone odd-tail berths that cannot pair into a body lane go to the centre
+    // AISLE of the back bench — the one column allowed to carry an unpaired berth
+    // — so cols 0/1 and 3/4 stay mirrored row-for-row on the OFF path.
+    final aisleSingle = totalSingleCells.isOdd ? 1 : 0;
+    final aisleDouble = totalDoubleCells.isOdd ? 1 : 0;
+
+    final int backSingles;
+    final int backDoubles;
+    final int aisleSingles;
+    final int aisleDoubles;
+    if (!isSleeperish) {
+      backSingles = 0;
+      backDoubles = 0;
+      aisleSingles = 0;
+      aisleDoubles = 0;
+    } else if (allDoubleBackRow) {
+      // Toggle ON is a PRODUCT GUARANTEE: the last row is always 4 double sofas
+      // when the bus has the doubles for it (col3 + col4 + an aisle double pair).
+      // An EVEN double count lays out fully paired. An ODD double count keeps the
+      // 4-double back row (the toggle's whole point) and leaves its one
+      // unavoidable leftover as a trailing half-bunk in the body — never invents
+      // a single. Singles requested on an ON bus pair up in the body lanes.
+      final canFourDouble = totalDoubleCells >= wantBackDoubles;
+      backSingles = 0;
+      backDoubles = canFourDouble ? wantBackDoubles : 0; // 4
+      aisleSingles = 0;
+      aisleDoubles = canFourDouble ? 2 : 0; // the 3rd/4th doubles sit in the aisle
+    } else if (!pairsCleanly &&
+        benchKeepsBodyEven &&
+        totalDoubleCells >= wantBackDoubles &&
+        totalSingleCells >= wantBackSingles) {
+      // Designed OFF bench: 3S + 2D, body stays even by construction. The 3rd
+      // single sits in the aisle; col0/col1 carry the other two.
+      backSingles = wantBackSingles;
+      backDoubles = wantBackDoubles;
+      aisleSingles = 1;
+      aisleDoubles = 0;
+    } else {
+      // Minimal OFF bench: only the odd-tail berth(s) live in the aisle so every
+      // body lane pair stays even and hole-free. Zero when both counts are
+      // already even (pairsCleanly) → no bench, clean full rows.
+      backSingles = aisleSingle;
+      backDoubles = aisleDouble;
+      aisleSingles = aisleSingle;
+      aisleDoubles = aisleDouble;
+    }
+    final hasBackRow = (backSingles + backDoubles) > 0;
+
+    // The body lanes get everything the bench didn't take — now always EVEN, so
+    // each lane pair splits exactly in half with no unpaired tail.
     final bodySingleCells = totalSingleCells - backSingles;
     final bodyDoubleCells = totalDoubleCells - backDoubles;
 
-    final upperSingles = (bodySingleCells / 2).ceil();
+    final upperSingles = bodySingleCells ~/ 2;
     final lowerSingles = bodySingleCells - upperSingles;
-    final upperDoubles = (bodyDoubleCells / 2).ceil();
+    final upperDoubles = bodyDoubleCells ~/ 2;
     final lowerDoubles = bodyDoubleCells - upperDoubles;
 
     final grid = <SeatCell>[];
@@ -271,39 +328,35 @@ class BusLayout {
       lowerDoubles,
     ].fold<int>(0, (m, v) => v > m ? v : m);
 
-    // The dedicated back row sits just below the body lanes.
+    // The dedicated back row sits just below the body lanes. Its left/right LANE
+    // berths land in the same col0/1 & col3/4 columns as the body (so they stay
+    // paired and contiguous with it), and only the ODD-tail berths sit in the
+    // centre aisle — the one column allowed to carry an unpaired berth.
     final benchRow = laneRows;
     if (hasBackRow) {
-      // Doubles always sit on the RIGHT (lane cols + aisle).
-      grid.add(SeatCell(
-        row: benchRow,
-        col: SeatGridCols.doubleUpper,
-        seatType: SeatType.doubleSofa,
-        position: SeatPosition.upper,
-      ));
-      grid.add(SeatCell(
-        row: benchRow,
-        col: SeatGridCols.doubleLower,
-        seatType: SeatType.doubleSofa,
-        position: SeatPosition.lower,
-      ));
-      if (allDoubleBackRow) {
-        // ON → the aisle/balcony berths are a DOUBLE pair too (4 doubles).
+      final benchColSingles = backSingles - aisleSingles; // col0 + col1 (0 or 2)
+      final benchColDoubles = backDoubles - aisleDoubles; // col3 + col4 (0 or 2)
+
+      // RIGHT: a paired double bunk (col3 upper, col4 lower) when the designed
+      // bench carries doubles.
+      if (benchColDoubles >= 2) {
         grid.add(SeatCell(
           row: benchRow,
-          col: SeatGridCols.aisle,
+          col: SeatGridCols.doubleUpper,
           seatType: SeatType.doubleSofa,
           position: SeatPosition.upper,
         ));
         grid.add(SeatCell(
           row: benchRow,
-          col: SeatGridCols.aisle,
+          col: SeatGridCols.doubleLower,
           seatType: SeatType.doubleSofa,
           position: SeatPosition.lower,
         ));
-      } else {
-        // OFF → 3 SINGLE sofas on the LEFT: a single column (cols 0/1) plus one
-        // in the aisle, with the doubles already placed on the right.
+      }
+
+      // LEFT: a paired single bunk (col0 upper, col1 lower) when the designed
+      // OFF bench carries its two lane singles.
+      if (benchColSingles >= 2) {
         grid.add(SeatCell(
           row: benchRow,
           col: SeatGridCols.singleUpper,
@@ -316,12 +369,28 @@ class BusLayout {
           seatType: SeatType.singleSofa,
           position: SeatPosition.lower,
         ));
+      }
+
+      // AISLE: the odd-tail berths. The aisle holds at most an upper + a lower.
+      // ON → a double pair; OFF designed → the 3rd single (lower); minimal bench
+      // → the lone odd single and/or odd double. Upper slot is filled first.
+      var aisleUpperTaken = false;
+      void addAisle(SeatType type) {
+        final pos = aisleUpperTaken ? SeatPosition.lower : SeatPosition.upper;
+        aisleUpperTaken = true;
         grid.add(SeatCell(
           row: benchRow,
           col: SeatGridCols.aisle,
-          seatType: SeatType.singleSofa,
-          position: SeatPosition.lower,
+          seatType: type,
+          position: pos,
         ));
+      }
+
+      for (var i = 0; i < aisleDoubles; i++) {
+        addAisle(SeatType.doubleSofa);
+      }
+      for (var i = 0; i < aisleSingles; i++) {
+        addAisle(SeatType.singleSofa);
       }
     }
 

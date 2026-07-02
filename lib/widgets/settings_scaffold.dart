@@ -27,10 +27,7 @@ class SettingsScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [

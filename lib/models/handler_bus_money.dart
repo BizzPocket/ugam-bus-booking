@@ -8,10 +8,11 @@ import 'passenger.dart';
 ///
 /// Built on [BusMoneySummary] — the single source of truth the admin's money
 /// board uses — so the handler and admin can NEVER disagree on what was
-/// collected. The handler never settles the bus owner (the admin pays the owner
-/// directly), so the owner's rent is excluded here entirely (`busRent: 0`):
-/// [spent] is the handler's own ground expenses and [inHand] is the cash they
-/// must hand over.
+/// collected OR on what must be handed over. The handler settles the bus owner
+/// directly out of the cash they collect, so the owner's rent ([rent]) is a
+/// real deduction: [spent] is the handler's own ground expenses and [inHand] is
+/// the net cash left after BOTH ground costs and rent — exactly the admin's
+/// [BusMoneySummary.expectedHandover] for the same bus.
 ///
 /// CRITICAL: cash is summed per COLLECTION ROW scoped to the bus — NEVER matched
 /// to a rider's CURRENT seat. A rider who paid and later changed seats keeps
@@ -24,11 +25,15 @@ class HandlerBusMoney {
   final double toCollect;
 
   /// Total of every expense logged against this bus (the handler's own ground
-  /// costs — the owner's rent is NOT included, the admin settles that).
+  /// costs only — the owner's rent is tracked separately in [rent]).
   final double spent;
 
   /// Total extra income (cabin / gallery / other cash taken in outside fares).
   final double income;
+
+  /// The bus owner's rent the handler pays out of the cash they collect. Shown
+  /// as its own deduction line so the handler can see why their in-hand drops.
+  final double rent;
 
   const HandlerBusMoney({
     required this.collected,
@@ -36,11 +41,13 @@ class HandlerBusMoney {
     required this.toCollect,
     required this.spent,
     required this.income,
+    this.rent = 0,
   });
 
   /// Net cash the handler should be holding for this bus — collected + extra
-  /// income taken in, less their ground expenses. This is what they hand over.
-  double get inHand => collected + income - spent;
+  /// income taken in, less their ground expenses AND the owner's rent. This is
+  /// what they hand over to the admin.
+  double get inHand => collected + income - spent - rent;
 
   /// [dueForSeat] resolves a seated rider's fare for one seat (the bus's
   /// `amountDueForSeat`); injected so this stays decoupled from the heavy Bus
@@ -51,11 +58,14 @@ class HandlerBusMoney {
     required List<Collection> collections,
     required List<Expense> expenses,
     List<IncomeEntry> incomes = const [],
+    double busRent = 0,
     required double Function(Passenger passenger, String seatId) dueForSeat,
   }) {
     // collected / toReturn / to-collect-shortfalls / income all come from the
-    // shared, seat-agnostic BusMoneySummary. Rent is the admin's to settle, so
-    // it is 0 here — `expensesTotal` is then the handler's ground expenses only.
+    // shared, seat-agnostic BusMoneySummary. Rent is kept OUT of this base
+    // (`busRent: 0`) so `expensesTotal` stays the handler's ground expenses
+    // only; the owner's rent is carried separately on [rent] and deducted in
+    // [inHand], so the handler sees ground costs and rent as distinct lines.
     final base = BusMoneySummary.compute(
       busId: busId,
       collections: collections,
@@ -91,6 +101,7 @@ class HandlerBusMoney {
       toCollect: toCollect,
       spent: base.expensesTotal, // busRent: 0 → logged ground expenses only
       income: base.income,
+      rent: busRent,
     );
   }
 }

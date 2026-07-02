@@ -97,5 +97,32 @@ void main() {
       expect(t.totalNet, 2800 - 9000);
       expect(t.totalHandedOver, 1000);
     });
+
+    test('bus rent is INSIDE the handover expectation (handler settles owner)',
+        () {
+      final s = BusMoneySummary.compute(
+        busId: 'bus1',
+        collections: collections,
+        expenses: expenses,
+        handovers: const [],
+        busRent: 20000,
+      );
+      // ground 8000 + rent 20000 folded into expensesTotal.
+      expect(s.expensesTotal, 28000);
+      // The settlement figure now deducts rent too — it IS the cash net.
+      expect(s.expectedHandover, s.netCollected);
+      expect(s.expectedHandover, 2100 - 28000); // -25900
+    });
+
+    test('totalExpectedHandover equals totalNet with rent folded in', () {
+      final t = TourMoneySummary.compute(
+        collections: collections,
+        expenses: expenses,
+        handovers: handovers,
+        busRentsTotal: 20000,
+      );
+      expect(t.totalExpenses, 9000 + 20000);
+      expect(t.totalExpectedHandover, t.totalNet);
+    });
   });
 }

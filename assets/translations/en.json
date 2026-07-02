@@ -9,6 +9,15 @@
     "cross_fill_single_other": "Cross-fill · one berth toward a Double Sofa (free the other berth too)",
     "cross_fill_half": "Cross-fill · a single on half a Double Sofa"
   },
+  "capacity": {
+    "going": "Going",
+    "return_leg": "Return",
+    "go_short": "Go",
+    "ret_short": "Ret",
+    "free_n": "{n} free",
+    "full": "Full",
+    "demand_legs": "Need {go} going · {ret} returning"
+  },
   "app": {
     "title": "Ugam Booking",
     "action": {
@@ -263,7 +272,26 @@
     "choose_trip": "Choose a trip",
     "leg_go": "Go",
     "leg_return": "Return",
-    "leg_free": "Free"
+    "leg_free": "Free",
+    "phase": "Phase",
+    "phase_step": "Phase {step}/{total}",
+    "money_collected": "collected",
+    "money_pending": "pending",
+    "money_amount_collected": "{amount} collected",
+    "money_amount_pending": "{amount} pending",
+    "settle_from_handler": "₹{amount} to settle from {handler}",
+    "settle_amount": "₹{amount} to settle",
+    "qa_money": "Money",
+    "all_caught_up": "All caught up",
+    "all_caught_up_subtitle": "{n} tour(s) on track",
+    "picker_phase_suffix": "· Phase {step}/{total}",
+    "ago_days": "{n}d",
+    "ago_hours": "{n}h",
+    "ago_mins": "{n}m",
+    "seats_full": "Full",
+    "seats_filled_ratio": "{filled}/{total} filled",
+    "seats_left_n": "{n} left",
+    "left_behind": "{n} left behind"
   },
   "tours": {
     "title": "My Tours",
@@ -689,7 +717,7 @@
       "question": "How are seats priced?",
       "same_label": "Same for all",
       "bands_label": "Price bands",
-      "same_body": "Every seat costs the same. Add single / double sofa prices only if those seats are priced differently.",
+      "same_body": "Every seat costs the same. Single / double sofa prices are pre-filled from the base — change them only if those seats cost differently.",
       "bands_body": "Charge specific rows a different per-person price. Any row without a band uses the per-seat price above."
     },
     "per_seat": {
@@ -1141,22 +1169,18 @@
     "occupancy_count": "{assigned}/{capacity} seats",
     "menu_edit": "Edit bus details",
     "menu_view_status": "View seat status",
-    "menu_rebroadcast": "Re-broadcast to driver via WhatsApp",
     "menu_delete": "Delete bus",
-    "snack_driver_phone_missing": "Driver phone is missing on this bus.",
-    "snack_wa_failed": "Could not open WhatsApp.",
-    "wa_assignment": "Bus assignment — {tour}",
-    "wa_bus": "Bus: {bus}",
-    "wa_departure": "Departure: {date}",
-    "wa_from": "From: {city}",
-    "wa_to": "To: {city}",
     "delete_title": "Delete bus?",
     "delete_body": "This will remove {bus} from this tour. Seat assignments tied to this bus will be lost.",
     "snack_deleted": "Bus deleted.",
     "snack_delete_failed": "Could not delete bus.",
     "stat_buses": "Buses",
     "stat_seats": "Seats",
-    "chip_seats": "{n} SEATS"
+    "chip_seats": "{n} SEATS",
+    "subtitle_buses": "{count} buses",
+    "subtitle_seats": "{assigned}/{capacity} seats",
+    "subtitle_seats_free": "{free} free of {capacity}",
+    "menu_call_driver": "Call driver"
   },
   "notify": {
     "no_active_tours_title": "No Active Tours",
@@ -1404,6 +1428,18 @@
     "no_matches_body": "Nothing in this filter — try \"All\".",
     "manage_requests": "Manage requests",
     "manage_requests_hint": "Add, edit, waitlist or search",
+    "roster_header": "Riders",
+    "add": "Add",
+    "msg_whatsapp": "Message on WhatsApp",
+    "call": "Call",
+    "edit_request": "Edit request",
+    "assign_seats": "Assign seats",
+    "seats_left": "{n} left",
+    "bus_occupancy": "{filled}/{total} filled",
+    "vitals_seats": "{filled}/{total} seats",
+    "vitals_riders_one": "1 rider",
+    "vitals_riders_other": "{n} riders",
+    "whatsapp_open_failed": "Couldn't open WhatsApp",
     "ago_now": "now",
     "no_buses_title": "No buses yet",
     "no_buses_body": "Add a bus once the owner gives you the details.",
@@ -1597,7 +1633,10 @@
       "subtitle": "Two passengers share this sofa. Pick one to take the single seat — the other keeps the double.",
       "moved_title": "Seat moved",
       "moved_body": "Moved {name} to seat {seat}. The other passenger keeps the double.",
-      "swapped_body": "Swapped {a} ↔ {b}. {b} now shares the double."
+      "swapped_body": "Swapped {a} ↔ {b}. {b} now shares the double.",
+      "both_label": "Move both here",
+      "both_hint": "They travel on opposite legs (GO + RET), so both fit on {seat}. The double sofa is freed.",
+      "both_body": "Moved {a} and {b} to seat {seat}. The double sofa is now free."
     },
     "flags": {
       "forward_title": "Forward / premium seat",
@@ -1607,6 +1646,7 @@
     },
     "dock_all_pending_title": "All pending ({count})",
     "dock_view_all": "View all",
+    "dock_see_all": "See all {count}",
     "assigned_card_done_title": "All seats assigned",
     "assigned_card_done_sub": "Every passenger is seated. Tap a seat to make changes."
   },
@@ -1631,7 +1671,9 @@
     "context_buses_label": "Buses",
     "context_date_label": "Date",
     "context_handler_label": "Handler",
-    "contact": "Contact"
+    "contact": "Contact",
+    "leg_go": "Outbound journey (going)",
+    "leg_return": "Return journey (coming back)"
   },
   "fullscreen_chart": {
     "empty": "No seat chart to show.",
@@ -1695,6 +1737,8 @@
     "rollup_total_income": "Total income",
     "rollup_net": "Net",
     "rollup_to_return": "To return",
+    "rollup_net_caption": "Across the whole tour",
+    "expense_details": "Details",
     "bus_owner_rent": "Bus owner rent",
     "delete_expense_title": "Delete this expense?",
     "delete_expense_body": "This expense record will be permanently removed. This can't be undone.",
@@ -1727,7 +1771,8 @@
     "chip_not_collected": "Not collected",
     "seat_label": "Seat {seat}",
     "phone_seat_label": "{phone} · Seat {seat}",
-    "metric_due": "Due"
+    "metric_due": "Due",
+    "metric_returned": "Returned"
   },
   "handler_chart": {
     "badge_half_suffix": "{leg} ½",
@@ -1767,6 +1812,7 @@
     "money_owing": "Owing",
     "money_return_due": "Return due",
     "money_not_collected": "Not collected",
+    "in_hand_secondary": "{amount} collected so far",
     "badge_round_trip": "RT",
     "badge_go": "GO",
     "badge_ret": "RET",
@@ -1805,6 +1851,7 @@
     "stat_to_return": "To return",
     "stat_to_collect": "To collect",
     "stat_spent": "Spent",
+    "stat_rent": "Bus rent",
     "stat_in_hand": "In hand",
     "bus_expenses": "Bus expenses",
     "bus_expenses_total": "{bus} · {amount} spent",
@@ -2037,7 +2084,8 @@
     "all_settled": "All settled",
     "open": "Open",
     "no_buses": "No buses on this tour yet.",
-    "collect": "Collect"
+    "collect": "Collect",
+    "more_detail": "More detail"
   },
   "tour_overview": {
     "tour_not_found": "Tour not found.",
@@ -2324,6 +2372,7 @@
     "profit": "Profit",
     "loss": "Loss",
     "row_revenue": "REVENUE",
+    "row_revenue_value": "Rev {n}",
     "row_expenses": "EXPENSES",
     "row_margin": "MARGIN",
     "empty_title": "No completed tours yet",

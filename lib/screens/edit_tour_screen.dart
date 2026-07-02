@@ -403,8 +403,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
     final c = UgamColors.of(context);
     final dirty = _isDirty;
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [

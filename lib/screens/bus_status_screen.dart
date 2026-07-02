@@ -49,8 +49,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Obx(() {
           final tour = tourCtrl.getTour(widget.tourId);

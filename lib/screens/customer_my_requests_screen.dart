@@ -170,8 +170,7 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
     final c = UgamColors.of(context);
     final live = _live;
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(

@@ -128,8 +128,7 @@ class _SeatsScreenState extends State<SeatsScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -171,12 +170,14 @@ class _SeatsScreenState extends State<SeatsScreen> {
           if (_onGrid)
             UgamIconButton(
               icon: Icons.arrow_back_rounded,
+              size: 48,
               onTap: _showSummary,
               semanticLabel: tr('seats.back_to_summary'),
             )
           else
             UgamIconButton(
               icon: Icons.arrow_back_rounded,
+              size: 48,
               onTap: () => Get.back(),
             ),
           const SizedBox(width: UgamSpacing.md),
@@ -215,6 +216,7 @@ class _SeatsScreenState extends State<SeatsScreen> {
                 padding: const EdgeInsets.only(right: UgamSpacing.sm),
                 child: UgamIconButton(
                   icon: Icons.layers_clear_rounded,
+                  size: 48,
                   tone: UgamIconButtonTone.danger,
                   onTap: clearAction,
                   semanticLabel: tr('seat_assignment.clear_bus.confirm'),
@@ -224,6 +226,7 @@ class _SeatsScreenState extends State<SeatsScreen> {
           ),
           UgamIconButton(
             icon: Icons.directions_bus_filled_rounded,
+            size: 48,
             onTap: () => Get.to(() => ManageBusesScreen(tourId: widget.tourId)),
           ),
         ],

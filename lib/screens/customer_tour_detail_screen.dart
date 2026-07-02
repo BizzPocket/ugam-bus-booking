@@ -38,8 +38,7 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
     final c = UgamColors.of(context);
     final t = widget.tour;
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       extendBody: true,
       body: CustomScrollView(
         physics: const BouncingScrollPhysics(),

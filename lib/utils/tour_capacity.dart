@@ -6,6 +6,47 @@ import '../models/tour.dart';
 import '../models/trip_type.dart';
 import '../services/seating_engine.dart';
 
+/// Leg-aware capacity for ONE bus, read from the same engine plan as
+/// [TourCapacity]. Lets a per-bus row show the honest two-leg split
+/// (`Go 28/40 · Ret 24/40`) instead of a single merged fraction that hides
+/// which leg is fuller. [goOccupied]/[retOccupied] are already clamped to
+/// [capacity] by [computeTourCapacity].
+class BusCapacity {
+  /// Bus id this snapshot belongs to (matches [tour.buses[i].id]).
+  final String busId;
+
+  /// Physical berths on this bus (a Double Sofa = 2).
+  final int capacity;
+
+  /// Berths placed on the outbound (GO) leg of this bus.
+  final int goOccupied;
+
+  /// Berths placed on the return (RETURN) leg of this bus.
+  final int retOccupied;
+
+  const BusCapacity({
+    required this.busId,
+    required this.capacity,
+    required this.goOccupied,
+    required this.retOccupied,
+  });
+
+  /// Busier leg — the berths physically tied up at the peak of the journey.
+  int get occupied => math.max(goOccupied, retOccupied);
+
+  /// Berths empty on BOTH legs — sellable as a full round-trip.
+  int get free => (capacity - occupied).clamp(0, capacity);
+
+  /// Seats with a free outbound slot (`capacity − goOccupied`).
+  int get goFree => (capacity - goOccupied).clamp(0, capacity);
+
+  /// Seats with a free return slot (`capacity − retOccupied`).
+  int get retFree => (capacity - retOccupied).clamp(0, capacity);
+
+  /// True when both legs carry the same load — render a single bar, not two.
+  bool get symmetric => goOccupied == retOccupied;
+}
+
 /// Honest, single-source capacity snapshot for a tour, derived from the SAME
 /// deterministic [SeatingEngine] that auto-assign uses.
 ///
@@ -62,6 +103,11 @@ class TourCapacity {
   /// over-demand surfaces as [needsDecision], never as a phantom negative free.
   final Map<SeatType, int> freeByType;
 
+  /// Per-bus leg-aware capacity, keyed by bus id — the SAME plan as the tour
+  /// totals, so a per-bus row can show `Go x/n · Ret y/n` without re-deriving
+  /// its own count. Empty when the tour has no buses.
+  final Map<String, BusCapacity> byBus;
+
   const TourCapacity({
     required this.capacity,
     required this.occupied,
@@ -73,7 +119,16 @@ class TourCapacity {
     required this.needsDecision,
     required this.capByType,
     required this.freeByType,
+    required this.byBus,
   });
+
+  /// Tour-wide seats with a free OUTBOUND slot — `capacity − goOccupied`.
+  /// Mirror of [returnSeatsFree] for the GO leg.
+  int get goSeatsFree => (capacity - goOccupied).clamp(0, capacity);
+
+  /// True when both legs carry the same total load — the two-leg meter can
+  /// collapse to a single bar (no return leg, or perfectly symmetric demand).
+  bool get legsSymmetric => goOccupied == retOccupied;
 
   /// Berths with a free RETURN slot across every bus — the seats an agent can
   /// still sell as a return-only ticket once the GO leg is done: `capacity −
@@ -154,7 +209,7 @@ TourCapacity computeTourCapacity(Tour tour) {
     for (final a in seats) {
       final st = typeBySeat['${a.busId}:${a.seatId}'];
       if (st == null) continue;
-      final leg = p?.legForSeatType(st) ?? TripType.roundTrip;
+      final leg = a.leg ?? (p?.legForSeatType(st) ?? TripType.roundTrip);
       if (leg.usesOutbound) goByType[st] = (goByType[st] ?? 0) + 1;
       if (leg.usesReturn) retByType[st] = (retByType[st] ?? 0) + 1;
     }
@@ -172,6 +227,7 @@ TourCapacity computeTourCapacity(Tour tour) {
   var retOccupied = 0;
   var goOnlyFree = 0;
   var retOnlyFree = 0;
+  final byBus = <String, BusCapacity>{};
   for (final id in busCap.keys) {
     final cap = busCap[id] ?? 0;
     final g = (go[id] ?? 0).clamp(0, cap);
@@ -185,6 +241,12 @@ TourCapacity computeTourCapacity(Tour tour) {
     // (min) is the fully-empty seats already counted in [free].
     goOnlyFree += math.max(0, goFree - retFree);
     retOnlyFree += math.max(0, retFree - goFree);
+    byBus[id] = BusCapacity(
+      busId: id,
+      capacity: cap,
+      goOccupied: g,
+      retOccupied: r,
+    );
   }
   occupied = occupied.clamp(0, capacity);
 
@@ -201,6 +263,7 @@ TourCapacity computeTourCapacity(Tour tour) {
     needsDecision: needsDecision,
     capByType: capByType,
     freeByType: freeByType,
+    byBus: byBus,
   );
 }
 

@@ -205,4 +205,44 @@ void main() {
       expect(cap.returnSeatsFree, 1, reason: 'one return seat is sellable');
     });
   });
+
+  group('computeTourCapacity — same-type one-way split (the matrix bug)', () {
+    test('1 seater GO + 1 seater RET on one booking occupy ONE berth, not two',
+        () {
+      // ONE booking requests the SAME seat type on OPPOSITE legs: a seater
+      // GO-only line + a seater RET-only line. The engine leg-shares them onto
+      // ONE physical seat (GO slot + RET slot of the same berth), so the busier
+      // leg is 1 — capacity must read 1 occupied / 1 free, NOT 2. The per-seat
+      // legs are what keep [freeByType] from double-counting the reuse.
+      final matrix = Passenger(
+        id: 'matrix',
+        tourId: 't1',
+        name: 'matrix',
+        phone: '+910000000000',
+        requestLines: const [
+          RequestLine(
+              seatType: SeatType.seater, qty: 1, leg: TripType.outboundOnly),
+          RequestLine(
+              seatType: SeatType.seater, qty: 1, leg: TripType.returnOnly),
+        ],
+      );
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.seater, null, 'ST1'),
+          _seat(0, 1, SeatType.seater, null, 'ST2'),
+        ])
+      ], [
+        matrix,
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      expect(cap.capByType[SeatType.seater], 2);
+      expect(cap.freeByType[SeatType.seater], 1,
+          reason: 'GO+RET share one berth → max(GO,RET)=1 occupied seater');
+      expect(cap.occupied, 1,
+          reason: 'the reused berth is the busier leg = 1, not 2');
+      expect(cap.free, 1, reason: 'the other seater seat is genuinely empty');
+      expect(cap.needsDecision, 0);
+    });
+  });
 }

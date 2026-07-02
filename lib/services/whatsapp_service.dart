@@ -305,9 +305,9 @@ class WhatsAppService {
 
   String buildAnnouncementMessage({required Tour tour}) {
     final lines = <String>[
-      '🚌 *New Tour Announcement!*',
+      '🚌 *નવા પ્રવાસની જાહેરાત!*',
       '',
-      '🙏 Jay Gurudev',
+      '🙏 જય ગુરુદેવ',
       '',
       '🗺 *${tour.title}*',
       '📍 ${tour.fromCity} → ${tour.toCity}',
@@ -318,14 +318,12 @@ class WhatsAppService {
       lines.addAll(['', '📝 ${tour.description}']);
     }
 
+    // Booking details + the "Book seats" button live on the tour detail page,
+    // so the broadcast intentionally omits the old "reply with name/seats/
+    // mobile" how-to-book block — it only announces the trip.
     lines.addAll([
       '',
-      'To book your seat, reply with:',
-      '✅ Your Name',
-      '✅ Number of Seats',
-      '✅ Mobile Number',
-      '',
-      '🙏 Limited seats available!',
+      '🙏 મર્યાદિત બેઠકો ઉપલબ્ધ છે!',
     ]);
 
     final signature = adminSignature();

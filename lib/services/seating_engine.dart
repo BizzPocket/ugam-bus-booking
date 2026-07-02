@@ -37,6 +37,16 @@ enum TripLeg {
     if (t.usesReturn) legs.add(TripLeg.ret);
     return legs;
   }
+
+  /// Inverse of [forTrip]: the [TripType] a set of held legs represents.
+  static TripType tripTypeOf(List<TripLeg> legs) {
+    final go = legs.contains(TripLeg.go);
+    final ret = legs.contains(TripLeg.ret);
+    if (go && ret) return TripType.roundTrip;
+    if (go) return TripType.outboundOnly;
+    if (ret) return TripType.returnOnly;
+    return TripType.roundTrip;
+  }
 }
 
 /// Why a particular berth was placed where it was. Every assignment the engine
@@ -168,13 +178,11 @@ class SeatingPlan {
   /// outbound (GO) leg vs the return (RETURN) leg, derived from each holder's
   /// coarse [Passenger.derivedTripType] summary.
   ///
-  /// NOTE: the leg now lives per request LINE, but the plan output keys
-  /// assignments only by passenger, with no per-seat→line linkage, so this
-  /// display helper attributes legs at the whole-passenger granularity via the
-  /// [Passenger.derivedTripType] SUMMARY (round-trip when a passenger's lines
-  /// disagree). A passenger that mixes a GO-only line with a RET-only line will
-  /// therefore read as round-trip on each of its seats here — acceptable for the
-  /// occupancy overlay; the engine itself remains exact per line.
+  /// NOTE: per-seat legs are now honored. Each [SeatAssignment] carries the leg
+  /// of the request line it satisfies, so a passenger that mixes a GO-only line
+  /// with a RET-only line reports the correct leg on each of its seats. The
+  /// [Passenger.derivedTripType] SUMMARY is used only as a fallback when a seat
+  /// has no recorded leg (legacy data).
   ///
   /// Pass the SAME passenger list given to [SeatingEngine.propose]; passengers
   /// absent from the plan are ignored. Keyed by `"busId:seatId"`. A whole double
@@ -186,10 +194,12 @@ class SeatingPlan {
     };
     final out = <String, SeatLegOccupancy>{};
     for (final entry in assignmentsByPassenger.entries) {
-      final trip = tripById[entry.key] ?? TripType.roundTrip;
-      final usesGo = trip.usesOutbound;
-      final usesReturn = trip.usesReturn;
       for (final a in entry.value) {
+        // Per-seat leg first; fall back to the passenger summary for legacy
+        // seats that carry no recorded leg.
+        final trip = a.leg ?? (tripById[entry.key] ?? TripType.roundTrip);
+        final usesGo = trip.usesOutbound;
+        final usesReturn = trip.usesReturn;
         final key = '${a.busId}:${a.seatId}';
         final cur = out[key] ?? const SeatLegOccupancy(go: 0, ret: 0);
         out[key] = SeatLegOccupancy(
@@ -830,7 +840,7 @@ class SeatingEngine {
           legs: legs,
         );
         if (cell == null) return null;
-        state.assign(passenger.id, busId, cell.seatId!);
+        state.assign(passenger.id, busId, cell.seatId!, legs: legs);
         reasons.add(PlacementReason(
           busId: busId,
           seatId: cell.seatId!,
@@ -855,7 +865,7 @@ class SeatingEngine {
           preferLower: preferLower,
         );
         if (single != null) {
-          state.assign(passenger.id, busId, single.seatId!);
+          state.assign(passenger.id, busId, single.seatId!, legs: legs);
           reasons.add(PlacementReason(
             busId: busId,
             seatId: single.seatId!,
@@ -1675,8 +1685,9 @@ class _PlanState {
       {String? groupId}) {
     final bs = _busStates[a.busId];
     final list = assignmentsByPassenger.putIfAbsent(passengerId, () => []);
-    // Preserve the locked entry exactly (including locked:true).
-    list.add(a);
+    // Preserve the locked entry exactly (including locked:true). Stamp the leg
+    // from the passed [legs] only when the entry has none recorded yet.
+    list.add(a.leg == null ? a.copyWith(leg: TripLeg.tripTypeOf(legs)) : a);
     if (bs == null) return;
     if (bs.freeForLegs(a.seatId, legs) > 0) {
       bs.consume(a.seatId, legs, 1);
@@ -1845,7 +1856,8 @@ class _PlanState {
   void assign(String passengerId, String busId, String seatId,
       {String? groupId, List<TripLeg> legs = const [TripLeg.go, TripLeg.ret]}) {
     final list = assignmentsByPassenger.putIfAbsent(passengerId, () => []);
-    list.add(SeatAssignment(busId: busId, seatId: seatId));
+    list.add(SeatAssignment(
+        busId: busId, seatId: seatId, leg: TripLeg.tripTypeOf(legs)));
     final cell = _busStates[busId]?.cells[seatId];
     final bs = _busStates[busId];
     if (cell != null && bs != null) {

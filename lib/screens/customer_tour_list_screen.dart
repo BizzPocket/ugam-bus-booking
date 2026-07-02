@@ -92,8 +92,7 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
     final tourCtrl = Get.find<TourController>();
     final c = UgamColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(

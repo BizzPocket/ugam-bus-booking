@@ -72,8 +72,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -410,56 +409,53 @@ class _BusMoneyRow extends StatelessWidget {
             },
           ),
           const SizedBox(height: UgamSpacing.lg),
-          // ── Supporting money pair: collected + handover ────────────
+          // ── Two compact tonal pills: collected + handover ──────────
+          // The two figures the agent glances at most, side by side as quiet
+          // tonal chips — no metric grid, no second-tier ink competing with
+          // the headline above.
           Row(
             children: [
               Expanded(
-                child: _Metric(
+                child: _MoneyPill(
                   label: tr('tour_money_board.collected'),
                   value: Formatters.formatMoneyInr(summary.collected),
-                  valueColor: c.ink2,
                   c: c,
                 ),
               ),
+              const SizedBox(width: UgamSpacing.sm),
               Expanded(
-                child: _Metric(
+                child: _MoneyPill(
                   label: tr('tour_money_board.handover'),
                   value: Formatters.formatMoneyInr(summary.handedOver),
-                  valueColor: c.ink2,
                   c: c,
                 ),
               ),
             ],
           ),
           const SizedBox(height: UgamSpacing.md),
-          // ── Secondary money triplet ────────────────────────────────
-          Row(
-            children: [
-              Expanded(
-                child: _Metric(
-                  label: tr('tour_money_board.to_collect'),
-                  value: Formatters.formatMoneyInr(summary.toCollectTotal),
-                  valueColor: summary.toCollectTotal > 0.005
-                      ? c.danger
-                      : c.ink2,
-                  c: c,
-                ),
+          // ── Secondary figures, folded behind a tap ─────────────────
+          // To-collect / to-return / expenses are rarely the first question,
+          // so they hide inside an expandable breakdown rather than sitting in
+          // an always-on 3-number strip.
+          UgamHeroStat(
+            label: tr('tour_money_board.more_detail'),
+            value: Formatters.formatMoneyInr(summary.expensesTotal),
+            tone: c.ink2,
+            breakdown: [
+              HeroStatLine(
+                tr('tour_money_board.to_collect'),
+                Formatters.formatMoneyInr(summary.toCollectTotal),
+                tone: summary.toCollectTotal > 0.005 ? c.danger : c.ink2,
               ),
-              Expanded(
-                child: _Metric(
-                  label: tr('tour_money_board.to_return'),
-                  value: Formatters.formatMoneyInr(summary.toReturnTotal),
-                  valueColor: summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
-                  c: c,
-                ),
+              HeroStatLine(
+                tr('tour_money_board.to_return'),
+                Formatters.formatMoneyInr(summary.toReturnTotal),
+                tone: summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
               ),
-              Expanded(
-                child: _Metric(
-                  label: tr('tour_money_board.expenses'),
-                  value: Formatters.formatMoneyInr(summary.expensesTotal),
-                  valueColor: c.ink2,
-                  c: c,
-                ),
+              HeroStatLine(
+                tr('tour_money_board.expenses'),
+                Formatters.formatMoneyInr(summary.expensesTotal),
+                tone: c.ink2,
               ),
             ],
           ),
@@ -488,34 +484,47 @@ class _BusMoneyRow extends StatelessWidget {
   }
 }
 
-class _Metric extends StatelessWidget {
+/// Compact tonal money chip — a quiet `accentFill` pill carrying a micro label
+/// over a tabular value. Used in pairs on a bus row so the two everyday figures
+/// (collected / handover) read as one calm strip instead of a metric grid.
+class _MoneyPill extends StatelessWidget {
   final String label;
   final String value;
-  final Color valueColor;
   final UgamColorSet c;
 
-  const _Metric({
+  const _MoneyPill({
     required this.label,
     required this.value,
-    required this.valueColor,
     required this.c,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-        const SizedBox(height: UgamSpacing.sm),
-        Text(
-          value,
-          style: UgamText.numLg.copyWith(color: valueColor, fontSize: 15),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm + 2,
+      ),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.input),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            value,
+            style: UgamText.tabular(
+              UgamText.numLg.copyWith(color: c.ink2, fontSize: 15),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -533,77 +542,65 @@ class _TotalsCapsule extends StatelessWidget {
     final outstanding = summary.totalOutstandingHandover;
     final settled = outstanding.abs() <= 0.005;
 
+    // One hero number (outstanding) on the left, two compact pills (collected,
+    // net) on the right — a single tight strip in the thumb zone instead of the
+    // old 5-number grid. Kept short (~88dp content) so the chart still breathes.
     return UgamStickyCTA(
       child: UgamCard.plain(
         elev: true,
         padding: const EdgeInsets.all(UgamSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  tr('tour_money_board.tour_totals'),
-                  style: UgamText.micro.copyWith(color: c.ink3),
-                ),
-                UgamStatusDot(
-                  label: settled
-                      ? tr('tour_money_board.all_settled')
-                      : tr('tour_money_board.open'),
-                  tone: settled ? UgamStatusTone.good : UgamStatusTone.warm,
-                ),
-              ],
+            // ── Hero: outstanding handover ─────────────────────────
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        tr('tour_money_board.outstanding_handover')
+                            .toUpperCase(),
+                        style: UgamText.micro.copyWith(color: c.ink3),
+                      ),
+                      const SizedBox(width: UgamSpacing.sm),
+                      UgamStatusDot(
+                        label: settled
+                            ? tr('tour_money_board.all_settled')
+                            : tr('tour_money_board.open'),
+                        tone:
+                            settled ? UgamStatusTone.good : UgamStatusTone.warm,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: UgamSpacing.xs),
+                  Text(
+                    Formatters.formatMoneyInr(outstanding),
+                    style: UgamText.tabular(
+                      UgamText.numXl.copyWith(
+                        color: settled ? c.good : c.warm,
+                      ),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: UgamSpacing.lg),
-            Row(
-              children: [
-                Expanded(
-                  child: _TotalCol(
-                    label: tr('tour_money_board.collected'),
-                    value: Formatters.formatMoneyInr(summary.totalCollected),
-                    color: c.ink,
-                    c: c,
-                  ),
-                ),
-                Expanded(
-                  child: _TotalCol(
-                    label: tr('tour_money_board.expenses'),
-                    value: Formatters.formatMoneyInr(summary.totalExpenses),
-                    color: c.ink2,
-                    c: c,
-                  ),
-                ),
-                Expanded(
-                  child: _TotalCol(
-                    label: tr('tour_money_board.net'),
-                    value: Formatters.formatMoneyInr(summary.totalNet),
-                    color: c.ink,
-                    c: c,
-                  ),
-                ),
-              ],
+            const SizedBox(width: UgamSpacing.md),
+            // ── Two compact pills: collected + net ─────────────────
+            _CapsulePill(
+              label: tr('tour_money_board.collected'),
+              value: Formatters.formatMoneyInr(summary.totalCollected),
+              c: c,
             ),
-            const SizedBox(height: UgamSpacing.lg),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    tr('tour_money_board.outstanding_handover'),
-                    style: UgamText.body.copyWith(color: c.ink2),
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.md),
-                Text(
-                  Formatters.formatMoneyInr(outstanding),
-                  style: UgamText.numLg.copyWith(
-                    color: settled ? c.good : c.warm,
-                  ),
-                ),
-              ],
+            const SizedBox(width: UgamSpacing.sm),
+            _CapsulePill(
+              label: tr('tour_money_board.net'),
+              value: Formatters.formatMoneyInr(summary.totalNet),
+              c: c,
             ),
           ],
         ),
@@ -612,34 +609,46 @@ class _TotalsCapsule extends StatelessWidget {
   }
 }
 
-class _TotalCol extends StatelessWidget {
+/// Tight tonal chip used inside the sticky totals capsule: a micro cap over a
+/// tabular value, sized for a thumb-zone strip rather than a full metric tile.
+class _CapsulePill extends StatelessWidget {
   final String label;
   final String value;
-  final Color color;
   final UgamColorSet c;
 
-  const _TotalCol({
+  const _CapsulePill({
     required this.label,
     required this.value,
-    required this.color,
     required this.c,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-        const SizedBox(height: UgamSpacing.sm),
-        Text(
-          value,
-          style: UgamText.numLg.copyWith(color: color, fontSize: 18),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.input),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            value,
+            style: UgamText.tabular(
+              UgamText.numLg.copyWith(color: c.ink, fontSize: 15),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
   }
 }

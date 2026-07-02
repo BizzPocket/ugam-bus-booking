@@ -49,8 +49,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [
@@ -482,11 +481,40 @@ class _TourFinanceRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      tf.title.isEmpty ? tf.route : tf.title,
-                      style: UgamText.titleS.copyWith(color: c.ink),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    // Title line carries the margin% as a small badge chip so
+                    // the headline answer (how good was this trip) rides
+                    // alongside the name — no separate metric strip needed.
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            tf.title.isEmpty ? tf.route : tf.title,
+                            style: UgamText.titleS.copyWith(color: c.ink),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (marginPct != '—') ...[
+                          const SizedBox(width: UgamSpacing.sm),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: UgamSpacing.sm,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: c.cardElev,
+                              borderRadius:
+                                  BorderRadius.circular(UgamRadius.chip),
+                            ),
+                            child: Text(
+                              marginPct,
+                              style: UgamText.tabular(
+                                UgamText.micro.copyWith(color: c.ink2),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -499,6 +527,9 @@ class _TourFinanceRow extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: UgamSpacing.sm),
+              // Net big, revenue small beneath — the trip's bottom line and the
+              // gross it came from, stacked on the right. The old divider + 3-col
+              // revenue/expenses/margin strip is gone.
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
@@ -508,81 +539,20 @@ class _TourFinanceRow extends StatelessWidget {
                     style:
                         UgamText.tabular(UgamText.numLg.copyWith(color: netColor)),
                   ),
-                  const SizedBox(height: 1),
+                  const SizedBox(height: 2),
                   Text(
-                    zero
-                        ? tr('finance.flat')
-                        : (profit ? tr('finance.profit') : tr('finance.loss')),
-                    style: UgamText.micro.copyWith(color: netColor),
+                    tr('finance.row_revenue_value',
+                        namedArgs: {'n': _inr(tf.revenue)}),
+                    style: UgamText.tabular(
+                      UgamText.micro.copyWith(color: c.ink3),
+                    ),
                   ),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: UgamSpacing.md),
-          Divider(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.sm + 2),
-          Row(
-            children: [
-              Expanded(
-                child: _MiniMetric(
-                  label: tr('finance.row_revenue'),
-                  value: _inr(tf.revenue),
-                  color: c.ink,
-                  c: c,
-                ),
-              ),
-              Expanded(
-                child: _MiniMetric(
-                  label: tr('finance.row_expenses'),
-                  value: _inr(tf.expenses),
-                  color: c.ink2,
-                  c: c,
-                ),
-              ),
-              Expanded(
-                child: _MiniMetric(
-                  label: tr('finance.row_margin'),
-                  value: marginPct,
-                  color: c.ink2,
-                  c: c,
-                ),
-              ),
-            ],
-          ),
         ],
       ),
-    );
-  }
-}
-
-class _MiniMetric extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final UgamColorSet c;
-  const _MiniMetric({
-    required this.label,
-    required this.value,
-    required this.color,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: color)),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ],
     );
   }
 }

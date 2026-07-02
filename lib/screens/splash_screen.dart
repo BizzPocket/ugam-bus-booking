@@ -62,8 +62,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: Center(
         child: FadeTransition(
           opacity: _fadeAnim,

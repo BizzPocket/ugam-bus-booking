@@ -20,8 +20,7 @@ class LegalDocumentScreen extends StatelessWidget {
     final headerCross =
         doc.showLogo ? CrossAxisAlignment.center : CrossAxisAlignment.start;
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(

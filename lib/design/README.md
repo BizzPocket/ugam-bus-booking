@@ -43,7 +43,6 @@ lib/design/
     ├── ugam_input.dart          — labelled input + phone input
     ├── ugam_request_row.dart    — dense admin row + UgamReqChip
     ├── ugam_route_header.dart   — city-to-city journey header
-    ├── ugam_seat_grid.dart      — seat grid + legend
     ├── ugam_sheet.dart          — bottom sheet wrapper (iOS / Android)
     ├── ugam_skeleton.dart       — shimmer loading placeholder
     ├── ugam_snackbar.dart       — toast content widget

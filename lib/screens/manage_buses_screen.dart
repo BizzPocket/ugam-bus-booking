@@ -1,17 +1,20 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
+import '../design/components/ugam_capacity_meter.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
-import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
+import '../utils/phone_dialer.dart';
 import '../utils/time_format.dart';
+import '../utils/tour_capacity.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
 
@@ -37,15 +40,7 @@ class ManageBusesScreen extends StatelessWidget {
     return label;
   }
 
-  int _seatsAssignedForBus(Tour tour, String busId) {
-    return tour.passengers.fold<int>(
-      0,
-      (sum, p) => sum + p.assignedSeats.where((a) => a.busId == busId).length,
-    );
-  }
-
-  /// Opens a sheet with the per-bus actions: edit, view status,
-  /// re-broadcast to driver via WhatsApp, delete.
+  /// Opens a sheet with the per-bus actions: edit, call the driver, delete.
   void _openBusMenu(BuildContext context, Tour tour, Bus bus) {
     UgamSheet.show<void>(
       context,
@@ -69,16 +64,19 @@ class ManageBusesScreen extends StatelessWidget {
                 );
               },
             ),
-            _BusMenuTile(
-              c: c,
-              icon: Icons.chat_rounded,
-              label: tr('manage_buses.menu_rebroadcast'),
-              tint: c.good,
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _broadcastToDriver(tour, bus);
-              },
-            ),
+            // Driver phone lives here now (moved off the dense card meta line):
+            // a one-tap call, with the number shown as the tile subtitle.
+            if (bus.driverPhone.trim().isNotEmpty)
+              _BusMenuTile(
+                c: c,
+                icon: Icons.call_rounded,
+                label: tr('manage_buses.menu_call_driver'),
+                subtitle: bus.driverPhone,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  PhoneDialer.call(bus.driverPhone);
+                },
+              ),
             _BusMenuTile(
               c: c,
               icon: Icons.delete_outline_rounded,
@@ -94,43 +92,6 @@ class ManageBusesScreen extends StatelessWidget {
         );
       },
     );
-  }
-
-  Future<void> _broadcastToDriver(Tour tour, Bus bus) async {
-    final phone = bus.driverPhone.replaceAll(RegExp(r'[^\d+]'), '');
-    if (phone.isEmpty) {
-      AppSnackBar.error(tr('manage_buses.snack_driver_phone_missing'));
-      return;
-    }
-    // This bus's OWN departure place + time (per-bus overrides tour-level),
-    // joined by a middot and omitting either half when unset.
-    final busDeparture = [bus.boardingPoint, formatHhMm(bus.departureTime)]
-        .where((s) => s != null && s.trim().isNotEmpty)
-        .join(' · ');
-    final msg = StringBuffer()
-      ..writeln(tr('manage_buses.wa_assignment',
-          namedArgs: {'tour': tour.title}))
-      ..writeln(tr('manage_buses.wa_bus', namedArgs: {
-        'bus': bus.displayLabel,
-      }))
-      ..writeln(tr('manage_buses.wa_departure', namedArgs: {
-        'date':
-            '${tour.departureDate.day}/${tour.departureDate.month}/${tour.departureDate.year}',
-      }))
-      ..writeln(tr('manage_buses.wa_from', namedArgs: {'city': tour.fromCity}))
-      ..writeln(tr('manage_buses.wa_to', namedArgs: {'city': tour.toCity}));
-    if (busDeparture.isNotEmpty) {
-      msg.writeln(busDeparture);
-    }
-    try {
-      final ok = await WhatsAppService()
-          .openChat(phone: bus.driverPhone, message: msg.toString());
-      if (!ok) {
-        AppSnackBar.error(tr('manage_buses.snack_wa_failed'));
-      }
-    } catch (e) {
-      AppSnackBar.error('${tr('manage_buses.snack_wa_failed')} $e');
-    }
   }
 
   /// Distinct passengers holding at least one seat on [bus], in roster order.
@@ -239,8 +200,7 @@ class ManageBusesScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Obx(() {
           final tour = _tourCtrl.getTour(tourId);
@@ -251,45 +211,37 @@ class ManageBusesScreen extends StatelessWidget {
             );
           }
 
-          final assigned = tour.totalSeatsAssigned;
-          final totalCapacity = tour.totalBusSeats;
+          // Single engine-sourced capacity snapshot for the whole screen:
+          // feeds the app-bar "free seats" subtitle AND each per-bus meter
+          // (via cap.byBus[bus.id]) so the list never re-derives its own count.
+          final cap = computeTourCapacity(tour);
+          final totalCapacity = cap.capacity;
+
+          // "N buses · X free of Y" — the old 2-col stat strip folded into the
+          // app-bar subtitle so the list starts higher (mobile-native: one
+          // hero context line, no metric grid). Leads with FREE seats — the
+          // figure the agent acts on — never an opaque assigned/total or a %.
+          final busesLabel = tr(
+            'manage_buses.subtitle_buses',
+            namedArgs: {'count': '${tour.buses.length}'},
+          );
+          final seatsLabel = totalCapacity > 0
+              ? tr('manage_buses.subtitle_seats_free', namedArgs: {
+                  'free': '${cap.free}',
+                  'capacity': '$totalCapacity',
+                })
+              : null;
+          final summaryLine =
+              [busesLabel, seatsLabel].whereType<String>().join('  ·  ');
 
           return Column(
             children: [
               UgamAppBar(
                 title: tr('manage_buses.title'),
                 subtitle:
-                    '${tour.title} · ${_formatDateRange(context, tour)}',
+                    '${tour.title} · ${_formatDateRange(context, tour)}  ·  $summaryLine',
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  UgamSpacing.gutter,
-                  UgamSpacing.md,
-                  UgamSpacing.gutter,
-                  UgamSpacing.lg,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: UgamStatTile(
-                        icon: Icons.directions_bus_rounded,
-                        value: '${tour.buses.length}',
-                        label: tr('manage_buses.stat_buses'),
-                      ),
-                    ),
-                    const SizedBox(width: UgamSpacing.md),
-                    Expanded(
-                      child: UgamStatTile(
-                        icon: Icons.event_seat_rounded,
-                        value: totalCapacity > 0 ? '$assigned' : '—',
-                        ofTotal: totalCapacity > 0 ? '/$totalCapacity' : null,
-                        label: tr('manage_buses.stat_seats'),
-                        variant: UgamStatVariant.good,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              const SizedBox(height: UgamSpacing.sm),
               Expanded(
                 child: tour.buses.isEmpty
                     ? UgamEmpty(
@@ -309,10 +261,6 @@ class ManageBusesScreen extends StatelessWidget {
                             const SizedBox(height: UgamSpacing.md),
                         itemBuilder: (ctx, i) {
                           final bus = tour.buses[i];
-                          final assignedForBus = _seatsAssignedForBus(
-                            tour,
-                            bus.id,
-                          );
                           final handler = bus.handlerPassengerId == null
                               ? null
                               : tour.passengers.firstWhereOrNull(
@@ -321,7 +269,7 @@ class ManageBusesScreen extends StatelessWidget {
                           return _BusListItem(
                             c: c,
                             bus: bus,
-                            assigned: assignedForBus,
+                            busCap: cap.byBus[bus.id],
                             handlerName: handler?.displayName,
                             onOpen: () => Navigator.of(context).push(
                               MaterialPageRoute(
@@ -360,7 +308,11 @@ class ManageBusesScreen extends StatelessWidget {
 class _BusListItem extends StatelessWidget {
   final UgamColorSet c;
   final Bus bus;
-  final int assigned;
+
+  /// This bus's leg-aware capacity slice from the tour engine snapshot
+  /// (`cap.byBus[bus.id]`). Null when the bus isn't in the plan (no layout
+  /// yet) — the meter is simply skipped in that case.
+  final BusCapacity? busCap;
 
   /// Display name of this bus's handler, or null when none is assigned yet.
   final String? handlerName;
@@ -373,37 +325,27 @@ class _BusListItem extends StatelessWidget {
   const _BusListItem({
     required this.c,
     required this.bus,
-    required this.assigned,
+    required this.busCap,
     required this.handlerName,
     required this.onOpen,
     required this.onMore,
     required this.onHandler,
   });
 
-  /// Driver name + phone joined by a middot, skipping blanks so an empty
-  /// driver never renders as a lone "·".
-  String get _driverLine => [bus.driverName, bus.driverPhone]
-      .where((s) => s.trim().isNotEmpty)
-      .join(' · ');
+  /// Driver name only (line 1 of the meta stack). Phone is no longer crammed
+  /// here — it lives in the bus action sheet ("Call driver"). Empty when unset.
+  String get _driverLine => bus.driverName.trim();
 
-  /// This bus's own departure place + time joined by a middot, skipping blanks
-  /// so an unset half never renders as a lone "·". Per-bus values override the
-  /// tour-level / chart-footer departure; empty when both are unset.
+  /// This bus's own boarding place + departure time joined by a middot,
+  /// skipping blanks so an unset half never renders as a lone "·". Per-bus
+  /// values override the tour-level / chart-footer departure; empty when both
+  /// are unset. This is line 2 of the meta stack.
   String get _departureLine => [bus.boardingPoint, formatHhMm(bus.departureTime)]
       .where((s) => s != null && s.trim().isNotEmpty)
       .join(' · ');
 
-  /// Single combined meta line: driver then departure, each segment kept only
-  /// when present, joined by a middot. Collapses the old two-line driver +
-  /// departure stack into one dense secondary line.
-  String get _metaLine =>
-      [_driverLine, _departureLine].where((s) => s.isNotEmpty).join('  ·  ');
-
   @override
   Widget build(BuildContext context) {
-    final cap = bus.totalSeats;
-    final pct = cap > 0 ? (assigned / cap).clamp(0.0, 1.0) : 0.0;
-
     return UgamCard.media(
       onTap: onOpen,
       elev: true,
@@ -436,10 +378,25 @@ class _BusListItem extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      if (_metaLine.isNotEmpty) ...[
+                      // Line 1: driver name (emphasised). Line 2: boarding +
+                      // departure (muted). Phone is no longer crammed here — it
+                      // moved into the bus action sheet ("Call driver").
+                      if (_driverLine.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          _driverLine,
+                          style: UgamText.bodyStrong.copyWith(
+                            color: c.ink,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      if (_departureLine.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
-                          _metaLine,
+                          _departureLine,
                           style: UgamText.caption.copyWith(
                             color: c.ink2,
                             fontSize: 12,
@@ -462,40 +419,16 @@ class _BusListItem extends StatelessWidget {
                 ),
               ],
             ),
-            if (cap > 0) ...[
+            // Leg-aware occupancy: the shared two-leg meter ("Go x/n · Ret
+            // y/n" + free count over a single thin bar). Replaces the old
+            // merged $assigned/$cap + percentage bar, which hid which leg was
+            // fuller and could leak a fractional seatLoad. Skipped when the bus
+            // has no engine slice yet (no layout).
+            if (busCap != null && busCap!.capacity > 0) ...[
               const SizedBox(height: UgamSpacing.md),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.sm),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius:
-                            BorderRadius.circular(UgamRadius.chip),
-                        // Neutral progress — copper is rationed for the single
-                        // "Add bus" CTA, so the fill stays a quiet ink bar over
-                        // a recessed track (the card is elevated, so the track
-                        // drops back to the base card tone for contrast).
-                        child: LinearProgressIndicator(
-                          value: pct,
-                          minHeight: 6,
-                          backgroundColor: c.card,
-                          valueColor: AlwaysStoppedAnimation(c.ink2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: UgamSpacing.md),
-                    Text(
-                      '$assigned/$cap',
-                      style: UgamText.tabular(
-                        UgamText.bodyStrong.copyWith(
-                          color: c.ink,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                child: UgamCapacityMeter.bus(busCap!),
               ),
               const SizedBox(height: UgamSpacing.xs),
             ],
@@ -652,6 +585,10 @@ class _BusMenuTile extends StatelessWidget {
   final UgamColorSet c;
   final IconData icon;
   final String label;
+
+  /// Optional muted second line under the label (e.g. the driver's phone
+  /// number on the "Call driver" tile).
+  final String? subtitle;
   final Color? tint;
   final bool danger;
   final VoidCallback onTap;
@@ -661,6 +598,7 @@ class _BusMenuTile extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.subtitle,
     this.tint,
     this.danger = false,
   });
@@ -669,35 +607,63 @@ class _BusMenuTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final iconColor = tint ?? c.ink;
     final labelColor = danger ? c.danger : c.ink;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: danger ? c.warmFill : c.cardElev,
-                shape: BoxShape.circle,
+    // InkWell (ripple + 48dp tap target) replaces the raw GestureDetector;
+    // selection haptic on tap for native feel.
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            vertical: UgamSpacing.md,
+            horizontal: UgamSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: danger ? c.warmFill : c.cardElev,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 18, color: iconColor),
               ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 18, color: iconColor),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Text(
-                label,
-                style: UgamText.bodyStrong.copyWith(
-                  color: labelColor,
-                  fontSize: 14,
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: UgamText.bodyStrong.copyWith(
+                        color: labelColor,
+                        fontSize: 14,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle!,
+                        style: UgamText.caption.copyWith(color: c.ink2),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ],
                 ),
               ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
-          ],
+              Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+            ],
+          ),
         ),
       ),
     );

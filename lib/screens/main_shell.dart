@@ -15,6 +15,22 @@ class ShellController extends GetxController {
   final currentIndex = 0.obs;
   void switchTab(int i) => currentIndex.value = i;
 
+  /// Handle a bottom-dock tap. Switching to a different tab just changes the
+  /// index; re-tapping the tab you're already on pops that tab's nested
+  /// navigator back to its root. This is what makes tapping Home from a pushed
+  /// sub-page (e.g. Buses opened off the dashboard) return to the dashboard —
+  /// previously [switchTab] set `0 = 0`, a no-op, so nothing happened.
+  void onTabTapped(int i) {
+    if (i == currentIndex.value) {
+      final navState = navigatorKeys[i].currentState;
+      if (navState != null && navState.canPop()) {
+        navState.popUntil((route) => route.isFirst);
+      }
+    } else {
+      currentIndex.value = i;
+    }
+  }
+
   final List<GlobalKey<NavigatorState>> navigatorKeys = List.generate(
     5,
     (index) => GlobalKey<NavigatorState>(),
@@ -134,8 +150,7 @@ class _MainShellState extends State<MainShell> {
             shell.switchTab(0);
           }
         },
-        child: Scaffold(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        child: UgamScaffold(
           extendBody: true,
           body: Center(
             child: ConstrainedBox(
@@ -170,7 +185,7 @@ class _MainShellState extends State<MainShell> {
               constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
               child: UgamDockNav(
                 currentIndex: shell.currentIndex.value,
-                onTap: shell.switchTab,
+                onTap: shell.onTabTapped,
                 items: buildAdminDockItems(),
               ),
             ),

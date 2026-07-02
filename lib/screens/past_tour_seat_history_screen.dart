@@ -79,8 +79,7 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
     final c = UgamColors.of(context);
     final tour = _ctrl.getTour(widget.tourId);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(

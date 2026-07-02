@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import 'fullscreen_chart_screen.dart';
@@ -95,8 +96,10 @@ class TourSeatAssignmentScreen extends StatefulWidget {
 
 /// Height the collapsed assignment dock reserves at the bottom of the screen.
 /// The seat-chart scroll view pads its bottom by this much (+ the safe area)
-/// so the chart legend is never hidden behind the floating dock.
-const double _kCollapsedDockHeight = 176;
+/// so the chart legend is never hidden behind the floating dock. Sized for the
+/// taller vertical pending list (grab handle + one-line active summary + up to
+/// three 60dp `UgamPersonRow`s + the optional "See all" row + primary action).
+const double _kCollapsedDockHeight = 360;
 
 class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   String? _selectedBusId;
@@ -157,14 +160,13 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// Confirm + unassign every seat on [bus]. Passengers keep their requests, so
   /// they drop straight back into the pending dock.
   Future<void> _confirmClearBus(Tour tour, Bus bus, int seatCount) async {
-    final ok = await UgamDialog.confirm(
+    final ok = await _confirmSheet(
       context,
       title: tr('seat_assignment.clear_bus.title'),
       message: tr(
         'seat_assignment.clear_bus.body',
         namedArgs: {'count': '$seatCount', 'bus': bus.name},
       ),
-      cancelLabel: tr('app.action.cancel'),
       confirmLabel: tr('seat_assignment.clear_bus.confirm'),
       destructive: true,
     );
@@ -426,6 +428,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   }
 
   void _onSeatTapped(SeatCell cell, Bus bus, Tour tour) {
+    HapticFeedback.selectionClick();
     if (cell.isEmpty || cell.seatId == null) return;
 
     // Edit-seats mode → every real seat routes to the Forward/Reserved flag
@@ -608,12 +611,11 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// replacement return ticket straight into the just-freed seat. Only reachable
   /// once the tour is in its return phase (the sheet gates the entry point).
   Future<void> _cancelReturnSeatFlow(Passenger occ) async {
-    final ok = await UgamDialog.confirm(
+    final ok = await _confirmSheet(
       context,
       title: tr('tour_detail.cancel_return_confirm_title'),
       message: tr('tour_detail.cancel_return_confirm_body',
           namedArgs: {'name': occ.displayName}),
-      cancelLabel: tr('app.action.cancel'),
       confirmLabel: tr('tour_detail.cancel_return_cta'),
       destructive: true,
       confirmIcon: Icons.event_busy_rounded,
@@ -624,11 +626,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     AppSnackBar.success(tr('tour_detail.cancel_return_done',
         namedArgs: {'name': occ.displayName}));
 
-    final rebook = await UgamDialog.confirm(
+    final rebook = await _confirmSheet(
       context,
       title: tr('tour_detail.cancel_return_rebook_title'),
       message: tr('tour_detail.cancel_return_rebook_body'),
-      cancelLabel: tr('app.action.cancel'),
       confirmLabel: tr('tour_detail.add_return_ticket'),
       confirmIcon: Icons.event_seat_rounded,
     );
@@ -774,14 +775,13 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       }
     }
 
-    final confirmed = await UgamDialog.confirm(
+    final confirmed = await _confirmSheet(
       context,
       title: tr('tour_seat_assignment.relocate.move_confirm_title'),
       message: tr(
         'tour_seat_assignment.relocate.move_confirm_body',
         namedArgs: {'name': mover.displayName, 'seat': seatId, 'bus': bus.name},
       ),
-      cancelLabel: tr('app.action.cancel'),
       confirmLabel: tr('tour_seat_assignment.relocate.move_confirm_yes'),
     );
     if (!confirmed) return;
@@ -830,24 +830,41 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     required String seatId,
     required String name,
   }) {
-    return UgamDialog.show<bool>(
+    final c = UgamColors.of(context);
+    return UgamSheet.show<bool>(
       context,
       title: tr('tour_seat_assignment.relocate.pair_title'),
-      message: tr(
-        'tour_seat_assignment.relocate.pair_body',
-        namedArgs: {'name': name, 'seat': seatId},
+      builder: (sheetCtx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            tr(
+              'tour_seat_assignment.relocate.pair_body',
+              namedArgs: {'name': name, 'seat': seatId},
+            ),
+            style: UgamText.body.copyWith(color: c.ink2, height: 1.4),
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          // Two stacked full-width tonal choices — neither is "the" primary, so
+          // both stay tonal (gold stays rationed); the agent picks intent.
+          UgamButton(
+            kind: UgamButtonKind.tonal,
+            label: tr('tour_seat_assignment.relocate.pair_both'),
+            icon: Icons.group_add_rounded,
+            expand: true,
+            onPressed: () => Navigator.of(sheetCtx).pop(true),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          UgamButton(
+            kind: UgamButtonKind.tonal,
+            label: tr('tour_seat_assignment.relocate.pair_one'),
+            icon: Icons.person_rounded,
+            expand: true,
+            onPressed: () => Navigator.of(sheetCtx).pop(false),
+          ),
+        ],
       ),
-      actions: (ctx) => [
-        UgamButton(
-          kind: UgamButtonKind.tonal,
-          label: tr('tour_seat_assignment.relocate.pair_one'),
-          onPressed: () => Navigator.of(ctx).pop(false),
-        ),
-        UgamButton(
-          label: tr('tour_seat_assignment.relocate.pair_both'),
-          onPressed: () => Navigator.of(ctx).pop(true),
-        ),
-      ],
     );
   }
 
@@ -895,7 +912,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   ) async {
     final seatId = cell.seatId;
     if (seatId == null) return;
-    final confirmed = await UgamDialog.confirm(
+    final confirmed = await _confirmSheet(
       context,
       title: tr('tour_seat_assignment.relocate.swap_confirm_title'),
       message: tr(
@@ -906,7 +923,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           'seat': seatId,
         },
       ),
-      cancelLabel: tr('app.action.cancel'),
       confirmLabel: tr('tour_seat_assignment.relocate.swap_confirm_yes'),
     );
     if (!confirmed) return;
@@ -981,7 +997,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     Passenger other,
     int berths,
   ) async {
-    final confirmed = await UgamDialog.confirm(
+    final confirmed = await _confirmSheet(
       context,
       title: tr('tour_seat_assignment.share_confirm_title'),
       message: tr(
@@ -992,7 +1008,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           'currentName': passenger.displayName,
         },
       ),
-      cancelLabel: tr('app.action.cancel'),
       confirmLabel: tr('tour_seat_assignment.share_confirm_yes'),
     );
     if (!confirmed) return;
@@ -1033,7 +1048,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   ) async {
     final seatId = cell.seatId;
     if (seatId == null) return;
-    final confirmed = await UgamDialog.confirm(
+    final confirmed = await _confirmSheet(
       context,
       title: tr('tour_seat_assignment.swap_in_confirm_title'),
       message: tr(
@@ -1044,7 +1059,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           'seat': seatId,
         },
       ),
-      cancelLabel: tr('app.action.cancel'),
       confirmLabel: tr('tour_seat_assignment.swap_in_confirm_yes'),
     );
     if (!confirmed) return;
@@ -1090,6 +1104,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         ),
         title: tr('tour_seat_assignment.snack_fully_assigned_title'),
       );
+      HapticFeedback.lightImpact();
 
       final nextUnassigned = updatedTour!.passengers
           .where((p) => !p.isFullyAssigned && !p.journeyDone)
@@ -1111,6 +1126,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           namedArgs: {'seatId': cell.seatId!},
         ),
       );
+      HapticFeedback.lightImpact();
     }
   }
 
@@ -1443,6 +1459,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
 
     switch (decision.action) {
       case SeatDropAction.blocked:
+        HapticFeedback.mediumImpact();
         _toastBlocked(
           decision.block!,
           fromCell,
@@ -1555,7 +1572,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         );
         if (occ == null) return;
         if (!mounted) return;
-        final confirmed = await UgamDialog.confirm(
+        final confirmed = await _confirmSheet(
           context,
           title: tr('tour_seat_assignment.share_confirm_title'),
           message: tr(
@@ -1566,7 +1583,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
               'currentName': mover.displayName,
             },
           ),
-          cancelLabel: tr('app.action.cancel'),
           confirmLabel: tr('tour_seat_assignment.share_confirm_yes'),
         );
         if (!confirmed) return;
@@ -1695,6 +1711,14 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       return;
     }
 
+    // "Both" is offered only when the two sharers travel on DISJOINT legs (one
+    // outbound, one return) AND the target single is fully free — then both
+    // riders leg-reuse the single seat and the whole double sofa is released.
+    // Any leg overlap (or a round-trip rider) means they can't co-seat a single,
+    // so the choice stays one-or-the-other.
+    final bothFits =
+        targetOccs.isEmpty && _legsDisjoint(candidates[0], candidates[1]);
+
     UgamSheet.show<void>(
       context,
       title: tr(
@@ -1705,6 +1729,28 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         candidates: candidates,
         activeId: null,
         subtitle: tr('tour_seat_assignment.split_pair.subtitle'),
+        bothLabel: bothFits
+            ? tr('tour_seat_assignment.split_pair.both_label')
+            : null,
+        bothHint: bothFits
+            ? tr(
+                'tour_seat_assignment.split_pair.both_hint',
+                namedArgs: {'seat': toSeatId},
+              )
+            : null,
+        onPickBoth: bothFits
+            ? () {
+                Navigator.of(sheetCtx).pop();
+                _seatBothSharersOnSingle(
+                  tour,
+                  bus,
+                  fromSeatId,
+                  toSeatId,
+                  candidates[0],
+                  candidates[1],
+                );
+              }
+            : null,
         onPick: (chosen) {
           Navigator.of(sheetCtx).pop();
           _seatChosenSharerOnSingle(
@@ -1717,6 +1763,49 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           );
         },
       ),
+    );
+  }
+
+  /// Whether [a] and [b] travel on non-overlapping legs — one uses the outbound
+  /// leg without the return and the other the reverse. Only such a pair can
+  /// share a single berth (leg-reuse); any round-trip rider uses both legs and
+  /// therefore overlaps.
+  bool _legsDisjoint(Passenger a, Passenger b) {
+    final la = a.derivedTripType;
+    final lb = b.derivedTripType;
+    final outboundClash = la.usesOutbound && lb.usesOutbound;
+    final returnClash = la.usesReturn && lb.usesReturn;
+    return !outboundClash && !returnClash;
+  }
+
+  /// Move BOTH leg-disjoint sharers off the source double onto the single
+  /// [toSeatId] (each keeps their leg, so they co-seat via leg-reuse) — this
+  /// releases the entire double sofa. Only reached when the target single is
+  /// free and the pair's legs don't overlap (see [_legsDisjoint]).
+  Future<void> _seatBothSharersOnSingle(
+    Tour tour,
+    Bus bus,
+    String fromSeatId,
+    String toSeatId,
+    Passenger a,
+    Passenger b,
+  ) async {
+    await _ctrl.moveSharedPair(
+      tourId: tour.id,
+      busId: bus.id,
+      fromSeatId: fromSeatId,
+      toSeatId: toSeatId,
+    );
+    AppSnackBar.success(
+      tr(
+        'tour_seat_assignment.split_pair.both_body',
+        namedArgs: {
+          'a': a.displayName,
+          'b': b.displayName,
+          'seat': toSeatId,
+        },
+      ),
+      title: tr('tour_seat_assignment.split_pair.moved_title'),
     );
   }
 
@@ -1968,21 +2057,50 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                       ],
                     ),
                     const SizedBox(height: UgamSpacing.md),
-                    if (_relocate != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          UgamSpacing.gutter,
-                          0,
-                          UgamSpacing.gutter,
-                          UgamSpacing.md,
-                        ),
-                        child: _RelocateBanner(
-                          moverName: _relocate!.mover.displayName,
-                          busName: bus.name,
-                          onCancel: _cancelRelocate,
-                          c: c,
-                        ),
-                      ),
+                    // Relocate banner eases in/out (fade + slight slide from the
+                    // top) as relocate mode turns on/off. Always-mounted switcher
+                    // that collapses to a zero-size SizedBox when inactive, so the
+                    // steady-state Column layout is identical to the bare `if`.
+                    AnimatedSwitcher(
+                      duration: UgamMotion.sheet,
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeOutCubic,
+                      transitionBuilder: (child, animation) {
+                        return FadeTransition(
+                          opacity: animation,
+                          child: SizeTransition(
+                            sizeFactor: animation,
+                            axisAlignment: -1.0,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, -0.15),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
+                      child: _relocate != null
+                          ? Padding(
+                              key: const ValueKey('relocate-banner'),
+                              padding: const EdgeInsets.fromLTRB(
+                                UgamSpacing.gutter,
+                                0,
+                                UgamSpacing.gutter,
+                                UgamSpacing.md,
+                              ),
+                              child: _RelocateBanner(
+                                moverName: _relocate!.mover.displayName,
+                                busName: bus.name,
+                                onCancel: _cancelRelocate,
+                                c: c,
+                              ),
+                            )
+                          : const SizedBox.shrink(
+                              key: ValueKey('relocate-empty'),
+                            ),
+                    ),
                     Expanded(
                       child: LayoutBuilder(
                         builder: (ctx, constraints) {
@@ -2001,6 +2119,12 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 _SeatGrid(
+                                  // The visible scroll-area height — the pinch-
+                                  // zoom box is bounded to it so the constrained
+                                  // InteractiveViewer has finite height inside
+                                  // this unbounded scroll view, and the chart
+                                  // fits in view with pinch for detail.
+                                  viewportHeight: constraints.maxHeight,
                                   layout: bus.layout,
                                   tour: tour,
                                   assignmentMap: assignmentMap,
@@ -2097,11 +2221,70 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
 
     // Embedded: body only — the SeatsScreen shell owns the Scaffold/header.
     if (widget.embedded) return content;
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(bottom: false, child: content),
     );
   }
+}
+
+/// Mobile-native confirm — a bottom sheet with a prose body + a full-width
+/// primary action (red when [destructive]) over a ghost Cancel. Replaces the
+/// center [UgamDialog.confirm] so confirmations live in the thumb zone like
+/// every other detail/confirm surface. Returns true only when the user taps the
+/// primary action; swipe-down / tap-outside returns false.
+Future<bool> _confirmSheet(
+  BuildContext context, {
+  required String title,
+  String? message,
+  required String confirmLabel,
+  String? cancelLabel,
+  bool destructive = false,
+  IconData? confirmIcon,
+}) async {
+  final c = UgamColors.of(context);
+  final result = await UgamSheet.show<bool>(
+    context,
+    title: title,
+    showClose: false,
+    builder: (sheetCtx) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (message != null) ...[
+          Text(
+            message,
+            style: UgamText.body.copyWith(color: c.ink2, height: 1.4),
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+        ],
+        // Destructive confirms get a full-width RED button (delete/cancel);
+        // affirmative ones get the copper sticky CTA — the screen's one focal
+        // action while the sheet is up.
+        if (destructive)
+          UgamButton(
+            label: confirmLabel,
+            icon: confirmIcon,
+            kind: UgamButtonKind.danger,
+            expand: true,
+            onPressed: () => Navigator.of(sheetCtx).pop(true),
+          )
+        else
+          UgamCTA(
+            label: confirmLabel,
+            leadingIcon: confirmIcon,
+            onPressed: () => Navigator.of(sheetCtx).pop(true),
+          ),
+        const SizedBox(height: UgamSpacing.sm),
+        UgamButton(
+          label: cancelLabel ?? tr('app.action.cancel'),
+          kind: UgamButtonKind.ghost,
+          expand: true,
+          onPressed: () => Navigator.of(sheetCtx).pop(false),
+        ),
+      ],
+    ),
+  );
+  return result ?? false;
 }
 
 class _PendingLine {
@@ -2144,11 +2327,22 @@ class _SeatPassengerPicker extends StatelessWidget {
   /// seat-first "tap a passenger to seat them here" copy.
   final String? subtitle;
 
+  /// Optional "move both" affordance, shown as a distinct row above the
+  /// candidate list. Provided only when seating BOTH sharers on the target is
+  /// valid (leg-disjoint pair onto a free single). [bothLabel]/[bothHint] are
+  /// the row's title/subtitle; [onPickBoth] fires on tap.
+  final String? bothLabel;
+  final String? bothHint;
+  final VoidCallback? onPickBoth;
+
   const _SeatPassengerPicker({
     required this.candidates,
     required this.activeId,
     required this.onPick,
     this.subtitle,
+    this.bothLabel,
+    this.bothHint,
+    this.onPickBoth,
   });
 
   @override
@@ -2163,6 +2357,10 @@ class _SeatPassengerPicker extends StatelessWidget {
           style: UgamText.caption.copyWith(color: c.ink2),
         ),
         const SizedBox(height: UgamSpacing.md),
+        if (onPickBoth != null) ...[
+          _bothRow(c),
+          const SizedBox(height: UgamSpacing.sm),
+        ],
         Flexible(
           child: ConstrainedBox(
             constraints: BoxConstraints(
@@ -2179,6 +2377,64 @@ class _SeatPassengerPicker extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// Distinct accent-tinted row that seats BOTH sharers on the target single
+  /// (leg-reuse), freeing the double. Visually set apart from the one-or-other
+  /// candidate rows below by the accent group icon and tinted fill.
+  Widget _bothRow(UgamColorSet c) {
+    return GestureDetector(
+      onTap: onPickBoth,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.accentFill,
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+          border: Border.all(color: c.accent, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: c.accent,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.groups_rounded, size: 19, color: c.onAccent),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    bothLabel ?? '',
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (bothHint != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      bothHint!,
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.chevron_right_rounded, size: 18, color: c.accent),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2277,7 +2533,9 @@ class _EditSeatsToggle extends StatelessWidget {
       child: GestureDetector(
         onTap: onToggle,
         behavior: HitTestBehavior.opaque,
-        child: Container(
+        child: AnimatedContainer(
+          duration: UgamMotion.tab,
+          curve: Curves.easeOutCubic,
           height: 44,
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
           decoration: BoxDecoration(
@@ -2346,8 +2604,13 @@ class _BusPills extends StatelessWidget {
           final assigned = seatsAssignedFor(bus.id);
           final capacity = bus.totalSeats;
           return GestureDetector(
-            onTap: () => onTapBus(bus.id),
-            child: Container(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onTapBus(bus.id);
+            },
+            child: AnimatedContainer(
+              duration: UgamMotion.tab,
+              curve: Curves.easeOutCubic,
               padding: const EdgeInsets.symmetric(
                 horizontal: UgamSpacing.lg,
                 vertical: UgamSpacing.sm,
@@ -2476,6 +2739,10 @@ class _RelocateBanner extends StatelessWidget {
 // ─── Seat grid card ────────────────────────────────────────────────────
 
 class _SeatGrid extends StatelessWidget {
+  /// Visible scroll-area height. The in-place pinch-zoom box is bounded to it
+  /// so the constrained [InteractiveViewer] (inside [UgamPinchZoom]) has finite
+  /// height even though it lives in an unbounded vertical scroll view.
+  final double viewportHeight;
   final BusLayout? layout;
   final Tour tour;
   final Map<String, List<String>> assignmentMap;
@@ -2498,6 +2765,7 @@ class _SeatGrid extends StatelessWidget {
   final void Function(String fromSeatId, String toSeatId) onSeatDraggedToSeat;
 
   const _SeatGrid({
+    required this.viewportHeight,
     required this.layout,
     required this.tour,
     required this.assignmentMap,
@@ -2542,7 +2810,19 @@ class _SeatGrid extends StatelessWidget {
       padding: const EdgeInsets.all(UgamSpacing.md),
       child: Stack(
         children: [
-          CombinedSeatGrid(
+          // In-place pinch-zoom for close inspection of a dense chart; the
+          // full-screen expand button (below, outside the zoom layer) still
+          // opens the shared fullscreen chart. The zoom wraps only the grid so
+          // the expand affordance stays fixed and tappable. Bounded to the
+          // visible scroll-area height so the constrained InteractiveViewer has
+          // finite height inside this unbounded vertical scroll view; the chart
+          // sits at the top so it reads exactly as before at scale 1.
+          SizedBox(
+            height: viewportHeight > 0 ? viewportHeight : null,
+            child: UgamPinchZoom(
+            child: Align(
+            alignment: Alignment.topCenter,
+            child: CombinedSeatGrid(
             layout: l,
             cellWidth: kSeatTileW,
             cellHeight: kSeatTileH,
@@ -2587,33 +2867,42 @@ class _SeatGrid extends StatelessWidget {
                 width: kSeatTileW,
                 height: kSeatTileH,
                 child: RepaintBoundary(
-                  child: isMine
-                      ? Stack(
-                          children: [
-                            tile,
-                            // Selection ring marks the seats already held by
-                            // the passenger currently being assigned.
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(
-                                      UgamRadius.seat,
-                                    ),
-                                    border: Border.all(
-                                      color: c.accent,
-                                      width: 2.5,
-                                    ),
-                                  ),
+                  child: Stack(
+                    children: [
+                      tile,
+                      // Selection ring marks the seats already held by
+                      // the passenger currently being assigned. Kept always
+                      // mounted (IgnorePointer + Positioned.fill = zero layout
+                      // impact) so its opacity can ease in/out as [isMine]
+                      // flips, instead of popping.
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: AnimatedOpacity(
+                            opacity: isMine ? 1.0 : 0.0,
+                            duration: UgamMotion.sheet,
+                            curve: Curves.easeOutCubic,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.seat,
+                                ),
+                                border: Border.all(
+                                  color: c.accent,
+                                  width: 2.5,
                                 ),
                               ),
                             ),
-                          ],
-                        )
-                      : tile,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
+            ),
+            ),
+            ),
           ),
           // Expand to the shared full-screen chart — works in both standalone
           // and embedded modes. Top-left, since the driver indicator owns the
@@ -2971,29 +3260,41 @@ class _AssignmentDock extends StatelessWidget {
             ),
           ),
           // Body: full detail when expanded, otherwise the one-line summary.
+          // AnimatedSize keeps owning the height change; the inner
+          // AnimatedSwitcher cross-fades the detail / compact / done content so
+          // the swap eases instead of popping. Keyed so the switcher animates.
           AnimatedSize(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
             alignment: Alignment.bottomCenter,
-            child: showDetail
-                ? ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: media.size.height * 0.5,
-                    ),
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: _PassengerCard(
-                        tour: tour,
-                        passenger: passenger!,
-                        pending: pendingLines,
-                        handlerId: handlerId,
-                        onManageBuses: onManageBuses,
+            child: AnimatedSwitcher(
+              duration: UgamMotion.sheet,
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeOutCubic,
+              child: showDetail
+                  ? ConstrainedBox(
+                      key: const ValueKey('dock-detail'),
+                      constraints: BoxConstraints(
+                        maxHeight: media.size.height * 0.5,
                       ),
-                    ),
-                  )
-                : hasActive
-                ? _compactActive(context)
-                : const SizedBox.shrink(),
+                      child: SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: _PassengerCard(
+                          tour: tour,
+                          passenger: passenger!,
+                          pending: pendingLines,
+                          handlerId: handlerId,
+                          onManageBuses: onManageBuses,
+                        ),
+                      ),
+                    )
+                  : hasActive
+                  ? KeyedSubtree(
+                      key: const ValueKey('dock-compact'),
+                      child: _compactActive(context),
+                    )
+                  : const SizedBox.shrink(key: ValueKey('dock-done')),
+            ),
           ),
           // Queue strip + primary action, then the bottom safe-area inset.
           _queueRow(context),
@@ -3093,11 +3394,13 @@ class _AssignmentDock extends StatelessWidget {
     );
   }
 
-  /// Pending queue strip (horizontal passenger cards + "+N" overflow) and the
-  /// primary lock / download action. Unchanged from the previous dock — just
-  /// hosted inside the new sheet.
+  /// Pending queue — a VERTICAL list of up to three full-name [UgamPersonRow]s
+  /// (the active one framed selected) plus a "See all N" row opening the full
+  /// pending sheet, then the primary lock / download action. The vertical rows
+  /// give each pending passenger their full name + request summary instead of
+  /// the old horizontal cards that truncated names.
   Widget _queueRow(BuildContext context) {
-    const cap = 8;
+    const cap = 3;
     final visible = pending.take(cap).toList();
     final overflow = pending.length - visible.length;
 
@@ -3108,101 +3411,123 @@ class _AssignmentDock extends StatelessWidget {
         UgamSpacing.gutter,
         UgamSpacing.sm,
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: pending.isEmpty
-                ? Row(
-                    children: [
-                      Icon(Icons.check_circle_rounded, size: 16, color: c.good),
-                      const SizedBox(width: UgamSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          tr('tour_seat_assignment.all_assigned_dock'),
-                          style: UgamText.bodyStrong.copyWith(
-                            color: c.ink,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                : SizedBox(
-                    height: 64,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: visible.length + (overflow > 0 ? 1 : 0),
-                      separatorBuilder: (_, _) =>
-                          const SizedBox(width: UgamSpacing.sm),
-                      itemBuilder: (ctx, i) {
-                        if (i >= visible.length) {
-                          // The +N overflow opens a full sheet of every pending
-                          // passenger so none are stranded off-screen.
-                          return GestureDetector(
-                            onTap: () => _showAllPending(ctx),
-                            behavior: HitTestBehavior.opaque,
-                            child: Container(
-                              width: 70,
-                              decoration: BoxDecoration(
-                                color: c.cardElev,
-                                borderRadius: BorderRadius.circular(
-                                  UgamRadius.row,
-                                ),
-                              ),
-                              alignment: Alignment.center,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    '+$overflow',
-                                    style: UgamText.bodyStrong.copyWith(
-                                      color: c.ink,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 1),
-                                  Text(
-                                    tr('tour_seat_assignment.dock_view_all'),
-                                    style: UgamText.micro.copyWith(
-                                      color: c.ink3,
-                                      fontSize: 8.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-                        final p = visible[i];
-                        final active = activeId == p.id;
-                        return _PendingCard(
-                          c: c,
-                          passenger: p,
-                          active: active,
-                          onTap: () => onTapPassenger(p.id),
-                        );
-                      },
+          if (pending.isEmpty)
+            Row(
+              children: [
+                Icon(Icons.check_circle_rounded, size: 16, color: c.good),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(
+                  child: Text(
+                    tr('tour_seat_assignment.all_assigned_dock'),
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink,
+                      fontSize: 13,
                     ),
                   ),
-          ),
-          const SizedBox(width: UgamSpacing.sm),
-          if (onLockTour != null)
+                ),
+              ],
+            )
+          else ...[
+            for (final p in visible)
+              // Selecting a pending rider eases a subtle scale cue (1.0 → 1.02)
+              // alongside the row's own selected border/fill flip. Scale-only so
+              // the row's intrinsic layout/padding is untouched at steady state.
+              AnimatedScale(
+                scale: activeId == p.id ? 1.02 : 1.0,
+                duration: UgamMotion.tab,
+                curve: Curves.easeOutCubic,
+                child: UgamPersonRow(
+                  name: p.displayName,
+                  subtitle: _pendingSubtitle(p),
+                  initials: SeatChartTile.initials(p.displayName),
+                  selected: activeId == p.id,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onTapPassenger(p.id);
+                  },
+                  trailing: Text(
+                    '${p.totalSeatsAssigned}/${p.totalSeatsRequested}',
+                    style: UgamText.tabular(
+                      UgamText.caption.copyWith(
+                        color: activeId == p.id ? c.accent : c.ink2,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // "See all N" → the full pending sheet, so no one is stranded
+            // beyond the first three rows shown in the dock.
+            if (overflow > 0)
+              UgamPersonRow(
+                name: tr(
+                  'tour_seat_assignment.dock_see_all',
+                  namedArgs: {'count': '${pending.length}'},
+                ),
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: c.cardElev,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    '+$overflow',
+                    style: UgamText.bodyStrong.copyWith(
+                      color: c.ink2,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                trailing: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: c.ink3,
+                ),
+                onTap: () => _showAllPending(context),
+              ),
+          ],
+          if (onLockTour != null) ...[
+            const SizedBox(height: UgamSpacing.xs),
             UgamButton(
               label: tr('tour_seat_assignment.btn_lock_notify'),
               icon: Icons.lock_rounded,
               kind: UgamButtonKind.primary,
+              expand: true,
               onPressed: onLockTour,
-            )
-          else if (onDownloadChart != null)
+            ),
+          ] else if (onDownloadChart != null) ...[
+            const SizedBox(height: UgamSpacing.xs),
             UgamButton(
               label: tr('tour_seat_assignment.btn_download_chart'),
               icon: Icons.download_rounded,
               kind: UgamButtonKind.primary,
+              expand: true,
               onPressed: onDownloadChart,
             ),
+          ],
         ],
       ),
     );
+  }
+
+  /// Subtitle for a pending row — the passenger's outstanding need (first line
+  /// + "+N" for extra lines), falling back to their full request summary when
+  /// nothing is left to place. Mirrors the old `_PendingCard` needs label so the
+  /// leg/type cue carries over to the vertical rows.
+  String _pendingSubtitle(Passenger p) {
+    final remaining = p.totalSeatsRequested - p.totalSeatsAssigned;
+    if (remaining <= 0) return p.requestSummary;
+    final firstLine = p.requestLines.isNotEmpty
+        ? p.requestLines.first.shortLabel
+        : tr('tour_seat_assignment.needs_seat', namedArgs: {'count': '$remaining'});
+    if (p.requestLines.length <= 1) return firstLine;
+    return '$firstLine +${p.requestLines.length - 1}';
   }
 
   /// Full sheet of every pending passenger — opened from the dock's "+N"
@@ -3230,11 +3555,14 @@ class _AssignmentDock extends StatelessWidget {
               final selected = p.id == activeId;
               return GestureDetector(
                 onTap: () {
+                  HapticFeedback.selectionClick();
                   Navigator.of(sheetCtx).pop();
                   onTapPassenger(p.id);
                 },
                 behavior: HitTestBehavior.opaque,
-                child: Container(
+                child: AnimatedContainer(
+                  duration: UgamMotion.tab,
+                  curve: Curves.easeOutCubic,
                   padding: const EdgeInsets.all(UgamSpacing.md),
                   decoration: BoxDecoration(
                     color: cc.cardElev,
@@ -3307,120 +3635,6 @@ class _AssignmentDock extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _PendingCard extends StatelessWidget {
-  final UgamColorSet c;
-  final Passenger passenger;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _PendingCard({
-    required this.c,
-    required this.passenger,
-    required this.active,
-    required this.onTap,
-  });
-
-  String get _initials {
-    final name = passenger.displayName.trim();
-    if (name.isEmpty) return '?';
-    final parts = name
-        .split(RegExp(r'\s+'))
-        .where((p) => p.isNotEmpty)
-        .toList();
-    if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
-    return parts.first[0].toUpperCase();
-  }
-
-  String get _needsLabel {
-    final remaining =
-        passenger.totalSeatsRequested - passenger.totalSeatsAssigned;
-    if (remaining <= 0) return passenger.requestSummary;
-    final firstLine = passenger.requestLines.isNotEmpty
-        ? passenger.requestLines.first.shortLabel
-        : tr(
-            'tour_seat_assignment.needs_seat',
-            namedArgs: {'count': '$remaining'},
-          );
-    if (passenger.requestLines.length <= 1) return firstLine;
-    return '$firstLine +${passenger.requestLines.length - 1}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 116,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.sm,
-          vertical: UgamSpacing.sm,
-        ),
-        decoration: BoxDecoration(
-          color: active ? c.accentFill : c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-          // One signal: the active card carries the copper ring; inactive cards
-          // stay quiet fills (no neutral hairline).
-          border: active
-              ? Border.all(color: c.accent, width: 1.2)
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: active ? c.accent : c.card,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _initials,
-                style: UgamText.bodyStrong.copyWith(
-                  color: active ? c.onAccent : c.ink,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    passenger.displayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 11,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _needsLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: UgamText.caption.copyWith(
-                      color: active ? c.accent : c.ink2,
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -3563,7 +3777,7 @@ class _SeatFlagsSheetState extends State<_SeatFlagsSheet> {
           ],
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _FlagSwitch(
+        _FlagRow(
           icon: Icons.star_rounded,
           title: tr('tour_seat_assignment.flags.forward_title'),
           subtitle: tr('tour_seat_assignment.flags.forward_subtitle'),
@@ -3571,92 +3785,129 @@ class _SeatFlagsSheetState extends State<_SeatFlagsSheet> {
           // Warm = attention; the forward zone is the priority/premium band.
           activeColor: c.warm,
           c: c,
-          onChanged: (v) {
+          onTap: () {
+            final v = !_forward;
             setState(() => _forward = v);
             widget.onForward(v);
           },
         ),
         const SizedBox(height: UgamSpacing.sm),
-        _FlagSwitch(
+        _FlagRow(
           icon: Icons.lock_outline_rounded,
           title: tr('tour_seat_assignment.flags.reserved_title'),
           subtitle: tr('tour_seat_assignment.flags.reserved_subtitle'),
           value: _reserved,
           activeColor: c.accent,
           c: c,
-          onChanged: (v) {
+          onTap: () {
+            final v = !_reserved;
             setState(() => _reserved = v);
             widget.onReserved(v);
           },
         ),
         const SizedBox(height: UgamSpacing.lg),
-        UgamButton(
+        UgamCTA(
           label: tr('app.action.done'),
-          kind: UgamButtonKind.ghost,
           onPressed: () => Navigator.of(context).pop(),
-          expand: true,
         ),
       ],
     );
   }
 }
 
-class _FlagSwitch extends StatelessWidget {
+/// One tappable flag row in [_SeatFlagsSheet] — a full-width [UgamCard.plain]
+/// that fills accentFill + a check tick when ON, and fires the controller call
+/// immediately on tap (no Switch, no separate confirm). The whole row is the
+/// hit target, the active tone reads the flag's colour (warm/accent).
+class _FlagRow extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final bool value;
   final Color activeColor;
   final UgamColorSet c;
-  final ValueChanged<bool> onChanged;
+  final VoidCallback onTap;
 
-  const _FlagSwitch({
+  const _FlagRow({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.value,
     required this.activeColor,
     required this.c,
-    required this.onChanged,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
+    // One surface: a single tappable card whose fill flips to a tonal wash of
+    // the flag's colour while ON, with a hairline tone border. No nested card.
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
         borderRadius: BorderRadius.circular(UgamRadius.row),
-        // Lit tone border only while on; off state is a quiet neutral fill.
-        border: value
-            ? Border.all(color: activeColor.withValues(alpha: 0.5))
-            : null,
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: value ? activeColor : c.ink3),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(title, style: UgamText.bodyStrong.copyWith(color: c.ink)),
-                const SizedBox(height: 1),
-                Text(subtitle, style: UgamText.micro.copyWith(color: c.ink2)),
-              ],
-            ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.md,
+            vertical: UgamSpacing.sm + 4,
           ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeTrackColor: activeColor,
-            activeThumbColor: c.onAccent,
+          decoration: BoxDecoration(
+            color: value ? activeColor.withValues(alpha: 0.14) : c.cardElev,
+            borderRadius: BorderRadius.circular(UgamRadius.row),
+            border: value
+                ? Border.all(color: activeColor.withValues(alpha: 0.5))
+                : null,
           ),
-        ],
+          child: Row(
+            children: [
+              // Small scale cue on the flag glyph as the value flips, alongside
+              // the row's own color/border ease. Scale-only, no layout change.
+              AnimatedScale(
+                scale: value ? 1.12 : 1.0,
+                duration: UgamMotion.tab,
+                curve: Curves.easeOutCubic,
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: value ? activeColor : c.ink3,
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: UgamText.bodyStrong.copyWith(color: c.ink),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      subtitle,
+                      style: UgamText.micro.copyWith(color: c.ink2),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              // A filled tick when ON; a hollow ring when OFF — the at-a-glance
+              // "this flag is set" cue that replaces the Switch thumb.
+              Icon(
+                value
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 22,
+                color: value ? activeColor : c.ink3,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

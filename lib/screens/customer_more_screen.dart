@@ -25,8 +25,7 @@ class CustomerMoreScreen extends StatelessWidget {
     final c = UgamColors.of(context);
     final activeLanguage = I18nConfig.labelFor(context.locale);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(

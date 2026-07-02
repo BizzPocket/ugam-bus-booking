@@ -57,8 +57,7 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -186,9 +185,14 @@ class _TripTotalCard extends StatelessWidget {
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
           const SizedBox(height: UgamSpacing.sm),
-          Text(
-            Formatters.formatMoneyInr(billed.abs()),
-            style: UgamText.hero.copyWith(color: tone, fontSize: 44),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              Formatters.formatMoneyInr(billed.abs()),
+              maxLines: 1,
+              style: UgamText.hero.copyWith(color: tone, fontSize: 44),
+            ),
           ),
           const SizedBox(height: UgamSpacing.xs),
           Text(
@@ -376,10 +380,17 @@ class _NetLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final tone = value >= 0 ? c.good : c.danger;
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text(label, style: UgamText.body.copyWith(color: c.ink2)),
+        Expanded(
+          child: Text(
+            label,
+            style: UgamText.body.copyWith(color: c.ink2),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.md),
         Text(
           Formatters.formatMoneyInr(value),
           style: UgamText.numLg.copyWith(color: tone, fontSize: 17),

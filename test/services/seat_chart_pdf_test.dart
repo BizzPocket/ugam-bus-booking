@@ -10,6 +10,7 @@ import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/services/seat_chart_pdf.dart';
+import 'package:occubusbooking/utils/seat_occupants.dart';
 
 // ── Page counting ───────────────────────────────────────────────────────────
 //
@@ -213,6 +214,83 @@ void main() {
       final names =
           SeatChartPdf.debugOccupantNamesForBus(legSharedTour(), 'b1');
       expect(names['b1_DL1'], ['SoloOwner']);
+    });
+
+    // ── Leg-scoped per-passenger chart ────────────────────────────────────
+    //
+    // A one-way recipient's after-lock image must show only THEIR leg. On the
+    // outbound (GO) chart a return-only rider is not on the bus at all, so a
+    // leg-shared seat collapses to just the GO holder — and vice versa. Without
+    // this, a GO rider's own seat printed a return-only stranger's name beside
+    // their own, with no leg context (live tour "bij", seat SU3/SL4/etc).
+
+    test('GO-scoped chart shows only the outbound holder of a shared seat', () {
+      final names = SeatChartPdf.debugOccupantNamesForBus(
+        legSharedTour(),
+        'b1',
+        leg: CollectLeg.go,
+      );
+      expect(names['b1_SU1'], ['GoRider']);
+    });
+
+    test('RETURN-scoped chart shows only the return holder of a shared seat',
+        () {
+      final names = SeatChartPdf.debugOccupantNamesForBus(
+        legSharedTour(),
+        'b1',
+        leg: CollectLeg.ret,
+      );
+      expect(names['b1_SU1'], ['RetRider']);
+    });
+
+    test('null leg (round-trip recipient) keeps BOTH leg-shared occupants', () {
+      final names = SeatChartPdf.debugOccupantNamesForBus(
+        legSharedTour(),
+        'b1',
+        leg: null,
+      );
+      expect(names['b1_SU1'], ['GoRider', 'RetRider']);
+    });
+
+    test('whole double held solo still lists once on a leg-scoped chart', () {
+      final names = SeatChartPdf.debugOccupantNamesForBus(
+        legSharedTour(),
+        'b1',
+        leg: CollectLeg.go,
+      );
+      // SoloOwner is round-trip → present on the GO leg, listed once.
+      expect(names['b1_DL1'], ['SoloOwner']);
+    });
+  });
+
+  // ── Recipient leg derivation ────────────────────────────────────────────
+  //
+  // The per-passenger image is scoped to the recipient's OWN leg. The leg MUST
+  // come from the same tripType field the occupant filter uses, or the rider
+  // would be filtered off their own seat. Round-trip → null (full chart).
+  group('SeatChartPdf.recipientChartLeg', () {
+    test('outbound-only recipient → GO leg', () {
+      expect(
+        SeatChartPdf.recipientChartLeg(
+            _p('a', name: 'A', tripType: TripType.outboundOnly)),
+        CollectLeg.go,
+      );
+    });
+
+    test('return-only recipient → RETURN leg', () {
+      expect(
+        SeatChartPdf.recipientChartLeg(
+            _p('a', name: 'A', tripType: TripType.returnOnly)),
+        CollectLeg.ret,
+      );
+    });
+
+    test('round-trip recipient → null (whole-journey chart)', () {
+      expect(
+        SeatChartPdf.recipientChartLeg(
+            _p('a', name: 'A', tripType: TripType.roundTrip)),
+        isNull,
+      );
     });
   });
 }

@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/phone_normalize.dart';
 import '../models/admin.dart';
@@ -17,7 +18,11 @@ import 'auth_controller.dart';
 ///
 ///   admin login → ensureLoadedForCurrentAdmin() → fetches `users` rows
 ///                 from Appwrite, then kicks off a background phonebook
-///                 sync (permission prompt, device read, batch upsert).
+///                 sync (permission prompt, device read, batch upsert) —
+///                 but only the FIRST time this admin signs in on this
+///                 device. After that the sync (and its permission prompt)
+///                 is skipped on every subsequent login, gated by a local
+///                 `contacts_synced_<adminId>` flag.
 ///   booking submit → autoGrowFromBooking() → inserts a row scoped to
 ///                    the tour creator's admin id, if one doesn't exist.
 ///   logout → reset()
@@ -81,16 +86,33 @@ class UserController extends GetxController {
     syncDevicePhonebook();
   }
 
-  /// Pulls the device address book and inserts any phones not yet
-  /// present in this admin's `users` rows. No-op if permission denied.
+  /// SharedPreferences key marking that this admin has already synced their
+  /// device phonebook on THIS device. Once set, we never re-read the address
+  /// book or re-prompt for contacts permission for that admin again.
+  static String _syncedKey(String adminId) => 'contacts_synced_$adminId';
+
+  /// Pulls the device address book and inserts any phones not yet present in
+  /// this admin's `users` rows. Runs once per (admin, device): the first time
+  /// the admin signs in on a new device we prompt + read + upsert, then set a
+  /// local flag so every later login skips this entirely (no re-prompt, no
+  /// re-scan). No-op if permission denied.
   Future<void> syncDevicePhonebook() async {
     final adminId = _currentAdminId;
     if (adminId == null) return;
     if (isSyncing.value) return;
 
+    final prefs = await SharedPreferences.getInstance();
+    final syncedKey = _syncedKey(adminId);
+    // First-device-sync only — already done here means never touch the
+    // phonebook (or its permission prompt) again for this admin.
+    if (prefs.getBool(syncedKey) ?? false) return;
+
     isSyncing.value = true;
     try {
       final entries = await _contactSync.pullDeviceContacts();
+      // Mark done regardless of outcome (granted, denied, or empty book) so a
+      // denied/empty first attempt doesn't re-prompt on every future login.
+      await prefs.setBool(syncedKey, true);
       if (entries.isEmpty) return;
 
       final existing = _byPhone.keys.toSet();

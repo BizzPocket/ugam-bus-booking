@@ -60,8 +60,7 @@ class _ToursScreenState extends State<ToursScreen> {
     final tourCtrl = Get.find<TourController>();
     final c = UgamColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -192,7 +191,8 @@ class _ToursScreenState extends State<ToursScreen> {
                                 dim: isPast,
                                 onTap: () => Navigator.of(context).push(
                                   MaterialPageRoute(
-                                    builder: (context) => TourDetailScreen(tourId: g.tours[j].id),
+                                    builder: (context) =>
+                                        TourDetailScreen(tourId: g.tours[j].id),
                                   ),
                                 ),
                               ),
@@ -268,8 +268,7 @@ class _ToursScreenState extends State<ToursScreen> {
       _Group(_Bucket.later, tr('tours.group.later'), later),
       // Past/closed tours are kept out of the default browse view so the list
       // stays focused on upcoming work; they still surface when searching.
-      if (_query.isNotEmpty)
-        _Group(_Bucket.past, tr('tours.group.past'), past),
+      if (_query.isNotEmpty) _Group(_Bucket.past, tr('tours.group.past'), past),
     ];
   }
 }
@@ -404,143 +403,167 @@ class _TourRow extends StatelessWidget {
     final action = _actionFor(tour);
     final dimAlpha = dim ? 0.55 : 1.0;
 
-    return Opacity(
-      opacity: dimAlpha,
-      child: UgamCard.plain(
-        onTap: onTap,
-        radius: UgamRadius.card,
-        padding: const EdgeInsets.all(UgamSpacing.md - 2),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(UgamRadius.photo),
-                  child: SizedBox(
-                    width: 88,
-                    height: 88,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        UgamBusBackdrop(seed: tour.id, label: _routeLabel(tour)),
-                        Positioned(
-                          left: 6,
-                          top: 6,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            // Graphite-on-graphite chip reads cleanly over the
-                            // backdrop instead of a stray black box.
-                            decoration: BoxDecoration(
-                              color: c.cardElev,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              _formatDate(tour.departureDate),
-                              style: UgamText.tabular(
-                                UgamText.micro.copyWith(
-                                  color: c.ink,
-                                  fontSize: 9.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+    final card = UgamCard.plain(
+      onTap: onTap,
+      radius: UgamRadius.card,
+      padding: const EdgeInsets.all(UgamSpacing.md - 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(UgamRadius.photo),
+                child: SizedBox(
+                  width: 88,
+                  height: 88,
+                  child: Stack(
+                    fit: StackFit.expand,
                     children: [
-                      Text(
-                        tour.title,
-                        style: UgamText.titleS.copyWith(
-                          color: c.ink,
-                          fontSize: 15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '${tour.fromCity} → ${tour.toCity}',
-                        style: UgamText.caption.copyWith(
-                          color: c.ink2,
-                          fontSize: 12,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: UgamSpacing.sm + 2),
-                      Row(
-                        children: [
-                          UgamStatusDot(
-                            label: tour.status.displayName,
-                            tone: _toneFor(tour.status),
+                      UgamBusBackdrop(seed: tour.id, label: _routeLabel(tour)),
+                      Positioned(
+                        left: 6,
+                        top: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
                           ),
-                          const Spacer(),
-                          if (capacity > 0)
-                            Text(
-                              '$assigned/$capacity',
-                              style: UgamText.tabular(
-                                UgamText.bodyStrong.copyWith(
-                                  color: c.ink,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            )
-                          else
-                            Text(
-                              tr(
-                                'tours.pax',
-                                namedArgs: {'count': '${tour.passengerCount}'},
-                              ),
-                              style: UgamText.tabular(
-                                UgamText.caption.copyWith(color: c.ink2),
+                          // Graphite-on-graphite chip reads cleanly over the
+                          // backdrop instead of a stray black box.
+                          decoration: BoxDecoration(
+                            color: c.cardElev,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            _formatDate(tour.departureDate),
+                            style: UgamText.tabular(
+                              UgamText.micro.copyWith(
+                                color: c.ink,
+                                fontSize: 9.5,
                               ),
                             ),
-                        ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-            if (capacity > 0) ...[
-              const SizedBox(height: UgamSpacing.md - 2),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: pct,
-                  minHeight: 5,
-                  // Neutral per-row progress: the champagne accent is rationed
-                  // for the single signal in this view, not painted on every
-                  // capacity bar.
-                  backgroundColor: c.border,
-                  valueColor: AlwaysStoppedAnimation(c.ink3),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      tour.title,
+                      style: UgamText.titleS.copyWith(
+                        color: c.ink,
+                        fontSize: 15,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${tour.fromCity} → ${tour.toCity}',
+                      style: UgamText.caption.copyWith(
+                        color: c.ink2,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: UgamSpacing.sm + 2),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: UgamStatusDot(
+                            label: tour.status.displayName,
+                            tone: _toneFor(tour.status),
+                          ),
+                        ),
+                        // Urgency is carried by a copper micro eyebrow naming
+                        // the next step (swipe the card to run it) — no inline
+                        // button competes for the thumb-zone any more.
+                        if (action != null) ...[
+                          const SizedBox(width: UgamSpacing.sm),
+                          Flexible(
+                            child: Text(
+                              action.label.toUpperCase(),
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              style: UgamText.micro.copyWith(color: c.accent),
+                            ),
+                          ),
+                        ],
+                        const Spacer(),
+                        if (capacity > 0)
+                          Text(
+                            '$assigned/$capacity',
+                            style: UgamText.tabular(
+                              UgamText.bodyStrong.copyWith(
+                                color: c.ink,
+                                fontSize: 12,
+                              ),
+                            ),
+                          )
+                        else
+                          Text(
+                            tr(
+                              'tours.pax',
+                              namedArgs: {'count': '${tour.passengerCount}'},
+                            ),
+                            style: UgamText.tabular(
+                              UgamText.caption.copyWith(color: c.ink2),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
-            if (action != null) ...[
-              const SizedBox(height: UgamSpacing.md),
-              UgamCTA(
-                label: action.label,
-                leadingIcon: action.icon,
-                onPressed: () => _runRowAction(context, action.kind, tour),
+          ),
+          if (capacity > 0) ...[
+            const SizedBox(height: UgamSpacing.md - 2),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: pct,
+                minHeight: 5,
+                // Neutral per-row progress: the champagne accent is rationed
+                // for the single signal in this view, not painted on every
+                // capacity bar.
+                backgroundColor: c.border,
+                valueColor: AlwaysStoppedAnimation(c.ink3),
               ),
-            ],
+            ),
           ],
-        ),
+        ],
       ),
     );
+
+    // The contextual action no longer sits as a button inside the card (the
+    // card already navigates on tap). Instead it lives behind a right-swipe:
+    // swipe the row to reveal a copper pane labelled with the next step and
+    // run it. Rows with no pending action (locked / completed) just navigate.
+    final swipeable = action == null
+        ? card
+        : UgamSwipeAction(
+            key: ValueKey('tour-row-${tour.id}'),
+            rightLabel: action.label,
+            rightIcon: action.icon,
+            rightColor: c.accent,
+            borderRadius: BorderRadius.circular(UgamRadius.card),
+            onRight: () => _runRowAction(context, action.kind, tour),
+            child: card,
+          );
+
+    return Opacity(opacity: dimAlpha, child: swipeable);
   }
 
   static String _formatDate(DateTime d) {
@@ -636,10 +659,8 @@ class _TourRow extends StatelessWidget {
       case _RowActionKind.seats:
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (context) => SeatsScreen(
-              tourId: t.id,
-              initialMode: SeatsMode.summary,
-            ),
+            builder: (context) =>
+                SeatsScreen(tourId: t.id, initialMode: SeatsMode.summary),
           ),
         );
         break;
@@ -653,9 +674,7 @@ class _TourRow extends StatelessWidget {
         break;
       case _RowActionKind.lockNotify:
         Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => NotifyScreen(tourId: t.id),
-          ),
+          MaterialPageRoute(builder: (context) => NotifyScreen(tourId: t.id)),
         );
         break;
     }

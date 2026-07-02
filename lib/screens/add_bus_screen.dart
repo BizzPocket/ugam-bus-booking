@@ -583,8 +583,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
     _maybeSeedPrice();
     final c = UgamColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [
@@ -1492,10 +1491,28 @@ class _Step3PriceState extends State<_Step3Price> {
   /// the parent state (and thus _save) sees an empty band list meaning uniform.
   List<PriceBand> _stashedBands = const [];
 
+  /// The per-person base the sofa fields were last auto-seeded from. A later
+  /// base change re-seeds a field only while it still equals this base's default
+  /// (an untouched auto-value) — any other number is a hand-typed override and
+  /// is left alone. Held in state so the check survives this step's rebuilds.
+  double _lastBase = 0;
+
   @override
   void initState() {
     super.initState();
     _mode = widget.priceBands.isNotEmpty ? _PriceMode.bands : _PriceMode.fixed;
+    // Pre-fill any empty sofa field with its base-derived default; a value
+    // already present (edit-mode override, or a default seeded before navigating
+    // away) is preserved.
+    _lastBase = _basePerSeat;
+    if (_lastBase > 0) {
+      if (singleSofaPrice.text.trim().isEmpty) {
+        singleSofaPrice.text = _money(_lastBase);
+      }
+      if (doubleSofaPrice.text.trim().isEmpty) {
+        doubleSofaPrice.text = _money(_lastBase * 2);
+      }
+    }
   }
 
   List<PriceBand> get _bands => widget.priceBands;
@@ -1538,17 +1555,65 @@ class _Step3PriceState extends State<_Step3Price> {
   /// range. Null in add mode.
   int? get _rowCount => widget.layout?.rows;
 
+  /// Format a derived rupee value the way the per-seat auto-fill does: whole
+  /// numbers print clean, anything else to two decimals.
+  static String _money(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+
+  /// The per-person base the sofa defaults derive from: the typed per-seat
+  /// value, falling back to full bus price ÷ total seats.
+  double get _basePerSeat {
+    final perSeat = double.tryParse(price.text.trim());
+    if (perSeat != null && perSeat > 0) return perSeat;
+    final bus = double.tryParse(busPrice.text.trim());
+    if (bus != null && bus > 0 && totalSeats > 0) return bus / totalSeats;
+    return 0;
+  }
+
+  /// True while [ctrl] still holds the auto-default for [prevDefault] (or is
+  /// empty) — i.e. the agent hasn't typed their own number over it, so a base
+  /// change may freely re-seed it. The tolerance absorbs 2-decimal rounding.
+  bool _stillAuto(TextEditingController ctrl, double prevDefault) {
+    final t = ctrl.text.trim();
+    if (t.isEmpty) return true;
+    final v = double.tryParse(t);
+    return v != null && prevDefault > 0 && (v - prevDefault).abs() < 0.005;
+  }
+
+  /// Re-derive the single/double sofa defaults from [newBase] so the agent sees
+  /// concrete, editable numbers instead of an empty placeholder. A single sofa
+  /// is one berth (= base); a whole double sofa is two berths (= 2 × base),
+  /// matching [BusDetails.berthPriceFor], so an untouched default resolves to
+  /// exactly what a blank field would. Hand-typed overrides are preserved.
+  void _reseedSofaDefaults(double newBase) {
+    if (newBase > 0) {
+      if (_stillAuto(singleSofaPrice, _lastBase)) {
+        singleSofaPrice.text = _money(newBase);
+      }
+      if (_stillAuto(doubleSofaPrice, _lastBase * 2)) {
+        doubleSofaPrice.text = _money(newBase * 2);
+      }
+    }
+    _lastBase = newBase;
+  }
+
   /// When the agent edits the full bus price, auto-fill the per-seat field by
-  /// dividing across the total seats. Setting the controller text directly does
-  /// NOT fire the per-seat field's own onChanged, so this stays a soft default
-  /// the agent can freely type over.
+  /// dividing across the total seats, then re-derive the sofa defaults. Setting
+  /// the controller text directly does NOT fire those fields' own onChanged, so
+  /// each stays a soft default the agent can freely type over.
   void _onBusPriceChanged() {
     final parsed = double.tryParse(busPrice.text.trim());
     if (parsed != null && parsed > 0 && totalSeats > 0) {
-      final v = parsed / totalSeats;
-      price.text =
-          v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
+      final newBase = parsed / totalSeats;
+      price.text = _money(newBase);
+      _reseedSofaDefaults(newBase);
     }
+    onChanged();
+  }
+
+  /// A manual per-seat edit re-bases the (untouched) sofa defaults too.
+  void _onPerSeatChanged() {
+    _reseedSofaDefaults(_basePerSeat);
     onChanged();
   }
 
@@ -1617,7 +1682,7 @@ class _Step3PriceState extends State<_Step3Price> {
             FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
           ],
           prefix: _RupeePrefix(c: c),
-          onChanged: (_) => onChanged(),
+          onChanged: (_) => _onPerSeatChanged(),
         ),
         if (busPriceParsed > 0 && totalSeats > 0) ...[
           const SizedBox(height: UgamSpacing.xs),

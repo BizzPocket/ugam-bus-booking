@@ -95,9 +95,13 @@ void main() {
         (tester) async {
       // OFF with singles → the back row is 3 single + 2 double sofas;
       // everything must render flat on one bench row with no overflow.
+      // 37/13 carves the designed bench cleanly (13 singles odd, 12 doubles even
+      // → body 10S+10D stays paired). An odd-double count like 35/13 would
+      // instead drop to a hole-free minimal aisle bench, so it is not a 3S+2D
+      // case — see the seat_layout sweep for that path.
       final layout = BusLayout.generate(
         busType: BusType.sleeper,
-        totalSeats: 35,
+        totalSeats: 37,
         singleSofaCount: 13,
       );
       final benchRow = layout.rows - 1;

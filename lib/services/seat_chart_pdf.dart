@@ -114,6 +114,7 @@ class SeatChartPdf {
     required ChartFooter footer,
     String? onlyBusId,
     Map<String, Set<String>> highlightByBus = const {},
+    CollectLeg? leg,
   }) async {
     final theme = await _resolveTheme();
     final doc = pw.Document(theme: theme);
@@ -126,7 +127,7 @@ class SeatChartPdf {
       final layout = bus.layout;
       if (layout == null) continue;
       final highlight = highlightByBus[bus.id] ?? const <String>{};
-      final byId = _occupantsForBus(tour, bus.id);
+      final byId = _occupantsForBus(tour, bus.id, leg: leg);
 
       doc.addPage(
         pw.Page(
@@ -135,7 +136,7 @@ class SeatChartPdf {
           build: (context) => pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
-              _busTitle(tour, bus),
+              _busTitle(tour, bus, leg),
               pw.SizedBox(height: 10),
               _chartTable(layout, byId, highlight),
               pw.SizedBox(height: 14),
@@ -174,6 +175,12 @@ class SeatChartPdf {
       (seatsByBus[a.busId] ??= <String>{}).add(a.seatId);
     }
 
+    // Scope the chart to the recipient's OWN leg: a one-way rider sees only the
+    // journey they actually travel, so a leg-shared seat shows just them — never
+    // the opposite-leg stranger who reuses the seat on the other leg. Round-trip
+    // riders get the whole-journey chart (leg == null).
+    final leg = recipientChartLeg(passenger);
+
     final images = <Uint8List>[];
     for (final busId in seatsByBus.keys) {
       // Skip buses no longer on the tour (stale assignment).
@@ -184,6 +191,7 @@ class SeatChartPdf {
         footer: footer,
         onlyBusId: busId,
         highlightByBus: {busId: seatsByBus[busId]!},
+        leg: leg,
       );
 
       await for (final page in Printing.raster(bytes, dpi: 150)) {
@@ -193,10 +201,26 @@ class SeatChartPdf {
     return images;
   }
 
+  /// The journey leg a recipient's per-passenger chart should be scoped to,
+  /// derived from the SAME [Passenger.tripType] the occupant filter keys off
+  /// (so the recipient is never filtered off their own seat): an outbound-only
+  /// rider → [CollectLeg.go], a return-only rider → [CollectLeg.ret], a
+  /// round-trip (or mixed) rider → null, i.e. the whole-journey chart.
+  @visibleForTesting
+  static CollectLeg? recipientChartLeg(Passenger passenger) {
+    final t = passenger.tripType;
+    if (!t.isOneWay) return null;
+    return t.usesOutbound ? CollectLeg.go : CollectLeg.ret;
+  }
+
   // ── Header / footer building ──────────────────────────────
 
-  static pw.Widget _busTitle(Tour tour, Bus bus) {
-    final route = '${tour.fromCity} → ${tour.toCity}';
+  static pw.Widget _busTitle(Tour tour, Bus bus, [CollectLeg? leg]) {
+    // On the RETURN leg the bus drives the other way, so flip the route arrow
+    // so the chart unmistakably reads as the homeward journey.
+    final route = leg == CollectLeg.ret
+        ? '${tour.toCity} → ${tour.fromCity}'
+        : '${tour.fromCity} → ${tour.toCity}';
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -213,6 +237,30 @@ class SeatChartPdf {
           '${bus.name} · $route',
           style: pw.TextStyle(fontSize: 13, color: _inkMuted),
         ),
+        // Leg banner — only on a one-way recipient's leg-scoped chart. Makes the
+        // GO vs RETURN journey explicit so a one-way rider never reads their own
+        // seat as the wrong leg.
+        if (leg != null) ...[
+          pw.SizedBox(height: 6),
+          pw.Container(
+            padding:
+                const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 9),
+            decoration: pw.BoxDecoration(
+              color: _accentFill,
+              borderRadius: pw.BorderRadius.circular(4),
+            ),
+            child: pw.Text(
+              leg == CollectLeg.go
+                  ? tr('chart.leg_go')
+                  : tr('chart.leg_return'),
+              style: pw.TextStyle(
+                fontSize: 13,
+                fontWeight: pw.FontWeight.bold,
+                color: _accent,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -310,27 +358,32 @@ class SeatChartPdf {
 
   static Map<String, List<SeatOccupant>> _occupantsForBus(
     Tour tour,
-    String busId,
-  ) {
+    String busId, {
+    CollectLeg? leg,
+  }) {
     return {
       for (final e in occupantListForBus(tour.passengers, busId).entries)
         e.key: [
-          for (final p in e.value)
+          for (final p
+              in (leg == null ? e.value : occupantsForCollectLeg(e.value, leg)))
             SeatOccupant(name: p.displayName, phone: displayPhone(p.phone)),
         ],
     };
   }
 
   /// Test seam: the exact per-seat occupant NAMES the chart will draw for
-  /// [busId], GO-leg first. Used to lock leg-shared rendering without needing
-  /// the pdfium rasterizer (unavailable under `flutter test`).
+  /// [busId], GO-leg first. Pass [leg] to scope the names to one journey leg
+  /// (a one-way recipient's chart) — a leg-shared seat then collapses to just
+  /// that leg's holder; null keeps both. Used to lock leg-shared rendering
+  /// without needing the pdfium rasterizer (unavailable under `flutter test`).
   @visibleForTesting
   static Map<String, List<String>> debugOccupantNamesForBus(
     Tour tour,
-    String busId,
-  ) =>
+    String busId, {
+    CollectLeg? leg,
+  }) =>
       {
-        for (final e in _occupantsForBus(tour, busId).entries)
+        for (final e in _occupantsForBus(tour, busId, leg: leg).entries)
           e.key: [for (final o in e.value) o.name],
       };
 

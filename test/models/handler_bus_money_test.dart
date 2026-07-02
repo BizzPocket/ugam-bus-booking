@@ -117,7 +117,7 @@ void main() {
   });
 
   group('ledger lines', () {
-    test('income adds to in-hand, logged expense subtracts, rent excluded', () {
+    test('income adds to in-hand, ground expense subtracts, no rent', () {
       final m = HandlerBusMoney.compute(
         busId: 'bus1',
         passengers: const [],
@@ -152,10 +152,46 @@ void main() {
       );
       expect(m.collected, 5000);
       expect(m.income, 1500);
-      // Bus rent is the admin's to settle directly with the owner — never the
-      // handler's, so "spent" is the ground expense only.
+      // "spent" is the handler's ground expense only; rent is carried apart on
+      // [rent] (none passed here → 0).
       expect(m.spent, 500);
-      expect(m.inHand, 6000); // 5000 + 1500 - 500
+      expect(m.rent, 0);
+      expect(m.inHand, 6000); // 5000 + 1500 - 500 - 0
+    });
+
+    test('bus rent is deducted from in-hand (the handler settles the owner)',
+        () {
+      final m = HandlerBusMoney.compute(
+        busId: 'bus1',
+        passengers: const [],
+        collections: [
+          Collection(
+            tourId: 't1',
+            busId: 'bus1',
+            passengerId: 'p1',
+            amountDue: 30000,
+            amountReceived: 30000,
+          ),
+        ],
+        expenses: [
+          Expense(
+            tourId: 't1',
+            busId: 'bus1',
+            category: ExpenseCategory.fuel,
+            label: '',
+            amount: 5000,
+          ),
+        ],
+        incomes: const [],
+        busRent: 20000,
+        dueForSeat: dueForSeat,
+      );
+      expect(m.collected, 30000);
+      // Ground costs stay on [spent]; the owner's rent is its own line…
+      expect(m.spent, 5000);
+      expect(m.rent, 20000);
+      // …and in-hand nets BOTH: 30000 − 5000 ground − 20000 rent = 5000.
+      expect(m.inHand, 5000);
     });
 
     test('a seated rider with NO collection row owes their full fare', () {

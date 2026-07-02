@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../design/components/ugam_bus_chassis.dart';
 import '../design/text_styles.dart';
 import '../design/tokens.dart';
 import '../models/seat_layout.dart';
@@ -183,7 +184,7 @@ class CombinedSeatGrid extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Icon(Icons.account_circle_rounded, size: 16, color: c.ink3),
+        UgamSteeringWheel(size: 15, color: c.ink3),
         const SizedBox(width: 6),
         Text(
           (driverLabel ?? tr('seat_ui.driver')).toUpperCase(),
@@ -225,7 +226,7 @@ class CombinedSeatGrid extends StatelessWidget {
       add(_slot(context, layout.cellAt(row, SeatGridCols.singleLower)));
     }
     if (showAisle) {
-      add(SizedBox(width: cellWidth, height: cellHeight));
+      add(_aisleSlot(UgamColors.of(context)));
     }
     // Doubles render Lower then Upper (so the layout reads U L | L U, with the
     // two lower columns toward the centre aisle).
@@ -272,6 +273,27 @@ class CombinedSeatGrid extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: cols,
+    );
+  }
+
+  /// The centre aisle — a quiet walkway guide rather than blank space. A short
+  /// graphite bar centred in the slot; across rows the small top/bottom gaps
+  /// read as a dashed floor line down the middle of the bus. Neutral only, so
+  /// the accent stays rationed to the seats/CTA.
+  Widget _aisleSlot(UgamColorSet c) {
+    return SizedBox(
+      width: cellWidth,
+      height: cellHeight,
+      child: Center(
+        child: Container(
+          width: 1.5,
+          height: cellHeight * 0.7,
+          decoration: BoxDecoration(
+            color: c.ink3.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(1),
+          ),
+        ),
+      ),
     );
   }
 

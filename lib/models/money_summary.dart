@@ -25,10 +25,11 @@ class BusMoneySummary {
   /// must hand over, and to both profit figures.
   final double income;
 
-  /// The bus owner's rent, already folded into [expensesTotal] for the P&L
-  /// nets. The ADMIN settles the bus owner directly (not the handler), so rent
-  /// is EXCLUDED from the handover expectation — the handler hands over the full
-  /// cash they hold, and the admin pays the owner from it.
+  /// The bus owner's rent, already folded into [expensesTotal]. Kept as a
+  /// discrete figure so it can be surfaced as its own ledger row. The HANDLER
+  /// settles the owner directly out of the cash they collect, so rent is a real
+  /// deduction from what they hand over — it sits INSIDE the handover
+  /// expectation (see [expectedHandover]), never added back.
   final double busRent;
 
   const BusMoneySummary({
@@ -43,13 +44,13 @@ class BusMoneySummary {
     this.busRent = 0,
   });
 
-  /// Net cash the bus should hand over: collections + extra income − the
-  /// handler's OWN ground expenses (everything in [expensesTotal] EXCEPT the bus
-  /// rent, which the admin settles with the owner). Mirrors the handler's "in
-  /// hand" = collected + income − spent, so the admin's settlement expectation
-  /// matches what the handler is actually holding.
-  double get expectedHandover =>
-      collected + income - (expensesTotal - busRent);
+  /// Net cash the bus should hand over: collections + extra income − ALL costs
+  /// (every expense in [expensesTotal], the bus owner's rent INCLUDED — the
+  /// handler settles the owner out of the cash they collect). This is exactly
+  /// the cash profit [netCollected]: the handler hands over what's left after
+  /// every cost, so the settlement figure and the P&L net are the SAME number
+  /// on every screen.
+  double get expectedHandover => netCollected;
 
   /// Still-owed handover (expected minus what was actually handed over).
   double get outstandingHandover => expectedHandover - handedOver;
@@ -60,8 +61,8 @@ class BusMoneySummary {
   double get netBilled => revenueBilled + income - expensesTotal;
 
   /// CASH profit/loss so far: money actually collected + extra income − (rent +
-  /// expenses). Unlike [expectedHandover] this DOES subtract rent, because rent
-  /// is a real cost in the P&L even though the admin (not the handler) pays it.
+  /// expenses). Equal to [expectedHandover] — the handler hands over exactly the
+  /// net cash they hold once every cost (the owner's rent included) is paid.
   double get netCollected => collected + income - expensesTotal;
 
   factory BusMoneySummary.compute({
@@ -121,8 +122,9 @@ class HandlerMoneySummary {
   /// Extra income (cabin / gallery / other) across this handler's buses.
   final double income;
 
-  /// Bus owner rent across this handler's buses (in [expensesTotal] for P&L,
-  /// excluded from the handover expectation — the admin pays the owner).
+  /// Bus owner rent across this handler's buses, already inside [expensesTotal].
+  /// The handler settles the owners, so it is part of what's deducted from the
+  /// handover expectation, not added back.
   final double busRent;
 
   const HandlerMoneySummary({
@@ -141,10 +143,10 @@ class HandlerMoneySummary {
   double get netBilled => revenueBilled + income - expensesTotal;
   double get netCollected => collected + income - expensesTotal;
 
-  /// Cash this handler should hand over: collections + income − their own
-  /// ground expenses (rent excluded — the admin settles the owner).
-  double get expectedHandover =>
-      collected + income - (expensesTotal - busRent);
+  /// Cash this handler should hand over: collections + income − ALL costs (their
+  /// ground expenses AND the owner's rent they settle). Equal to [netCollected]
+  /// — the cash they hold once every cost is paid.
+  double get expectedHandover => netCollected;
   double get outstandingHandover => expectedHandover - handedOver;
 
   /// Roll a set of per-bus summaries up into one handler total.
@@ -181,8 +183,9 @@ class TourMoneySummary {
   /// Total extra income (cabin / gallery / other) across every bus on the tour.
   final double totalIncome;
 
-  /// Total bus owner rent across the tour (in [totalExpenses] for P&L, excluded
-  /// from the handover expectation — the admin pays the owners).
+  /// Total bus owner rent across the tour, already inside [totalExpenses]. The
+  /// handlers settle the owners, so it is part of what's deducted from the
+  /// handover expectation, not added back.
   final double totalBusRent;
 
   const TourMoneySummary({
@@ -204,9 +207,10 @@ class TourMoneySummary {
   double get totalNetBilled => totalRevenueBilled + totalIncome - totalExpenses;
 
   /// Cash the handlers should hand over across the tour: collections + income −
-  /// their ground expenses (rent excluded — the admin settles the owners).
-  double get totalExpectedHandover =>
-      totalCollected + totalIncome - (totalExpenses - totalBusRent);
+  /// ALL costs (ground expenses AND the owner rents they settle). Equal to
+  /// [totalNet] — the settlement figure and the tour's cash profit are one and
+  /// the same number on every screen.
+  double get totalExpectedHandover => totalNet;
 
   /// Still-owed handover across the whole tour.
   double get totalOutstandingHandover =>

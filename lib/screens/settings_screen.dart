@@ -20,8 +20,7 @@ class SettingsScreen extends StatelessWidget {
     final themeCtrl = Get.find<ThemeController>();
     final c = UgamColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [

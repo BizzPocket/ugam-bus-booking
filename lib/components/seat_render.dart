@@ -51,10 +51,13 @@ class SeatRender {
   });
 }
 
-/// The leg a render decision charges an occupant to. Kept in one place so the
-/// per-line migration is a single swap (today: the stored whole-passenger
-/// [Passenger.tripType], matching the current tile).
-TripType _legOf(Passenger p) => p.tripType;
+/// The leg a render decision charges an occupant to, for the seat [seatId] they
+/// hold here: the per-seat [SeatAssignment.leg] via [Passenger.legForSeat],
+/// falling back to the coarse [Passenger.tripType] for legacy / unstamped seats.
+/// Per-seat so a mixed same-type request (a GO-only and a RET-only seat in one
+/// booking) resolves each cell to its own leg instead of the round-trip summary.
+TripType _legOf(Passenger p, String? seatId) =>
+    seatId == null ? p.tripType : p.legForSeat(seatId);
 
 /// Occupants deduped by id, preserving order. A whole double held solo arrives
 /// as the same passenger twice (two assignments on one seatId); collapsing to
@@ -92,7 +95,7 @@ SeatRender resolveSeatRender({
   Passenger? ret;
   if (occ.length >= 2) {
     for (final p in occ) {
-      final leg = _legOf(p);
+      final leg = _legOf(p, cell.seatId);
       if (leg == TripType.outboundOnly) {
         go ??= p;
       } else if (leg == TripType.returnOnly) {
@@ -113,7 +116,7 @@ SeatRender resolveSeatRender({
   if (markHalfDouble && isDouble) {
     var g = 0, r = 0;
     for (final p in occupants) {
-      switch (_legOf(p)) {
+      switch (_legOf(p, cell.seatId)) {
         case TripType.outboundOnly:
           g++;
         case TripType.returnOnly:
@@ -140,8 +143,8 @@ SeatRender resolveSeatRender({
   // of two names + a "+N" badge that hid the rest. A round-trip rider holds
   // both legs of their berth, so they appear in both rows.
   if (isDouble && occ.length > 2) {
-    final qgo = occ.where((p) => _legOf(p).usesOutbound).toList();
-    final qret = occ.where((p) => _legOf(p).usesReturn).toList();
+    final qgo = occ.where((p) => _legOf(p, cell.seatId).usesOutbound).toList();
+    final qret = occ.where((p) => _legOf(p, cell.seatId).usesReturn).toList();
     final goRow = qgo.length > 2 ? qgo.sublist(0, 2) : qgo;
     final retRow = qret.length > 2 ? qret.sublist(0, 2) : qret;
     // Each leg row only seats two. A rider beyond that (an OVER-BOOKED leg —

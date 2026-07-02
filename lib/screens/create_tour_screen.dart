@@ -213,8 +213,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [

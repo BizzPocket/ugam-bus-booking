@@ -8,6 +8,28 @@ import '../models/passenger.dart';
 /// otherwise nothing has been collected yet (neutral).
 enum SeatMoneyState { uncollected, paid, owing, returnDue }
 
+/// How much of a collection to record as RETURNED, given the cash the rider
+/// tendered and any amount the handler explicitly marked as returned.
+///
+/// - [received] is the cash handed over (the hero amount in the collect sheet).
+/// - [manualReturned] is an explicit "returned to customer" override; `0` means
+///   the handler left it blank.
+///
+/// When the rider OVERPAID ([received] > [due]) and no explicit return was
+/// typed, the surplus is change to hand back: it is booked as refunded so the
+/// line settles to net = due and the change is recorded on the books instead of
+/// silently inflating "collected". An explicit [manualReturned] always wins, so
+/// genuine refunds / partial returns are never overwritten.
+double refundToRecord({
+  required double due,
+  required double received,
+  required double manualReturned,
+}) {
+  if (manualReturned > 0) return manualReturned;
+  final change = received - due;
+  return change > 0 ? change : 0;
+}
+
 /// Per-RIDER money state from their resolved [due] and [collection].
 ///
 /// Kept pure (no Bus/Passenger) so the rule is testable and shared by every

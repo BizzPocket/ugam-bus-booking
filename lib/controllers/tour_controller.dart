@@ -25,7 +25,9 @@ import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_normalize.dart';
+import '../utils/seat_leg_resolver.dart';
 import '../utils/seat_occupants.dart';
+import '../utils/tour_capacity.dart';
 import 'auth_controller.dart';
 import 'customer_memory_controller.dart';
 
@@ -46,6 +48,67 @@ class TourController extends GetxController {
   /// plan has been generated this session).
   List<SeatingException> exceptionsForTour(String tourId) =>
       lastPlanByTour[tourId]?.exceptions ?? const <SeatingException>[];
+
+  /// Memoization cache for [capacityFor]: the last [computeTourCapacity] result
+  /// per tourId, paired with the cheap content signature it was computed for.
+  /// Plain (non-reactive) map — capacity is a pure function of `tours`, so any
+  /// observer already rebuilds via `tours.refresh()`; this only avoids re-running
+  /// the engine on each of those rebuilds. Survives until the tour's signature
+  /// changes (recompute) or the controller is disposed.
+  final _capacityCache = <String, ({int sig, TourCapacity capacity})>{};
+
+  /// Memoized [computeTourCapacity] for [t].
+  ///
+  /// [computeTourCapacity] runs the full [SeatingEngine.propose] — expensive, and
+  /// the dashboard calls it once per tour on every `tours.refresh()` (each seat
+  /// tap, each realtime event). This caches the result keyed by [t.id] + a cheap
+  /// [_capacitySignature] that flips whenever anything the engine reads changes
+  /// (buses, passengers, seats, status). A cache hit returns the prior snapshot
+  /// untouched; a miss (first call, or any signature change) recomputes and
+  /// stores. Same semantics as calling [computeTourCapacity] directly — only the
+  /// redundant recomputes are removed.
+  ///
+  /// Correctness-first: the signature folds every field [computeTourCapacity]
+  /// reads, so when in doubt it recomputes rather than serve a stale snapshot.
+  /// Pass the SAME [Tour] instance the UI holds (e.g. from [getTour] / the
+  /// `tours` list) so the signature reflects the live state being rendered.
+  TourCapacity capacityFor(Tour t) {
+    final sig = _capacitySignature(t);
+    final hit = _capacityCache[t.id];
+    if (hit != null && hit.sig == sig) return hit.capacity;
+    final capacity = computeTourCapacity(t);
+    _capacityCache[t.id] = (sig: sig, capacity: capacity);
+    return capacity;
+  }
+
+  /// Cheap structural fingerprint of every input [computeTourCapacity] reads —
+  /// computed WITHOUT running the engine, so it's safe to evaluate on each
+  /// rebuild. Folds the tour status plus, per bus, its id and seat-grid
+  /// (seatId + seatType) and, per passenger, the fields that move the plan:
+  /// assigned seats, request-line seat-types + legs (drives leg-aware free), and
+  /// the waitlist / journeyDone flags the engine + decision filter gate on.
+  /// Order-stable (we fold list order, which the engine preserves). A collision
+  /// would have to match all of these while changing the plan — astronomically
+  /// unlikely, and a stale read self-heals on the next genuine change.
+  int _capacitySignature(Tour t) {
+    var h = t.status.index;
+    for (final b in t.buses) {
+      h = Object.hash(h, b.id);
+      for (final cell in b.layout?.grid ?? const []) {
+        h = Object.hash(h, cell.seatId, cell.seatType);
+      }
+    }
+    for (final p in t.passengers) {
+      h = Object.hash(h, p.id, p.isWaitlisted, p.journeyDone);
+      for (final a in p.assignedSeats) {
+        h = Object.hash(h, a.busId, a.seatId);
+      }
+      for (final l in p.requestLines) {
+        h = Object.hash(h, l.seatType, l.leg, l.qty);
+      }
+    }
+    return h;
+  }
 
   /// Frozen per-leg seat charts, keyed by tourId. Populated lazily by
   /// [loadSeatSnapshots] (when a past-tour seat view opens) and written through
@@ -551,6 +614,18 @@ class TourController extends GetxController {
     return idx >= 0 ? tours[idx] : null;
   }
 
+  /// A `(busId, seatId) -> SeatType?` lookup over [tour]'s bus layouts, used to
+  /// feed [resolveAssignmentLegs] when persisting manually-placed / moved seats
+  /// so each berth is stamped with the leg of the request line it satisfies.
+  SeatType? Function(String, String) _cellTypeLookup(Tour tour) =>
+      (busId, seatId) {
+        final bus = tour.buses.where((b) => b.id == busId).firstOrNull;
+        for (final c in bus?.layout?.grid ?? const <SeatCell>[]) {
+          if (c.seatId == seatId) return c.seatType;
+        }
+        return null;
+      };
+
   Future<void> deleteTour(String id) async {
     // Snapshot returning-customer memory (priority + travel companions) BEFORE
     // the tour — and its cascade-deleted passenger rows — are gone. Best-effort:
@@ -912,10 +987,25 @@ class TourController extends GetxController {
       AppSnackBar.warning(tr('seat.group_locked_msg'));
       return;
     }
+    // Stamp each berth with the leg of the request line it satisfies, so a
+    // booking split across one-way legs (e.g. "1 seater GO + 1 seater RET")
+    // keeps the per-seat leg after manual placement / swap-in. Falls back to
+    // the raw assignments when the tour/passenger can't be resolved (the empty
+    // = unseat case carries no legs anyway).
+    final tourForLegs = getTour(tourId);
+    final pForLegs =
+        tourForLegs?.passengers.firstWhereOrNull((p) => p.id == passengerId);
+    final stamped = (tourForLegs != null && pForLegs != null)
+        ? resolveAssignmentLegs(
+            requestLines: pForLegs.requestLines,
+            assigned: assignments,
+            cellTypeAt: _cellTypeLookup(tourForLegs),
+          )
+        : assignments;
     Passenger? updated;
     await _write(
       optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = p.copyWith(assignedSeats: assignments);
+        updated = p.copyWith(assignedSeats: stamped);
         return updated!;
       }),
       persist: () async {
@@ -1323,6 +1413,7 @@ class TourController extends GetxController {
       'consolidateOntoDouble expects exactly 2 source seats, got '
       '${sourceSeatIds.length}',
     );
+    final tour = getTour(tourId);
     Passenger? updated;
     await _write(
       optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
@@ -1335,7 +1426,16 @@ class TourController extends GetxController {
                 .toList()
               ..add(SeatAssignment(busId: busId, seatId: targetSeatId))
               ..add(SeatAssignment(busId: busId, seatId: targetSeatId));
-        updated = p.copyWith(assignedSeats: next);
+        // Re-stamp per-seat legs: the leg multiset is unchanged by folding two
+        // singles into a whole double, but the seatIds changed.
+        final stamped = tour == null
+            ? next
+            : resolveAssignmentLegs(
+                requestLines: p.requestLines,
+                assigned: next,
+                cellTypeAt: _cellTypeLookup(tour),
+              );
+        updated = p.copyWith(assignedSeats: stamped);
         return updated!;
       }),
       persist: () async {
@@ -1393,6 +1493,7 @@ class TourController extends GetxController {
       return;
     }
 
+    final tour = getTour(tourId);
     Passenger? updated;
     await _write(
       optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
@@ -1421,7 +1522,16 @@ class TourController extends GetxController {
         for (var i = 0; i < moveCount; i++) {
           next.add(SeatAssignment(busId: targetBusId, seatId: toSeatId));
         }
-        updated = p.copyWith(assignedSeats: next);
+        // Re-stamp per-seat legs: a move keeps the leg multiset (only seatIds
+        // change), so resolve against the same request lines on the new cells.
+        final stamped = tour == null
+            ? next
+            : resolveAssignmentLegs(
+                requestLines: p.requestLines,
+                assigned: next,
+                cellTypeAt: _cellTypeLookup(tour),
+              );
+        updated = p.copyWith(assignedSeats: stamped);
         return updated!;
       }),
       persist: () async {
@@ -1477,7 +1587,14 @@ class TourController extends GetxController {
             for (var i = 0; i < berths; i++) {
               next.add(SeatAssignment(busId: busId, seatId: toSeatId));
             }
-            updated = p.copyWith(assignedSeats: next);
+            // Re-stamp per-seat legs: moving the pair keeps each occupant's leg
+            // multiset, only the seatId changes.
+            final stamped = resolveAssignmentLegs(
+              requestLines: p.requestLines,
+              assigned: next,
+              cellTypeAt: _cellTypeLookup(tour),
+            );
+            updated = p.copyWith(assignedSeats: stamped);
             return updated!;
           });
           if (updated != null) changed.add(updated!);
@@ -1547,7 +1664,14 @@ class TourController extends GetxController {
             for (var i = 0; i < onB; i++) {
               next.add(SeatAssignment(busId: busId, seatId: seatAId));
             }
-            updated = p.copyWith(assignedSeats: next);
+            // Re-stamp per-seat legs: a contents swap keeps each occupant's leg
+            // multiset, only the seatIds change.
+            final stamped = resolveAssignmentLegs(
+              requestLines: p.requestLines,
+              assigned: next,
+              cellTypeAt: _cellTypeLookup(tour),
+            );
+            updated = p.copyWith(assignedSeats: stamped);
             return updated!;
           });
           if (updated != null) changed.add(updated!);
@@ -1708,6 +1832,11 @@ class TourController extends GetxController {
           .where((a) => a.busId == bBusId && a.seatId == seatBId)
           .length;
 
+      // Re-stamp per-seat legs after the swap: each side keeps its leg multiset
+      // (only seatIds change), so resolve against that passenger's own request
+      // lines on the new cells. [t] is the tour, so its layouts feed the lookup.
+      final cellTypeAt = _cellTypeLookup(t);
+
       final newPassengers = t.passengers.map((p) {
         if (p.id == passengerAId) {
           final next = p.assignedSeats
@@ -1716,7 +1845,13 @@ class TourController extends GetxController {
           for (var i = 0; i < berthsA; i++) {
             next.add(SeatAssignment(busId: bBusId, seatId: seatBId));
           }
-          updatedA = p.copyWith(assignedSeats: next);
+          updatedA = p.copyWith(
+            assignedSeats: resolveAssignmentLegs(
+              requestLines: p.requestLines,
+              assigned: next,
+              cellTypeAt: cellTypeAt,
+            ),
+          );
           return updatedA!;
         }
         if (p.id == passengerBId) {
@@ -1726,7 +1861,13 @@ class TourController extends GetxController {
           for (var i = 0; i < berthsB; i++) {
             next.add(SeatAssignment(busId: busAId, seatId: seatAId));
           }
-          updatedB = p.copyWith(assignedSeats: next);
+          updatedB = p.copyWith(
+            assignedSeats: resolveAssignmentLegs(
+              requestLines: p.requestLines,
+              assigned: next,
+              cellTypeAt: cellTypeAt,
+            ),
+          );
           return updatedB!;
         }
         final dropSeats = bumpBySeat[p.id];
@@ -1734,7 +1875,13 @@ class TourController extends GetxController {
           final next = p.assignedSeats
               .where((a) => !dropSeats.contains('${a.busId}|${a.seatId}'))
               .toList();
-          final u = p.copyWith(assignedSeats: next);
+          final u = p.copyWith(
+            assignedSeats: resolveAssignmentLegs(
+              requestLines: p.requestLines,
+              assigned: next,
+              cellTypeAt: cellTypeAt,
+            ),
+          );
           updatedBumped.add(u);
           return u;
         }

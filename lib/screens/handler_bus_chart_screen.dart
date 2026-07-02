@@ -229,6 +229,9 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
         collections: _collections.values.toList(),
         expenses: _expensesForBus(bus.id),
         incomes: _incomesForBus(bus.id),
+        // The handler pays the bus owner out of collected cash, so the rent is
+        // a real deduction from their in-hand — same figure the admin settles.
+        busRent: bus.busPrice,
         dueForSeat: bus.amountDueForSeat,
       );
 
@@ -300,6 +303,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   }
 
   void _onSeatTapped(Bus bus, String seatId, List<Passenger> occupants) {
+    HapticFeedback.selectionClick();
     if (occupants.isEmpty) return;
     // A shared seat (a Double Sofa can carry up to four riders across GO+RET, or
     // two on one leg) needs a chooser so the handler picks whom to call /
@@ -369,7 +373,14 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             seatId: seatId,
             amountDue: due,
             amountReceived: received,
-            amountRefunded: returned,
+            // Overpayment auto-books as change returned (net settles to due)
+            // unless the handler typed an explicit return — same rule as the
+            // admin collection screen. See [refundToRecord].
+            amountRefunded: refundToRecord(
+              due: due,
+              received: received,
+              manualReturned: returned,
+            ),
             collectedBy: collectedBy.isEmpty ? null : collectedBy,
             note: note.isEmpty ? null : note,
           );
@@ -641,8 +652,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     // The handler can broadcast a free-text message to their bus as soon as a
     // bus is loaded (regardless of grid/list view).
     final canMessage = !_loading && _error == null && bus != null;
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -786,6 +796,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                   toCollect: summary.toCollect,
                   spent: summary.spent,
                   income: summary.income,
+                  rent: summary.rent,
                   inHand: summary.inHand,
                 ),
                 const SizedBox(height: UgamSpacing.md),
@@ -1382,7 +1393,10 @@ class _RosterRow extends StatelessWidget {
                   namedArgs: {'phone': p.phone},
                 ),
                 child: GestureDetector(
-                  onTap: () => PhoneDialer.call(p.phone),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    PhoneDialer.call(p.phone);
+                  },
                   behavior: HitTestBehavior.opaque,
                   child: Container(
                     width: 40,
@@ -1514,16 +1528,31 @@ class _OccupantChooserSheetState extends State<_OccupantChooserSheet> {
           ),
         ],
         const SizedBox(height: UgamSpacing.md),
-        for (var i = 0; i < shown.length; i++) ...[
-          if (i > 0) const SizedBox(height: UgamSpacing.sm),
-          _LegSharedTile(
-            passenger: shown[i],
-            // The badge reads each rider's own leg (GO / RET / round-trip).
-            leg: shown[i].tripType,
-            onPick: () => widget.onPick(shown[i]),
-            c: c,
+        // Cross-fade the occupant list when the GO/RET leg toggle changes so the
+        // tiles swap smoothly instead of popping. Contained region only — the
+        // sheet's surrounding layout is untouched.
+        AnimatedSwitcher(
+          duration: UgamMotion.sheet,
+          switchInCurve: UgamMotion.easeOut,
+          switchOutCurve: UgamMotion.easeOut,
+          child: Column(
+            key: ValueKey<CollectLeg>(_leg),
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < shown.length; i++) ...[
+                if (i > 0) const SizedBox(height: UgamSpacing.sm),
+                _LegSharedTile(
+                  passenger: shown[i],
+                  // The badge reads each rider's own leg (GO / RET / round-trip).
+                  leg: shown[i].tripType,
+                  onPick: () => widget.onPick(shown[i]),
+                  c: c,
+                ),
+              ],
+            ],
           ),
-        ],
+        ),
       ],
     );
   }
@@ -1591,7 +1620,10 @@ class _LegSharedTile extends StatelessWidget {
                   namedArgs: {'phone': p.phone},
                 ),
                 child: GestureDetector(
-                  onTap: () => PhoneDialer.call(p.phone),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    PhoneDialer.call(p.phone);
+                  },
                   behavior: HitTestBehavior.opaque,
                   child: Container(
                     width: 40,
@@ -1771,7 +1803,10 @@ class _DriverContact extends StatelessWidget {
                   namedArgs: {'phone': phone},
                 ),
                 child: GestureDetector(
-                  onTap: () => PhoneDialer.call(phone),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    PhoneDialer.call(phone);
+                  },
                   behavior: HitTestBehavior.opaque,
                   child: Container(
                     width: 40,
@@ -1787,7 +1822,10 @@ class _DriverContact extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               GestureDetector(
-                onTap: () => _openWhatsApp(phone),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  _openWhatsApp(phone);
+                },
                 behavior: HitTestBehavior.opaque,
                 child: Container(
                   width: 40,
@@ -1837,6 +1875,7 @@ class _SummaryHeader extends StatelessWidget {
   final double toCollect;
   final double spent;
   final double income;
+  final double rent;
   final double inHand;
 
   const _SummaryHeader({
@@ -1845,74 +1884,58 @@ class _SummaryHeader extends StatelessWidget {
     required this.toCollect,
     required this.spent,
     required this.income,
+    required this.rent,
     required this.inHand,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.payments_rounded,
-                value: Formatters.formatMoneyInr(collected),
-                label: tr('handler_chart.stat_collected'),
-                variant: UgamStatVariant.good,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.undo_rounded,
-                value: Formatters.formatMoneyInr(toReturn),
-                label: tr('handler_chart.stat_to_return'),
-                variant: UgamStatVariant.warm,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.account_balance_wallet_rounded,
-                value: Formatters.formatMoneyInr(toCollect),
-                label: tr('handler_chart.stat_to_collect'),
-                variant: UgamStatVariant.accent,
-              ),
-            ),
-          ],
+    final c = UgamColors.of(context);
+
+    // ONE money hero: "In hand" is the headline; everything else is folded
+    // into a tap-to-reveal breakdown so the chart/roster owns the viewport.
+    return UgamHeroStat(
+      label: tr('handler_chart.stat_in_hand'),
+      value: Formatters.formatMoneyInr(inHand),
+      secondary: tr(
+        'handler_chart.in_hand_secondary',
+        namedArgs: {'amount': Formatters.formatMoneyInr(collected)},
+      ),
+      breakdown: [
+        HeroStatLine(
+          tr('handler_chart.stat_collected'),
+          Formatters.formatMoneyInr(collected),
+          tone: c.good,
         ),
-        const SizedBox(height: UgamSpacing.md),
-        Row(
-          children: [
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.savings_rounded,
-                value: Formatters.formatMoneyInr(income),
-                label: tr('handler_chart.stat_income'),
-                variant: UgamStatVariant.good,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.receipt_long_rounded,
-                value: Formatters.formatMoneyInr(spent),
-                label: tr('handler_chart.stat_spent'),
-                variant: UgamStatVariant.warm,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: UgamStatTile(
-                icon: Icons.account_balance_rounded,
-                value: Formatters.formatMoneyInr(inHand),
-                label: tr('handler_chart.stat_in_hand'),
-                variant: UgamStatVariant.neutral,
-              ),
-            ),
-          ],
+        HeroStatLine(
+          tr('handler_chart.stat_to_collect'),
+          Formatters.formatMoneyInr(toCollect),
+          tone: c.accent,
         ),
+        HeroStatLine(
+          tr('handler_chart.stat_to_return'),
+          Formatters.formatMoneyInr(toReturn),
+          tone: c.warm,
+        ),
+        HeroStatLine(
+          tr('handler_chart.stat_income'),
+          Formatters.formatMoneyInr(income),
+          tone: c.good,
+        ),
+        HeroStatLine(
+          tr('handler_chart.stat_spent'),
+          Formatters.formatMoneyInr(spent),
+          tone: c.warm,
+        ),
+        // The owner's rent the handler pays out of collected cash — shown as a
+        // distinct deduction so the in-hand drop reads clearly. Hidden when the
+        // bus carries no rent.
+        if (rent > 0.005)
+          HeroStatLine(
+            tr('handler_chart.stat_rent'),
+            Formatters.formatMoneyInr(rent),
+            tone: c.warm,
+          ),
       ],
     );
   }
@@ -1996,6 +2019,8 @@ class _CollectSheetState extends State<_CollectSheet> {
         _collectedByCtrl.text.trim(),
         _noteCtrl.text.trim(),
       );
+      // Dismiss the keyboard so it animates out cleanly with the sheet.
+      FocusManager.instance.primaryFocus?.unfocus();
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) setState(() => _saving = false);
@@ -2210,7 +2235,11 @@ class _CollectSheetState extends State<_CollectSheet> {
                       c.danger,
                     )
                   : (tr('handler_chart.balance_settled'), c.good);
-              return Container(
+              // Smooth the color/text transitions as the amount field changes;
+              // the balance VALUE/logic is unchanged, only the visual is eased.
+              return AnimatedContainer(
+                duration: UgamMotion.sheet,
+                curve: UgamMotion.easeOut,
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(
                   horizontal: UgamSpacing.lg,
@@ -2220,9 +2249,11 @@ class _CollectSheetState extends State<_CollectSheet> {
                   color: balColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(UgamRadius.row),
                 ),
-                child: Text(
-                  balLabel,
+                child: AnimatedDefaultTextStyle(
+                  duration: UgamMotion.sheet,
+                  curve: UgamMotion.easeOut,
                   style: UgamText.bodyStrong.copyWith(color: balColor),
+                  child: Text(balLabel),
                 ),
               );
             },
@@ -2230,6 +2261,7 @@ class _CollectSheetState extends State<_CollectSheet> {
           const SizedBox(height: UgamSpacing.lg),
           UgamCTA(
             label: _saving ? tr('handler_chart.saving') : tr('app.action.save'),
+            loading: _saving,
             onPressed: _saving ? null : _save,
           ),
         ],
@@ -2437,7 +2469,10 @@ class _HandlerExpenseRow extends StatelessWidget {
               button: true,
               label: tr('handler_chart.delete_expense'),
               child: GestureDetector(
-                onTap: onDelete,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  onDelete();
+                },
                 behavior: HitTestBehavior.opaque,
                 child: const Padding(
                   padding: EdgeInsets.all(6),
@@ -2526,6 +2561,8 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
         amount,
         _paidByCtrl.text.trim(),
       );
+      // Dismiss the keyboard so it animates out cleanly with the sheet.
+      FocusManager.instance.primaryFocus?.unfocus();
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) setState(() => _saving = false);
@@ -2557,9 +2594,14 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
                 .map((cat) {
                   final active = cat == _category;
                   return GestureDetector(
-                    onTap: () => setState(() => _category = cat),
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _category = cat);
+                    },
                     behavior: HitTestBehavior.opaque,
-                    child: Container(
+                    child: AnimatedContainer(
+                      duration: UgamMotion.tab,
+                      curve: UgamMotion.easeOut,
                       padding: const EdgeInsets.symmetric(
                         horizontal: UgamSpacing.lg,
                         vertical: UgamSpacing.sm + 2,
@@ -2605,6 +2647,7 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
             label: _saving
                 ? tr('handler_chart.saving')
                 : tr('handler_chart.save_expense'),
+            loading: _saving,
             onPressed: _saving ? null : _save,
           ),
         ],
@@ -2793,7 +2836,10 @@ class _HandlerIncomeRow extends StatelessWidget {
               button: true,
               label: tr('handler_chart.delete_income'),
               child: GestureDetector(
-                onTap: onDelete,
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  onDelete();
+                },
                 behavior: HitTestBehavior.opaque,
                 child: const Padding(
                   padding: EdgeInsets.all(6),
@@ -2872,6 +2918,8 @@ class _IncomeSheetState extends State<_IncomeSheet> {
         amount,
         _receivedByCtrl.text.trim(),
       );
+      // Dismiss the keyboard so it animates out cleanly with the sheet.
+      FocusManager.instance.primaryFocus?.unfocus();
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) setState(() => _saving = false);
@@ -2898,9 +2946,14 @@ class _IncomeSheetState extends State<_IncomeSheet> {
             children: IncomeCategory.values.map((cat) {
               final active = cat == _category;
               return GestureDetector(
-                onTap: () => setState(() => _category = cat),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _category = cat);
+                },
                 behavior: HitTestBehavior.opaque,
-                child: Container(
+                child: AnimatedContainer(
+                  duration: UgamMotion.tab,
+                  curve: UgamMotion.easeOut,
                   padding: const EdgeInsets.symmetric(
                     horizontal: UgamSpacing.lg,
                     vertical: UgamSpacing.sm + 2,
@@ -2945,6 +2998,7 @@ class _IncomeSheetState extends State<_IncomeSheet> {
             label: _saving
                 ? tr('handler_chart.saving')
                 : tr('handler_chart.save_income'),
+            loading: _saving,
             onPressed: _saving ? null : _save,
           ),
         ],
@@ -2991,6 +3045,8 @@ class _HandlerBusMessageSheetState extends State<_HandlerBusMessageSheet> {
     setState(() => _sending = true);
     try {
       await widget.onSend(text);
+      // Dismiss the keyboard so it animates out cleanly with the sheet.
+      FocusManager.instance.primaryFocus?.unfocus();
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) setState(() => _sending = false);
@@ -3021,6 +3077,7 @@ class _HandlerBusMessageSheetState extends State<_HandlerBusMessageSheet> {
                 ? tr('bus_message.sending')
                 : tr('bus_message.send_btn'),
             leadingIcon: Icons.send_rounded,
+            loading: _sending,
             onPressed: _sending ? null : _send,
           ),
         ],
@@ -3215,19 +3272,28 @@ class _AttendanceView extends StatelessWidget {
             ),
           )
         else
-          UgamCard.plain(
-            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
-            child: Column(
-              children: [
-                for (final r in rows)
-                  _AttendanceRow(
-                    bus: bus,
-                    passenger: r.passenger,
-                    present: r.present,
-                    onChanged: (v) => onTogglePresent(r.passenger, v),
-                    c: c,
-                  ),
-              ],
+          // Cross-fade the roster card when the GO/RET leg toggle changes so the
+          // list swaps smoothly. Contained region only — the surrounding scroll
+          // layout is untouched.
+          AnimatedSwitcher(
+            duration: UgamMotion.sheet,
+            switchInCurve: UgamMotion.easeOut,
+            switchOutCurve: UgamMotion.easeOut,
+            child: UgamCard.plain(
+              key: ValueKey<AttendanceLeg>(leg),
+              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+              child: Column(
+                children: [
+                  for (final r in rows)
+                    _AttendanceRow(
+                      bus: bus,
+                      passenger: r.passenger,
+                      present: r.present,
+                      onChanged: (v) => onTogglePresent(r.passenger, v),
+                      c: c,
+                    ),
+                ],
+              ),
             ),
           ),
       ],
@@ -3337,7 +3403,10 @@ class _AttendanceRow extends StatelessWidget {
             toggled: present,
             child: Switch(
               value: present,
-              onChanged: onChanged,
+              onChanged: (v) {
+                HapticFeedback.lightImpact();
+                onChanged(v);
+              },
               activeTrackColor: c.good,
               activeThumbColor: c.onAccent,
             ),

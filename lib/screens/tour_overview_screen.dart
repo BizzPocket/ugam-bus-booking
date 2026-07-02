@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
+import '../design/components/ugam_capacity_meter.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/seat_type.dart';
@@ -133,226 +134,212 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final content = Column(
-          children: [
-            Expanded(
-              child: Obx(() {
-                final tour = _ctrl.getTour(widget.tourId);
-                if (tour == null) {
-                  return Center(
-                    child: Text(
-                      tr('tour_overview.tour_not_found'),
-                      style: UgamText.body.copyWith(color: c.ink2),
-                    ),
-                  );
+      children: [
+        Expanded(
+          child: Obx(() {
+            final tour = _ctrl.getTour(widget.tourId);
+            if (tour == null) {
+              return Center(
+                child: Text(
+                  tr('tour_overview.tour_not_found'),
+                  style: UgamText.body.copyWith(color: c.ink2),
+                ),
+              );
+            }
+
+            final exceptions = _ctrl.exceptionsForTour(tour.id);
+            final total = tour.totalBusSeats;
+            // ONE engine snapshot drives every "how full?" surface on this
+            // screen — the summary meter, each bus row's meter, and the
+            // pre-fill shortfall below — so they can never disagree. Leg-aware
+            // by construction: a berth shared by two opposite one-way riders is
+            // ONE physical seat, split into honest GO/RET loads per leg.
+            final cap = total > 0 ? computeTourCapacity(tour) : null;
+
+            // Demand summary: how many of each seat type the passengers
+            // requested, so the agent knows what to book. A Double Sofa
+            // counts as ONE unit (one tile), NOT its two berths.
+            var reqSingles = 0, reqDoubles = 0, reqSeaters = 0;
+            // Capacity check runs in BERTHS — the engine's unit: a double
+            // sofa line costs 2 berths, single sofa & seater 1 each, and
+            // totalBusSeats is already in berths. Only ACTIVE (non-
+            // waitlisted) requests compete for seats, so held ones are
+            // excluded from demand.
+            var demandBerths = 0;
+            for (final p in tour.passengers) {
+              final held = p.isWaitlisted;
+              for (final line in p.requestLines) {
+                switch (line.seatType) {
+                  case SeatType.singleSofa:
+                    reqSingles += line.qty;
+                  case SeatType.doubleSofa:
+                    reqDoubles += line.qty;
+                  case SeatType.seater:
+                    reqSeaters += line.qty;
                 }
-
-                final exceptions = _ctrl.exceptionsForTour(tour.id);
-                // Leg-aware occupancy: a berth shared by two opposite one-way
-                // riders is ONE physical seat, not two. Counting raw entries
-                // here let a bus read "38/37 · full" while a seat sat empty.
-                final assignedByBus = tour.occupiedBerthsByBus();
-                final placed = tour.occupiedBerths;
-                final total = tour.totalBusSeats;
-
-                // Demand summary: how many of each seat type the passengers
-                // requested, so the agent knows what to book. A Double Sofa
-                // counts as ONE unit (one tile), NOT its two berths.
-                var reqSingles = 0, reqDoubles = 0, reqSeaters = 0;
-                // Capacity check runs in BERTHS — the engine's unit: a double
-                // sofa line costs 2 berths, single sofa & seater 1 each, and
-                // totalBusSeats is already in berths. Only ACTIVE (non-
-                // waitlisted) requests compete for seats, so held ones are
-                // excluded from demand.
-                var demandBerths = 0;
-                for (final p in tour.passengers) {
-                  final held = p.isWaitlisted;
-                  for (final line in p.requestLines) {
-                    switch (line.seatType) {
-                      case SeatType.singleSofa:
-                        reqSingles += line.qty;
-                      case SeatType.doubleSofa:
-                        reqDoubles += line.qty;
-                      case SeatType.seater:
-                        reqSeaters += line.qty;
-                    }
-                    if (!held) {
-                      demandBerths +=
-                          line.qty * (line.seatType == SeatType.doubleSofa ? 2 : 1);
-                    }
-                  }
+                if (!held) {
+                  demandBerths +=
+                      line.qty * (line.seatType == SeatType.doubleSofa ? 2 : 1);
                 }
+              }
+            }
 
-                // Did the LAST generated plan actually overflow anyone? That
-                // count is authoritative (post-fill); the pre-fill shortfall is
-                // an estimate shown before the agent ever taps Fill.
-                final overflowCount = exceptions
-                    .where((e) =>
-                        e.type == SeatingExceptionType.overflowWaitlist)
-                    .length;
-                // Pre-fill shortfall is ENGINE truth, not the leg-agnostic
-                // `demandBerths − total`. The raw subtraction overstated the gap
-                // because it ignored leg-sharing (two opposite one-way riders
-                // reuse one berth), so it claimed "6 short" while the engine can
-                // actually seat all but 3. Routing through [computeTourCapacity]
-                // makes "may not fit" agree with the same plan the chart and the
-                // Requests banner use — over-demand surfaces as needsDecision,
-                // never a phantom number. See [TourCapacity.freeByType].
-                final shortfall =
-                    total > 0 ? computeTourCapacity(tour).needsDecision : 0;
-                final showCapacity = overflowCount > 0 || shortfall > 0;
+            // Did the LAST generated plan actually overflow anyone? That
+            // count is authoritative (post-fill); the pre-fill shortfall is
+            // an estimate shown before the agent ever taps Fill.
+            final overflowCount = exceptions
+                .where((e) => e.type == SeatingExceptionType.overflowWaitlist)
+                .length;
+            // Pre-fill shortfall is ENGINE truth, not the leg-agnostic
+            // `demandBerths − total`. The raw subtraction overstated the gap
+            // because it ignored leg-sharing (two opposite one-way riders
+            // reuse one berth), so it claimed "6 short" while the engine can
+            // actually seat all but 3. Routing through [computeTourCapacity]
+            // makes "may not fit" agree with the same plan the chart and the
+            // Requests banner use — over-demand surfaces as needsDecision,
+            // never a phantom number. See [TourCapacity.freeByType].
+            final shortfall = cap?.needsDecision ?? 0;
+            final showCapacity = overflowCount > 0 || shortfall > 0;
 
-                return ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    UgamSpacing.gutter,
-                    UgamSpacing.sm,
-                    UgamSpacing.gutter,
-                    UgamSpacing.sm,
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.gutter,
+                UgamSpacing.sm,
+                UgamSpacing.gutter,
+                UgamSpacing.sm,
+              ),
+              physics: const BouncingScrollPhysics(),
+              children: [
+                // One compact summary: seats-placed + the bus requirements
+                // (what to book), on the 8pt grid — replaces the two tall
+                // stat/requirements cards.
+                _SummaryCard(
+                  cap: cap,
+                  total: total,
+                  singles: reqSingles,
+                  doubles: reqDoubles,
+                  seaters: reqSeaters,
+                  onEditRequests: _onEditRequests,
+                  c: c,
+                ),
+                if (showCapacity) ...[
+                  const SizedBox(height: UgamSpacing.sm),
+                  _CapacityBanner(
+                    overflowCount: overflowCount,
+                    demandBerths: demandBerths,
+                    capacityBerths: total,
+                    shortfall: shortfall,
+                    onAddBus: _onAddBus,
+                    onReview: overflowCount > 0 ? _onExceptionsTap : null,
+                    onEditRequests: _onEditRequests,
+                    c: c,
                   ),
-                  physics: const BouncingScrollPhysics(),
-                  children: [
-                    // One compact summary: seats-placed + the bus requirements
-                    // (what to book), on the 8pt grid — replaces the two tall
-                    // stat/requirements cards.
-                    _SummaryCard(
-                      placed: placed,
-                      total: total,
-                      singles: reqSingles,
-                      doubles: reqDoubles,
-                      seaters: reqSeaters,
-                      onEditRequests: _onEditRequests,
-                      c: c,
+                ],
+                // Collapse to ONE warm attention surface: the capacity
+                // banner already carries a "review waitlist" action into
+                // the same exceptions route, so the decision chip only
+                // appears when the banner is NOT shown — never both warm
+                // blocks at once.
+                if (exceptions.isNotEmpty && !showCapacity) ...[
+                  const SizedBox(height: UgamSpacing.sm),
+                  _DecisionChip(
+                    count: exceptions.length,
+                    onTap: _onExceptionsTap,
+                    c: c,
+                  ),
+                ],
+                const SizedBox(height: UgamSpacing.md),
+                // Buses are slim list rows inside ONE card (hairline
+                // dividers between), so several fit without the old
+                // card-per-bus gaps.
+                if (tour.buses.isEmpty)
+                  _NoBuses(c: c)
+                else
+                  Container(
+                    decoration: BoxDecoration(
+                      color: c.card,
+                      borderRadius: BorderRadius.circular(UgamRadius.card),
+                      border: Border.all(color: c.border),
                     ),
-                    if (showCapacity) ...[
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < tour.buses.length; i++) ...[
+                          if (i > 0)
+                            Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: c.border,
+                              indent: UgamSpacing.md,
+                              endIndent: UgamSpacing.md,
+                            ),
+                          _BusRow(
+                            bus: tour.buses[i],
+                            busCap: cap?.byBus[tour.buses[i].id],
+                            hasExceptions: exceptions.isNotEmpty,
+                            onTap: () => _onBusTap(tour.buses[i]),
+                            c: c,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          }),
+        ),
+        // Sticky bottom CTAs in the thumb zone. The summary's PRIMARY,
+        // prominent action is "Edit seats by hand" → the manual grid;
+        // auto-fill drops to a secondary neutral button beneath it. When
+        // standalone (no onEditByHand) only the auto-fill CTA is shown.
+        Obx(() {
+          final tour = _ctrl.getTour(widget.tourId);
+          final placed = tour?.totalSeatsAssigned ?? 0;
+          final hasBuses = (tour?.buses.isNotEmpty ?? false);
+          final fillLabel = placed > 0
+              ? tr('tour_overview.regenerate_plan')
+              : tr('tour_overview.fill_bus');
+          final onEdit = widget.onEditByHand;
+          // Thumb-zone stack: the ONE primary focal action is the
+          // full-width champagne UgamCTA "Edit seats by hand"; auto-fill /
+          // re-generate drops below it as a quiet full-width ghost
+          // UgamButton so solid gold stays rationed to a single element.
+          // Standalone (no onEditByHand) collapses to the lone auto-fill
+          // CTA as the screen's primary.
+          return UgamStickyCTA(
+            child: onEdit == null
+                ? UgamCTA(
+                    label: fillLabel,
+                    leadingIcon: Icons.auto_awesome_rounded,
+                    loading: _filling,
+                    onPressed: hasBuses ? _fill : null,
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      UgamCTA(
+                        label: tr('tour_overview.cta_edit_by_hand'),
+                        leadingIcon: Icons.edit_rounded,
+                        onPressed: hasBuses ? onEdit : null,
+                      ),
                       const SizedBox(height: UgamSpacing.sm),
-                      _CapacityBanner(
-                        overflowCount: overflowCount,
-                        demandBerths: demandBerths,
-                        capacityBerths: total,
-                        shortfall: shortfall,
-                        onAddBus: _onAddBus,
-                        onReview:
-                            overflowCount > 0 ? _onExceptionsTap : null,
-                        onEditRequests: _onEditRequests,
-                        c: c,
-                      ),
-                    ],
-                    // Collapse to ONE warm attention surface: the capacity
-                    // banner already carries a "review waitlist" action into
-                    // the same exceptions route, so the decision chip only
-                    // appears when the banner is NOT shown — never both warm
-                    // blocks at once.
-                    if (exceptions.isNotEmpty && !showCapacity) ...[
-                      const SizedBox(height: UgamSpacing.sm),
-                      _DecisionChip(
-                        count: exceptions.length,
-                        onTap: _onExceptionsTap,
-                        c: c,
-                      ),
-                    ],
-                    const SizedBox(height: UgamSpacing.md),
-                    // Buses are slim list rows inside ONE card (hairline
-                    // dividers between), so several fit without the old
-                    // card-per-bus gaps.
-                    if (tour.buses.isEmpty)
-                      _NoBuses(c: c)
-                    else
-                      Container(
-                        decoration: BoxDecoration(
-                          color: c.card,
-                          borderRadius:
-                              BorderRadius.circular(UgamRadius.card),
-                          border: Border.all(color: c.border),
-                        ),
-                        child: Column(
-                          children: [
-                            for (var i = 0; i < tour.buses.length; i++) ...[
-                              if (i > 0)
-                                Divider(
-                                  height: 1,
-                                  thickness: 1,
-                                  color: c.border,
-                                  indent: UgamSpacing.md,
-                                  endIndent: UgamSpacing.md,
-                                ),
-                              _BusRow(
-                                bus: tour.buses[i],
-                                assigned:
-                                    assignedByBus[tour.buses[i].id] ?? 0,
-                                hasExceptions: exceptions.isNotEmpty,
-                                onTap: () => _onBusTap(tour.buses[i]),
-                                c: c,
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                  ],
-                );
-              }),
-            ),
-            // Sticky bottom CTAs in the thumb zone. The summary's PRIMARY,
-            // prominent action is "Edit seats by hand" → the manual grid;
-            // auto-fill drops to a secondary neutral button beneath it. When
-            // standalone (no onEditByHand) only the auto-fill CTA is shown.
-            Obx(() {
-              final tour = _ctrl.getTour(widget.tourId);
-              final placed = tour?.totalSeatsAssigned ?? 0;
-              final hasBuses = (tour?.buses.isNotEmpty ?? false);
-              final fillLabel = placed > 0
-                  ? tr('tour_overview.regenerate_plan')
-                  : tr('tour_overview.fill_bus');
-              // Concise labels for the half-width row so they never ellipsize.
-              final fillLabelShort = placed > 0
-                  ? tr('tour_overview.cta_regenerate')
-                  : tr('tour_overview.fill_bus');
-              final onEdit = widget.onEditByHand;
-              // Two CTAs share ONE component (UgamButton) so they read as a
-              // matched pair — identical height + corner radius — laid out in a
-              // single row. "Edit by hand" stays the lone champagne focal
-              // (primary); "Re-generate" is the neutral sibling. Text-only so
-              // the longer labels never truncate at half-width. Standalone (no
-              // onEditByHand) collapses to a single full-width primary button.
-              return UgamStickyCTA(
-                child: onEdit == null
-                    ? UgamButton(
+                      UgamButton(
                         label: fillLabel,
                         icon: Icons.auto_awesome_rounded,
-                        kind: UgamButtonKind.primary,
+                        kind: UgamButtonKind.ghost,
                         expand: true,
                         loading: _filling,
                         onPressed: hasBuses ? _fill : null,
-                      )
-                    : Row(
-                        children: [
-                          Expanded(
-                            child: UgamButton(
-                              label: tr('tour_overview.cta_edit_by_hand'),
-                              kind: UgamButtonKind.primary,
-                              expand: true,
-                              onPressed: hasBuses ? onEdit : null,
-                            ),
-                          ),
-                          const SizedBox(width: UgamSpacing.sm),
-                          Expanded(
-                            child: UgamButton(
-                              label: fillLabelShort,
-                              kind: UgamButtonKind.neutral,
-                              expand: true,
-                              loading: _filling,
-                              onPressed: hasBuses ? _fill : null,
-                            ),
-                          ),
-                        ],
                       ),
-              );
-            }),
-          ],
-        );
+                    ],
+                  ),
+          );
+        }),
+      ],
+    );
 
     // Embedded: body only — the SeatsScreen shell owns the Scaffold/header.
     if (widget.embedded) return content;
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(bottom: false, child: content),
     );
   }
@@ -364,7 +351,9 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
 /// hairline divider, then what the agent still has to book (single/double/
 /// seater counts + total). Replaces the two tall stat + requirements cards.
 class _SummaryCard extends StatelessWidget {
-  final int placed;
+  /// Engine snapshot driving the seats-placed meter. Null only when the tour
+  /// has no buses yet (total == 0) — then the meter row collapses away.
+  final TourCapacity? cap;
   final int total;
   final int singles;
   final int doubles;
@@ -373,7 +362,7 @@ class _SummaryCard extends StatelessWidget {
   final UgamColorSet c;
 
   const _SummaryCard({
-    required this.placed,
+    required this.cap,
     required this.total,
     required this.singles,
     required this.doubles,
@@ -384,9 +373,6 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final complete = total > 0 && placed >= total;
-    final ratio = total == 0 ? 0.0 : (placed / total).clamp(0.0, 1.0);
-    final barColor = complete ? c.good : c.accent;
     final units = singles + doubles + seaters;
     final chips = <String>[
       '$singles ${tr('tour_overview.single_sofa')}',
@@ -404,47 +390,25 @@ class _SummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Seats placed — eyebrow + tabular count.
-          Row(
-            children: [
-              Text(
-                tr('tour_overview.seats_placed'),
-                style: UgamText.micro.copyWith(color: c.ink3),
-              ),
-              const Spacer(),
-              RichText(
-                text: TextSpan(
-                  style: UgamText.tabular(
-                    UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
-                  ),
-                  children: [
-                    TextSpan(text: '$placed'),
-                    TextSpan(
-                      text: ' / $total',
-                      style: UgamText.body.copyWith(
-                        color: c.ink2,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+          // Seats placed — eyebrow, then the shared two-leg meter. The meter
+          // owns the count ("placed / cap"), the per-leg GO/RET split, the
+          // "{n} free" label and the bar — no percentage, no merged fraction,
+          // and every figure a whole seat. Falls back to a plain "0 / 0" when
+          // the tour has no buses yet (cap == null).
+          Text(
+            tr('tour_overview.seats_placed'),
+            style: UgamText.micro.copyWith(color: c.ink3),
           ),
           const SizedBox(height: UgamSpacing.sm),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-            child: Stack(
-              children: [
-                Container(height: 6, color: c.cardElev),
-                FractionallySizedBox(
-                  widthFactor: ratio == 0 ? 0.001 : ratio,
-                  child: Container(height: 6, color: barColor),
-                ),
-              ],
+          if (cap != null)
+            UgamCapacityMeter.tour(cap!)
+          else
+            Text(
+              '0 / $total',
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(color: c.ink),
+              ),
             ),
-          ),
           const SizedBox(height: UgamSpacing.md),
           Container(height: 1, color: c.border),
           const SizedBox(height: UgamSpacing.md),
@@ -466,8 +430,11 @@ class _SummaryCard extends StatelessWidget {
                       tr('app.action.edit'),
                       style: UgamText.micro.copyWith(color: c.accent),
                     ),
-                    Icon(Icons.chevron_right_rounded,
-                        size: 14, color: c.accent),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 14,
+                      color: c.accent,
+                    ),
                   ],
                 ),
               ),
@@ -575,17 +542,22 @@ class _CapacityBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final overflowed = overflowCount > 0;
     final title = overflowed
-        ? tr('tour_overview.capacity_overflow_title',
-            namedArgs: {'n': '$overflowCount'})
+        ? tr(
+            'tour_overview.capacity_overflow_title',
+            namedArgs: {'n': '$overflowCount'},
+          )
         : tr('tour_overview.capacity_short_title');
     final message = overflowed
         ? tr('tour_overview.capacity_overflow_message')
-        : tr('tour_overview.capacity_short_message', namedArgs: {
-            'demand': '$demandBerths',
-            'berthWord': _berthWord(demandBerths),
-            'capacity': '$capacityBerths',
-            'shortfall': '$shortfall',
-          });
+        : tr(
+            'tour_overview.capacity_short_message',
+            namedArgs: {
+              'demand': '$demandBerths',
+              'berthWord': _berthWord(demandBerths),
+              'capacity': '$capacityBerths',
+              'shortfall': '$shortfall',
+            },
+          );
 
     final secondaryLabel = overflowed
         ? tr('tour_overview.review_waitlist')
@@ -613,8 +585,7 @@ class _CapacityBanner extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 alignment: Alignment.center,
-                child:
-                    Icon(Icons.event_busy_rounded, size: 18, color: c.warm),
+                child: Icon(Icons.event_busy_rounded, size: 18, color: c.warm),
               ),
               const SizedBox(width: UgamSpacing.md),
               Expanded(
@@ -622,10 +593,7 @@ class _CapacityBanner extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      title,
-                      style: UgamText.titleS.copyWith(color: c.ink),
-                    ),
+                    Text(title, style: UgamText.titleS.copyWith(color: c.ink)),
                     const SizedBox(height: 3),
                     Text(
                       message,
@@ -737,12 +705,16 @@ class _BannerAction extends StatelessWidget {
 // ─── Bus row ─────────────────────────────────────────────────────────────
 
 /// A slim, tappable bus row inside the shared buses card: name · type, a
-/// status dot + leg-aware count, and a thin fill bar. The dot/bar colour is
-/// the status (good = full & clean, warm = unplaced or needs review), so no
-/// separate status line is needed — keeps several buses visible at once.
+/// status dot, and the shared two-leg capacity meter (`Go x/n · Ret y/n` over a
+/// thin bar). The dot colour is the status (good = full & clean, warm = unplaced
+/// or needs review), so no separate status line is needed — keeps several buses
+/// visible at once.
 class _BusRow extends StatelessWidget {
   final Bus bus;
-  final int assigned;
+
+  /// This bus's slice of the engine snapshot, keyed by bus id. Null only when
+  /// the tour has no engine plan yet — the row then degrades to an empty meter.
+  final BusCapacity? busCap;
 
   /// True when the last generated plan has unresolved exceptions on this tour
   /// — flags any not-yet-full bus warm while issues remain.
@@ -752,7 +724,7 @@ class _BusRow extends StatelessWidget {
 
   const _BusRow({
     required this.bus,
-    required this.assigned,
+    required this.busCap,
     required this.hasExceptions,
     required this.onTap,
     required this.c,
@@ -761,10 +733,12 @@ class _BusRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = bus.totalSeats;
-    final full = total > 0 && assigned >= total;
+    // Leg-aware fullness from the engine slice: a bus is full only when its
+    // busier leg leaves no berth free. Falls back to "not full" when the slice
+    // is missing so the dot reads warm rather than falsely clean.
+    final full = total > 0 && (busCap?.free ?? total) == 0;
     final clean = full && !hasExceptions;
     final tone = clean ? c.good : c.warm;
-    final ratio = total == 0 ? 0.0 : (assigned / total).clamp(0.0, 1.0);
 
     return GestureDetector(
       onTap: onTap,
@@ -777,22 +751,26 @@ class _BusRow extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.directions_bus_filled_rounded,
-                    size: 16, color: c.ink3),
+                Icon(
+                  Icons.directions_bus_filled_rounded,
+                  size: 16,
+                  color: c.ink3,
+                ),
                 const SizedBox(width: UgamSpacing.sm),
                 Expanded(
                   child: RichText(
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     text: TextSpan(
-                      style: UgamText.bodyStrong
-                          .copyWith(color: c.ink, fontSize: 14),
+                      style: UgamText.bodyStrong.copyWith(
+                        color: c.ink,
+                        fontSize: 14,
+                      ),
                       children: [
                         TextSpan(text: bus.name),
                         TextSpan(
                           text: '  ·  ${bus.busType}',
-                          style:
-                              UgamText.caption.copyWith(color: c.ink3),
+                          style: UgamText.caption.copyWith(color: c.ink3),
                         ),
                       ],
                     ),
@@ -802,31 +780,25 @@ class _BusRow extends StatelessWidget {
                 Container(
                   width: 7,
                   height: 7,
-                  decoration: BoxDecoration(color: tone, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  '$assigned/$total',
-                  style: UgamText.tabular(
-                    UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 14),
+                  decoration: BoxDecoration(
+                    color: tone,
+                    shape: BoxShape.circle,
                   ),
                 ),
-                const SizedBox(width: 2),
+                const SizedBox(width: 6),
                 Icon(Icons.chevron_right_rounded, size: 16, color: c.ink3),
               ],
             ),
             const SizedBox(height: UgamSpacing.sm),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(UgamRadius.chip),
-              child: Stack(
-                children: [
-                  Container(height: 5, color: c.cardElev),
-                  FractionallySizedBox(
-                    widthFactor: ratio == 0 ? 0.001 : ratio,
-                    child: Container(height: 5, color: tone),
+            // Shared per-bus meter owns the leg-split count + "{n} free" + bar.
+            UgamCapacityMeter.bus(
+              busCap ??
+                  BusCapacity(
+                    busId: bus.id,
+                    capacity: total,
+                    goOccupied: 0,
+                    retOccupied: 0,
                   ),
-                ],
-              ),
             ),
           ],
         ),

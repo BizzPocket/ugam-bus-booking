@@ -113,6 +113,36 @@ void main() {
 
       expect(map, isEmpty);
     });
+
+    test('ONE booking with a same-type one-way split lands each seat on its own '
+        'leg (matrix bug)', () {
+      // The matrix bug: a single passenger holds TWO seats — a GO-only seat and
+      // a RET-only seat of the SAME type. Their coarse tripType collapses to
+      // round-trip (the lines disagree), so the OLD resolver would have shown
+      // this rider on BOTH legs of BOTH seats. Now each [SeatAssignment] carries
+      // its own leg, so ST1 surfaces only on GO and ST2 only on RET.
+      final matrix = Passenger(
+        id: 'matrix',
+        tourId: 't1',
+        name: 'matrix',
+        phone: '+910000000000',
+        // derivedTripType collapses to round-trip — the trap the old code fell in.
+        tripType: TripType.roundTrip,
+        assignedSeats: const [
+          SeatAssignment(busId: _bus, seatId: 'ST1', leg: TripType.outboundOnly),
+          SeatAssignment(busId: _bus, seatId: 'ST2', leg: TripType.returnOnly),
+        ],
+      );
+
+      final map = seatOccupantsForBus([matrix], _bus);
+
+      // ST1 is GO-only for this rider; nobody returns on it.
+      expect(map['ST1']!.go?.id, 'matrix');
+      expect(map['ST1']!.ret, isNull);
+      // ST2 is RET-only; nobody goes out on it.
+      expect(map['ST2']!.go, isNull);
+      expect(map['ST2']!.ret?.id, 'matrix');
+    });
   });
 
   // occupantListForBus is the FULL-roster resolver: unlike SeatOccupancy (one

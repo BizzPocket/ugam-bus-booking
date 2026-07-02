@@ -181,7 +181,14 @@ class Passenger {
   /// under-counts capacity.
   TripType legForSeatType(SeatType type, {SeatPosition? position}) {
     final typeLines = requestLines.where((l) => l.seatType == type).toList();
-    if (typeLines.isEmpty) return TripType.roundTrip;
+    // No request line of this seat type means the rider was placed in a seat
+    // TYPE they didn't request — common when a one-way rider leg-shares a
+    // double sofa (a single-sofa GO/RET rider seated on a double berth). Fall
+    // back to the rider's OVERALL leg ([derivedTripType]) rather than assuming
+    // round-trip: a wholly one-way rider then still gets the one-leg price,
+    // while a round-trip or mixed-leg rider stays at full fare (derivedTripType
+    // is round-trip for both), so this never under-charges.
+    if (typeLines.isEmpty) return derivedTripType;
     // Narrow to an exact position match only if one exists; otherwise keep all
     // lines of this type (ignore position).
     final positionMatch =
@@ -194,6 +201,23 @@ class Passenger {
     if (legs.contains(TripType.roundTrip)) return TripType.roundTrip;
     if (legs.contains(TripType.outboundOnly)) return TripType.outboundOnly;
     return TripType.returnOnly;
+  }
+
+  /// The trip leg this passenger holds [seatId] on: the per-seat
+  /// [SeatAssignment.leg] when it was recorded, else the coarse passenger-level
+  /// [tripType] (legacy rows / unstamped seats). This is what lets a mixed
+  /// same-type request tint and charge EACH physical seat by its own leg
+  /// instead of collapsing both to the [derivedTripType] summary — e.g. one
+  /// "1 seater GO-only + 1 seater RET-only" booking shows one seat cyan (GO)
+  /// and the other violet (RET). Pass [busId] to disambiguate the rare case of
+  /// the same seatId across two buses; omit it on a per-bus chart.
+  TripType legForSeat(String seatId, {String? busId}) {
+    for (final a in assignedSeats) {
+      if (a.seatId == seatId && (busId == null || a.busId == busId)) {
+        return a.leg ?? tripType;
+      }
+    }
+    return tripType;
   }
 
   /// Total number of seats actually assigned.

@@ -35,6 +35,12 @@ class MoneyController extends GetxController {
   /// keys and to know what to refetch on refresh.
   String? _loadedTourId;
 
+  /// The tour id whose money rows (`collections`/`expenses`/`handovers`/
+  /// `incomes`) are currently held. Summaries (`tourSummary`, …) only
+  /// describe THIS tour, so callers that read settlement state for a
+  /// specific tour must check this matches first.
+  String? get loadedTourId => _loadedTourId;
+
   SyncService get _sync => Get.find<SyncService>();
 
   String _collectionsKey(String tourId) => 'collections_$tourId';

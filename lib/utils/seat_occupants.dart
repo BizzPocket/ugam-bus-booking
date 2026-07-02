@@ -67,8 +67,13 @@ Map<String, SeatOccupancy> seatOccupantsForBus(
   for (final p in passengers) {
     for (final a in p.assignedSeats) {
       if (a.busId != busId) continue;
-      if (p.tripType.usesOutbound) go.putIfAbsent(a.seatId, () => p);
-      if (p.tripType.usesReturn) ret.putIfAbsent(a.seatId, () => p);
+      // Bucket THIS berth by its OWN recorded leg so a passenger holding a
+      // same-type one-way split (a GO-only seat + a RET-only seat) lands each
+      // seat on its real leg; null = legacy row → fall back to the
+      // passenger-level leg this resolver always used.
+      final leg = a.leg ?? p.tripType;
+      if (leg.usesOutbound) go.putIfAbsent(a.seatId, () => p);
+      if (leg.usesReturn) ret.putIfAbsent(a.seatId, () => p);
     }
   }
   final out = <String, SeatOccupancy>{};
@@ -104,14 +109,23 @@ Map<String, List<Passenger>> occupantListForBus(
   final go = <String, List<Passenger>>{};
   final ret = <String, List<Passenger>>{};
   for (final p in passengers) {
-    final seenSeats = <String>{}; // one seat counts a rider once, not per berth
+    // One seat counts a rider once PER LEG, not per berth — but a same-type
+    // one-way split puts the rider on different legs of DIFFERENT seats, so the
+    // dedupe is keyed by (seatId, leg): a whole double held solo (two berths,
+    // same leg, same seat) still collapses, while the rider's GO seat and RET
+    // seat each surface on their own leg.
+    final seen = <String>{};
     for (final a in p.assignedSeats) {
       if (a.busId != busId) continue;
-      if (!seenSeats.add(a.seatId)) continue;
-      if (p.tripType.usesOutbound) {
-        (go[a.seatId] ??= <Passenger>[]).add(p);
-      } else if (p.tripType.usesReturn) {
-        (ret[a.seatId] ??= <Passenger>[]).add(p);
+      // This berth's OWN recorded leg; null = legacy row → fall back to the
+      // passenger-level leg this resolver always used.
+      final leg = a.leg ?? p.tripType;
+      if (leg.usesOutbound) {
+        if (seen.add('${a.seatId}|go')) (go[a.seatId] ??= <Passenger>[]).add(p);
+      } else if (leg.usesReturn) {
+        if (seen.add('${a.seatId}|ret')) {
+          (ret[a.seatId] ??= <Passenger>[]).add(p);
+        }
       }
     }
   }

@@ -421,8 +421,7 @@ class _CustomerBookingRequestScreenState
     final c = UgamColors.of(context);
     final seatCount = _formKey.currentState?.totalSeats ?? 0;
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Column(

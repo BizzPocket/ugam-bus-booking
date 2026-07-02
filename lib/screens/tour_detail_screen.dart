@@ -16,6 +16,7 @@ import '../utils/app_dialogs.dart';
 import '../utils/app_nav.dart';
 import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/phone_dialer.dart';
 import '../utils/tour_capacity.dart';
 import 'add_bus_screen.dart';
 import 'add_return_ticket_sheet.dart';
@@ -61,8 +62,7 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
     return Obx(() {
       final tour = tourCtrl.getTour(widget.tourId);
       if (tour == null) {
-        return Scaffold(
-          backgroundColor: c.bg,
+        return UgamScaffold(
           body: SafeArea(
             child: UgamEmpty(
               icon: Icons.search_off_rounded,
@@ -82,8 +82,7 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
       // the compact header. The summary card only overlaps in the image case,
       // so the tab gap adapts below.
       final hasHeroImage = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
-      return Scaffold(
-        backgroundColor: c.bg,
+      return UgamScaffold(
         extendBody: true,
         body: RefreshIndicator(
           color: c.accent,
@@ -327,6 +326,10 @@ class _HeroSection extends StatelessWidget {
                       label: tour.status.description,
                       tone: statusTone,
                     ),
+                    // Live "how's this tour doing" vitals — seats filled +
+                    // rider count — so the agent reads progress at a glance
+                    // without drilling into Seats/Passengers.
+                    _HeroVitals(tour: tour, c: c),
                   ],
                 ),
               ),
@@ -1011,51 +1014,33 @@ class _PassengersTab extends StatelessWidget {
       return SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.only(top: UgamSpacing.huge),
-          child: _PassengersEmptyState(tour: tour, c: c),
+          child: _PassengersEmptyState(tour: tour),
         ),
       );
     }
 
-    final newCount =
-        all.where((p) => p.assignedSeats.isEmpty && !p.isWaitlisted).length;
-    final waitlistCount = all.where((p) => p.isWaitlisted).length;
-    final allottedCount = all.where((p) => p.totalSeatsAssigned > 0).length;
-
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        // First-class entry into the full per-tour requests manager
-        // (add / edit / waitlist / search). Tour-first: requests live inside
-        // the tour, not on a separate global tab. Management itself lives only
-        // on the dedicated RequestsScreen — this tab is read-only.
-        _ManageRequestsButton(
+        // Slim roster header: the riders themselves are the hero of this tab,
+        // so the per-tour requests manager is demoted from a full-width card to
+        // a compact "+ Add" affordance on the right. Tapping Add — or any row's
+        // Edit action — still lands on the dedicated RequestsScreen, which owns
+        // all add / edit / waitlist management; this tab stays read-only.
+        _RosterHeader(
+          count: all.length,
           c: c,
-          onTap: () => Navigator.of(context).push(
+          onAdd: () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (context) => RequestsScreen(initialTourId: tour.id),
             ),
           ),
         ),
         const SizedBox(height: UgamSpacing.md),
-        // Read-only count summary (NOT tabs) — at-a-glance breakdown only.
-        Row(
-          children: [
-            _CountChip(label: tr('tour_detail.filter_new'), count: newCount, c: c),
-            const SizedBox(width: UgamSpacing.sm),
-            _CountChip(
-                label: tr('tour_detail.filter_waitlist'),
-                count: waitlistCount,
-                c: c),
-            const SizedBox(width: UgamSpacing.sm),
-            _CountChip(
-                label: tr('tour_detail.filter_assigned'),
-                count: allottedCount,
-                c: c),
-          ],
-        ),
-        const SizedBox(height: UgamSpacing.lg),
-        // Full roster, read-only, unfiltered.
+        // Full roster, unfiltered. Each row is now tappable → a quick-action
+        // sheet (WhatsApp / Call / Edit request) so the agent can act on a
+        // rider without leaving the tour.
         for (var i = 0; i < all.length; i++) ...[
-          _PassengerRow(passenger: all[i], c: c),
+          _PassengerRow(passenger: all[i], tour: tour, c: c),
           if (i != all.length - 1) const SizedBox(height: UgamSpacing.sm + 2),
         ],
       ]),
@@ -1066,13 +1051,12 @@ class _PassengersTab extends StatelessWidget {
 /// Empty Passengers tab. ONE primary action — "Share on WhatsApp to collect
 /// riders" — wired to the SAME broadcast send the Overview Broadcast card uses
 /// (via shared [_TourBroadcast.send], no duplicated message-building). "Copy
-/// broadcast message" is demoted to a small inline icon/text link, and the
-/// manual "Add riders" path is a quiet secondary text link (BUG-001 Option A).
+/// broadcast message" and the manual "Add riders" path are demoted to
+/// full-width neutral buttons (>=48dp tap targets) below the empty state.
 class _PassengersEmptyState extends StatefulWidget {
   final Tour tour;
-  final UgamColorSet c;
 
-  const _PassengersEmptyState({required this.tour, required this.c});
+  const _PassengersEmptyState({required this.tour});
 
   @override
   State<_PassengersEmptyState> createState() => _PassengersEmptyStateState();
@@ -1090,7 +1074,6 @@ class _PassengersEmptyStateState extends State<_PassengersEmptyState> {
 
   @override
   Widget build(BuildContext context) {
-    final c = widget.c;
     return Column(
       children: [
         UgamEmpty(
@@ -1108,21 +1091,25 @@ class _PassengersEmptyStateState extends State<_PassengersEmptyState> {
           ),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        // Secondary, demoted: copy the same message to the clipboard.
-        _InlineTextLink(
-          icon: Icons.copy_rounded,
+        // Secondary, demoted: copy the same message to the clipboard. Promoted
+        // from a sub-44dp inline text link to a full-width neutral button so it
+        // hits the 48dp+ tap-target rule.
+        UgamButton(
           label: tr('tour_detail.copy_broadcast_message'),
-          c: c,
-          onTap: () => _TourBroadcast.copy(widget.tour),
+          icon: Icons.copy_rounded,
+          kind: UgamButtonKind.neutral,
+          expand: true,
+          onPressed: () => _TourBroadcast.copy(widget.tour),
         ),
         const SizedBox(height: UgamSpacing.sm),
         // Quiet manual path: add a rider on behalf of a customer (with the
         // phone-contacts picker) even before anyone has booked.
-        _InlineTextLink(
-          icon: Icons.person_add_alt_1_rounded,
+        UgamButton(
           label: tr('tour_detail.add_riders'),
-          c: c,
-          onTap: () => Navigator.of(context).push(
+          icon: Icons.person_add_alt_1_rounded,
+          kind: UgamButtonKind.neutral,
+          expand: true,
+          onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (context) => RequestsScreen(initialTourId: widget.tour.id),
             ),
@@ -1133,153 +1120,170 @@ class _PassengersEmptyStateState extends State<_PassengersEmptyState> {
   }
 }
 
-/// A quiet inline icon+text link (muted ink) — used for the demoted secondary
-/// actions in the empty Passengers state.
-class _InlineTextLink extends StatelessWidget {
-  final IconData icon;
-  final String label;
+/// Slim header for the populated Passengers tab: a "Riders" label + live count
+/// on the left and a compact "+ Add" pill on the right that opens the per-tour
+/// requests manager. Replaces the old full-width _ManageRequestsButton card so
+/// the roster itself leads the tab rather than a navigation button. The pill
+/// stays NEUTRAL (not champagne) — the single rationed accent on this tab is
+/// the sticky "Assign seats" CTA.
+class _RosterHeader extends StatelessWidget {
+  final int count;
   final UgamColorSet c;
-  final VoidCallback onTap;
+  final VoidCallback onAdd;
 
-  const _InlineTextLink({
-    required this.icon,
-    required this.label,
+  const _RosterHeader({
+    required this.count,
     required this.c,
-    required this.onTap,
+    required this.onAdd,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.sm,
-          vertical: UgamSpacing.sm,
+    return Row(
+      children: [
+        Text(
+          tr('tour_detail.roster_header'),
+          style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 16, color: c.ink2),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A small, non-interactive count label (read-only) used in the Passengers tab
-/// summary row — looks like a pill but is NOT a tab.
-class _CountChip extends StatelessWidget {
-  final String label;
-  final int count;
-  final UgamColorSet c;
-
-  const _CountChip({required this.label, required this.count, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 11.5),
+        const SizedBox(width: UgamSpacing.sm),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: c.cardElev,
+            borderRadius: BorderRadius.circular(UgamRadius.chip),
           ),
-          const SizedBox(width: 6),
-          Text(
+          child: Text(
             '$count',
             style: UgamText.tabular(
               UgamText.caption.copyWith(
-                color: c.ink,
-                fontSize: 11.5,
+                color: c.ink2,
+                fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
           ),
-        ],
-      ),
+        ),
+        const Spacer(),
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onAdd();
+            },
+            borderRadius: BorderRadius.circular(UgamRadius.chip),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.md,
+                vertical: UgamSpacing.sm,
+              ),
+              decoration: BoxDecoration(
+                color: c.cardElev,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.person_add_alt_1_rounded, size: 16, color: c.ink),
+                  const SizedBox(width: 6),
+                  Text(
+                    tr('tour_detail.add'),
+                    style:
+                        UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-/// Full-width entry into the per-tour requests manager. Lives at the top of
-/// the Passengers tab so adding/editing/waitlisting a request is one tap from
-/// the tour workspace.
-class _ManageRequestsButton extends StatelessWidget {
-  final UgamColorSet c;
-  final VoidCallback onTap;
+/// Quick-action sheet for a single rider, opened by tapping their roster row.
+/// Three first-class actions for a WhatsApp-run tour desk: message the rider
+/// (request-received / seat-confirmed ack), call them, or jump to edit their
+/// request. Reuses [_HeroActionRow] for the row styling and the shared
+/// [WhatsAppService.sendAck] / [PhoneDialer] paths used elsewhere in the app.
+void _showPassengerActions(
+  BuildContext context,
+  Passenger passenger,
+  Tour tour,
+  UgamColorSet c,
+) {
+  UgamSheet.show<void>(
+    context,
+    title: passenger.name,
+    builder: (ctx) => Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _HeroActionRow(
+          icon: Icons.chat_rounded,
+          label: tr('tour_detail.msg_whatsapp'),
+          c: c,
+          onTap: () {
+            // Pop on the sheet's own (root) navigator first, then fire the
+            // ack send — mirrors the hero actions sheet's close-then-act order.
+            AppNav.pop(ctx);
+            _messageRiderOnWhatsApp(passenger, tour);
+          },
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        _HeroActionRow(
+          icon: Icons.call_rounded,
+          label: tr('tour_detail.call'),
+          c: c,
+          onTap: () {
+            AppNav.pop(ctx);
+            PhoneDialer.call(passenger.phone);
+          },
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        _HeroActionRow(
+          icon: Icons.edit_note_rounded,
+          label: tr('tour_detail.edit_request'),
+          c: c,
+          onTap: () {
+            AppNav.pop(ctx);
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => RequestsScreen(initialTourId: tour.id),
+              ),
+            );
+          },
+        ),
+      ],
+    ),
+  );
+}
 
-  const _ManageRequestsButton({required this.c, required this.onTap});
+/// Opens WhatsApp addressed to [passenger] with the contextual ack pre-filled
+/// (request-received before seats, seat-confirmed once assigned). Surfaces a
+/// warning toast only if WhatsApp can't be opened.
+Future<void> _messageRiderOnWhatsApp(Passenger passenger, Tour tour) async {
+  final ok = await WhatsAppService().sendAck(passenger: passenger, tour: tour);
+  if (!ok) AppSnackBar.warning(tr('tour_detail.whatsapp_open_failed'));
+}
 
-  @override
-  Widget build(BuildContext context) {
-    return UgamCard.plain(
-      onTap: onTap,
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: c.accentFill,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.edit_note_rounded, size: 19, color: c.accent),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr('tour_detail.manage_requests'),
-                  style: UgamText.titleS.copyWith(color: c.ink),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  tr('tour_detail.manage_requests_hint'),
-                  style: UgamText.caption.copyWith(color: c.ink3),
-                ),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-        ],
-      ),
-    );
-  }
+/// Opens a blank WhatsApp chat to the bus driver (same path used by the bus &
+/// handler screens). Warning toast only on failure.
+Future<void> _contactDriverOnWhatsApp(Bus bus) async {
+  final ok =
+      await WhatsAppService().openChat(phone: bus.driverPhone, message: '');
+  if (!ok) AppSnackBar.warning(tr('tour_detail.whatsapp_open_failed'));
 }
 
 class _PassengerRow extends StatelessWidget {
   final Passenger passenger;
+  final Tour tour;
   final UgamColorSet c;
 
-  const _PassengerRow({required this.passenger, required this.c});
+  const _PassengerRow({
+    required this.passenger,
+    required this.tour,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1288,6 +1292,7 @@ class _PassengerRow extends StatelessWidget {
     return UgamCard.plain(
       elev: true,
       radius: UgamRadius.row,
+      onTap: () => _showPassengerActions(context, passenger, tour, c),
       padding: const EdgeInsets.all(UgamSpacing.md),
       child: Row(
         children: [
@@ -1368,6 +1373,9 @@ class _PassengerRow extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: UgamSpacing.sm),
+          // Affordance hint that the row is tappable (opens the rider sheet).
+          Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
         ],
       ),
     );
@@ -1435,7 +1443,13 @@ class _BusesTab extends StatelessWidget {
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
         for (var i = 0; i < tour.buses.length; i++) ...[
-          _BusListItem(bus: tour.buses[i], c: c),
+          _BusListItem(
+            bus: tour.buses[i],
+            // Leg-aware berths occupied on this bus (max of the busier leg) —
+            // single-sourced from the same helper the capacity engine uses.
+            filled: tour.occupiedBerthsFor(tour.buses[i].id),
+            c: c,
+          ),
           if (i != tour.buses.length - 1)
             const SizedBox(height: UgamSpacing.md),
         ],
@@ -1446,8 +1460,9 @@ class _BusesTab extends StatelessWidget {
 
 class _BusListItem extends StatelessWidget {
   final Bus bus;
+  final int filled;
   final UgamColorSet c;
-  const _BusListItem({required this.bus, required this.c});
+  const _BusListItem({required this.bus, required this.filled, required this.c});
 
   @override
   Widget build(BuildContext context) {
@@ -1502,13 +1517,43 @@ class _BusListItem extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   if (bus.driverPhone.trim().isNotEmpty)
-                    Text(
-                      bus.driverPhone,
-                      style: UgamText.tabular(
-                        UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              bus.driverPhone,
+                              style: UgamText.tabular(
+                                UgamText.caption
+                                    .copyWith(color: c.ink3, fontSize: 12),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: UgamSpacing.sm),
+                          // Reach the driver without leaving the tour — same
+                          // symmetry as the rider row-tap actions. Neutral icon
+                          // buttons keep the gold reserved for the sticky CTA;
+                          // their own taps win over the row's open-chart tap.
+                          UgamIconButton(
+                            icon: Icons.chat_rounded,
+                            onTap: () => _contactDriverOnWhatsApp(bus),
+                            size: 32,
+                            iconSize: 16,
+                            semanticLabel: tr('tour_detail.msg_whatsapp'),
+                          ),
+                          const SizedBox(width: 6),
+                          UgamIconButton(
+                            icon: Icons.call_rounded,
+                            onTap: () => PhoneDialer.call(bus.driverPhone),
+                            size: 32,
+                            iconSize: 16,
+                            semanticLabel: tr('tour_detail.call'),
+                          ),
+                        ],
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   const SizedBox(height: UgamSpacing.sm),
                   Row(
@@ -1517,10 +1562,20 @@ class _BusListItem extends StatelessWidget {
                         const UgamReqChip(label: 'AC'),
                         const SizedBox(width: 5),
                       ],
+                      // Occupancy at a glance — "12/40 filled" — tinted by how
+                      // full the bus is (green when full, accent when partly,
+                      // neutral when empty). Carries the total seat count too,
+                      // so it replaces the old plain "{n} SEATS" chip.
                       UgamReqChip(
-                        label: tr('tour_detail.seats_count',
-                            namedArgs: {'n': '${bus.totalSeats}'}),
-                        variant: UgamChipVariant.neutral,
+                        label: tr('tour_detail.bus_occupancy', namedArgs: {
+                          'filled': '$filled',
+                          'total': '${bus.totalSeats}',
+                        }),
+                        variant: bus.totalSeats > 0 && filled >= bus.totalSeats
+                            ? UgamChipVariant.good
+                            : (filled > 0
+                                ? UgamChipVariant.accent
+                                : UgamChipVariant.neutral),
                       ),
                     ],
                   ),
@@ -1828,27 +1883,37 @@ class _StickyAction extends StatelessWidget {
   Widget? _buildCta(BuildContext context) {
     switch (tab) {
       case 1:
-        // Hide the sticky "Seats" button until seating is actually actionable:
-        // there must be at least one bus AND at least one passenger. Otherwise
-        // it's a dead-end tap (BUG-001) — the empty state owns the share CTA.
-        if (tour.buses.isEmpty || tour.passengers.isEmpty) return null;
-        // Standardized seating entry: single "Seats" label that opens the
-        // SeatsScreen SUMMARY (AppRoutes.tourOverview -> SeatsMode.summary).
-        return UgamCTA(
-          label: tr('seats.title'),
-          leadingIcon: Icons.event_seat_rounded,
-          trailingValue: tour.totalBusSeats > 0
-              ? '${tour.totalSeatsAssigned}/${tour.totalBusSeats}'
-              : null,
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => SeatsScreen(
-                tourId: tour.id,
-                initialMode: SeatsMode.summary,
+        {
+          // Hide the sticky "Seats" button until seating is actually
+          // actionable: there must be at least one bus AND at least one
+          // passenger. Otherwise it's a dead-end tap (BUG-001) — the empty
+          // state owns the share CTA.
+          if (tour.buses.isEmpty || tour.passengers.isEmpty) return null;
+          // While seats are still pending, action-word the CTA ("Assign seats"
+          // + "N left") so the next step is explicit; once everything is placed
+          // it settles to the neutral "Seats x/y" status label. Same
+          // destination either way: the SeatsScreen SUMMARY.
+          final pending = tour.pendingSeatsToAssign;
+          final assigning = pending > 0;
+          return UgamCTA(
+            label:
+                assigning ? tr('tour_detail.assign_seats') : tr('seats.title'),
+            leadingIcon: Icons.event_seat_rounded,
+            trailingValue: assigning
+                ? tr('tour_detail.seats_left', namedArgs: {'n': '$pending'})
+                : (tour.totalBusSeats > 0
+                    ? '${tour.totalSeatsAssigned}/${tour.totalBusSeats}'
+                    : null),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => SeatsScreen(
+                  tourId: tour.id,
+                  initialMode: SeatsMode.summary,
+                ),
               ),
             ),
-          ),
-        );
+          );
+        }
       case 2:
         // When empty, the body's UgamEmpty already owns the "Add bus" CTA
         // (next to its explanatory text) — don't duplicate it here. The sticky
@@ -1980,6 +2045,54 @@ class _SectionEyebrow extends StatelessWidget {
   }
 }
 
+/// Compact live-vitals strip for the hero: "X/Y seats · N riders" from
+/// tour-only data (no money controller). Seats use the leg-aware
+/// [Tour.occupiedBerths]; riders use [Tour.passengerCount]. Renders nothing
+/// until the tour actually has buses or riders, so a brand-new tour's hero
+/// stays clean.
+class _HeroVitals extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  const _HeroVitals({required this.tour, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = <String>[];
+    if (tour.totalBusSeats > 0) {
+      parts.add(tr('tour_detail.vitals_seats', namedArgs: {
+        'filled': '${tour.occupiedBerths}',
+        'total': '${tour.totalBusSeats}',
+      }));
+    }
+    if (tour.passengerCount > 0) {
+      parts.add(tour.passengerCount == 1
+          ? tr('tour_detail.vitals_riders_one')
+          : tr('tour_detail.vitals_riders_other',
+              namedArgs: {'n': '${tour.passengerCount}'}));
+    }
+    if (parts.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: UgamSpacing.sm),
+      child: Row(
+        children: [
+          Icon(Icons.event_seat_rounded, size: 13, color: c.ink3),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              parts.join('   ·   '),
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Full tour-actions grid — every per-tour workspace in one clean, labeled
 /// surface. Restored after the BUG-001 slim removed Seats/Buses/Requests; the
 /// agent wanted all shortcuts back, so the fix is presentation (a tidy 3×2
@@ -2008,65 +2121,56 @@ class _ActionsGrid extends StatelessWidget {
           MaterialPageRoute(builder: (_) => screen),
         );
 
-    final tiles = <Widget>[
-      _TourToolTile(
-        icon: Icons.how_to_reg_rounded,
-        label: tr('tour_detail.tool_requests'),
-        c: c,
-        onTap: () => push(RequestsScreen(initialTourId: tour.id)),
+    // Mobile-native: the icon-grid launcher is now a vertical list of
+    // full-width tool rows (icon left + label + chevron, 56dp). The three
+    // primary destinations (Requests / Seats / Money) show by default; the
+    // rest live behind a "More tools" expander so the Overview stays calm.
+    final requests = _TourToolRow(
+      icon: Icons.how_to_reg_rounded,
+      label: tr('tour_detail.tool_requests'),
+      c: c,
+      onTap: () => push(RequestsScreen(initialTourId: tour.id)),
+    );
+    final seats = _TourToolRow(
+      icon: Icons.event_seat_rounded,
+      label: tr('tour_detail.tool_seats'),
+      c: c,
+      // A completed tour's live GO chart has been recycled, so its Seats row
+      // opens the frozen read-only seat HISTORY instead of the live editor.
+      onTap: () => push(
+        tour.status == TourStatus.completed
+            ? PastTourSeatHistoryScreen(tourId: tour.id)
+            : SeatsScreen(tourId: tour.id, initialMode: SeatsMode.summary),
       ),
-      _TourToolTile(
-        icon: Icons.directions_bus_rounded,
-        label: tr('tour_detail.tool_buses'),
-        c: c,
-        onTap: () => push(ManageBusesScreen(tourId: tour.id)),
-      ),
-      _TourToolTile(
-        icon: Icons.event_seat_rounded,
-        label: tr('tour_detail.tool_seats'),
-        c: c,
-        // A completed tour's live GO chart has been recycled, so its Seats tile
-        // opens the frozen read-only seat HISTORY instead of the live editor.
-        onTap: () => push(
-          tour.status == TourStatus.completed
-              ? PastTourSeatHistoryScreen(tourId: tour.id)
-              : SeatsScreen(tourId: tour.id, initialMode: SeatsMode.summary),
-        ),
-      ),
-      _TourToolTile(
-        icon: Icons.account_balance_wallet_rounded,
-        label: tr('tour_detail.tool_money'),
-        c: c,
-        onTap: () => push(TourMoneyBoardScreen(tourId: tour.id)),
-      ),
-      _TourToolTile(
-        icon: Icons.groups_rounded,
-        label: tr('tour_detail.tool_groups'),
-        c: c,
-        onTap: () => push(TourGroupsScreen(tourId: tour.id)),
-      ),
-      _TourToolTile(
-        icon: locked ? Icons.send_rounded : Icons.lock_rounded,
-        label: locked ? tr('notify.title') : tr('tour_detail.tool_lock'),
-        c: c,
-        highlight: readyToLock || locked,
-        onTap: () => push(NotifyScreen(tourId: tour.id)),
-      ),
-    ];
+    );
+    final money = _TourToolRow(
+      icon: Icons.account_balance_wallet_rounded,
+      label: tr('tour_detail.tool_money'),
+      c: c,
+      onTap: () => push(TourMoneyBoardScreen(tourId: tour.id)),
+    );
+
+    final buses = _TourToolRow(
+      icon: Icons.directions_bus_rounded,
+      label: tr('tour_detail.tool_buses'),
+      c: c,
+      onTap: () => push(ManageBusesScreen(tourId: tour.id)),
+    );
+    final groups = _TourToolRow(
+      icon: Icons.groups_rounded,
+      label: tr('tour_detail.tool_groups'),
+      c: c,
+      onTap: () => push(TourGroupsScreen(tourId: tour.id)),
+    );
+    final lockSend = _TourToolRow(
+      icon: locked ? Icons.send_rounded : Icons.lock_rounded,
+      label: locked ? tr('notify.title') : tr('tour_detail.tool_lock'),
+      c: c,
+      highlight: readyToLock || locked,
+      onTap: () => push(NotifyScreen(tourId: tour.id)),
+    );
 
     const gap = UgamSpacing.sm + 2;
-
-    // Two fixed rows of three so every tile is the same width and the grid
-    // reads as a clean block, not a wrapping flow.
-    Widget rowOf(int start) => Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = start; i < start + 3; i++) ...[
-              if (i > start) const SizedBox(width: gap),
-              Expanded(child: tiles[i]),
-            ],
-          ],
-        );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2074,25 +2178,48 @@ class _ActionsGrid extends StatelessWidget {
       children: [
         _SectionEyebrow(label: tr('tour_detail.actions_section'), c: c),
         const SizedBox(height: UgamSpacing.md),
-        rowOf(0),
+        requests,
         const SizedBox(height: gap),
-        rowOf(3),
+        seats,
+        const SizedBox(height: gap),
+        money,
+        const SizedBox(height: gap),
+        // Secondary tools hidden behind a tap. Lock/Send stays here too but, if
+        // it's the next milestone (ready-to-lock / locked), the expander opens
+        // by default so it isn't buried.
+        UgamExpander(
+          title: tr('tour_detail.more_tools'),
+          icon: Icons.apps_rounded,
+          initiallyExpanded: readyToLock || locked,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              buses,
+              const SizedBox(height: gap),
+              groups,
+              const SizedBox(height: gap),
+              lockSend,
+            ],
+          ),
+        ),
       ],
     );
   }
 }
 
-class _TourToolTile extends StatelessWidget {
+/// A full-width tool row (56dp): leading icon chip, label, trailing chevron.
+/// Replaces the old 3×2 icon grid tile with a thumb-friendly list item.
+class _TourToolRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final UgamColorSet c;
 
-  /// Draws the tile in the "good" accent — used for Lock/Send when the tour is
+  /// Draws the row in the "good" accent — used for Lock/Send when the tour is
   /// ready to lock or already locked, so the next step stands out.
   final bool highlight;
 
-  const _TourToolTile({
+  const _TourToolRow({
     required this.icon,
     required this.label,
     required this.onTap,
@@ -2102,46 +2229,51 @@ class _TourToolTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Accent-rationing: ordinary tool tiles are NEUTRAL (graphite chip + muted
+    // Accent-rationing: ordinary tool rows are NEUTRAL (graphite chip + muted
     // ink) so the only champagne signal on the Overview is the single next
     // action card / sticky CTA. The "good" highlight (ready-to-lock / locked)
     // is a distinct semantic green, not the rationed gold, so it stays.
     final iconColor = highlight ? c.good : c.ink;
     final fill = highlight ? c.goodFill : c.cardElev;
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
-        decoration: BoxDecoration(
-          // No border on neutral dark surfaces — fill + space do the separating
-          // (matches the dashboard _QA tiles). Highlight (ready-to-lock / locked)
-          // reads through the goodFill icon chip, not a hairline outline.
-          color: c.card,
-          borderRadius: BorderRadius.circular(UgamRadius.card),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: fill,
-                borderRadius: BorderRadius.circular(UgamRadius.input),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(UgamRadius.row),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: fill,
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, size: 19, color: iconColor),
               ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 20, color: iconColor),
-            ),
-            const SizedBox(height: UgamSpacing.sm + 2),
-            Text(
-              label,
-              style: UgamText.caption.copyWith(color: c.ink2),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-          ],
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Text(
+                  label,
+                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 14),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+            ],
+          ),
         ),
       ),
     );

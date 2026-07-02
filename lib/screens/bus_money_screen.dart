@@ -43,8 +43,7 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [
@@ -69,7 +68,9 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                     .toList();
                 final t = controller.tourSummary();
 
-                return ListView(
+                return Stack(
+                  children: [
+                    ListView(
                   padding: const EdgeInsets.fromLTRB(
                     UgamSpacing.gutter,
                     UgamSpacing.lg,
@@ -118,23 +119,10 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                       ],
                     ),
                     const SizedBox(height: UgamSpacing.xl),
-                    // Demoted to a TONAL quiet-primary: this is a navigation
-                    // jump, not the screen's single focal action, so solid
-                    // champagne stays rationed (accent-rationing law).
-                    UgamButton(
-                      label: tr('bus_money.collect_from_passengers'),
-                      icon: Icons.groups_rounded,
-                      kind: UgamButtonKind.tonal,
-                      expand: true,
-                      onPressed: () => Get.to(
-                        () => CollectionScreen(
-                          tour: widget.tour,
-                          bus: widget.bus,
-                        ),
-                        transition: Transition.cupertino,
-                      ),
-                    ),
-                    const SizedBox(height: UgamSpacing.xl),
+
+                    // The "Collect from passengers" jump now lives in the
+                    // sticky bottom CTA (thumb-zone); the ledger scrolls under
+                    // it thanks to the dockClearance bottom padding above.
 
                     // ── Expenses ───────────────────────────────────────
                     _SectionHeader(
@@ -173,32 +161,34 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           padding: const EdgeInsets.only(
                             bottom: UgamSpacing.sm,
                           ),
-                          child: _ExpenseRow(
-                            expense: e,
-                            onTap: () =>
-                                _openExpenseSheet(context, existing: e),
+                          // Swipe-left to delete; tap still opens the edit
+                          // sheet. Money records are irreversible, so the
+                          // destructive swipe is gated by a confirm.
+                          child: UgamSwipeAction(
+                            key: ValueKey('expense-${e.id}'),
+                            confirmDelete: () => UgamDialog.confirm(
+                              context,
+                              title: tr('bus_money.delete_expense_title'),
+                              message: tr('bus_money.delete_expense_body'),
+                              cancelLabel: tr('app.action.cancel'),
+                              confirmLabel: tr('bus_money.delete_confirm'),
+                              destructive: true,
+                              confirmIcon: Icons.delete_outline_rounded,
+                            ),
                             // await + swallow: the controller already rolls
                             // back and shows an error toast on failure;
                             // without this the rethrow becomes an uncaught
                             // async exception.
                             onDelete: () async {
-                              // Money records are irreversible — gate the delete
-                              // behind a destructive confirm (was a one-tap
-                              // data-loss footgun on a small icon).
-                              final ok = await UgamDialog.confirm(
-                                context,
-                                title: tr('bus_money.delete_expense_title'),
-                                message: tr('bus_money.delete_expense_body'),
-                                cancelLabel: tr('app.action.cancel'),
-                                confirmLabel: tr('bus_money.delete_confirm'),
-                                destructive: true,
-                                confirmIcon: Icons.delete_outline_rounded,
-                              );
-                              if (!ok) return;
                               try {
                                 await controller.deleteExpense(e.id);
                               } catch (_) {}
                             },
+                            child: _ExpenseRow(
+                              expense: e,
+                              onTap: () =>
+                                  _openExpenseSheet(context, existing: e),
+                            ),
                           ),
                         ),
                       ),
@@ -258,30 +248,32 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           padding: const EdgeInsets.only(
                             bottom: UgamSpacing.sm,
                           ),
-                          child: _HandoverRow(
-                            handover: h,
-                            onTap: () => _openHandoverSheet(
+                          // Swipe-left to delete; tap still opens the edit
+                          // sheet. Irreversible record — gated by a confirm.
+                          child: UgamSwipeAction(
+                            key: ValueKey('handover-${h.id}'),
+                            confirmDelete: () => UgamDialog.confirm(
                               context,
-                              h.expectedAmount,
-                              existing: h,
+                              title: tr('bus_money.delete_handover_title'),
+                              message: tr('bus_money.delete_handover_body'),
+                              cancelLabel: tr('app.action.cancel'),
+                              confirmLabel: tr('bus_money.delete_confirm'),
+                              destructive: true,
+                              confirmIcon: Icons.delete_outline_rounded,
                             ),
                             onDelete: () async {
-                              // Irreversible handover record — destructive
-                              // confirm before delete.
-                              final ok = await UgamDialog.confirm(
-                                context,
-                                title: tr('bus_money.delete_handover_title'),
-                                message: tr('bus_money.delete_handover_body'),
-                                cancelLabel: tr('app.action.cancel'),
-                                confirmLabel: tr('bus_money.delete_confirm'),
-                                destructive: true,
-                                confirmIcon: Icons.delete_outline_rounded,
-                              );
-                              if (!ok) return;
                               try {
                                 await controller.deleteHandover(h.id);
                               } catch (_) {}
                             },
+                            child: _HandoverRow(
+                              handover: h,
+                              onTap: () => _openHandoverSheet(
+                                context,
+                                h.expectedAmount,
+                                existing: h,
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -289,6 +281,29 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
 
                     // ── Tour rollup ────────────────────────────────────
                     _TourRollupCard(summary: t),
+                  ],
+                    ),
+                    // ── Sticky thumb-zone CTA ──────────────────────────
+                    // The screen's single solid-copper focal action: jump to
+                    // per-passenger collection. Ledger scrolls under it.
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: UgamStickyCTA(
+                        child: UgamCTA(
+                          label: tr('bus_money.collect_from_passengers'),
+                          leadingIcon: Icons.groups_rounded,
+                          onPressed: () => Get.to(
+                            () => CollectionScreen(
+                              tour: widget.tour,
+                              bus: widget.bus,
+                            ),
+                            transition: Transition.cupertino,
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 );
               }),
@@ -302,109 +317,47 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
   void _openExpenseSheet(BuildContext context, {Expense? existing}) {
     ExpenseCategory category = existing?.category ?? ExpenseCategory.other;
     final labelCtrl = TextEditingController(text: existing?.label ?? '');
-    final amountCtrl = TextEditingController(
-      text: (existing == null || existing.amount == 0)
-          ? ''
-          : existing.amount.toStringAsFixed(0),
-    );
     final paidByCtrl = TextEditingController(text: existing?.paidBy ?? '');
 
+    // Numpad-first money entry: a giant tabular amount up top, category as a
+    // pill rail above it, and the label + paid-by tucked behind a collapsed
+    // "Details" expander (progressive disclosure). The save call is unchanged.
     UgamSheet.show<void>(
       context,
       title: existing == null
           ? tr('bus_money.add_expense')
           : tr('bus_money.edit_expense'),
       builder: (sheetCtx) {
-        final sc = UgamColors.of(sheetCtx);
-        return SingleChildScrollView(
-          child: StatefulBuilder(
-            builder: (innerCtx, setSheetState) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tr('bus_money.field_category'),
-                    style: UgamText.micro.copyWith(color: sc.ink2),
-                  ),
-                  const SizedBox(height: UgamSpacing.sm),
-                  // busOwner is excluded: the bus rent is the single source of
-                  // truth (Bus.busPrice) and must never be added manually, or
-                  // it would be double-counted.
-                  Builder(
-                    builder: (_) {
-                      final cats = ExpenseCategory.values
-                          .where((c) => c != ExpenseCategory.busOwner)
-                          .toList();
-                      final selected = cats.indexOf(category);
-                      return UgamSelectorPills(
-                        padding: EdgeInsets.zero,
-                        items: cats
-                            .map(
-                              (cat) => UgamSelectorItem(label: cat.displayName),
-                            )
-                            .toList(),
-                        currentIndex: selected < 0 ? 0 : selected,
-                        onChanged: (i) =>
-                            setSheetState(() => category = cats[i]),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: UgamSpacing.lg),
-                  UgamInput(
-                    label: tr('bus_money.field_label'),
-                    controller: labelCtrl,
-                  ),
-                  const SizedBox(height: UgamSpacing.md),
-                  UgamInput(
-                    label: tr('bus_money.field_amount'),
-                    controller: amountCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+        return _ExpenseSheetBody(
+          initialCategory: category,
+          initialAmount: existing?.amount,
+          labelCtrl: labelCtrl,
+          paidByCtrl: paidByCtrl,
+          onCategory: (c) => category = c,
+          confirmLabel: tr('bus_money.save_expense'),
+          onConfirm: (amount) async {
+            final paidBy = paidByCtrl.text.trim();
+            final label = labelCtrl.text.trim();
+            // Editing reuses the same id (an update, not a new row) by going
+            // through copyWith, which preserves id/createdAt.
+            await controller.upsertExpense(
+              existing == null
+                  ? Expense(
+                      tourId: widget.tour.id,
+                      busId: widget.bus.id,
+                      category: category,
+                      label: label,
+                      amount: amount,
+                      paidBy: paidBy.isEmpty ? null : paidBy,
+                    )
+                  : existing.copyWith(
+                      category: category,
+                      label: label,
+                      amount: amount,
+                      paidBy: paidBy.isEmpty ? null : paidBy,
                     ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    ],
-                  ),
-                  const SizedBox(height: UgamSpacing.md),
-                  UgamInput(
-                    label: tr('bus_money.field_paid_by'),
-                    controller: paidByCtrl,
-                  ),
-                  const SizedBox(height: UgamSpacing.lg),
-                  UgamCTA(
-                    label: tr('bus_money.save_expense'),
-                    onPressed: () async {
-                      final paidBy = paidByCtrl.text.trim();
-                      final amount =
-                          double.tryParse(amountCtrl.text.trim()) ?? 0;
-                      final label = labelCtrl.text.trim();
-                      // Editing reuses the same id (an update, not a new row)
-                      // by going through copyWith, which preserves id/createdAt.
-                      await controller.upsertExpense(
-                        existing == null
-                            ? Expense(
-                                tourId: widget.tour.id,
-                                busId: widget.bus.id,
-                                category: category,
-                                label: label,
-                                amount: amount,
-                                paidBy: paidBy.isEmpty ? null : paidBy,
-                              )
-                            : existing.copyWith(
-                                category: category,
-                                label: label,
-                                amount: amount,
-                                paidBy: paidBy.isEmpty ? null : paidBy,
-                              ),
-                      );
-                      if (innerCtx.mounted) Navigator.of(innerCtx).pop();
-                    },
-                  ),
-                ],
-              );
-            },
-          ),
+            );
+          },
         );
       },
     );
@@ -478,6 +431,134 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Numpad-first body for the add/edit-expense sheet. Category pills ride at the
+/// very top; a live [UgamAmountHero] + [UgamNumpad] own the middle; the label
+/// and paid-by inputs hide behind a collapsed "Details" [UgamExpander]; a
+/// sticky [UgamCTA] saves. The category selection is reported back to the
+/// caller via [onCategory] so the unchanged controller call can read it.
+class _ExpenseSheetBody extends StatefulWidget {
+  final ExpenseCategory initialCategory;
+  final double? initialAmount;
+  final TextEditingController labelCtrl;
+  final TextEditingController paidByCtrl;
+  final ValueChanged<ExpenseCategory> onCategory;
+  final String confirmLabel;
+  final Future<void> Function(double amount) onConfirm;
+
+  const _ExpenseSheetBody({
+    required this.initialCategory,
+    required this.initialAmount,
+    required this.labelCtrl,
+    required this.paidByCtrl,
+    required this.onCategory,
+    required this.confirmLabel,
+    required this.onConfirm,
+  });
+
+  @override
+  State<_ExpenseSheetBody> createState() => _ExpenseSheetBodyState();
+}
+
+class _ExpenseSheetBodyState extends State<_ExpenseSheetBody> {
+  // busOwner is excluded: the bus rent is the single source of truth
+  // (Bus.busPrice) and must never be added manually, or it double-counts.
+  final List<ExpenseCategory> _cats = ExpenseCategory.values
+      .where((c) => c != ExpenseCategory.busOwner)
+      .toList();
+
+  late ExpenseCategory _category = widget.initialCategory;
+  late final ValueNotifier<String> _value = ValueNotifier<String>(_seed());
+
+  String _seed() {
+    final init = widget.initialAmount;
+    if (init == null || init == 0) return '';
+    if (init == init.roundToDouble()) return init.toInt().toString();
+    return init.toString();
+  }
+
+  @override
+  void dispose() {
+    _value.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final selected = _cats.indexOf(_category);
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            tr('bus_money.field_category'),
+            style: UgamText.micro.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          UgamSelectorPills(
+            padding: EdgeInsets.zero,
+            items: _cats
+                .map((cat) => UgamSelectorItem(label: cat.displayName))
+                .toList(),
+            currentIndex: selected < 0 ? 0 : selected,
+            onChanged: (i) {
+              setState(() => _category = _cats[i]);
+              widget.onCategory(_cats[i]);
+            },
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          ValueListenableBuilder<String>(
+            valueListenable: _value,
+            builder: (context, v, child) => UgamAmountHero(
+              amount: v.isEmpty ? '0' : v,
+              label: tr('bus_money.field_amount'),
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          UgamNumpad(value: _value, allowDecimal: true),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamExpander(
+            title: tr('bus_money.expense_details'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                UgamInput(
+                  label: tr('bus_money.field_label'),
+                  controller: widget.labelCtrl,
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                UgamInput(
+                  label: tr('bus_money.field_paid_by'),
+                  controller: widget.paidByCtrl,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          ValueListenableBuilder<String>(
+            valueListenable: _value,
+            builder: (context, v, child) {
+              final amount = double.tryParse(v) ?? 0;
+              return UgamCTA(
+                label: widget.confirmLabel,
+                onPressed: amount > 0
+                    ? () async {
+                        await widget.onConfirm(amount);
+                        if (context.mounted) Navigator.of(context).pop();
+                      }
+                    : null,
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -611,21 +692,17 @@ class _SectionHeader extends StatelessWidget {
 class _ExpenseRow extends StatelessWidget {
   final Expense expense;
   final VoidCallback onTap;
-  // Null for a derived (non-DB) row such as the auto bus-owner rent: the
-  // trash icon is hidden and the row can't be deleted.
-  final VoidCallback? onDelete;
 
   const _ExpenseRow({
     required this.expense,
     required this.onTap,
-    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    // Tapping the row opens the edit sheet; the inner delete GestureDetector
-    // (opaque) swallows its own taps so deleting never also triggers an edit.
+    // Tapping the row opens the edit sheet; delete is a swipe-left gesture
+    // owned by the enclosing UgamSwipeAction.
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -664,15 +741,6 @@ class _ExpenseRow extends StatelessWidget {
                 UgamText.bodyStrong.copyWith(color: c.ink),
               ),
             ),
-            if (onDelete != null) ...[
-              const SizedBox(width: UgamSpacing.sm),
-              UgamIconButton(
-                icon: Icons.delete_outline_rounded,
-                tone: UgamIconButtonTone.danger,
-                onTap: onDelete,
-                semanticLabel: tr('bus_money.delete_expense_title'),
-              ),
-            ],
           ],
         ),
       ),
@@ -805,12 +873,10 @@ class _IncomeRow extends StatelessWidget {
 class _HandoverRow extends StatelessWidget {
   final BusHandover handover;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
 
   const _HandoverRow({
     required this.handover,
     required this.onTap,
-    required this.onDelete,
   });
 
   @override
@@ -855,13 +921,6 @@ class _HandoverRow extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: UgamSpacing.sm),
-            UgamIconButton(
-              icon: Icons.delete_outline_rounded,
-              tone: UgamIconButtonTone.danger,
-              onTap: onDelete,
-              semanticLabel: tr('bus_money.delete_handover_title'),
-            ),
           ],
         ),
       ),
@@ -877,72 +936,47 @@ class _TourRollupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return UgamCard.plain(
-      elev: true,
-      padding: const EdgeInsets.all(UgamSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            tr('bus_money.tour_totals'),
-            style: UgamText.titleM.copyWith(color: c.ink),
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          _RollupRow(
-            label: tr('bus_money.rollup_total_collected'),
-            value: Formatters.formatMoneyInr(summary.totalCollected),
-          ),
-          _RollupRow(
-            label: tr('bus_money.rollup_total_income'),
-            value: Formatters.formatMoneyInr(summary.totalIncome),
-          ),
-          _RollupRow(
-            label: tr('bus_money.rollup_total_expenses'),
-            value: Formatters.formatMoneyInr(summary.totalExpenses),
-          ),
-          _RollupRow(
-            label: tr('bus_money.rollup_net'),
-            value: Formatters.formatMoneyInr(summary.totalNet),
-          ),
-          _RollupRow(
-            label: tr('bus_money.stat_outstanding'),
-            value: Formatters.formatMoneyInr(summary.totalOutstandingHandover),
-          ),
-          _RollupRow(
-            label: tr('bus_money.rollup_to_return'),
-            value: Formatters.formatMoneyInr(summary.totalToReturn),
-          ),
-        ],
-      ),
+    // The whole tour rollup collapses into ONE hero: NET is the big figure;
+    // the six component lines hide behind the chevron (progressive disclosure).
+    final net = summary.totalNet;
+    final netTone = net < -0.005 ? c.warm : c.good;
+    return UgamHeroStat(
+      label: tr('bus_money.tour_totals'),
+      value: Formatters.formatMoneyInr(net),
+      tone: netTone,
+      secondary: tr('bus_money.rollup_net_caption'),
+      breakdown: [
+        HeroStatLine(
+          tr('bus_money.rollup_total_collected'),
+          Formatters.formatMoneyInr(summary.totalCollected),
+          tone: c.good,
+        ),
+        HeroStatLine(
+          tr('bus_money.rollup_total_income'),
+          Formatters.formatMoneyInr(summary.totalIncome),
+          tone: c.good,
+        ),
+        HeroStatLine(
+          tr('bus_money.rollup_total_expenses'),
+          Formatters.formatMoneyInr(summary.totalExpenses),
+          tone: c.warm,
+        ),
+        HeroStatLine(
+          tr('bus_money.stat_outstanding'),
+          Formatters.formatMoneyInr(summary.totalOutstandingHandover),
+        ),
+        HeroStatLine(
+          tr('bus_money.rollup_to_return'),
+          Formatters.formatMoneyInr(summary.totalToReturn),
+        ),
+      ],
     );
   }
 }
 
-class _RollupRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _RollupRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: UgamText.body.copyWith(color: c.ink2)),
-          Text(
-            value,
-            style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
+/// The "due" billboard shown at the top of the handover sheet: a tinted accent
+/// card with a small caps label over a large tabular figure — the number the
+/// agent is settling against. Replaces the thin label/value line.
 class _ReadOnlyLine extends StatelessWidget {
   final String label;
   final String value;
@@ -952,15 +986,34 @@ class _ReadOnlyLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: UgamText.body.copyWith(color: c.ink2)),
-        Text(
-          value,
-          style: UgamText.tabular(UgamText.titleS.copyWith(color: c.ink)),
-        ),
-      ],
+    return UgamCard.plain(
+      tone: UgamCardTone.accent,
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.lg,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: UgamText.micro.copyWith(color: c.accent),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Flexible(
+            child: Text(
+              value,
+              style: UgamText.tabular(
+                UgamText.numLg.copyWith(color: c.accent),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

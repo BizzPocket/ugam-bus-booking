@@ -129,8 +129,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       body: SafeArea(
         bottom: false,
         child: Obx(() {
@@ -260,25 +259,25 @@ class _ChartsScreenState extends State<ChartsScreen> {
                             markHalfDouble: true,
                           ),
                         ),
+                      // Thumb-reachable "edit seats" hand-off as a small FAB
+                      // overlaying the chart's bottom-right, instead of a
+                      // full-width footer button that pushed the legend up and
+                      // ate vertical chart space. The legend stays below.
+                      if (layout != null && layout.totalCells > 0)
+                        Positioned(
+                          right: UgamSpacing.sm,
+                          bottom: UgamSpacing.sm,
+                          child: _EditSeatsFab(
+                            c: c,
+                            onTap: () => _editSeats(tour.id, bus.id),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: UgamSpacing.sm),
               UgamSeatChartLegend(c: c),
-              const SizedBox(height: UgamSpacing.sm + 2),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.gutter,
-                ),
-                child: UgamButton(
-                  label: tr('charts.edit_seats'),
-                  icon: Icons.grid_view_rounded,
-                  kind: UgamButtonKind.tonal,
-                  expand: true,
-                  onPressed: () => _editSeats(tour.id, bus.id),
-                ),
-              ),
               SizedBox(
                 height: MediaQuery.of(context).padding.bottom + UgamSpacing.md,
               ),
@@ -393,6 +392,71 @@ class _Tally extends StatelessWidget {
   }
 }
 
+// ─── Edit-seats FAB ────────────────────────────────────────────────────
+
+/// The chart's one primary hand-off into the editable grid, as a small copper
+/// FAB overlaying the chart's bottom-right (thumb zone) instead of a full-width
+/// footer button. It carries the screen's single rationed solid-copper fill —
+/// THE LAW's one focal element — with the edit glyph plus a compact label, a
+/// soft copper glow, and a 48dp-min tap target with ripple + haptic.
+class _EditSeatsFab extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _EditSeatsFab({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: tr('charts.edit_seats'),
+      child: Material(
+        color: c.accent,
+        elevation: 0,
+        borderRadius: BorderRadius.circular(UgamRadius.button),
+        shadowColor: Colors.transparent,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(UgamRadius.button),
+            boxShadow: [
+              BoxShadow(
+                color: c.glow,
+                blurRadius: 18,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(UgamRadius.button),
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onTap();
+            },
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.lg,
+                vertical: UgamSpacing.sm + 2,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.edit_rounded, size: 18, color: c.onAccent),
+                  const SizedBox(width: UgamSpacing.sm),
+                  Text(
+                    tr('charts.edit_seats'),
+                    style: UgamText.bodyStrong.copyWith(color: c.onAccent),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Seat chart card ───────────────────────────────────────────────────
 
 /// The rounded card holding the canonical read-only chart for the bus. Renders
@@ -446,38 +510,40 @@ class _SeatChartCard extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(
           parent: BouncingScrollPhysics(),
         ),
-        child: CombinedSeatGrid(
-          layout: l,
-          cellWidth: kSeatTileW,
-          cellHeight: kSeatTileH,
-          colGap: 6,
-          rowGap: 6,
-          driverLabel: tr('charts.driver_label'),
-          // Header band so the top-left expand button clears the first seat.
-          reserveTopAction: true,
-          tileBuilder: (ctx, cell) {
-            final occupants = cell.seatId != null
-                ? (assignments[cell.seatId] ?? const <Passenger>[])
-                : const <Passenger>[];
-            return RepaintBoundary(
-              child: SeatChartTile(
-                cell: cell,
-                occupants: occupants,
-                groupColors: groupColors,
-                markHalfDouble: true,
-                // Pass ALL occupants (not `.first`) to the read-only sheet so a
-                // shared / leg-shared double surfaces BOTH names. The distinct,
-                // GO-first set comes from the shared resolver (sheetOccupants),
-                // matching what the tile paints.
-                onTapBooked: occupants.isEmpty
-                    ? null
-                    : () => onSeatTap(
-                        cell.seatId!,
-                        sheetOccupants[cell.seatId] ?? occupants,
-                      ),
-              ),
-            );
-          },
+        child: UgamBusChassis(
+          child: CombinedSeatGrid(
+            layout: l,
+            cellWidth: kSeatTileW,
+            cellHeight: kSeatTileH,
+            colGap: 6,
+            rowGap: 6,
+            driverLabel: tr('charts.driver_label'),
+            // Header band so the top-left expand button clears the first seat.
+            reserveTopAction: true,
+            tileBuilder: (ctx, cell) {
+              final occupants = cell.seatId != null
+                  ? (assignments[cell.seatId] ?? const <Passenger>[])
+                  : const <Passenger>[];
+              return RepaintBoundary(
+                child: SeatChartTile(
+                  cell: cell,
+                  occupants: occupants,
+                  groupColors: groupColors,
+                  markHalfDouble: true,
+                  // Pass ALL occupants (not `.first`) to the read-only sheet so
+                  // a shared / leg-shared double surfaces BOTH names. The
+                  // distinct, GO-first set comes from the shared resolver
+                  // (sheetOccupants), matching what the tile paints.
+                  onTapBooked: occupants.isEmpty
+                      ? null
+                      : () => onSeatTap(
+                          cell.seatId!,
+                          sheetOccupants[cell.seatId] ?? occupants,
+                        ),
+                ),
+              );
+            },
+          ),
         ),
       ),
     );

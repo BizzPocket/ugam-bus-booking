@@ -2,6 +2,38 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/collection.dart';
 import 'package:occubusbooking/utils/seat_money_state.dart';
 
+void _refundToRecordTests() {
+  group('refundToRecord — change auto-booked on overpayment', () {
+    test('overpayment with no manual return → the surplus is the change', () {
+      // Rider owes 1500, hands over 2000: 500 is change to hand back, recorded
+      // so the line settles to net = due instead of looking like extra revenue.
+      expect(
+        refundToRecord(due: 1500, received: 2000, manualReturned: 0),
+        500,
+      );
+    });
+
+    test('exact payment → nothing returned', () {
+      expect(refundToRecord(due: 1500, received: 1500, manualReturned: 0), 0);
+    });
+
+    test('underpayment → nothing returned (still owes)', () {
+      expect(refundToRecord(due: 1500, received: 1000, manualReturned: 0), 0);
+    });
+
+    test('an explicit manual return always wins over the auto change', () {
+      expect(
+        refundToRecord(due: 1500, received: 2000, manualReturned: 300),
+        300,
+      );
+    });
+
+    test('manual return on an exactly-paid line is kept (genuine refund)', () {
+      expect(refundToRecord(due: 1500, received: 1500, manualReturned: 200), 200);
+    });
+  });
+}
+
 /// Helpers to build the collection shapes the rider resolver keys off.
 Collection _paid({double amount = 100}) => Collection(
       tourId: 't',
@@ -28,6 +60,8 @@ Collection _changeDue() => Collection(
     );
 
 void main() {
+  _refundToRecordTests();
+
   group('riderMoneyStateOf', () {
     test('no collection but money owed reads as owing', () {
       expect(riderMoneyStateOf(100, null), SeatMoneyState.owing);

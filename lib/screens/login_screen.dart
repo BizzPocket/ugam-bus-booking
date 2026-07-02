@@ -18,8 +18,7 @@ class LoginScreen extends GetView<AuthController> {
     // the user a visible way back so they are never stranded.
     final canPop = Navigator.canPop(context);
 
-    return Scaffold(
-      backgroundColor: c.bg,
+    return UgamScaffold(
       // Tapping anywhere outside a field dismisses the keyboard. On iOS the
       // numeric/phone keyboard has no "Done" key, so this is the user's way to
       // close it — and the CTA below sits ABOVE the keyboard (it lives in the

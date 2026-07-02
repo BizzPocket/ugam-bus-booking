@@ -14,8 +14,8 @@ import 'seat_render.dart';
 /// Canonical tile size used by every seat chart in the app so the chart reads
 /// identically wherever it appears (auto-fill, assign, rearrange, handler,
 /// bus status, seat detail).
-const double kSeatTileW = 60;
-const double kSeatTileH = 60;
+const double kSeatTileW = 52;
+const double kSeatTileH = 52;
 
 /// The ONE seat tile used across the whole app.
 ///
@@ -166,10 +166,69 @@ class SeatChartTile extends StatelessWidget {
     }
   }
 
+  /// The leg to tint [p] by ON THIS cell: the per-seat [SeatAssignment.leg] via
+  /// [Passenger.legForSeat], falling back to the coarse [Passenger.tripType].
+  /// Per-seat so a mixed same-type booking (a GO-only seat + a RET-only seat in
+  /// one request) tints each cell its own colour instead of the round-trip
+  /// summary that collapsed both.
+  TripType _seatLeg(Passenger p) =>
+      cell.seatId == null ? p.tripType : p.legForSeat(cell.seatId!);
+
   /// Tile fill, with the optional price-band [bandColor] composited over the
   /// card [base] surface so a banded row reads as a faint price stripe.
   Color _fill(Color base) =>
       bandColor == null ? base : Color.alphaBlend(bandColor!, base);
+
+  /// True when this cell is a two-person berth. A double reads as a WIDER chair
+  /// (the silhouette fills the box) so a 2-person sofa is visibly bigger than a
+  /// 1-person seat, which insets its chair body — see [_SeatShapePainter].
+  bool get _isDouble => cell.seatType == SeatType.doubleSofa;
+
+  /// Horizontal inset matching the chair-body silhouette ([_SeatShape._sideInset]
+  /// — singles inset ~16%/side, doubles ~6%). Centered label content (name /
+  /// phone) must be laid out at this VISIBLE body width, not the full tile box:
+  /// otherwise [FittedBox] scales the name to the box and the surplus bleeds
+  /// under the arms and is hard-clipped by [_chairFrame]'s ClipPath (a long name
+  /// like "Vijay Mehta" reads as a meaningless middle slice "ijay Meht").
+  double get _bodyInset =>
+      _SeatShape(isDouble: _isDouble)._sideInset(Size(width, height));
+
+  /// The ONE chair silhouette every filled state shares: an asymmetric box with
+  /// a tall back (large top radius = headrest), a shorter base (small bottom
+  /// radius), and thin armrest hints down the sides. Painted WITHIN the
+  /// canonical [width]×[height] box (the external footprint is unchanged), so a
+  /// single/seater reads as a slim 1-seat chair while a double fills wider to
+  /// read as a 2-person berth. The [child] (occupant content + badges) layers on
+  /// top, clipped to the silhouette so leg-tint halves don't bleed past the arms.
+  ///
+  /// Replaces the old identical rounded-square `Container` in every variant; the
+  /// fill / border colour / width and the inner [child] are passed through
+  /// unchanged, so each state keeps its exact colours, badges and tap target.
+  Widget _chairFrame({
+    required UgamColorSet c,
+    required Color fill,
+    required Color borderColor,
+    required double borderWidth,
+    required Widget child,
+  }) {
+    final shape = _SeatShape(isDouble: _isDouble);
+    return SizedBox(
+      width: width,
+      height: height,
+      child: CustomPaint(
+        painter: _SeatShapePainter(
+          shape: shape,
+          fill: fill,
+          borderColor: borderColor,
+          borderWidth: borderWidth,
+        ),
+        child: ClipPath(
+          clipper: _SeatShapeClipper(shape),
+          child: child,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -247,10 +306,13 @@ class SeatChartTile extends StatelessWidget {
       children: [
         if (showForwardRing)
           Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(UgamRadius.seat),
-                border: Border.all(color: c.warm, width: 2),
+            // Warm forward ring follows the chair silhouette, not a square.
+            child: CustomPaint(
+              painter: _SeatShapePainter(
+                shape: _SeatShape(isDouble: _isDouble),
+                fill: Colors.transparent,
+                borderColor: c.warm,
+                borderWidth: 2,
               ),
             ),
           ),
@@ -269,9 +331,12 @@ class SeatChartTile extends StatelessWidget {
   // border so even empty seats read their price tier.
   Widget _freeTile(UgamColorSet c) {
     final content = CustomPaint(
+      // Dashed CHAIR silhouette (single/seater slim, double wider) so an empty
+      // seat reads as the same chair outline as a filled one.
       painter: SeatDashedBorderPainter(
         color: c.ink3.withValues(alpha: 0.55),
         radius: UgamRadius.seat,
+        chairIsDouble: _isDouble,
       ),
       child: SizedBox(
         width: width,
@@ -292,14 +357,14 @@ class SeatChartTile extends StatelessWidget {
       ),
     );
     if (bandColor == null) return content;
+    // Band wash sits behind the dashed chair, clipped to the same silhouette so
+    // the price stripe reads inside the chair body, not a square behind it.
     return Stack(
       children: [
         Positioned.fill(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Color.alphaBlend(bandColor!, c.bg),
-              borderRadius: BorderRadius.circular(UgamRadius.seat),
-            ),
+          child: ClipPath(
+            clipper: _SeatShapeClipper(_SeatShape(isDouble: _isDouble)),
+            child: Container(color: Color.alphaBlend(bandColor!, c.bg)),
           ),
         ),
         content,
@@ -309,14 +374,11 @@ class SeatChartTile extends StatelessWidget {
 
   // RESERVED — dimmed fill, struck lock glyph, "Held" label.
   Widget _heldTile(UgamColorSet c) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: _fill(c.cardElev.withValues(alpha: 0.5)),
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(color: c.border),
-      ),
+    return _chairFrame(
+      c: c,
+      fill: _fill(c.cardElev.withValues(alpha: 0.5)),
+      borderColor: c.border,
+      borderWidth: 1,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -354,24 +416,22 @@ class SeatChartTile extends StatelessWidget {
       ringWidth = 1;
     }
 
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        // One-way legs are marked by the tile COLOUR alone (GO cyan / RET
-        // violet); round-trip stays the plain card fill. No "GO"/"RET" text
-        // chip — the colour already says the leg, and the chip just cluttered
-        // tiles that also carry a name + mobile.
-        color: _fill(_legBgFill(c, p.tripType) ?? c.cardElev),
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(color: ringColor, width: ringWidth),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _chairFrame(
+      c: c,
+      // One-way legs are marked by the tile COLOUR alone (GO cyan / RET violet);
+      // round-trip stays the plain card fill. No "GO"/"RET" text chip — the
+      // colour already says the leg, and the chip just cluttered tiles that also
+      // carry a name + mobile.
+      fill: _fill(_legBgFill(c, _seatLeg(p)) ?? c.cardElev),
+      borderColor: ringColor,
+      borderWidth: ringWidth,
       child: Stack(
         children: [
           Center(
+            // Inset to the chair body so a long name shrinks to fit WITHIN the
+            // silhouette instead of bleeding under the arms and being clipped.
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(3, 12, 3, 6),
+              padding: EdgeInsets.fromLTRB(_bodyInset, 12, _bodyInset, 6),
               child: SeatOccupantLabel(
                 name: p.displayName,
                 phone: p.phone,
@@ -426,15 +486,11 @@ class SeatChartTile extends StatelessWidget {
     final bg = mine ? c.accent : c.cardElev;
     final ringColor = mine ? c.accent : c.border;
     final idColor = mine ? c.onAccent : c.ink3;
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(color: ringColor, width: mine ? 1.5 : 1),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _chairFrame(
+      c: c,
+      fill: bg,
+      borderColor: ringColor,
+      borderWidth: mine ? 1.5 : 1,
       child: Stack(
         children: [
           Center(
@@ -464,17 +520,12 @@ class SeatChartTile extends StatelessWidget {
   Widget _legShareTile(UgamColorSet c, Passenger go, Passenger ret) {
     final priority =
         go.isPriorityApproved || ret.isPriorityApproved || cell.forward;
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(
-          color: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
-          width: priority ? 2 : 1.5,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _chairFrame(
+      c: c,
+      // Transparent body — the stacked GO/RET halves below carry the leg tint.
+      fill: Colors.transparent,
+      borderColor: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
+      borderWidth: priority ? 2 : 1.5,
       child: Stack(
         children: [
           Column(
@@ -516,17 +567,12 @@ class SeatChartTile extends StatelessWidget {
   Widget _legShareHalfTile(UgamColorSet c, Passenger go, Passenger ret) {
     final priority =
         go.isPriorityApproved || ret.isPriorityApproved || cell.forward;
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(
-          color: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
-          width: priority ? 2 : 1.5,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _chairFrame(
+      c: c,
+      // Transparent body — the left GO/RET stack + right empty half fill it.
+      fill: Colors.transparent,
+      borderColor: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
+      borderWidth: priority ? 2 : 1.5,
       child: Stack(
         children: [
           Row(
@@ -573,32 +619,38 @@ class SeatChartTile extends StatelessWidget {
     final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
     return Container(
       // The half's COLOUR marks the leg (GO cyan / RET violet) — no text chip.
-      color: _fill(_legBgFill(c, p.tripType) ?? c.cardElev),
-      child: Center(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: SeatOccupantLabel(
-                name: p.displayName,
-                phone: p.phone,
-                nameColor: c.ink,
-                phoneColor: c.ink2,
-                nameSize: 12.5,
-                phoneSize: 8,
+      // The tint fills the full body; the TEXT is inset to the chair-body width
+      // so a leg-share name shrinks to fit instead of bleeding under the arms
+      // and being clipped (the booked tile uses the same [_bodyInset]).
+      color: _fill(_legBgFill(c, _seatLeg(p)) ?? c.cardElev),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: _bodyInset),
+        child: Center(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: SeatOccupantLabel(
+                  name: p.displayName,
+                  phone: p.phone,
+                  nameColor: c.ink,
+                  phoneColor: c.ink2,
+                  nameSize: 12.5,
+                  phoneSize: 8,
+                ),
               ),
-            ),
-            if (gColor != null) ...[
-              const SizedBox(width: 4),
-              Container(
-                width: 6,
-                height: 6,
-                decoration:
-                    BoxDecoration(color: gColor, shape: BoxShape.circle),
-              ),
+              if (gColor != null) ...[
+                const SizedBox(width: 4),
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration:
+                      BoxDecoration(color: gColor, shape: BoxShape.circle),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -610,17 +662,12 @@ class SeatChartTile extends StatelessWidget {
     final b = _occ[1];
     final priority =
         a.isPriorityApproved || b.isPriorityApproved || cell.forward;
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(
-          color: priority ? c.warm : c.border,
-          width: priority ? 2 : 1,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _chairFrame(
+      c: c,
+      // Transparent body — the two leg-tinted halves below fill it.
+      fill: Colors.transparent,
+      borderColor: priority ? c.warm : c.border,
+      borderWidth: priority ? 2 : 1,
       child: Stack(
         children: [
           Row(
@@ -663,7 +710,7 @@ class SeatChartTile extends StatelessWidget {
     return Container(
       // A one-way occupant's half is tinted by leg (GO cyan / RET violet) — the
       // colour alone marks the leg, no text chip. Round-trip stays plain fill.
-      color: _fill(_legBgFill(c, p.tripType) ?? c.cardElev),
+      color: _fill(_legBgFill(c, _seatLeg(p)) ?? c.cardElev),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(2, 12, 2, 4),
         child: Column(
@@ -719,14 +766,12 @@ class SeatChartTile extends StatelessWidget {
       ringWidth = 1;
     }
 
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(color: ringColor, width: ringWidth),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _chairFrame(
+      c: c,
+      // Transparent body — the filled left half + empty right half fill it.
+      fill: Colors.transparent,
+      borderColor: ringColor,
+      borderWidth: ringWidth,
       child: Stack(
         children: [
           Row(
@@ -783,17 +828,12 @@ class SeatChartTile extends StatelessWidget {
     final priority = cell.forward ||
         goRow.any((p) => p.isPriorityApproved) ||
         retRow.any((p) => p.isPriorityApproved);
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(UgamRadius.seat),
-        border: Border.all(
-          color: priority ? c.warm : c.border,
-          width: priority ? 2 : 1,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
+    return _chairFrame(
+      c: c,
+      // Transparent body — the GO row over the RET row carry the leg tints.
+      fill: Colors.transparent,
+      borderColor: priority ? c.warm : c.border,
+      borderWidth: priority ? 2 : 1,
       child: Stack(
         children: [
           Column(
@@ -1165,13 +1205,117 @@ class _SeatDragChip extends StatelessWidget {
   }
 }
 
+/// The shared chair silhouette geometry, computed once for a tile [Size] so the
+/// painter, the clipper and the dashed FREE border all draw the identical body.
+///
+/// The silhouette lives INSIDE the canonical tile box (the external footprint is
+/// unchanged): a tall back with a large top radius (the headrest) and a shorter
+/// base with a small bottom radius (the seat base). A [isDouble] berth fills the
+/// box edge-to-edge to read as a 2-person bench; a single/seater insets its body
+/// horizontally so it reads as a slimmer 1-person chair.
+class _SeatShape {
+  /// Doubles fill wider; singles/seaters inset so a 2-person berth is visibly
+  /// bigger than a 1-person seat.
+  final bool isDouble;
+
+  const _SeatShape({required this.isDouble});
+
+  /// Horizontal inset of the chair BODY from the tile edge. A double keeps a
+  /// hair of inset (so its arms still read); a single insets a touch MORE so it
+  /// reads slightly narrower than the double's berth — but only ~10% (was 16%),
+  /// because a deeper inset shrank the body below the width an occupant name
+  /// needs and the name was hard-clipped to a middle slice by the body ClipPath.
+  double _sideInset(Size s) => (isDouble ? 0.06 : 0.10) * s.width;
+
+  /// The rounded chair-body path: large top radius (back/headrest), small bottom
+  /// radius (base). This is the clip + fill region every variant shares.
+  Path bodyPath(Size s) {
+    final inset = _sideInset(s);
+    final rect = Rect.fromLTRB(inset, 0, s.width - inset, s.height);
+    final topR = Radius.circular(s.height * 0.30); // back / headrest curve
+    final botR = Radius.circular(s.height * 0.14); // shorter seat base
+    return Path()
+      ..addRRect(RRect.fromRectAndCorners(
+        rect,
+        topLeft: topR,
+        topRight: topR,
+        bottomLeft: botR,
+        bottomRight: botR,
+      ));
+  }
+}
+
+/// Clips a tile's content to the [_SeatShape] body so leg-tint halves and fills
+/// stay within the chair silhouette (no bleed past the body corners).
+class _SeatShapeClipper extends CustomClipper<Path> {
+  final _SeatShape shape;
+  const _SeatShapeClipper(this.shape);
+
+  @override
+  Path getClip(Size size) => shape.bodyPath(size);
+
+  @override
+  bool shouldReclip(covariant _SeatShapeClipper old) =>
+      old.shape.isDouble != shape.isDouble;
+}
+
+/// Paints the shared chair silhouette behind a tile's content: the [fill] body
+/// and its [borderColor]/[borderWidth] outline. One painter for every filled
+/// state, so the chair reads identically app-wide.
+class _SeatShapePainter extends CustomPainter {
+  final _SeatShape shape;
+  final Color fill;
+  final Color borderColor;
+  final double borderWidth;
+
+  _SeatShapePainter({
+    required this.shape,
+    required this.fill,
+    required this.borderColor,
+    required this.borderWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final body = shape.bodyPath(size);
+    canvas.drawPath(body, Paint()..color = fill);
+    if (borderWidth > 0) {
+      canvas.drawPath(
+        body,
+        Paint()
+          ..color = borderColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = borderWidth,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SeatShapePainter old) =>
+      old.fill != fill ||
+      old.borderColor != borderColor ||
+      old.borderWidth != borderWidth ||
+      old.shape.isDouble != shape.isDouble;
+}
+
 /// Paints a dashed rounded-rectangle border for the FREE tile. Public so the
 /// chart legend can reuse the exact same dashed swatch.
 class SeatDashedBorderPainter extends CustomPainter {
   final Color color;
   final double radius;
 
-  SeatDashedBorderPainter({required this.color, required this.radius});
+  /// When non-null, dash the shared CHAIR silhouette instead of the plain
+  /// rounded rect — the FREE tile passes `false` for a single/seater chair and
+  /// `true` for a (wider) double berth, so an empty seat reads as the same chair
+  /// outline as a filled one. Null (the legend's swatch) keeps the original
+  /// dashed rounded-rectangle unchanged.
+  final bool? chairIsDouble;
+
+  SeatDashedBorderPainter({
+    required this.color,
+    required this.radius,
+    this.chairIsDouble,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1179,11 +1323,16 @@ class SeatDashedBorderPainter extends CustomPainter {
       ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
-    final rrect = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      Radius.circular(radius),
-    );
-    final path = Path()..addRRect(rrect);
+    final Path path;
+    if (chairIsDouble != null) {
+      path = _SeatShape(isDouble: chairIsDouble!).bodyPath(size);
+    } else {
+      final rrect = RRect.fromRectAndRadius(
+        Offset.zero & size,
+        Radius.circular(radius),
+      );
+      path = Path()..addRRect(rrect);
+    }
     const dash = 4.0;
     const gap = 3.0;
     for (final metric in path.computeMetrics()) {
@@ -1198,5 +1347,7 @@ class SeatDashedBorderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SeatDashedBorderPainter old) =>
-      old.color != color || old.radius != radius;
+      old.color != color ||
+      old.radius != radius ||
+      old.chairIsDouble != chairIsDouble;
 }

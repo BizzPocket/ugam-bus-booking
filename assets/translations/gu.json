@@ -9,6 +9,15 @@
     "cross_fill_single_other": "ક્રોસ-ફિલ · ડબલ સોફા માટે એક બર્થ (બીજો બર્થ પણ ખાલી કરો)",
     "cross_fill_half": "ક્રોસ-ફિલ · ડબલ સોફાના અડધા પર સિંગલ"
   },
+  "capacity": {
+    "going": "જતી",
+    "return_leg": "પરત",
+    "go_short": "જા",
+    "ret_short": "પાછા",
+    "free_n": "{n} ખાલી",
+    "full": "ભરાઈ ગઈ",
+    "demand_legs": "જરૂર: {go} જતી · {ret} પરત"
+  },
   "app": {
     "title": "ઉગમ બુકિંગ",
     "action": {
@@ -263,7 +272,26 @@
     "choose_trip": "ટ્રિપ પસંદ કરો",
     "leg_go": "જતી",
     "leg_return": "પરત",
-    "leg_free": "ખાલી"
+    "leg_free": "ખાલી",
+    "phase": "તબક્કો",
+    "phase_step": "તબક્કો {step}/{total}",
+    "money_collected": "ઉઘરાવ્યા",
+    "money_pending": "બાકી",
+    "money_amount_collected": "{amount} ઉઘરાવ્યા",
+    "money_amount_pending": "{amount} બાકી",
+    "settle_from_handler": "{handler} પાસેથી ₹{amount} ચૂકવવાના બાકી",
+    "settle_amount": "₹{amount} ચૂકવવાના બાકી",
+    "qa_money": "પૈસા",
+    "all_caught_up": "બધું પૂરું",
+    "all_caught_up_subtitle": "{n} ટૂર બરાબર ચાલે છે",
+    "picker_phase_suffix": "· તબક્કો {step}/{total}",
+    "ago_days": "{n} દિ",
+    "ago_hours": "{n} ક",
+    "ago_mins": "{n} મિ",
+    "seats_full": "ભરાઈ ગઈ",
+    "seats_filled_ratio": "{filled}/{total} ભરાઈ",
+    "seats_left_n": "{n} બાકી",
+    "left_behind": "{n} રહી ગયા"
   },
   "tours": {
     "title": "મારી ટૂર",
@@ -689,7 +717,7 @@
       "question": "સીટના ભાવ કેવી રીતે છે?",
       "same_label": "બધા માટે સરખું",
       "bands_label": "ભાવ બેન્ડ",
-      "same_body": "દરેક સીટનો ભાવ સરખો. સિંગલ / ડબલ સોફાનો ભાવ અલગ હોય તો જ ઉમેરો.",
+      "same_body": "દરેક સીટનો ભાવ સરખો. સિંગલ / ડબલ સોફાનો ભાવ બેઝ પરથી આપમેળે ભરાય — અલગ હોય તો જ બદલો.",
       "bands_body": "અમુક હરોળ માટે વ્યક્તિ દીઠ અલગ ભાવ રાખો. જે હરોળમાં બેન્ડ ન હોય તે ઉપરના પ્રતિ-સીટ ભાવે રહેશે."
     },
     "per_seat": {
@@ -1141,22 +1169,18 @@
     "occupancy_count": "{assigned}/{capacity} સીટ",
     "menu_edit": "બસની વિગતો બદલો",
     "menu_view_status": "સીટ સ્ટેટસ જુઓ",
-    "menu_rebroadcast": "WhatsApp દ્વારા ડ્રાઈવરને ફરી બ્રોડકાસ્ટ કરો",
     "menu_delete": "બસ કાઢો",
-    "snack_driver_phone_missing": "આ બસ પર ડ્રાઈવરનો મોબાઇલ નથી.",
-    "snack_wa_failed": "WhatsApp ખોલી શકાયું નહીં.",
-    "wa_assignment": "બસ સોંપણી — {tour}",
-    "wa_bus": "બસ: {bus}",
-    "wa_departure": "પ્રસ્થાન: {date}",
-    "wa_from": "થી: {city}",
-    "wa_to": "સુધી: {city}",
     "delete_title": "બસ કાઢવી છે?",
     "delete_body": "આનાથી {bus} આ ટૂરમાંથી દૂર થશે. આ બસ સાથે જોડાયેલી સીટ સોંપણીઓ ગુમ થઈ જશે.",
     "snack_deleted": "બસ કાઢી નાખી.",
     "snack_delete_failed": "બસ કાઢી શકાઈ નહીં.",
     "stat_buses": "બસ",
     "stat_seats": "સીટ",
-    "chip_seats": "{n} સીટ"
+    "chip_seats": "{n} સીટ",
+    "subtitle_buses": "{count} બસ",
+    "subtitle_seats": "{assigned}/{capacity} સીટ",
+    "subtitle_seats_free": "{capacity} માંથી {free} ખાલી",
+    "menu_call_driver": "ડ્રાઈવરને કૉલ કરો"
   },
   "notify": {
     "no_active_tours_title": "કોઈ ટૂર ચાલુ નથી",
@@ -1404,6 +1428,18 @@
     "no_matches_body": "આ ફિલ્ટરમાં કંઈ નથી — \"બધા\" અજમાવો.",
     "manage_requests": "વિનંતીઓ મેનેજ કરો",
     "manage_requests_hint": "ઉમેરો, બદલો, વેઇટલિસ્ટ કે શોધો",
+    "roster_header": "પ્રવાસીઓ",
+    "add": "ઉમેરો",
+    "msg_whatsapp": "WhatsApp પર સંદેશ",
+    "call": "કૉલ કરો",
+    "edit_request": "વિનંતી બદલો",
+    "assign_seats": "સીટ સોંપો",
+    "seats_left": "{n} બાકી",
+    "bus_occupancy": "{filled}/{total} ભરાઈ",
+    "vitals_seats": "{filled}/{total} સીટ",
+    "vitals_riders_one": "1 પ્રવાસી",
+    "vitals_riders_other": "{n} પ્રવાસી",
+    "whatsapp_open_failed": "WhatsApp ખોલી શકાયું નહીં",
     "ago_now": "હમણાં",
     "no_buses_title": "હજી કોઈ બસ નથી",
     "no_buses_body": "માલિક વિગતો આપે પછી એક બસ ઉમેરો.",
@@ -1597,7 +1633,10 @@
       "subtitle": "આ સોફા બે મુસાફરો વહેંચે છે. એકને સિંગલ સીટ પર બેસાડવા પસંદ કરો — બીજો ડબલ રાખશે.",
       "moved_title": "સીટ ખસેડી",
       "moved_body": "{name}ને સીટ {seat} પર ખસેડ્યા. બીજો મુસાફર ડબલ રાખે છે.",
-      "swapped_body": "{a} ↔ {b} અદલાબદલી. {b} હવે ડબલ વહેંચે છે."
+      "swapped_body": "{a} ↔ {b} અદલાબદલી. {b} હવે ડબલ વહેંચે છે.",
+      "both_label": "બંનેને અહીં ખસેડો",
+      "both_hint": "બંને અલગ-અલગ લેગ પર મુસાફરી કરે છે (GO + RET), તેથી બંને {seat} પર બેસી શકે. ડબલ સોફા ખાલી થઈ જશે.",
+      "both_body": "{a} અને {b}ને સીટ {seat} પર ખસેડ્યા. ડબલ સોફા હવે ખાલી છે."
     },
     "flags": {
       "forward_title": "ફોરવર્ડ / પ્રીમિયમ સીટ",
@@ -1607,6 +1646,7 @@
     },
     "dock_all_pending_title": "બધા બાકી ({count})",
     "dock_view_all": "બધા જુઓ",
+    "dock_see_all": "બધા {count} જુઓ",
     "assigned_card_done_title": "બધી સીટ ફાળવાઈ ગઈ",
     "assigned_card_done_sub": "દરેક મુસાફર બેસી ગયા છે. ફેરફાર માટે સીટ પર ટૅપ કરો."
   },
@@ -1631,7 +1671,9 @@
     "context_buses_label": "બસ",
     "context_date_label": "તારીખ",
     "context_handler_label": "હેન્ડલર",
-    "contact": "સંપર્ક"
+    "contact": "સંપર્ક",
+    "leg_go": "જતી મુસાફરી",
+    "leg_return": "વળતી મુસાફરી"
   },
   "fullscreen_chart": {
     "empty": "બતાવવા માટે કોઈ સીટ ચાર્ટ નથી.",
@@ -1695,6 +1737,8 @@
     "rollup_total_expenses": "કુલ ખર્ચ",
     "rollup_net": "ચોખ્ખું",
     "rollup_to_return": "પાછું આપવાનું",
+    "rollup_net_caption": "આખા પ્રવાસ માટે",
+    "expense_details": "વિગતો",
     "bus_owner_rent": "બસ માલિકનું ભાડું",
     "delete_expense_title": "આ ખર્ચ કાઢી નાખવો છે?",
     "delete_expense_body": "આ ખર્ચનો રેકોર્ડ કાયમ માટે દૂર થઈ જશે. આ પાછું લાવી શકાશે નહીં.",
@@ -1727,7 +1771,8 @@
     "chip_not_collected": "એકઠી નથી કરી",
     "seat_label": "સીટ {seat}",
     "phone_seat_label": "{phone} · સીટ {seat}",
-    "metric_due": "બાકી"
+    "metric_due": "બાકી",
+    "metric_returned": "પાછું આપ્યું"
   },
   "handler_chart": {
     "badge_half_suffix": "{leg} ½",
@@ -1767,6 +1812,7 @@
     "money_owing": "બાકી",
     "money_return_due": "પાછા આપવાના",
     "money_not_collected": "વસૂલ થયા નથી",
+    "in_hand_secondary": "અત્યાર સુધી {amount} એકઠા થયા",
     "badge_round_trip": "આવ-જા",
     "badge_go": "જા",
     "badge_ret": "પાછા",
@@ -1805,6 +1851,7 @@
     "stat_to_return": "પાછા આપવાના",
     "stat_to_collect": "વસૂલવાના",
     "stat_spent": "ખર્ચ્યા",
+    "stat_rent": "બસ ભાડું",
     "stat_in_hand": "હાથમાં",
     "stat_income": "આવક",
     "bus_income": "બસની આવક",
@@ -2037,7 +2084,8 @@
     "all_settled": "બધું પતી ગયું",
     "open": "ખુલ્લું",
     "no_buses": "આ ટૂરમાં હજી કોઈ બસ નથી.",
-    "collect": "એકઠી કરો"
+    "collect": "એકઠી કરો",
+    "more_detail": "વધુ વિગત"
   },
   "tour_overview": {
     "tour_not_found": "ટૂર મળ્યો નહીં.",
@@ -2324,6 +2372,7 @@
     "profit": "નફો",
     "loss": "નુકસાન",
     "row_revenue": "આવક",
+    "row_revenue_value": "આવક {n}",
     "row_expenses": "ખર્ચ",
     "row_margin": "માર્જિન",
     "empty_title": "હજુ કોઈ પૂર્ણ પ્રવાસ નથી",
