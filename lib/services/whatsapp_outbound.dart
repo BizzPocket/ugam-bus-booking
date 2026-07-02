@@ -275,4 +275,43 @@ class WhatsAppOutbound {
         '${messages.length} msg(s) -> ${messages.map((m) => m.to).toList()}');
     return _cloud.send(messages);
   }
+
+  /// Sends a single "request cancelled" utility notification to [passenger].
+  /// Uses the flexible `bus_msg` template (body {{1}} free text) so the admin
+  /// can notify cancellations without requiring a dedicated Meta template.
+  Future<WaSendResult> sendRequestCancelled({
+    required Tour tour,
+    required Passenger passenger,
+  }) {
+    return _cloud.send([
+      WaMessage(
+        to: WhatsAppCloudService.graphPhone(passenger.phone),
+        template: WhatsAppCloudConfig.busMessageTemplate,
+        bodyParams: [_requestCancelledText(tour, passenger)],
+      ),
+    ]);
+  }
+
+  /// Batch variant of [sendRequestCancelled] for bulk declines.
+  Future<WaSendResult> sendRequestCancelledBatch({
+    required Tour tour,
+    required Iterable<Passenger> passengers,
+  }) {
+    final msgs = passengers
+        .map(
+          (p) => WaMessage(
+            to: WhatsAppCloudService.graphPhone(p.phone),
+            template: WhatsAppCloudConfig.busMessageTemplate,
+            bodyParams: [_requestCancelledText(tour, p)],
+          ),
+        )
+        .toList();
+    return _cloud.send(msgs);
+  }
+
+  String _requestCancelledText(Tour tour, Passenger passenger) {
+    return 'Namaste ${_orDash(passenger.displayName)}, your booking request for '
+        '${tour.title} (${tour.fromCity} → ${tour.toCity}) has been cancelled '
+        'by admin. Please contact support/admin for details.';
+  }
 }

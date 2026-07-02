@@ -246,6 +246,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
   Future<void> _bulkDecline(Tour tour) async {
     final ids = List<String>.from(_selectedIds);
     if (ids.isEmpty) return;
+    final selectedPassengers = [
+      for (final id in ids)
+        tour.passengers.firstWhereOrNull((p) => p.id == id),
+    ].whereType<Passenger>().toList();
     final confirmed = await UgamDialog.confirm(
       context,
       title: tr('requests.bulk.decline_title'),
@@ -262,10 +266,29 @@ class _RequestsScreenState extends State<RequestsScreen> {
     for (final id in ids) {
       await tourCtrl.removePassenger(tour.id, id);
     }
+    var waSent = 0;
+    var waFailed = 0;
+    if (selectedPassengers.isNotEmpty) {
+      try {
+        final wa = await WhatsAppOutbound().sendRequestCancelledBatch(
+          tour: tour,
+          passengers: selectedPassengers,
+        );
+        waSent = wa.sent;
+        waFailed = wa.failed;
+      } catch (_) {
+        waFailed = selectedPassengers.length;
+      }
+    }
     if (!mounted) return;
     AppSnackBar.success(
       tr('requests.bulk.declined', namedArgs: {'n': '${ids.length}'}),
     );
+    if (waFailed > 0) {
+      AppSnackBar.warning(
+        'Cancelled ${ids.length} request(s). WhatsApp sent: $waSent, failed: $waFailed.',
+      );
+    }
     _exitSelection();
   }
 
@@ -1691,6 +1714,16 @@ class _CardActions extends StatelessWidget {
     );
     if (!confirmed) return;
     await _ctrl.removePassenger(tour.id, passenger.id);
+    var waFailed = false;
+    try {
+      final wa = await WhatsAppOutbound().sendRequestCancelled(
+        tour: tour,
+        passenger: passenger,
+      );
+      waFailed = !wa.anySent;
+    } catch (_) {
+      waFailed = true;
+    }
     AppSnackBar.success(
       tr(
         'requests.snack.declined_body',
@@ -1698,6 +1731,9 @@ class _CardActions extends StatelessWidget {
       ),
       title: tr('requests.snack.declined_title'),
     );
+    if (waFailed) {
+      AppSnackBar.warning('Request was cancelled, but WhatsApp notification failed.');
+    }
   }
 
   void _openAssignment() {
