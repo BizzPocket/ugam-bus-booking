@@ -402,14 +402,13 @@ class _RequestsScreenState extends State<RequestsScreen> {
                           // already past the confirm stage.
                           canConfirm:
                               _filter != _RequestFilter.assigned,
-                          // Cancellation/decline is allowed only while the
-                          // passenger hasn't been confirmed yet. Once
-                          // confirmed, they can edit but must not be
-                          // cancelled (including the "confirmed but not yet
-                          // assigned" stage).
+                          // Decline/cancel stays available through the confirmed
+                          // stage (a confirmed-but-unseated request may need to
+                          // be removed). Only the Assigned tab hides it — there
+                          // the seat is unassigned first, which drops the
+                          // passenger back to Confirmed where decline lives.
                           canDecline:
-                              _filter != _RequestFilter.confirmed &&
-                                  _filter != _RequestFilter.assigned,
+                              _filter != _RequestFilter.assigned,
                           onWaitlist: () => _bulkWaitlist(selectedTour),
                           onPromote: () => _bulkPromote(selectedTour),
                           onConfirm: () => _bulkConfirm(selectedTour),
@@ -1887,6 +1886,11 @@ class _CardActions extends StatelessWidget {
           Icons.hourglass_top_rounded,
           _toWaitlist,
         ),
+        // A confirmed-but-unseated passenger (e.g. one whose seat was just
+        // vacated and dropped back here) must still be removable — the agent
+        // needs to delete a request that is no longer coming. The action is
+        // guarded by a destructive confirm dialog + WhatsApp cancellation.
+        declineItem,
       ];
     } else if (isWaitlisted) {
       // WAITLIST — "Confirm & seat" is the primary: it clears the waitlist flag
