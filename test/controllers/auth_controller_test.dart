@@ -111,4 +111,20 @@ void main() {
     }
     expect(signedIn, contains('9876543210'));
   });
+
+  test('submitPhone clears a stale passwordError', () async {
+    final ctrl = _TestAuthController()..adminAuth = _ThrowingAuth();
+    ctrl.passwordError.value = 'login.password_incorrect';
+    ctrl.phoneController.text = '9876543210';
+    try {
+      await ctrl.submitPhone();
+    } catch (_) {
+      // _ThrowingAuth only overrides signIn — findByPhone falls through to
+      // the real AdminAuthService, which has no Supabase client in a pure
+      // controller test and throws. passwordError.value = null runs at the
+      // TOP of submitPhone, before findByPhone, so the assertion below still
+      // holds regardless of this downstream failure.
+    }
+    expect(ctrl.passwordError.value, isNull);
+  });
 }

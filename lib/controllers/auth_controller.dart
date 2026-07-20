@@ -228,6 +228,7 @@ class AuthController extends GetxController {
 
   /// Step 1 — phone lookup. Falls through to passenger session on no match.
   Future<void> submitPhone() async {
+    passwordError.value = null;
     final phone = phoneController.text.trim();
     if (phone.length < 10) {
       AppSnackBar.error(tr('errors.phone_invalid'));
@@ -313,6 +314,7 @@ class AuthController extends GetxController {
 
   /// Replays the stored admin credential after a passing biometric prompt.
   Future<void> unlockWithBiometric() async {
+    if (isLoading.value) return;
     final phone = phoneController.text.trim();
     if (phone.isEmpty) return;
     final cred = await biometric.unlock(phone);
@@ -327,10 +329,12 @@ class AuthController extends GetxController {
       await _completeLogin(admin, password: cred.password);
     } on AuthException catch (_) {
       // Stored password is stale (admin changed it server-side). Drop the
-      // credential and fall back to manual entry.
+      // credential and fall back to manual entry. The password field isn't
+      // necessarily mounted here (awaitingAdminPassword may still be false),
+      // so surface this as a snackbar rather than the inline field error.
       await biometric.clear();
       canBiometricUnlock.value = false;
-      passwordError.value = tr('login.password_incorrect');
+      AppSnackBar.error(tr('login.password_incorrect'));
     } catch (e) {
       AppSnackBar.error(
         tr('errors.sign_in', namedArgs: {'e': '$e'}),
