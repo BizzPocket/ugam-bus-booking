@@ -135,7 +135,12 @@
     "theme_system": "सिस्टम",
     "theme_light": "लाइट",
     "theme_dark": "डार्क",
-    "footer_version": "Ugam Booking v{version}"
+    "footer_version": "Ugam Booking v{version}",
+    "security_section": "सुरक्षा",
+    "biometric_title": "फ़िंगरप्रिंट / फ़ेस अनलॉक",
+    "biometric_subtitle": "अपनी फ़िंगरप्रिंट या फ़ेस से साइन इन करें",
+    "biometric_unavailable": "इस डिवाइस पर उपलब्ध नहीं है",
+    "biometric_enable_password_prompt": "फ़िंगरप्रिंट लॉगिन चालू करने के लिए पासवर्ड डालें"
   },
   "settings_pages": {
     "save": "बदलाव सहेजें",

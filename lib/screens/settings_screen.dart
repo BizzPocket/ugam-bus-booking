@@ -2,12 +2,14 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_info.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/finance_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../design/ugam.dart';
+import '../utils/app_snackbar.dart';
 import '../widgets/language_picker_sheet.dart';
 import 'account_details_screen.dart';
 import 'finance_screen.dart';
@@ -72,6 +74,19 @@ class SettingsScreen extends StatelessWidget {
                         onPick: themeCtrl.setMode,
                         c: c,
                       ),
+                    ),
+                    const SizedBox(height: UgamSpacing.xl),
+                    Text(
+                      tr('settings.security_section').toUpperCase(),
+                      style: UgamText.micro.copyWith(color: c.ink3),
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: c.cardElev,
+                        borderRadius: BorderRadius.circular(UgamRadius.card),
+                      ),
+                      child: BiometricToggle(authCtrl: authCtrl),
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     Text(
@@ -757,6 +772,193 @@ class _DangerRow extends StatelessWidget {
             Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Security-section toggle for biometric (fingerprint/face) login. Seeds its
+/// switch from [AuthController.biometric] on init, clears the stored
+/// credential when switched off, and re-authenticates with the account
+/// password (via [AuthController.adminAuth]) before enrolling when switched
+/// on. Exposed publicly so it is directly pumpable in widget tests.
+class BiometricToggle extends StatefulWidget {
+  const BiometricToggle({super.key, required this.authCtrl});
+  final AuthController authCtrl;
+
+  @override
+  State<BiometricToggle> createState() => _BiometricToggleState();
+}
+
+class _BiometricToggleState extends State<BiometricToggle> {
+  bool _available = false;
+  bool _on = false;
+  final _pw = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final b = widget.authCtrl.biometric;
+    final avail = await b.isAvailable();
+    final on = avail && await b.hasCredential(widget.authCtrl.userPhone.value);
+    if (mounted) {
+      setState(() {
+        _available = avail;
+        _on = on;
+      });
+    }
+  }
+
+  Future<void> _toggle(bool want) async {
+    final b = widget.authCtrl.biometric;
+    if (!want) {
+      await b.clear();
+      if (mounted) setState(() => _on = false);
+      return;
+    }
+    final ok = await _promptPasswordAndEnroll();
+    if (mounted && ok) setState(() => _on = true);
+  }
+
+  Future<bool> _promptPasswordAndEnroll() async {
+    _pw.clear();
+    final entered = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: UgamInput(
+          label: tr('login.password_label'),
+          hint: tr('settings.biometric_enable_password_prompt'),
+          controller: _pw,
+          obscure: true,
+          obscureToggle: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(tr('app.action.cancel')),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_pw.text),
+            child: Text(tr('login.biometric_enroll_confirm')),
+          ),
+        ],
+      ),
+    );
+    if (entered == null || entered.isEmpty) return false;
+    try {
+      final phone = widget.authCtrl.userPhone.value;
+      await widget.authCtrl.adminAuth.signIn(phone: phone, password: entered);
+      await widget.authCtrl.biometric.enroll(phone: phone, password: entered);
+      return true;
+    } on AuthException catch (_) {
+      AppSnackBar.error(tr('login.password_incorrect'));
+      return false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pw.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return _SecurityToggleRow(
+      c: c,
+      title: tr('settings.biometric_title'),
+      subtitle: _available
+          ? tr('settings.biometric_subtitle')
+          : tr('settings.biometric_unavailable'),
+      value: _on,
+      enabled: _available,
+      onChanged: _toggle,
+    );
+  }
+}
+
+/// Local copy of the notifications-screen `_ToggleRow` styling (icon tile +
+/// title/subtitle + trailing `Switch`), kept private to this file so the
+/// shared notifications widget stays untouched.
+class _SecurityToggleRow extends StatelessWidget {
+  final UgamColorSet c;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _SecurityToggleRow({
+    required this.c,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final on = value && enabled;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.lg - 2,
+      ),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: c.cardElev,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.fingerprint_rounded,
+              size: 18,
+              color: enabled ? c.ink2 : c.ink3,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: UgamText.titleS.copyWith(
+                    color: enabled ? c.ink : c.ink3,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: UgamText.caption.copyWith(color: c.ink3),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Switch(
+            value: on,
+            onChanged: enabled ? onChanged : null,
+            activeTrackColor: c.accent,
+            activeThumbColor: c.onAccent,
+          ),
+        ],
       ),
     );
   }

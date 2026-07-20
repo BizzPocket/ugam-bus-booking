@@ -135,7 +135,12 @@
     "theme_system": "System",
     "theme_light": "Light",
     "theme_dark": "Dark",
-    "footer_version": "Ugam Booking v{version}"
+    "footer_version": "Ugam Booking v{version}",
+    "security_section": "SECURITY",
+    "biometric_title": "Fingerprint / Face unlock",
+    "biometric_subtitle": "Sign in with your fingerprint or face",
+    "biometric_unavailable": "Not available on this device",
+    "biometric_enable_password_prompt": "Enter your password to enable fingerprint login"
   },
   "settings_pages": {
     "save": "Save changes",
