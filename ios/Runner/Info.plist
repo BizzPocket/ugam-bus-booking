@@ -38,6 +38,8 @@
 	<true/>
 	<key>NSContactsUsageDescription</key>
 	<string>Ugam Booking matches your saved contacts to incoming bookings so you instantly see who booked.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Ugam Booking uses Face ID to sign you in quickly and securely.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
