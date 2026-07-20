@@ -47,6 +47,37 @@ class BusCapacity {
   bool get symmetric => goOccupied == retOccupied;
 }
 
+/// Free WHOLE tiles of one seat type, split by which legs are still open — so
+/// the by-type breakdown can say "1 Double free round-trip · 2 more free going
+/// only" and the agent instantly knows which request each open seat can take.
+///
+/// A tile falls in EXACTLY one bucket (a whole unit of the type must be free on
+/// that leg — a Double Sofa needs BOTH berths free, so a half-taken double lands
+/// in NO bucket, no fresh pair fits either way):
+///  * [round]   — empty on BOTH legs → sellable as a fresh round-trip booking.
+///  * [goOnly]  — empty going, held returning → fits an OUTBOUND-only rider.
+///  * [retOnly] — empty returning, held going → fits a RETURN-only rider.
+class SeatTypeFree {
+  /// Tiles free on both legs — a fresh round-trip booking of this type fits.
+  final int round;
+
+  /// Tiles free on the outbound leg only (a return rider holds the seat coming
+  /// back) — a go-only rider of this type can still take them.
+  final int goOnly;
+
+  /// Tiles free on the return leg only (an outbound rider holds the seat going)
+  /// — a return-only rider of this type can still take them.
+  final int retOnly;
+
+  const SeatTypeFree({this.round = 0, this.goOnly = 0, this.retOnly = 0});
+
+  /// Every fresh booking of this type the agent can still take, any leg.
+  int get total => round + goOnly + retOnly;
+
+  /// True when there's leg asymmetry worth surfacing (a one-way-only opening).
+  bool get hasOneWay => goOnly > 0 || retOnly > 0;
+}
+
 /// Honest, single-source capacity snapshot for a tour, derived from the SAME
 /// deterministic [SeatingEngine] that auto-assign uses.
 ///
@@ -62,9 +93,9 @@ class TourCapacity {
   /// Total physical berths across every bus (a Double Sofa = 2).
   final int capacity;
 
-  /// Leg-aware berths the engine actually PLACES — the busier leg per bus,
+  /// Leg-aware berths the engine actually PLACES — the busier leg per seat,
   /// `max(GO, RET)`, so two opposite one-way riders sharing one berth count
-  /// once. Never exceeds [capacity].
+  /// once. Never exceeds [capacity]. Excludes held (reserved) seats.
   final int occupied;
 
   /// Genuinely empty berths the engine leaves free on BOTH legs — seats the
@@ -78,13 +109,13 @@ class TourCapacity {
   final int retOccupied;
 
   /// Seats the plan leaves empty on the outbound leg ONLY (occupied returning).
-  /// Per-bus `max(0, goFree − retFree)`, summed. A round-trip can't take these,
+  /// Per-seat `max(0, goFree − retFree)`, summed. A round-trip can't take these,
   /// but an outbound-only rider can. Derived from the SAME plan as [free], so it
   /// never disagrees with the chart the way the old raw-demand reclaim did.
   final int goOnlyFree;
 
   /// Seats the plan leaves empty on the return leg ONLY (occupied outbound).
-  /// Per-bus `max(0, retFree − goFree)`, summed. Fillable by a return-only rider.
+  /// Per-seat `max(0, retFree − goFree)`, summed. Fillable by a return-only rider.
   final int retOnlyFree;
 
   /// Distinct passengers the engine could NOT auto-seat under the hard rules
@@ -92,16 +123,21 @@ class TourCapacity {
   /// These are the riders that need the agent's decision — NOT a silent "full".
   final int needsDecision;
 
-  /// Physical berth capacity per seat type (a Double Sofa cell = 2 berths).
-  /// Only types the tour's buses actually have appear here.
+  /// Physical TILE capacity per seat type — one tile of that type = 1 unit (a
+  /// Double Sofa cell is ONE tile that seats a pair, NOT two berths), matching
+  /// the demand summary's "a Double Sofa counts as ONE unit". Only types the
+  /// tour's buses actually have appear here.
   final Map<SeatType, int> capByType;
 
-  /// GENUINELY-empty berths per seat type, read from the SAME engine plan as
-  /// [free] — `typeCap − max(goPlaced, retPlaced)` clamped to `[0, cap]`. This
-  /// replaces the old per-type `capacity − requested-demand` math that could go
-  /// NEGATIVE (e.g. "Single Sofa −2") and disagree with the engine headline:
-  /// over-demand surfaces as [needsDecision], never as a phantom negative free.
-  final Map<SeatType, int> freeByType;
+  /// GENUINELY-empty WHOLE tiles per seat type, split by open leg — read from
+  /// the SAME engine plan as [free]. A tile counts as free on a leg ONLY when
+  /// ZERO berths are placed on it that leg (a whole unit must fit — a Double
+  /// Sofa needs BOTH berths free), so a half-occupied double is NOT a free
+  /// double. Counted in tiles/units (a double = 1), so it agrees with the demand
+  /// line and never over-reports bookable doubles the way the old berth-based
+  /// `typeCap − max(goPlaced, retPlaced)` did. See [SeatTypeFree] for the
+  /// round / go-only / return-only split the by-type breakdown renders.
+  final Map<SeatType, SeatTypeFree> freeByType;
 
   /// Per-bus leg-aware capacity, keyed by bus id — the SAME plan as the tour
   /// totals, so a per-bus row can show `Go x/n · Ret y/n` without re-deriving
@@ -146,108 +182,148 @@ class TourCapacity {
 /// its current buses + passengers and reading the resulting plan. Pure and
 /// side-effect free (no persistence) — safe to call from a widget build.
 TourCapacity computeTourCapacity(Tour tour) {
-  final capacity = tour.totalBusSeats;
   final plan = SeatingEngine.propose(
     buses: tour.buses,
     passengers: tour.passengers,
   );
 
-  // Leg-aware occupancy per bus from the PLAN's placements: each physical berth
-  // offers one GO slot + one RET slot, so the honest load is the busier leg.
-  //
-  // The leg now lives PER REQUEST LINE, not on the passenger, so a single
-  // request can mix legs. A [SeatAssignment] carries no leg, so we gate each
-  // placed seat against the passenger's per-line GO/RET berth quotas
-  // ([Passenger.goBerths]/[Passenger.retBerths]): the first `goBerths` placed
-  // seats load GO, the first `retBerths` load RET. Exact when a passenger's
-  // seats sit on one bus (the engine keeps them together), a safe upper bound
-  // otherwise — and identical to the old whole-passenger gate for a
-  // single-leg request.
   final passengerById = <String, Passenger>{
     for (final p in tour.passengers) p.id: p,
   };
-  final go = <String, int>{};
-  final ret = <String, int>{};
-  plan.assignmentsByPassenger.forEach((passengerId, seats) {
-    final p = passengerById[passengerId];
-    final goQuota = p?.goBerths ?? seats.length;
-    final retQuota = p?.retBerths ?? seats.length;
-    var i = 0;
-    for (final a in seats) {
-      if (i < goQuota) go[a.busId] = (go[a.busId] ?? 0) + 1;
-      if (i < retQuota) ret[a.busId] = (ret[a.busId] ?? 0) + 1;
-      i++;
-    }
-  });
-  // Per-bus capacity so leg-free is bounded by the seats that bus actually has —
-  // a seat free outbound on bus A can't offset a seat over-full on bus B.
-  final busCap = <String, int>{for (final b in tour.buses) b.id: b.totalSeats};
 
-  // Seat-type lookup keyed "busId:seatId", plus per-type berth capacity (a
-  // Double Sofa cell physically seats two → contributes 2 berths). Built from
-  // the same grids the engine plans on, so per-type free below reads the PLAN.
+  // Seat-type lookup keyed "busId:seatId", plus per-type TILE capacity — one
+  // physical tile of that type = 1 unit (a Double Sofa cell is ONE tile that
+  // seats a pair, NOT two berths), matching the "a Double Sofa counts as ONE
+  // unit" convention the demand summary uses. Built from the same grids the
+  // engine plans on, so per-type free below reads the PLAN.
+  //
+  // RESERVED cells are HELD, never sellable — the engine never auto-fills them.
+  // They are excluded from [typeBySeat]/[capByType] (and every free/occupied
+  // bucket below), and their berths are subtracted from [capacity], so a held
+  // seat can never read as free sellable capacity.
   final typeBySeat = <String, SeatType>{};
   final capByType = <SeatType, int>{};
+  int reservedBerths = 0;
   for (final b in tour.buses) {
     for (final cell in b.layout?.grid ?? const []) {
       final sid = cell.seatId;
       final st = cell.seatType;
       if (sid == null || st == null) continue;
+      if (cell.reserved) {
+        reservedBerths += st == SeatType.doubleSofa ? 2 : 1;
+        continue;
+      }
       typeBySeat['${b.id}:$sid'] = st;
-      capByType[st] = (capByType[st] ?? 0) + (st == SeatType.doubleSofa ? 2 : 1);
+      capByType[st] = (capByType[st] ?? 0) + 1;
     }
   }
-  // Per-type berth-legs the engine actually PLACES (each assignment = 1 berth,
-  // a whole double = two entries on the same seatId). Gated PER SEAT by the leg
-  // of the matching request line via [Passenger.legForSeatType] — the leg now
-  // lives per line, so a mixed request charges each placed seat to its own type's
-  // leg rather than the whole-passenger trip. Round-trip is unchanged.
-  final goByType = <SeatType, int>{};
-  final retByType = <SeatType, int>{};
+  // Sellable capacity = physical total minus every held (reserved) berth.
+  final capacity =
+      (tour.totalBusSeats - reservedBerths).clamp(0, tour.totalBusSeats).toInt();
+  // Berth-legs the plan PLACES on each physical tile, split by leg. A whole
+  // double tile is two entries on one seatId, a half-open double just one.
+  // Gated PER SEAT by the request line's leg via [Passenger.legForSeatType] —
+  // the leg lives per line, so a mixed request charges each placed seat to its
+  // own leg. Round-trip loads both legs.
+  final goBySeat = <String, int>{};
+  final retBySeat = <String, int>{};
   plan.assignmentsByPassenger.forEach((passengerId, seats) {
     final p = passengerById[passengerId];
     for (final a in seats) {
       final st = typeBySeat['${a.busId}:${a.seatId}'];
       if (st == null) continue;
       final leg = a.leg ?? (p?.legForSeatType(st) ?? TripType.roundTrip);
-      if (leg.usesOutbound) goByType[st] = (goByType[st] ?? 0) + 1;
-      if (leg.usesReturn) retByType[st] = (retByType[st] ?? 0) + 1;
+      final k = '${a.busId}:${a.seatId}';
+      if (leg.usesOutbound) goBySeat[k] = (goBySeat[k] ?? 0) + 1;
+      if (leg.usesReturn) retBySeat[k] = (retBySeat[k] ?? 0) + 1;
     }
   });
-  final freeByType = <SeatType, int>{
+  // GENUINELY-empty WHOLE tiles per seat type, split by which legs are open —
+  // the fresh bookings of that type the agent can still take. A tile is free on
+  // a leg ONLY when ZERO berths are placed on it that leg (a whole unit must fit
+  // — a Double Sofa needs BOTH berths free), so a half-occupied double (one half
+  // taken) is free on NEITHER leg: a new pair can't sit there. Counted in tiles
+  // (a double = 1 unit), agreeing with the demand line and the by-type row's own
+  // intent ("match a Double Sofa request to a free double"). The go-only /
+  // return-only buckets carry the one-way surplus per type, so the breakdown can
+  // tell a round-trip opening from a going-/returning-only one at a glance.
+  final roundByType = <SeatType, int>{for (final st in capByType.keys) st: 0};
+  final goOnlyByType = <SeatType, int>{for (final st in capByType.keys) st: 0};
+  final retOnlyByType = <SeatType, int>{for (final st in capByType.keys) st: 0};
+  for (final b in tour.buses) {
+    for (final cell in b.layout?.grid ?? const []) {
+      final sid = cell.seatId;
+      final st = cell.seatType;
+      if (sid == null || st == null || cell.reserved) continue;
+      final k = '${b.id}:$sid';
+      final goOpen = (goBySeat[k] ?? 0) == 0;
+      final retOpen = (retBySeat[k] ?? 0) == 0;
+      if (goOpen && retOpen) {
+        roundByType[st] = (roundByType[st] ?? 0) + 1;
+      } else if (goOpen) {
+        goOnlyByType[st] = (goOnlyByType[st] ?? 0) + 1;
+      } else if (retOpen) {
+        retOnlyByType[st] = (retOnlyByType[st] ?? 0) + 1;
+      }
+    }
+  }
+  final freeByType = <SeatType, SeatTypeFree>{
     for (final st in capByType.keys)
-      st: (capByType[st]! -
-              math.max(goByType[st] ?? 0, retByType[st] ?? 0))
-          .clamp(0, capByType[st]!)
-          .toInt(),
+      st: SeatTypeFree(
+        round: roundByType[st] ?? 0,
+        goOnly: goOnlyByType[st] ?? 0,
+        retOnly: retOnlyByType[st] ?? 0,
+      ),
   };
 
+  // Meter totals read from the SAME per-seat goBySeat/retBySeat map that drives
+  // [freeByType] — so the headline "free" can never claim a round-trip seat that
+  // the by-type breakdown counts as go-only/return-only. Each physical berth
+  // offers one GO slot + one RET slot; a seat is round-trip-free only where BOTH
+  // legs are open (min of the two), and the surplus on the roomier leg is the
+  // one-way-only opening. Reserved (held) cells are skipped entirely.
   var occupied = 0;
   var goOccupied = 0;
   var retOccupied = 0;
+  var free = 0;
   var goOnlyFree = 0;
   var retOnlyFree = 0;
-  final byBus = <String, BusCapacity>{};
-  for (final id in busCap.keys) {
-    final cap = busCap[id] ?? 0;
-    final g = (go[id] ?? 0).clamp(0, cap);
-    final r = (ret[id] ?? 0).clamp(0, cap);
-    occupied += math.max(g, r);
-    goOccupied += g;
-    retOccupied += r;
-    final goFree = cap - g;
-    final retFree = cap - r;
-    // The leg with MORE free room carries the one-way-only surplus; the overlap
-    // (min) is the fully-empty seats already counted in [free].
-    goOnlyFree += math.max(0, goFree - retFree);
-    retOnlyFree += math.max(0, retFree - goFree);
-    byBus[id] = BusCapacity(
-      busId: id,
-      capacity: cap,
-      goOccupied: g,
-      retOccupied: r,
-    );
+  final busGo = <String, int>{};
+  final busRet = <String, int>{};
+  final busCapTotal = <String, int>{};
+  for (final b in tour.buses) {
+    for (final cell in b.layout?.grid ?? const []) {
+      final sid = cell.seatId;
+      final st = cell.seatType;
+      if (sid == null || st == null || cell.reserved) continue;
+      final int capBerths = st.berthsPerUnit.toInt();
+      final k = '${b.id}:$sid';
+      final placedGo = (goBySeat[k] ?? 0).clamp(0, capBerths).toInt();
+      final placedRet = (retBySeat[k] ?? 0).clamp(0, capBerths).toInt();
+      final gF = capBerths - placedGo;
+      final rF = capBerths - placedRet;
+      free += math.min(gF, rF);
+      goOnlyFree += math.max(0, gF - rF);
+      retOnlyFree += math.max(0, rF - gF);
+      occupied += capBerths - math.min(gF, rF);
+      goOccupied += placedGo;
+      retOccupied += placedRet;
+      busGo[b.id] = (busGo[b.id] ?? 0) + placedGo;
+      busRet[b.id] = (busRet[b.id] ?? 0) + placedRet;
+      busCapTotal[b.id] = (busCapTotal[b.id] ?? 0) + capBerths;
+    }
   }
+  // Per-bus leg-aware snapshot — every bus appears (0 when it has no sellable,
+  // non-reserved seats), derived from the same per-seat loop as the tour totals.
+  final byBus = <String, BusCapacity>{
+    for (final b in tour.buses)
+      b.id: BusCapacity(
+        busId: b.id,
+        capacity: busCapTotal[b.id] ?? 0,
+        goOccupied: busGo[b.id] ?? 0,
+        retOccupied: busRet[b.id] ?? 0,
+      ),
+  };
   occupied = occupied.clamp(0, capacity);
 
   final needsDecision = _decisionFilter(plan, tour).length;
@@ -255,7 +331,7 @@ TourCapacity computeTourCapacity(Tour tour) {
   return TourCapacity(
     capacity: capacity,
     occupied: occupied,
-    free: (capacity - occupied).clamp(0, capacity),
+    free: free.clamp(0, capacity),
     goOccupied: goOccupied,
     retOccupied: retOccupied,
     goOnlyFree: goOnlyFree,

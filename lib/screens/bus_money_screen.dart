@@ -32,6 +32,17 @@ class BusMoneyScreen extends StatefulWidget {
 class _BusMoneyScreenState extends State<BusMoneyScreen> {
   final MoneyController controller = Get.find<MoneyController>();
 
+  /// True only when the money load failed AND nothing is already held to keep —
+  /// so a transient read failure shows a retry instead of an all-zero cockpit.
+  /// Reads the money obs inside the calling [Obx], so a successful retry
+  /// re-renders it.
+  bool get _showLoadError =>
+      controller.loadFailed.value &&
+      controller.collections.isEmpty &&
+      controller.expenses.isEmpty &&
+      controller.handovers.isEmpty &&
+      controller.incomes.isEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +67,14 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
             ),
             Expanded(
               child: Obx(() {
+                // A failed load leaves the money lists empty; show the shared
+                // retry rather than a ₹0 cockpit that reads as a settled bus.
+                if (_showLoadError) {
+                  return UgamEmpty.error(
+                    onRetry: () => controller.loadForTour(widget.tour.id),
+                  );
+                }
+
                 final s = controller.summaryForBus(widget.bus.id);
                 final expenses = controller.expenses
                     .where((e) => e.busId == widget.bus.id)
@@ -83,8 +102,17 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                     // it's what the agent must act on. Everything else is
                     // demoted to a quiet supporting row below.
                     _OutstandingHero(
-                      amount: s.outstandingHandover,
-                      expected: s.expectedHandover,
+                      // Clamp the *displayed* settlement figure at 0: before
+                      // collections cover the bus rent the net can be
+                      // negative, but a handler never pays rent out of pocket
+                      // before collecting, so "-30000 owed" is nonsense to
+                      // show. Underlying net math is untouched.
+                      amount: s.outstandingHandover < 0
+                          ? 0.0
+                          : s.outstandingHandover,
+                      expected: s.expectedHandover < 0
+                          ? 0.0
+                          : s.expectedHandover,
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     // ── Supporting stat grid (demoted) ─────────────────
@@ -93,7 +121,12 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                         Expanded(
                           child: UgamStatTile(
                             icon: Icons.payments_rounded,
-                            value: Formatters.formatMoneyInr(s.collected),
+                            // Compact (₹1.2L) so large INR values never wrap
+                            // and blow out the tile height in the equal-height
+                            // supporting grid.
+                            value: Formatters.formatMoneyInrCompact(
+                              s.collected,
+                            ),
                             label: tr('bus_money.stat_collected'),
                             variant: UgamStatVariant.good,
                           ),
@@ -102,7 +135,7 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                         Expanded(
                           child: UgamStatTile(
                             icon: Icons.savings_rounded,
-                            value: Formatters.formatMoneyInr(s.income),
+                            value: Formatters.formatMoneyInrCompact(s.income),
                             label: tr('bus_money.stat_income'),
                             variant: UgamStatVariant.good,
                           ),
@@ -111,7 +144,9 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                         Expanded(
                           child: UgamStatTile(
                             icon: Icons.receipt_long_rounded,
-                            value: Formatters.formatMoneyInr(s.expensesTotal),
+                            value: Formatters.formatMoneyInrCompact(
+                              s.expensesTotal,
+                            ),
                             label: tr('bus_money.stat_expenses'),
                             variant: UgamStatVariant.warm,
                           ),
@@ -368,8 +403,15 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
     double expected, {
     BusHandover? existing,
   }) {
+    // Whole-rupee seed: dues are rounded at source, so pre-fill the full
+    // whole-rupee figure. Rounding (not truncating) a fractional expected is
+    // belt-and-suspenders — it avoids a stuck sub-rupee residual that would
+    // read as "not fully settled". Clamp at 0: a handler never hands over a
+    // negative figure (i.e. pays the owner's rent out of pocket) before
+    // collecting.
+    final seed = existing?.handedOverAmount ?? (expected < 0 ? 0.0 : expected);
     final handedCtrl = TextEditingController(
-      text: (existing?.handedOverAmount ?? expected).toStringAsFixed(0),
+      text: seed.round().toString(),
     );
     final noteCtrl = TextEditingController(text: existing?.note ?? '');
 
@@ -576,7 +618,10 @@ class _OutstandingHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final settled = amount.abs() <= 0.005;
+    // Within-rupee residual reads as fully handed over: once dues are whole
+    // rupees a handover of expected.round() may leave a sub-rupee remainder
+    // that should still settle the tile to a calm `good` tone.
+    final settled = amount.abs() < 0.5;
     final figureColor = settled ? c.good : c.accent;
     return UgamCard.plain(
       elev: true,
@@ -619,13 +664,19 @@ class _OutstandingHero extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                     horizontal: UgamSpacing.lg,
                   ),
-                  child: Text(
-                    Formatters.formatMoneyInr(amount),
-                    style: UgamText.tabular(
-                      UgamText.hero.copyWith(color: figureColor, fontSize: 44),
+                  // Scale the focal figure down (never ellipsize) so lakh/crore
+                  // amounts stay fully legible — mirrors trip_pnl's
+                  // _TripTotalCard.
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      Formatters.formatMoneyInr(amount),
+                      style: UgamText.tabular(
+                        UgamText.hero
+                            .copyWith(color: figureColor, fontSize: 44),
+                      ),
+                      maxLines: 1,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],

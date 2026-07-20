@@ -79,6 +79,8 @@ class _CustomerBookingRequestScreenState
         doubleSofa: e.doubleSofa,
         singleSofa: e.singleSofa,
         note: e.note,
+        pickupLocationId: e.pickupLocationId,
+        pickupLocationName: e.pickupLocationName,
       );
     }
   }
@@ -242,6 +244,8 @@ class _CustomerBookingRequestScreenState
           'p_raw_form': rawForm,
           'p_request_lines': requestLines.map((l) => l.toMap()).toList(),
           'p_note': note.isEmpty ? null : note,
+          'p_pickup_location_id': data.pickupLocationId,
+          'p_pickup_location_name': data.pickupLocationName,
         },
       );
     } on PostgrestException catch (e) {
@@ -256,6 +260,8 @@ class _CustomerBookingRequestScreenState
         'party_size': data.totalSeats,
         'trip_type': data.tripType.storageKey,
         'raw_form': rawForm,
+        'pickup_location_id': data.pickupLocationId,
+        'pickup_location_name': data.pickupLocationName,
       });
       final passenger = Passenger(
         tourId: widget.tour.id,
@@ -264,6 +270,8 @@ class _CustomerBookingRequestScreenState
         requestLines: requestLines,
         note: note.isEmpty ? null : note,
         tripType: data.tripType,
+        pickupLocationId: data.pickupLocationId,
+        pickupLocationName: data.pickupLocationName,
       );
       // Plain insert — a phone may now hold multiple distinct requests on one
       // tour, so we never collapse onto an existing (tour_id, phone) row.
@@ -287,8 +295,11 @@ class _CustomerBookingRequestScreenState
         doubleSofa: data.doubleSofa,
         singleSofa: data.singleSofa,
         note: note.isEmpty ? null : note,
+        pickupLocationId: data.pickupLocationId,
+        pickupLocationName: data.pickupLocationName,
         tripType: data.tripType,
         status: 'pending',
+        organiserPhone: widget.tour.createdBy,
         createdAt: DateTime.now(),
       ),
     );
@@ -317,6 +328,7 @@ class _CustomerBookingRequestScreenState
         doubleSofaCount: data.doubleSofa,
         note: note.isEmpty ? null : note,
         tripType: data.tripType,
+        pickupLocation: data.pickupLocationName,
       );
     }
 
@@ -364,6 +376,8 @@ class _CustomerBookingRequestScreenState
         },
         'p_request_lines': requestLinesJson,
         'p_trip_type': data.tripType.storageKey,
+        'p_pickup_location_id': data.pickupLocationId,
+        'p_pickup_location_name': data.pickupLocationName,
       },
     );
 
@@ -385,6 +399,8 @@ class _CustomerBookingRequestScreenState
         doubleSofa: data.doubleSofa,
         singleSofa: data.singleSofa,
         note: note.isEmpty ? null : note,
+        pickupLocationId: data.pickupLocationId,
+        pickupLocationName: data.pickupLocationName,
         tripType: data.tripType,
         customerEditedAt: DateTime.now(),
         lastRefreshedAt: DateTime.now(),
@@ -401,6 +417,7 @@ class _CustomerBookingRequestScreenState
         note: note.isEmpty ? null : note,
         tripType: data.tripType,
         isUpdate: true,
+        pickupLocation: data.pickupLocationName,
       );
     }
 
@@ -420,6 +437,12 @@ class _CustomerBookingRequestScreenState
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final seatCount = _formKey.currentState?.totalSeats ?? 0;
+    // Leg-weighted estimate: a one-way (Go-only / Return-only) berth is charged
+    // at 0.5 of a round-trip berth, so the preview must apply the same factor —
+    // otherwise a Go-only booking reads at the full round-trip price. Rounded to
+    // whole rupees by Formatters.formatMoneyInr.
+    final estTotal =
+        (_formKey.currentState?.legWeightedSeats ?? 0) * widget.tour.pricePerSeat;
 
     return UgamScaffold(
       body: SafeArea(
@@ -481,9 +504,7 @@ class _CustomerBookingRequestScreenState
                       style: UgamText.caption.copyWith(color: c.ink2),
                     ),
                     Text(
-                      Formatters.formatMoneyInr(
-                        seatCount * widget.tour.pricePerSeat,
-                      ),
+                      Formatters.formatMoneyInr(estTotal),
                       style: UgamText.tabular(
                         UgamText.bodyStrong.copyWith(color: c.ink),
                       ),

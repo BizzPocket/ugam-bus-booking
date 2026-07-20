@@ -42,15 +42,21 @@ class Collection {
   /// Cash the collection actually holds.
   double get netCollected => amountReceived - amountRefunded;
 
+  /// Sub-rupee tolerance for money classification. Fractional dues (one-leg
+  /// 0.5, sofa/2, bus/seats) can leave sub-rupee residuals in [balance]; without
+  /// a tolerance a fully-paid rider stays "return due"/"owing" forever off a few
+  /// paise. Anything inside ±[kMoneyEpsilon] rupees is treated as square.
+  static const double kMoneyEpsilon = 0.005;
+
   /// +ve = owe customer change; -ve = customer still owes.
   double get balance => amountReceived - amountRefunded - amountDue;
 
-  bool get isReturnDue => balance > 0;
-  bool get isShortfall => balance < 0;
-  bool get isSquare => balance == 0;
+  bool get isReturnDue => balance > kMoneyEpsilon;
+  bool get isShortfall => balance < -kMoneyEpsilon;
+  bool get isSquare => balance.abs() < kMoneyEpsilon;
 
-  double get changeToReturn => balance > 0 ? balance : 0;
-  double get stillToCollect => balance < 0 ? -balance : 0;
+  double get changeToReturn => isSquare ? 0 : (balance > 0 ? balance : 0);
+  double get stillToCollect => isSquare ? 0 : (balance < 0 ? -balance : 0);
 
   // ── Postgres serialization ────────────────────────────────
 

@@ -95,9 +95,11 @@ void main() {
         closeTo(775, 1e-9),
       );
       expect(
+        // One berth (775) on a single leg = half → rounded to a whole rupee
+        // at source (387.5 → 388) so cash payments settle to exactly zero.
         bus.amountDueFor(
             passenger(seats: shared, tripType: TripType.outboundOnly)),
-        closeTo(387.5, 1e-9),
+        closeTo(388, 1e-9),
       );
     });
 

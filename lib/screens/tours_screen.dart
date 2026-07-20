@@ -109,15 +109,12 @@ class _ToursScreenState extends State<ToursScreen> {
                   return _LoadingShimmer();
                 }
                 if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-                  return UgamEmpty(
-                    icon: Icons.cloud_off_rounded,
-                    title: tr('tours.title'),
-                    body: tourCtrl.errorMessage.value,
-                    cta: UgamCTA(
-                      label: tr('app.action.retry'),
-                      leadingIcon: Icons.refresh_rounded,
-                      onPressed: tourCtrl.refreshTours,
-                    ),
+                  // Shared load-failed + retry surface. errorMessage carries the
+                  // tour-specific tr('errors.load_tours') copy; retry re-runs the
+                  // (now internally-retrying) fetch.
+                  return UgamEmpty.error(
+                    onRetry: tourCtrl.refreshTours,
+                    message: tourCtrl.errorMessage.value,
                   );
                 }
 

@@ -9,6 +9,8 @@ import '../models/expense.dart';
 import '../models/income_entry.dart';
 import '../models/bus_handover.dart';
 import '../models/money_summary.dart';
+import '../models/bus_details.dart';
+import '../models/passenger.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
 import 'tour_controller.dart';
@@ -31,6 +33,18 @@ class MoneyController extends GetxController {
   final incomes = <IncomeEntry>[].obs;
   final isLoading = false.obs;
 
+  /// True when the last [loadForTour] could not reach the server (offline or a
+  /// timed-out/failed read). Mirrors [TourController.hasError] /
+  /// [FinanceController.loadFailed]: the screens read this to show a retry state
+  /// instead of silently rendering an all-zero money board (a failed load is NOT
+  /// the same as "this tour has no money"). Reset to false at the start of every
+  /// load and only re-raised when [SyncService.lastReadFailed] trips.
+  final loadFailed = false.obs;
+
+  /// True once at least one load has genuinely succeeded for the current tour, so
+  /// consumers can distinguish "never loaded" from "loaded and empty".
+  final loadedOnce = false.obs;
+
   /// Which tour the lists currently hold data for. Used to scope cache
   /// keys and to know what to refetch on refresh.
   String? _loadedTourId;
@@ -51,8 +65,23 @@ class MoneyController extends GetxController {
   // ── Load / refresh ────────────────────────────────────────
 
   Future<void> loadForTour(String tourId) async {
+    // A genuine tour SWITCH must never render the previous tour's rows. Clear
+    // the four cached lists up-front, BEFORE the fetch, so tour B can never show
+    // tour A's collections + rent even if B's read fails (loadFailed then drives
+    // the retry surface). A SAME-tour reload is left untouched — its transient
+    // read failures still preserve last-known rows (see below), the intended
+    // resilience behaviour.
+    final isSwitch = tourId != _loadedTourId;
+    if (isSwitch) {
+      collections.clear();
+      expenses.clear();
+      handovers.clear();
+      incomes.clear();
+      loadedOnce.value = false;
+    }
     _loadedTourId = tourId;
     isLoading.value = true;
+    loadFailed.value = false;
     try {
       final results = await Future.wait([
         _sync.smartFetch(
@@ -81,10 +110,23 @@ class MoneyController extends GetxController {
         ),
       ]);
 
-      collections.assignAll(results[0].map(Collection.fromMap).toList());
-      expenses.assignAll(results[1].map(Expense.fromMap).toList());
-      handovers.assignAll(results[2].map(BusHandover.fromMap).toList());
-      incomes.assignAll(results[3].map(IncomeEntry.fromMap).toList());
+      // smartFetch never throws — it returns [] and trips [lastReadFailed] on any
+      // failure or when offline. The four reads run concurrently and share the
+      // one flag, but it stays true if ANY of them failed, so capture it right
+      // after the wait. Only COMMIT the fetched rows when the load genuinely
+      // succeeded: a transient timeout must keep whatever we already hold rather
+      // than blank the money board to ₹0 (which reads as "this tour has no
+      // money" — the bug this guard fixes). The screens observe [loadFailed] to
+      // show a retry instead.
+      final failed = _sync.lastReadFailed;
+      if (!failed) {
+        collections.assignAll(results[0].map(Collection.fromMap).toList());
+        expenses.assignAll(results[1].map(Expense.fromMap).toList());
+        handovers.assignAll(results[2].map(BusHandover.fromMap).toList());
+        incomes.assignAll(results[3].map(IncomeEntry.fromMap).toList());
+        loadedOnce.value = true;
+      }
+      loadFailed.value = failed;
     } catch (e, st) {
       // Leave whatever we already hold in place — a transient fetch
       // failure shouldn't blank the money screen.
@@ -92,6 +134,7 @@ class MoneyController extends GetxController {
         'loadForTour failed for $tourId: $e\n$st',
         name: 'MoneyController',
       );
+      loadFailed.value = true;
     } finally {
       isLoading.value = false;
     }
@@ -309,6 +352,29 @@ class MoneyController extends GetxController {
     };
   }
 
+  /// Bus objects for the loaded tour, keyed by bus id — the source of each bus's
+  /// per-seat fare ([Bus.amountDueForSeat]) so to-collect can price seated riders
+  /// who have no collection row yet. Same guards as [_busRents] (missing tour /
+  /// unregistered controller → empty).
+  Map<String, Bus> _busById() {
+    final tourId = _loadedTourId;
+    if (tourId == null || !Get.isRegistered<TourController>()) {
+      return const {};
+    }
+    final buses = Get.find<TourController>().getTour(tourId)?.buses;
+    if (buses == null) return const {};
+    return {for (final b in buses) b.id: b};
+  }
+
+  /// The loaded tour's passengers, or empty when the tour/controller is missing.
+  List<Passenger> _tourPassengers() {
+    final tourId = _loadedTourId;
+    if (tourId == null || !Get.isRegistered<TourController>()) {
+      return const [];
+    }
+    return Get.find<TourController>().getTour(tourId)?.passengers ?? const [];
+  }
+
   BusMoneySummary summaryForBus(String busId) => BusMoneySummary.compute(
     busId: busId,
     collections: collections.toList(),
@@ -317,16 +383,35 @@ class MoneyController extends GetxController {
     incomes: incomes.toList(),
     busRent: _busRents()[busId] ?? 0,
     revenueBilled: _billedRevenues()[busId] ?? 0,
+    passengers: _tourPassengers(),
+    dueForSeat: _busById()[busId]?.amountDueForSeat,
   );
 
-  TourMoneySummary tourSummary() => TourMoneySummary.compute(
-    collections: collections.toList(),
-    expenses: expenses.toList(),
-    handovers: handovers.toList(),
-    incomes: incomes.toList(),
-    busRentsTotal: _busRents().values.fold(0.0, (sum, r) => sum + r),
-    totalRevenueBilled: _billedRevenues().values.fold(0.0, (sum, r) => sum + r),
-  );
+  TourMoneySummary tourSummary() {
+    // Roll to-collect up from the per-bus summaries so the tour total counts
+    // seated-but-uncollected riders exactly the same way each bus row does —
+    // admin, handler and tour totals then all agree. Fall back to the recorded
+    // shortfalls (null override) when no tour/buses are resolvable.
+    final busById = _busById();
+    final perBusToCollect = busById.isEmpty
+        ? null
+        : summariesForBuses(busById.keys).fold(
+            0.0,
+            (sum, s) => sum + s.toCollectTotal,
+          );
+    return TourMoneySummary.compute(
+      collections: collections.toList(),
+      expenses: expenses.toList(),
+      handovers: handovers.toList(),
+      incomes: incomes.toList(),
+      busRentsTotal: _busRents().values.fold(0.0, (sum, r) => sum + r),
+      totalRevenueBilled: _billedRevenues().values.fold(
+        0.0,
+        (sum, r) => sum + r,
+      ),
+      toCollectTotal: perBusToCollect,
+    );
+  }
 
   /// Read-only summaries for every bus id in [busIds], in the order given.
   /// Pure aggregation over the currently held rows — no fetch. Used by the
@@ -339,6 +424,8 @@ class MoneyController extends GetxController {
     final incs = incomes.toList();
     final rents = _busRents();
     final billed = _billedRevenues();
+    final busById = _busById();
+    final passengers = _tourPassengers();
     return [
       for (final id in busIds)
         BusMoneySummary.compute(
@@ -349,6 +436,8 @@ class MoneyController extends GetxController {
           incomes: incs,
           busRent: rents[id] ?? 0,
           revenueBilled: billed[id] ?? 0,
+          passengers: passengers,
+          dueForSeat: busById[id]?.amountDueForSeat,
         ),
     ];
   }
@@ -405,7 +494,15 @@ class MoneyController extends GetxController {
     final outstanding = s.outstandingHandover > eps;
     final toCollect = s.toCollectTotal > eps;
     final toReturn = s.toReturnTotal > eps;
-    if (outstanding || toCollect) return BusMoneyState.actionNeeded;
+    // Real money still owed: billed revenue not yet collected (catches seated
+    // riders billed but uncollected, whether or not a shortfall row exists).
+    final revenueOutstanding = (s.revenueBilled - s.collected) > eps;
+    // Net can't even cover the owner's rent — the handler is short on the
+    // settlement, so this is an attention state, never "settled".
+    final cannotCoverRent = s.expectedHandover < -eps;
+    if (outstanding || toCollect || revenueOutstanding || cannotCoverRent) {
+      return BusMoneyState.actionNeeded;
+    }
 
     final hasActivity = s.collected > eps || s.handedOver > eps;
     if (hasActivity && !toReturn) return BusMoneyState.settled;

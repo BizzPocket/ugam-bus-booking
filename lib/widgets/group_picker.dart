@@ -778,11 +778,11 @@ class _CurrentGroupRow extends StatelessWidget {
               ],
             ),
           ),
-          TextButton.icon(
+          UgamButton(
+            label: tr('tour_groups.remove_from_group'),
+            icon: Icons.close_rounded,
+            kind: UgamButtonKind.dangerTonal,
             onPressed: onRemove,
-            icon: Icon(Icons.close_rounded, size: 16, color: c.danger),
-            label: Text(tr('tour_groups.remove_from_group'),
-                style: UgamText.caption.copyWith(color: c.danger)),
           ),
         ],
       ),

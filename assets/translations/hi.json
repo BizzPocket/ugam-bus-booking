@@ -1,4 +1,33 @@
 {
+  "actions": {
+    "retry": "फिर से प्रयास करें"
+  },
+  "pickup": {
+    "form_label": "पिकअप स्थान",
+    "form_placeholder": "पिकअप स्थान चुनें (वैकल्पिक)",
+    "sheet_title": "पिकअप स्थान चुनें",
+    "clear": "कोई पिकअप स्थान नहीं",
+    "reflect_label": "पिकअप",
+    "settings_title": "पिकअप स्थान",
+    "settings_subtitle": "सभी यात्राओं के लिए पिकअप स्थान प्रबंधित करें",
+    "manage_title": "पिकअप स्थान",
+    "add_hint": "पिकअप स्थान जोड़ें",
+    "add_button": "जोड़ें",
+    "empty_title": "अभी तक कोई पिकअप स्थान नहीं",
+    "empty_body": "ग्राहक बुकिंग करते समय चुन सकें ऐसे पिकअप स्थान जोड़ें। ये सभी यात्राओं पर लागू होते हैं।",
+    "rename_title": "पिकअप स्थान का नाम बदलें",
+    "rename_hint": "पिकअप स्थान का नाम",
+    "code_label": "कोड",
+    "code_hint": "उदा. ST",
+    "edit_title": "पिकअप पॉइंट संपादित करें",
+    "deactivate": "छिपाएँ",
+    "activate": "दिखाएँ",
+    "inactive_badge": "छिपा हुआ",
+    "delete_title": "पिकअप स्थान हटाएँ?",
+    "delete_body": "यह उसे उस सूची से हटा देता है जिसमें से ग्राहक चुनते हैं। पुरानी विनंतियों में सहेजा गया पिकअप बना रहता है।",
+    "delete": "हटाएँ",
+    "name_required": "नाम दर्ज करें"
+  },
   "swap_reason": {
     "swap_seats": "सीट अदला-बदली",
     "exact_match": "सटीक मेल",
@@ -291,7 +320,9 @@
     "seats_full": "भर गई",
     "seats_filled_ratio": "{filled}/{total} भरीं",
     "seats_left_n": "{n} बाकी",
-    "left_behind": "{n} छूट गए"
+    "left_behind": "{n} छूट गए",
+    "attention_cancel_requests": "{} लोग सीट कैंसल करना चाहते हैं",
+    "cta_review": "देखें"
   },
   "tours": {
     "title": "मेरी यात्राएँ",
@@ -352,7 +383,8 @@
       "seats_unit": {
         "one": "सीट",
         "other": "सीटें"
-      }
+      },
+      "cancel_requested": "कैंसलेशन विनती"
     },
     "action": {
       "confirm": "पुष्ट करें",
@@ -364,10 +396,14 @@
       "unassign_all": "सभी सीट हटाएं",
       "decline_request": "अनुरोध अस्वीकार करें",
       "more_actions": "और क्रियाएँ",
+      "mark_priority": "प्राथमिकता दें",
+      "remove_priority": "प्राथमिकता हटाएं",
       "edit_request": "रिक्वेस्ट बदलें",
       "confirm_and_seat": "पुष्ट कर सीट दें",
       "add_to_group": "ग्रुप में जोड़ें",
-      "change_group": "ग्रुप बदलें"
+      "change_group": "ग्रुप बदलें",
+      "approve_cancel": "कैंसलेशन मंज़ूर करें",
+      "dismiss_cancel": "बुकिंग रखें"
     },
     "decline_dialog": {
       "title": "अनुरोध अस्वीकार करें?",
@@ -435,7 +471,12 @@
       "declined_title": "अस्वीकृत",
       "declined_body": "{name} को इस यात्रा से हटाया गया।",
       "bulk_waitlisted": "{n} को वेटलिस्ट में ले गए",
-      "bulk_wa_opened": "{n} WhatsApp चैट खोलीं"
+      "bulk_wa_opened": "{n} WhatsApp चैट खोलीं",
+      "cancel_approved_title": "कैंसलेशन मंज़ूर हुआ",
+      "cancel_approved_body": "{name} को हटाया और सीट खाली हुई।",
+      "cancel_approved_wa_failed": "मंज़ूर हुआ, पर सूचना के लिए WhatsApp नहीं खुल सका।",
+      "cancel_dismissed_title": "विनती खारिज",
+      "cancel_dismissed_body": "{name} इस यात्रा में रखे गए।"
     },
     "empty_search": {
       "title": "कोई मेल नहीं",
@@ -477,6 +518,16 @@
     },
     "group": {
       "no_bus": "ग्रुप का आकार जानने के लिए बस जोड़ें"
+    },
+    "approve_cancel_dialog": {
+      "title": "कैंसलेशन मंज़ूर करें?",
+      "body": "{name} ने कैंसल करने की विनती की है। इससे उनकी सीट खाली होगी और उन्हें इस यात्रा से हटा दिया जाएगा।",
+      "confirm": "मंज़ूर करें और सीट खाली करें"
+    },
+    "dismiss_cancel_dialog": {
+      "title": "क्या यह बुकिंग रखें?",
+      "body": "{name} ने कैंसल करने की विनती की है। विनती को खारिज करके उन्हें इस यात्रा में रखें?",
+      "confirm": "बुकिंग रखें"
     }
   },
   "find_seat": {
@@ -546,8 +597,28 @@
     "chip_oneway_return": "एक तरफ · वापसी",
     "chip_seats": "सीटें: {seats}",
     "chip_seats_finalizing": "सीटें तय की जा रही हैं",
+    "chip_seat_after_lock": "सीट नंबर जल्द ही",
     "seats_pending_toast": "सीटें अभी तय नहीं हुई हैं — यात्रा पक्की होने पर आपको दिख जाएँगी।",
-    "add_another": "एक और अनुरोध जोड़ें"
+    "add_another": "एक और अनुरोध जोड़ें",
+    "cancel_action": "बुकिंग रद्द करें",
+    "cancel_title": "यह बुकिंग रद्द करें?",
+    "cancel_body": "इससे आपका अनुरोध वापस ले लिया जाएगा और सीट खाली हो जाएगी. आप कभी भी दोबारा बुक कर सकते हैं.",
+    "cancel_confirm": "बुकिंग रद्द करें",
+    "cancel_keep": "रहने दें",
+    "cancel_done": "बुकिंग रद्द हो गई.",
+    "cancel_blocked": "यह बुकिंग पहले ही पक्की हो चुकी है — रद्द करने के लिए आयोजक को कॉल करें.",
+    "contact_to_cancel": "रद्द करने के लिए आयोजक को कॉल करें",
+    "contact_no_number": "आयोजक का नंबर उपलब्ध नहीं है. कृपया सीधे संपर्क करें.",
+    "request_cancel_title": "क्या इस सीट को कैंसल करने की विनती करें?",
+    "request_cancel_body": "आपकी सीट पहले ही कन्फर्म हो चुकी है, इसलिए हम आयोजक को कैंसलेशन विनती भेजेंगे। उनकी मंज़ूरी मिलते ही आपकी सीट खाली हो जाएगी।",
+    "request_cancel_confirm": "विनती भेजें",
+    "request_cancel_action": "मुझे अपनी सीट कैंसल करनी है",
+    "request_cancel_done": "कैंसलेशन विनती आयोजक को भेज दी गई।",
+    "request_cancel_blocked": "विनती नहीं भेजी जा सकी — कृपया आयोजक को फ़ोन करें।",
+    "chip_cancel_requested": "कैंसलेशन विनती की",
+    "cancel_requested_state": "कैंसलेशन विनती की — आयोजक के जवाब का इंतज़ार",
+    "seats_more": "{shown}… (+{count})",
+    "actions_title": "अनुरोध प्रबंधित करें"
   },
   "add_bus": {
     "title": "बस जोड़ें",
@@ -969,7 +1040,8 @@
     "cta_request_to_book": "बुकिंग के लिए अनुरोध",
     "chip_tour_full": "टूर भर गया",
     "chip_seats_left": "{n} सीटें बाकी",
-    "chip_open_requests": "अनुरोध के लिए खुला"
+    "chip_open_requests": "अनुरोध के लिए खुला",
+    "chip_bookings_closed": "बुकिंग बंद"
   },
   "edit_tour": {
     "title": "टूर संपादित करें",
@@ -1066,7 +1138,25 @@
     "tab_requests": "अनुरोध",
     "tab_assign": "आवंटन",
     "tab_notify": "सूचना",
+    "tab_messages": "संदेश",
     "tab_settings": "सेटिंग"
+  },
+  "inbox": {
+    "title": "संदेश",
+    "empty_title": "अभी कोई संदेश नहीं",
+    "empty_subtitle": "ग्राहक के WhatsApp संदेश यहाँ दिखेंगे।",
+    "unknown": "अज्ञात नंबर",
+    "reply_hint": "संदेश लिखें…",
+    "send": "भेजें",
+    "window_open": "फ्री रिप्लाई विंडो खुली है",
+    "window_closed": "24 घंटे की विंडो बंद — टेम्पलेट से भेजा",
+    "send_failed": "भेजा नहीं जा सका। दोबारा प्रयास करें।",
+    "load_failed": "संदेश लोड नहीं हो सके।",
+    "photo": "📷 फ़ोटो",
+    "document": "📎 दस्तावेज़",
+    "you": "आप",
+    "new_label": "नया",
+    "card_unread": "{count} अपठित"
   },
   "broadcast_fallback": {
     "label_route": "रूट",
@@ -1148,7 +1238,9 @@
     "group_locked_msg": "ग्रुप के सदस्य एक ही बस में रहने चाहिए। इसके बजाय पूरा ग्रुप ले जाएँ।",
     "group_move_failed": "ग्रुप नहीं ले जाया जा सका। कृपया फिर प्रयास करें।",
     "group_move_no_fit": "पूरा ग्रुप इस बस में नहीं समाता।",
-    "group_move_save": "पूरा ग्रुप ले जाएँ"
+    "group_move_save": "पूरा ग्रुप ले जाएँ",
+    "auto_confirm_sent_one": "कन्फर्म करके {name} को WhatsApp भेजा",
+    "auto_confirm_sent_many": "कन्फर्म करके {count} यात्रियों को WhatsApp पर सूचित किया"
   },
   "manage_buses": {
     "title": "बसें प्रबंधित करें",
@@ -1240,6 +1332,7 @@
     "send_now_opened_title": "{name} के लिए खोला",
     "title": "नोटिफाई",
     "send_all_pending": "सभी बाकी को भेजें",
+    "resend_all": "चार्ट सभी को फिर से भेजें",
     "filter_all": "सभी",
     "filter_pending": "बाकी",
     "filter_notified": "भेजा गया",
@@ -1594,6 +1687,7 @@
     "edit_seats": "सीट बदलें",
     "done_editing_seats": "बदलाव पूरे",
     "btn_lock_notify": "लॉक करें और सूचित करें",
+    "btn_pick_handler_lock": "लॉक करने के लिए हैंडलर चुनें",
     "seat_label": "सीट {seat}",
     "drop": {
       "class_mismatch_title": "सीट वर्ग मेल नहीं खाता",
@@ -2121,6 +2215,7 @@
     "save_failed": "सहेजना विफल",
     "delete_failed": "हटाना विफल",
     "connection_error": "कनेक्शन त्रुटि",
+    "load_failed": "लोड नहीं हो सका — अपना कनेक्शन जांचें।",
     "sign_in_required": "साइन इन आवश्यक",
     "sign_in_failed": "साइन इन विफल",
     "access_denied": "एक्सेस अस्वीकृत",
@@ -2173,7 +2268,8 @@
     "call_failed": "कॉल विफल",
     "dialer_open_failed": "{phone} के लिए डायलर नहीं खोल सके।",
     "dialer_open_failed_generic": "डायलर नहीं खोल सके।",
-    "duplicate": "पहले से मौजूद है — डुप्लिकेट लगता है (जैसे इस टूर में वही बस नंबर)।"
+    "duplicate": "पहले से मौजूद है — डुप्लिकेट लगता है (जैसे इस टूर में वही बस नंबर)।",
+    "dismiss_cancel": "कैंसलेशन विनती खारिज नहीं की जा सकी।"
   },
   "enums": {
     "seat_type": {

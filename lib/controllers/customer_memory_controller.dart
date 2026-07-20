@@ -19,6 +19,13 @@ import 'auth_controller.dart';
 class CustomerMemoryController extends GetxController {
   final memories = <CustomerMemory>[].obs;
 
+  /// True when the last [load] could not reach the server — smartFetch swallows
+  /// its error to `[]` and trips [SyncService.lastReadFailed]. Surfaced so a
+  /// failed load is distinguishable from a genuinely-empty index. Memory is a
+  /// best-effort enhancement, so this drives a silent self-heal on reconnect,
+  /// NOT a blocking error/retry UI ("never block the app on it").
+  final loadFailed = false.obs;
+
   /// normalised phone → memory, rebuilt on every load/upsert for O(1) lookups.
   final _byPhone = <String, CustomerMemory>{};
 
@@ -32,6 +39,14 @@ class CustomerMemoryController extends GetxController {
   void onInit() {
     super.onInit();
     load();
+    // Best-effort self-heal: a first-launch load that failed (offline / timed
+    // out) re-runs once connectivity returns, so returning-customer priority and
+    // companion suggestions become available without any user action. Mirrors
+    // TourController's reaction to isOnline; guarded on [loadFailed] so we don't
+    // re-fetch on every connectivity flap once a load has succeeded.
+    ever(_sync.isOnline, (online) {
+      if (online && loadFailed.value) load();
+    });
   }
 
   /// (Re)load the current admin's memory rows. No-op on a non-admin session.
@@ -40,6 +55,7 @@ class CustomerMemoryController extends GetxController {
     if (!_auth.isAdmin || adminId == null) {
       memories.clear();
       _byPhone.clear();
+      loadFailed.value = false;
       return;
     }
     try {
@@ -50,10 +66,21 @@ class CustomerMemoryController extends GetxController {
         orderBy: 'updated_at',
         maxAge: 120000,
       );
+      // smartFetch returns `[]` on any failure (and trips lastReadFailed), so a
+      // blind assignAll would wipe the returning-customer index on a transient
+      // timeout. Distinguish a real load failure from a genuinely-empty result:
+      // on failure KEEP whatever memories are already held and just flag it.
+      if (_sync.lastReadFailed) {
+        loadFailed.value = true;
+        return;
+      }
       memories.assignAll(data.map((m) => CustomerMemory.fromMap(m)).toList());
       _rebuildIndex();
+      loadFailed.value = false;
     } catch (_) {
       // Best-effort — memory is an enhancement, never block the app on it.
+      // Keep held memories; just surface the failure for the reconnect retry.
+      loadFailed.value = true;
     }
   }
 

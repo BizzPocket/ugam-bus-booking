@@ -32,6 +32,14 @@ class CustomerRequestEntry {
   final int doubleSofa;
   final int singleSofa;
   final String? note;
+
+  /// Snapshot of the global pickup location the customer chose for this request
+  /// (id + name captured at submit time). Nullable — many riders pick no point.
+  /// The name is kept alongside the id so a later rename/retire of the global
+  /// pickup location never rewrites this device-local ticket.
+  final String? pickupLocationId;
+  final String? pickupLocationName;
+
   final TripType tripType;
   final String status;
   final List<SeatAssignment> assignedSeats;
@@ -44,6 +52,25 @@ class CustomerRequestEntry {
   /// provisional and may shuffle right up until the organiser locks the tour.
   /// Sourced server-side via the `booking_request_tour_locked` RPC on refresh.
   final bool tourLocked;
+
+  /// Whether the organiser has CONFIRMED this request (passengers.is_confirmed),
+  /// sourced server-side via `booking_request_status_lookup` on refresh
+  /// (migration 034). A confirmed request can no longer be self-cancelled — the
+  /// customer must phone the organiser instead.
+  final bool isConfirmed;
+
+  /// The organiser's phone (tour.createdBy), captured at submit so the
+  /// "Contact organiser to cancel" action can dial them even offline. Nullable
+  /// for legacy entries created before this field existed.
+  final String? organiserPhone;
+
+  /// Set once the customer has RAISED a cancellation request on a CONFIRMED /
+  /// seat-assigned booking (migration 035). Distinct from a completed cancel —
+  /// the organiser still has to approve it (which frees the seat). Sourced
+  /// server-side via `booking_request_status_lookup` on refresh; drives the
+  /// "Cancellation requested — awaiting organiser" state, replacing the old
+  /// dead-end "Call organiser" for a confirmed/seated booking.
+  final DateTime? cancelRequestedAt;
 
   CustomerRequestEntry({
     required this.id,
@@ -59,6 +86,8 @@ class CustomerRequestEntry {
     required this.doubleSofa,
     required this.singleSofa,
     this.note,
+    this.pickupLocationId,
+    this.pickupLocationName,
     this.tripType = TripType.roundTrip,
     this.status = 'pending',
     this.assignedSeats = const [],
@@ -66,9 +95,36 @@ class CustomerRequestEntry {
     required this.createdAt,
     this.lastRefreshedAt,
     this.tourLocked = false,
+    this.isConfirmed = false,
+    this.organiserPhone,
+    this.cancelRequestedAt,
   });
 
   bool get hasSeatsAssigned => assignedSeats.isNotEmpty;
+
+  /// A request is cancellable by the customer ONLY while purely pending — not
+  /// organiser-confirmed and with no seats assigned. Migration 034 enforces the
+  /// same gate server-side, so a stale screen can never cancel a confirmed one.
+  bool get canCancel =>
+      status == 'pending' && !hasSeatsAssigned && !isConfirmed;
+
+  /// True once the customer has raised a cancellation REQUEST (migration 035)
+  /// and is awaiting the organiser's approval.
+  bool get cancellationRequested => cancelRequestedAt != null;
+
+  /// A confirmed / seat-assigned booking can no longer be self-cancelled, but
+  /// the customer MAY request cancellation — offered only while no such request
+  /// is already pending and the booking isn't already cancelled. The mirror of
+  /// [canCancel] for the confirmed/seated case (migration 035 enforces the same
+  /// gate server-side).
+  bool get canRequestCancel =>
+      !isCancelled &&
+      !cancellationRequested &&
+      (isConfirmed || hasSeatsAssigned);
+
+  /// Both admin-decline ('rejected') and customer self-cancel ('cancelled') read
+  /// as "Cancelled" to the customer.
+  bool get isCancelled => status == 'rejected' || status == 'cancelled';
 
   /// Seats may only be shown once the tour is locked AND seats are assigned.
   /// Until the organiser locks the tour, assignments are provisional, so the
@@ -92,12 +148,17 @@ class CustomerRequestEntry {
     int? doubleSofa,
     int? singleSofa,
     String? note,
+    String? pickupLocationId,
+    String? pickupLocationName,
     TripType? tripType,
     String? status,
     List<SeatAssignment>? assignedSeats,
     DateTime? customerEditedAt,
     DateTime? lastRefreshedAt,
     bool? tourLocked,
+    bool? isConfirmed,
+    String? organiserPhone,
+    DateTime? cancelRequestedAt,
   }) {
     return CustomerRequestEntry(
       id: id,
@@ -113,6 +174,8 @@ class CustomerRequestEntry {
       doubleSofa: doubleSofa ?? this.doubleSofa,
       singleSofa: singleSofa ?? this.singleSofa,
       note: note ?? this.note,
+      pickupLocationId: pickupLocationId ?? this.pickupLocationId,
+      pickupLocationName: pickupLocationName ?? this.pickupLocationName,
       tripType: tripType ?? this.tripType,
       status: status ?? this.status,
       assignedSeats: assignedSeats ?? this.assignedSeats,
@@ -120,6 +183,9 @@ class CustomerRequestEntry {
       createdAt: createdAt,
       lastRefreshedAt: lastRefreshedAt ?? this.lastRefreshedAt,
       tourLocked: tourLocked ?? this.tourLocked,
+      isConfirmed: isConfirmed ?? this.isConfirmed,
+      organiserPhone: organiserPhone ?? this.organiserPhone,
+      cancelRequestedAt: cancelRequestedAt ?? this.cancelRequestedAt,
     );
   }
 
@@ -150,6 +216,8 @@ class CustomerRequestEntry {
     'double_sofa': doubleSofa,
     'single_sofa': singleSofa,
     if (note != null) 'note': note,
+    if (pickupLocationId != null) 'pickup_location_id': pickupLocationId,
+    if (pickupLocationName != null) 'pickup_location_name': pickupLocationName,
     'trip_type': tripType.storageKey,
     'status': status,
     'assigned_seats': assignedSeats.map((a) => a.toMap()).toList(),
@@ -159,6 +227,10 @@ class CustomerRequestEntry {
     if (lastRefreshedAt != null)
       'last_refreshed_at': lastRefreshedAt!.toIso8601String(),
     'tour_locked': tourLocked,
+    'is_confirmed': isConfirmed,
+    if (organiserPhone != null) 'organiser_phone': organiserPhone,
+    if (cancelRequestedAt != null)
+      'cancel_requested_at': cancelRequestedAt!.toIso8601String(),
   };
 
   factory CustomerRequestEntry.fromJson(Map<String, dynamic> m) {
@@ -176,6 +248,8 @@ class CustomerRequestEntry {
       doubleSofa: (m['double_sofa'] as int?) ?? 0,
       singleSofa: (m['single_sofa'] as int?) ?? 0,
       note: m['note'] as String?,
+      pickupLocationId: m['pickup_location_id'] as String?,
+      pickupLocationName: m['pickup_location_name'] as String?,
       tripType: TripType.fromString(m['trip_type'] as String?),
       status: (m['status'] as String?) ?? 'pending',
       assignedSeats: _parseAssignedSeats(m['assigned_seats']),
@@ -187,6 +261,11 @@ class CustomerRequestEntry {
           ? DateTime.tryParse(m['last_refreshed_at'] as String)
           : null,
       tourLocked: (m['tour_locked'] as bool?) ?? false,
+      isConfirmed: (m['is_confirmed'] as bool?) ?? false,
+      organiserPhone: m['organiser_phone'] as String?,
+      cancelRequestedAt: m['cancel_requested_at'] != null
+          ? DateTime.tryParse(m['cancel_requested_at'] as String)
+          : null,
     );
   }
 
@@ -203,7 +282,16 @@ class CustomerRequestEntry {
         final seatId = map['seatId']?.toString();
         final busId = map['busId']?.toString();
         if (seatId == null || busId == null) continue;
-        out.add(SeatAssignment(busId: busId, seatId: seatId));
+        // Keep the per-seat leg when the server stamped one (mixed-leg requests)
+        // so the customer's own one-way seat can render as a half — the coarse
+        // request tripType is the fallback where a seat has no leg.
+        out.add(SeatAssignment(
+          busId: busId,
+          seatId: seatId,
+          leg: map['leg'] != null
+              ? TripType.fromString(map['leg'].toString())
+              : null,
+        ));
       }
       // Legacy bare-string entries had no busId — they can't be rendered on a
       // layout, so we drop them rather than fabricate a fake busId.
@@ -295,10 +383,12 @@ class CustomerRequestsStore {
       return cancelled;
     }
     final row = Map<String, dynamic>.from(rows.first as Map);
-    // Seat assignments are provisional until the organiser locks the tour, so
-    // ask the server whether this request's tour is locked/completed. Any
-    // failure is treated as not-locked (seats stay hidden) — fail closed.
-    final locked = await _tourLocked(id);
+    // Seat assignments are provisional until the organiser locks the tour. The
+    // lock flag now rides on the SAME lookup row (migration 037) so one atomic
+    // read decides it; the legacy standalone RPC is only a fallback, and a
+    // transient failure can never revert an already-locked ticket. See
+    // [_resolveTourLocked].
+    final locked = await _resolveTourLocked(id, row, existing.tourLocked);
     final updated = existing.copyWith(
       status: (row['status'] as String?) ?? existing.status,
       assignedSeats: CustomerRequestEntry._parseAssignedSeats(
@@ -312,26 +402,99 @@ class CustomerRequestsStore {
           : existing.customerEditedAt,
       lastRefreshedAt: DateTime.now(),
       tourLocked: locked,
+      isConfirmed: (row['is_confirmed'] as bool?) ?? existing.isConfirmed,
+      cancelRequestedAt: row['cancel_requested_at'] != null
+          ? DateTime.tryParse(row['cancel_requested_at'] as String)
+          : existing.cancelRequestedAt,
     );
     await upsert(updated);
     return updated;
   }
 
-  /// Whether the request's tour has been locked (seats are final and may be
-  /// revealed). Goes through the `booking_request_tour_locked` SECURITY DEFINER
-  /// RPC since customers are anonymous and can't read tour status directly. Any
-  /// error or null result is treated as not-locked (seats stay hidden).
-  Future<bool> _tourLocked(String requestId) async {
+  /// Customer self-cancels a still-pending request. Routes through the
+  /// `booking_request_customer_cancel` SECURITY DEFINER RPC (migration 034),
+  /// which enforces the same not-confirmed / not-seated gate server-side. On a
+  /// server-confirmed cancel it marks the local entry 'cancelled' and clears any
+  /// stale seat data. Returns the updated entry, or null when the server refused
+  /// (already confirmed/seated) or the row is gone — the caller surfaces that.
+  Future<CustomerRequestEntry?> cancel(String id) async {
+    final existing = await get(id);
+    if (existing == null) return null;
+    final client = Supabase.instance.client;
+    final ok = await client.rpc(
+      'booking_request_customer_cancel',
+      params: {'p_id': id},
+    );
+    if (ok != true) return null;
+    final cancelled = existing.copyWith(
+      status: 'cancelled',
+      assignedSeats: const [],
+      tourLocked: false,
+      lastRefreshedAt: DateTime.now(),
+    );
+    await upsert(cancelled);
+    return cancelled;
+  }
+
+  /// Customer REQUESTS cancellation of a CONFIRMED / seat-assigned booking. This
+  /// is the confirmed/seated counterpart to [cancel]: it does NOT free the seat,
+  /// it only raises a request the organiser approves later. Routes through the
+  /// `booking_request_customer_request_cancel` SECURITY DEFINER RPC (migration
+  /// 035), which enforces the confirmed/seated gate server-side and mirrors the
+  /// marker onto the passenger row so the organiser sees it. On success it stamps
+  /// the local entry's [cancelRequestedAt] (status/seat untouched — the booking
+  /// stays live until the organiser acts) and returns it; returns null when the
+  /// server refused (still purely pending / already requested / gone) or on
+  /// error — the caller surfaces that.
+  Future<CustomerRequestEntry?> requestCancellation(String id) async {
+    final existing = await get(id);
+    if (existing == null) return null;
     final client = Supabase.instance.client;
     try {
-      final result = await client.rpc(
+      final ok = await client.rpc(
+        'booking_request_customer_request_cancel',
+        params: {'p_id': id},
+      );
+      if (ok != true) return null;
+    } catch (_) {
+      return null;
+    }
+    final updated = existing.copyWith(
+      cancelRequestedAt: DateTime.now(),
+      lastRefreshedAt: DateTime.now(),
+    );
+    await upsert(updated);
+    return updated;
+  }
+
+  /// Resolve whether the request's tour is locked (seats final, may be revealed)
+  /// during a refresh. Customers are anonymous and can't read tour status
+  /// directly, so the value is server-provided:
+  ///   1. Prefer the `tour_locked` column the single `booking_request_status_lookup`
+  ///      now returns inline (migration 037) — one atomic read, no extra round trip.
+  ///   2. Fall back to the legacy standalone `booking_request_tour_locked` RPC
+  ///      when that column is absent (pre-037 server).
+  ///   3. If neither yields a definite answer, KEEP the last known [previous]
+  ///      value rather than failing to false. A tour only ever advances
+  ///      locked → completed (never back), so a transient error must not flip an
+  ///      already-revealed ticket back to the "seats being finalized" state.
+  Future<bool> _resolveTourLocked(
+    String requestId,
+    Map<String, dynamic> row,
+    bool previous,
+  ) async {
+    final inline = row['tour_locked'];
+    if (inline is bool) return inline;
+    try {
+      final result = await Supabase.instance.client.rpc(
         'booking_request_tour_locked',
         params: {'p_id': requestId},
       );
-      return result as bool? ?? false;
+      if (result is bool) return result;
     } catch (_) {
-      return false;
+      // Fall through — keep the last known value below.
     }
+    return previous;
   }
 
   /// Refreshes every entry. Errors on individual rows are swallowed so a

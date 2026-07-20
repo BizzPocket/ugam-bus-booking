@@ -69,6 +69,32 @@ class Passenger {
   /// just drop off the active roster. Round-trip riders are never marked here.
   final bool journeyDone;
 
+  /// Snapshot of the global pickup location the customer chose for this request
+  /// (id + name captured at submit time). Nullable — many riders pick no point.
+  /// The name is stored alongside the id so a later rename/retire of the global
+  /// pickup location never rewrites this historical request.
+  final String? pickupLocationId;
+  final String? pickupLocationName;
+
+  /// Set when the customer self-cancels a still-pending request (migration 034).
+  /// The row is KEPT for history, but the app filters a cancelled passenger out
+  /// of every active roster / capacity calc (loading + realtime), so it stops
+  /// counting toward demand.
+  final DateTime? cancelledAt;
+
+  bool get isCancelled => cancelledAt != null;
+
+  /// Set when the customer REQUESTS cancellation of a CONFIRMED / seat-assigned
+  /// booking (migration 035). Mirror of the customer-side flag onto the row the
+  /// admin roster reads. UNLIKE [cancelledAt] this KEEPS the passenger on the
+  /// active roster/capacity — the organiser still has to APPROVE it (approval
+  /// removes the row and frees the seat). Until then it only drives the
+  /// "cancellation requested" badge, so it is deliberately NOT filtered out at
+  /// load / realtime.
+  final DateTime? cancelRequestedAt;
+
+  bool get isCancelRequested => cancelRequestedAt != null;
+
   final DateTime createdAt;
 
   Passenger({
@@ -90,6 +116,10 @@ class Passenger {
     this.priorityStatus = PriorityStatus.none,
     this.priorityReason,
     this.journeyDone = false,
+    this.pickupLocationId,
+    this.pickupLocationName,
+    this.cancelledAt,
+    this.cancelRequestedAt,
     DateTime? createdAt,
   }) : id = id ?? const Uuid().v4(),
        createdAt = createdAt ?? DateTime.now();
@@ -277,6 +307,10 @@ class Passenger {
       'priority_status': priorityStatus.name,
       'priority_reason': priorityReason,
       'journey_done': journeyDone,
+      'pickup_location_id': pickupLocationId,
+      'pickup_location_name': pickupLocationName,
+      'cancelled_at': cancelledAt?.toIso8601String(),
+      'cancel_requested_at': cancelRequestedAt?.toIso8601String(),
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -308,6 +342,14 @@ class Passenger {
       priorityStatus: PriorityStatus.fromString(map['priority_status'] as String?),
       priorityReason: map['priority_reason'] as String?,
       journeyDone: map['journey_done'] as bool? ?? false,
+      pickupLocationId: map['pickup_location_id'] as String?,
+      pickupLocationName: map['pickup_location_name'] as String?,
+      cancelledAt: map['cancelled_at'] != null
+          ? DateTime.tryParse(map['cancelled_at'].toString())
+          : null,
+      cancelRequestedAt: map['cancel_requested_at'] != null
+          ? DateTime.tryParse(map['cancel_requested_at'].toString())
+          : null,
       createdAt: _parseDate(map['created_at']),
     );
   }
@@ -370,6 +412,11 @@ class Passenger {
     PriorityStatus? priorityStatus,
     String? priorityReason,
     bool? journeyDone,
+    String? pickupLocationId,
+    String? pickupLocationName,
+    DateTime? cancelledAt,
+    DateTime? cancelRequestedAt,
+    bool clearCancelRequested = false,
   }) {
     return Passenger(
       id: id,
@@ -390,6 +437,14 @@ class Passenger {
       priorityStatus: priorityStatus ?? this.priorityStatus,
       priorityReason: priorityReason ?? this.priorityReason,
       journeyDone: journeyDone ?? this.journeyDone,
+      pickupLocationId: pickupLocationId ?? this.pickupLocationId,
+      pickupLocationName: pickupLocationName ?? this.pickupLocationName,
+      cancelledAt: cancelledAt ?? this.cancelledAt,
+      // `clearCancelRequested` wins so a dismiss can null the marker (plain
+      // copyWith can't set null through the `??` fallback).
+      cancelRequestedAt: clearCancelRequested
+          ? null
+          : (cancelRequestedAt ?? this.cancelRequestedAt),
       createdAt: createdAt,
     );
   }

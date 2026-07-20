@@ -368,21 +368,21 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
     if (tour.passengers.isNotEmpty && tour.buses.isEmpty) {
       return _HeroAction(
         tr('dashboard.attention_no_bus',
-            args: ['${tour.passengers.length}']),
+            namedArgs: {'n': '${tour.passengers.length}'}),
         urgent: true,
       );
     }
     if (tour.buses.isNotEmpty && cap.needsDecision > 0) {
       return _HeroAction(
         tr('dashboard.attention_seating_decisions',
-            args: ['${cap.needsDecision}']),
+            namedArgs: {'n': '${cap.needsDecision}'}),
         urgent: true,
       );
     }
     if (tour.buses.isNotEmpty && tour.pendingSeatsToAssign > 0) {
       return _HeroAction(
         tr('dashboard.attention_unassigned',
-            args: ['${tour.pendingSeatsToAssign}']),
+            namedArgs: {'n': '${tour.pendingSeatsToAssign}'}),
         urgent: true,
       );
     }

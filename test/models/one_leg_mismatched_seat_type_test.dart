@@ -81,9 +81,10 @@ void main() {
         assignedSeats: const [SeatAssignment(busId: 'bus1', seatId: 'DL1')],
         tripType: TripType.returnOnly,
       );
-      // One double-sofa berth (775) on a single leg → half = 387.5, not 775.
-      expect(bus.amountDueForSeat(rider, 'DL1'), closeTo(387.5, 1e-9));
-      expect(bus.amountDueFor(rider), closeTo(387.5, 1e-9));
+      // One double-sofa berth (775) on a single leg → half = 387.5, rounded to
+      // a whole rupee at source → 388 (not 775, and never a fractional due).
+      expect(bus.amountDueForSeat(rider, 'DL1'), closeTo(388, 1e-9));
+      expect(bus.amountDueFor(rider), closeTo(388, 1e-9));
     });
 
     test('outbound-only rider on an unrequested seater berth pays HALF', () {

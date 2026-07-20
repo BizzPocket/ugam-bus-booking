@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../controllers/pickup_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../controllers/user_controller.dart';
 import '../design/components/ugam_capacity_meter.dart';
+import '../design/group_color.dart' show kOneWayTint, kReturnTint;
 import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/passenger_group.dart';
@@ -77,6 +79,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
   @override
   void initState() {
     super.initState();
+    // Load the global pickup-location list once so cards can resolve the
+    // short code ("ST") beside each rider's pickup name. Guarded + idempotent.
+    if (Get.isRegistered<PickupController>()) {
+      Get.find<PickupController>().ensureLoaded();
+    }
     // Honour a deep-link target tour, falling back to the first tour when the
     // id is unknown (e.g. the tour was completed/removed since the link).
     final id = widget.initialTourId;
@@ -104,13 +111,12 @@ class _RequestsScreenState extends State<RequestsScreen> {
   }
 
   void _openAddRequest(Tour tour) {
-    // Once the tour is locked the allocation is final — admins/handlers can no
-    // longer add a new request. Tell them why rather than opening a form whose
-    // save the controller would silently refuse.
-    if (!tour.acceptsBookings) {
-      AppSnackBar.error(tr('errors.bookings_closed'));
-      return;
-    }
+    // Locking a tour closes it to CUSTOMERS only — the anonymous
+    // submit_booking_request RPC (migration 026/030) refuses a new request once
+    // the status is locked/completed. The ORGANISER, however, must still be able
+    // to add a rider by hand after locking (a late walk-in or phone booking), so
+    // the admin add form always opens; its save passes overrideLock (see
+    // _AddRequestForm._submit) to skip the acceptsBookings gate.
     UgamSheet.show(
       context,
       title: tr('requests.sheet.title'),
@@ -732,27 +738,24 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     final cap = computeTourCapacity(tour);
     final free = cap.free;
     final needsDecision = cap.needsDecision;
-    // Per-leg one-way surplus, derived from the SAME plan as [free] (never from
-    // raw demand, which counted the unseatable needsDecision rider and inverted
-    // the reclaim direction). At most one is non-zero per bus, but across buses
-    // both can be — so both are surfaced.
-    final goOnlyFree = cap.goOnlyFree;
-    final retOnlyFree = cap.retOnlyFree;
-    // GENUINELY-empty berths per seat type, read from the SAME engine plan as
-    // [free] (see [TourCapacity.freeByType]). The old `capacity − requested
-    // demand` math lived here and could go NEGATIVE (e.g. "Single Sofa −2") when
-    // riders asked for more of a type than exists — disagreeing with the engine
-    // headline. Over-demand now surfaces as [needsDecision], never a phantom
-    // negative. Only types the buses actually have are shown.
-    final typeFree = <(String, int)>[
+    // GENUINELY-empty WHOLE tiles per seat type, split by open leg, read from
+    // the SAME engine plan as [free] (see [TourCapacity.freeByType]). Each type
+    // carries round / go-only / return-only counts, so the by-type row shows the
+    // agent both HOW MANY of each seat are open AND which legs they're open on —
+    // the one-way surplus now lives per type instead of a separate tour-wide
+    // reclaim line. Only types the buses actually have are shown.
+    final typeFree = <(String, SeatTypeFree)>[
       for (final st in const [
         SeatType.singleSofa,
         SeatType.doubleSofa,
         SeatType.seater,
       ])
         if ((cap.capByType[st] ?? 0) > 0)
-          (st.displayName, cap.freeByType[st] ?? 0),
+          (st.displayName, cap.freeByType[st] ?? const SeatTypeFree()),
     ];
+    // Show the go/return colour caption only when some type actually has a
+    // one-way-only opening — the common round-trip case stays clean.
+    final anyOneWay = typeFree.any((t) => t.$2.hasOneWay);
 
     // The bar is a quiet soft card — depth from fill, not a border (the look
     // is borderless on neutral dark surfaces). Only the no-bus *attention*
@@ -861,54 +864,37 @@ class _CapacityBannerState extends State<_CapacityBanner> {
               // free whole-seat counts, so the old three-segment "requested /
               // seats / free" row (which leaked the fractional 1.5) is gone.
               if (_expanded) ...[
-                // Per-leg reclaim hint — only meaningful when one-way riders make
-                // the two legs differ. Shows the opposite-leg seats still open,
-                // so the agent can fill "going-out-full, coming-back-empty"
-                // seats. Plan-derived, so the reclaim direction agrees with the
-                // chart instead of the old raw-demand reclaim that could invert.
-                if (!noBus && (goOnlyFree > 0 || retOnlyFree > 0)) ...[
-                  const SizedBox(height: UgamSpacing.sm + 2),
-                  Row(
-                    children: [
-                      const Spacer(),
-                      Text(
-                        [
-                          if (goOnlyFree > 0)
-                            tr('requests.capacity.reclaim_go',
-                                namedArgs: {'n': '$goOnlyFree'}),
-                          if (retOnlyFree > 0)
-                            tr('requests.capacity.reclaim_ret',
-                                namedArgs: {'n': '$retOnlyFree'}),
-                        ].join(' · '),
-                        style: UgamText.micro.copyWith(color: c.good),
-                      ),
-                    ],
-                  ),
-                ],
-                // Free-by-type breakdown — which KIND of seat is still open, so
-                // the agent can match a Double Sofa request to a free double
-                // (not just any empty berth). Only shown when the bus mixes seat
+                // Free-by-type breakdown — which KIND of seat is still open AND
+                // on which legs, so the agent can match a request precisely: a
+                // Double Sofa pair to a round-trip-free double, a return-only
+                // rider to a return-only-open seat. Each pill shows the round
+                // count plus cyan (go-only) / violet (return-only) leg badges;
+                // the one-way surplus lives here per type instead of a separate
+                // tour-wide reclaim line. Only shown when the bus mixes seat
                 // types; a single-type bus already says it in the headline free.
                 if (!noBus && typeFree.length >= 2) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: UgamSpacing.sm + 2),
                   Row(
                     children: [
                       Text(
                         tr('requests.capacity.free_by_type'),
                         style: UgamText.micro.copyWith(color: c.ink3),
                       ),
-                      const SizedBox(width: UgamSpacing.sm),
-                      Expanded(
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          alignment: WrapAlignment.end,
-                          children: [
-                            for (final (label, free) in typeFree)
-                              _TypeFreePill(c: c, label: label, free: free),
-                          ],
-                        ),
-                      ),
+                      const Spacer(),
+                      // Colour key for the leg badges — shown only when some type
+                      // actually has a going-/returning-only opening, so the
+                      // common round-trip case stays uncluttered.
+                      if (anyOneWay) const _LegCaption(),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    alignment: WrapAlignment.start,
+                    children: [
+                      for (final (label, free) in typeFree)
+                        _TypeFreePill(c: c, label: label, free: free),
                     ],
                   ),
                 ],
@@ -922,12 +908,14 @@ class _CapacityBannerState extends State<_CapacityBanner> {
 }
 
 /// One "Single Sofa · 2" free-seat pill in the capacity banner's by-type row.
-/// The count is tinted green when seats remain, red when that type is
-/// over-subscribed, muted when exactly full.
+/// The primary number is the ROUND-TRIP-free count (green when seats remain,
+/// muted when none); a going-only or return-only surplus rides alongside it as a
+/// cyan / violet leg badge with a directional arrow, so the agent sees at a
+/// glance which legs each open seat can still take.
 class _TypeFreePill extends StatelessWidget {
   final UgamColorSet c;
   final String label;
-  final int free;
+  final SeatTypeFree free;
   const _TypeFreePill({
     required this.c,
     required this.label,
@@ -936,7 +924,7 @@ class _TypeFreePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tone = free > 0 ? c.good : (free < 0 ? c.danger : c.ink3);
+    final roundTone = free.round > 0 ? c.good : c.ink3;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -951,11 +939,62 @@ class _TypeFreePill extends StatelessWidget {
             style: UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
           ),
           const SizedBox(width: 5),
+          // Round-trip-free — the seats sellable as a fresh both-legs booking.
           Text(
-            '$free',
+            '${free.round}',
             style: UgamText.tabular(
               UgamText.micro.copyWith(
-                color: tone,
+                color: roundTone,
+                fontWeight: FontWeight.w700,
+                fontSize: 11,
+              ),
+            ),
+          ),
+          // Going-only surplus (a return rider holds the seat coming back): a
+          // GO-cyan badge with a forward arrow → an outbound-only rider fits.
+          if (free.goOnly > 0)
+            _LegBadge(
+              tint: kOneWayTint,
+              icon: Icons.arrow_forward_rounded,
+              count: free.goOnly,
+            ),
+          // Return-only surplus (an outbound rider holds it going): a RET-violet
+          // badge with a back arrow ← a return-only rider fits.
+          if (free.retOnly > 0)
+            _LegBadge(
+              tint: kReturnTint,
+              icon: Icons.arrow_back_rounded,
+              count: free.retOnly,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A small leg-tinted "→ 2" badge inside a [_TypeFreePill]: the arrow gives the
+/// direction (forward = going, back = returning), the colour reinforces it (GO
+/// cyan / RET violet — the same tints the seat chart uses for one-way seats).
+class _LegBadge extends StatelessWidget {
+  final Color tint;
+  final IconData icon;
+  final int count;
+  const _LegBadge({required this.tint, required this.icon, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 5),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: tint),
+          const SizedBox(width: 1),
+          Text(
+            '$count',
+            style: UgamText.tabular(
+              UgamText.micro.copyWith(
+                color: tint,
                 fontWeight: FontWeight.w700,
                 fontSize: 11,
               ),
@@ -963,6 +1002,40 @@ class _TypeFreePill extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Colour key for the by-type leg badges: a cyan "Go only" swatch + a violet
+/// "Return only" swatch, reusing the shared seat-legend wording. Rendered only
+/// when some type has a one-way-only opening, so it never clutters the common
+/// round-trip case. Uses the same GO-cyan / RET-violet tints as the seat chart.
+class _LegCaption extends StatelessWidget {
+  const _LegCaption();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    Widget key(Color tint, String label) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: tint, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 3),
+            Text(label,
+                style: UgamText.micro.copyWith(color: c.ink3, fontSize: 9)),
+          ],
+        );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        key(kOneWayTint, tr('seat_legend.go')),
+        const SizedBox(width: 8),
+        key(kReturnTint, tr('seat_legend.ret')),
+      ],
     );
   }
 }
@@ -1399,6 +1472,46 @@ class _RequestCard extends StatelessWidget {
                     behavior: HitTestBehavior.opaque,
                     child: _GroupBadge(group: group, c: c),
                   ),
+                if (passenger.pickupLocationName != null &&
+                    passenger.pickupLocationName!.isNotEmpty)
+                  // "PICKUP: ST · SURAT" when a short code exists, else the
+                  // name-only "PICKUP: SURAT". Wrapped in Obx so the code fills
+                  // in if the pickup list finishes loading after first paint;
+                  // degrades to name-only when the controller isn't registered.
+                  Builder(
+                    builder: (_) {
+                      final pickup = Get.isRegistered<PickupController>()
+                          ? Get.find<PickupController>()
+                          : null;
+                      final name = passenger.pickupLocationName;
+                      UgamReqChip chip(String? code) {
+                        final tail = (code == null || code.isEmpty)
+                            ? name
+                            : '$code · $name';
+                        return UgamReqChip(
+                          label: '${tr('pickup.reflect_label')}: $tail'
+                              .toUpperCase(),
+                          variant: UgamChipVariant.neutral,
+                        );
+                      }
+
+                      // With no controller there is nothing observable to
+                      // watch, so render the name-only chip directly — an Obx
+                      // whose closure reads no observable throws.
+                      if (pickup == null) return chip(null);
+                      return Obx(
+                        () => chip(pickup.codeFor(passenger.pickupLocationId)),
+                      );
+                    },
+                  ),
+                // Customer has asked to cancel this confirmed/seated booking
+                // (migration 035). Warm badge so the organiser triages it; the
+                // ACTION (approve → free seat) lives on the card's primary CTA.
+                if (passenger.isCancelRequested)
+                  UgamReqChip(
+                    label: tr('requests.chip.cancel_requested').toUpperCase(),
+                    variant: UgamChipVariant.warm,
+                  ),
                 ..._assignedSeatChips(),
               ];
               if (chips.isEmpty) return const <Widget>[];
@@ -1735,6 +1848,77 @@ class _CardActions extends StatelessWidget {
     }
   }
 
+  /// Organiser APPROVES a customer's cancellation request (migration 035). This
+  /// reuses the exact decline/free-seat mechanism: `removePassenger` deletes the
+  /// passengers row, which inherently frees any assigned seat (seats live as the
+  /// `assigned_seats` jsonb column ON that row) and drops the rider from the
+  /// roster — the seating engine recomputes capacity automatically. Notifies the
+  /// customer via the same WhatsApp cancellation sender the decline path uses.
+  Future<void> _approveCancellation(BuildContext context) async {
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('requests.approve_cancel_dialog.title'),
+      message: tr(
+        'requests.approve_cancel_dialog.body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('requests.approve_cancel_dialog.confirm'),
+      destructive: true,
+      confirmIcon: Icons.check_rounded,
+    );
+    if (!confirmed) return;
+    await _ctrl.removePassenger(tour.id, passenger.id);
+    var waFailed = false;
+    try {
+      final wa = await WhatsAppOutbound().sendRequestCancelled(
+        tour: tour,
+        passenger: passenger,
+      );
+      waFailed = !wa.anySent;
+    } catch (_) {
+      waFailed = true;
+    }
+    AppSnackBar.success(
+      tr(
+        'requests.snack.cancel_approved_body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      title: tr('requests.snack.cancel_approved_title'),
+    );
+    if (waFailed) {
+      AppSnackBar.warning(tr('requests.snack.cancel_approved_wa_failed'));
+    }
+  }
+
+  /// Organiser DISMISSES the customer's cancellation request — the counterpart
+  /// to approving. Keeps the passenger on the tour and clears the marker on both
+  /// rows (migration 036), so this card reverts to its normal state and the
+  /// customer's app drops the "cancellation requested" banner. A quiet keep — no
+  /// WhatsApp is sent (the organiser typically tells the customer directly).
+  Future<void> _dismissCancellation(BuildContext context) async {
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('requests.dismiss_cancel_dialog.title'),
+      message: tr(
+        'requests.dismiss_cancel_dialog.body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('requests.dismiss_cancel_dialog.confirm'),
+      confirmIcon: Icons.undo_rounded,
+    );
+    if (!confirmed) return;
+    await _ctrl.dismissCancellationRequest(tour.id, passenger.id);
+    AppSnackBar.success(
+      tr(
+        'requests.snack.cancel_dismissed_body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      title: tr('requests.snack.cancel_dismissed_title'),
+    );
+  }
+
   void _openAssignment() {
     Get.toNamed(
       AppRoutes.seatAssignment,
@@ -1797,8 +1981,8 @@ class _CardActions extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 40,
-        height: 40,
+        width: 44,
+        height: 44,
         decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
         alignment: Alignment.center,
         child: Icon(icon, size: 18, color: iconColor),
@@ -1816,7 +2000,7 @@ class _CardActions extends StatelessWidget {
     // Assigned uses the muted "good" fill; every other state uses the accent.
     final bool primaryIsGood = isAssigned;
     final Widget secondary;
-    final List<_MenuItem> menu;
+    List<_MenuItem> menu;
 
     final editItem = _MenuItem(
       tr('requests.action.edit_request'),
@@ -1828,6 +2012,17 @@ class _CardActions extends StatelessWidget {
       Icons.close_rounded,
       () => _confirmDecline(context),
       isDanger: true,
+    );
+    // Priority toggle — moved out of the crowded card row into the overflow
+    // menu (label flips on the current priority state).
+    final priorityItem = _MenuItem(
+      passenger.isPriorityApproved
+          ? tr('requests.action.remove_priority')
+          : tr('requests.action.mark_priority'),
+      passenger.isPriorityApproved
+          ? Icons.star_rounded
+          : Icons.star_outline_rounded,
+      () => _togglePriority(context),
     );
     // Assign this passenger to an EXISTING cross-booking group (or change/remove
     // it) without leaving Requests. Group CREATION still lives in the single
@@ -1951,18 +2146,55 @@ class _CardActions extends StatelessWidget {
       ];
     }
 
+    // A pending customer cancellation request (migration 035) overrides the
+    // primary CTA into a warm "Approve cancellation" — the organiser's decision
+    // is the salient action. Approving reuses removePassenger (frees the seat +
+    // drops the row), matching today's decline. Every other affordance (the
+    // priority toggle, the secondary circle, the overflow menu) is untouched, so
+    // the normal state actions are still reachable while the request is pending.
+    final bool cancelRequested = passenger.isCancelRequested;
+    final String effPrimaryLabel = cancelRequested
+        ? tr('requests.action.approve_cancel')
+        : primaryLabel;
+    final IconData effPrimaryIcon =
+        cancelRequested ? Icons.event_busy_rounded : primaryIcon;
+    final VoidCallback effPrimaryAction =
+        cancelRequested ? () => _approveCancellation(context) : primaryAction;
+
+    // While a cancellation is pending, the primary CTA approves it; the overflow
+    // menu gains a "Keep booking" entry so the organiser can dismiss the request
+    // and keep the passenger without cluttering the card row.
+    if (cancelRequested) {
+      menu = [
+        _MenuItem(
+          tr('requests.action.dismiss_cancel'),
+          Icons.undo_rounded,
+          () => _dismissCancellation(context),
+        ),
+        ...menu,
+      ];
+    }
+
+    // Priority toggle rides in the overflow menu for every state (it used to be
+    // an always-present third circle in the card row).
+    menu = [...menu, priorityItem];
+
     // Card primary is TONAL (fill + coloured ink), never solid gold — solid
     // champagne is reserved for the screen's single bottom "Seats" CTA, so the
-    // eye has one focal point. Assigned keeps the emerald "good" tone; every
-    // other state uses the champagne accent. This unifies all four states.
-    final Color primaryTone = primaryIsGood ? c.good : c.accent;
-    final Color primaryFill = primaryIsGood ? c.goodFill : c.accentFill;
+    // eye has one focal point. Assigned keeps the emerald "good" tone; a pending
+    // cancellation uses warm; every other state uses the champagne accent.
+    final Color primaryTone = cancelRequested
+        ? c.warm
+        : (primaryIsGood ? c.good : c.accent);
+    final Color primaryFill = cancelRequested
+        ? c.warmFill
+        : (primaryIsGood ? c.goodFill : c.accentFill);
 
     return Row(
       children: [
         Expanded(
           child: GestureDetector(
-            onTap: primaryAction,
+            onTap: effPrimaryAction,
             behavior: HitTestBehavior.opaque,
             child: Container(
               height: 40,
@@ -1975,11 +2207,11 @@ class _CardActions extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(primaryIcon, size: 16, color: primaryTone),
+                  Icon(effPrimaryIcon, size: 16, color: primaryTone),
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                      primaryLabel,
+                      effPrimaryLabel,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: UgamText.bodyStrong.copyWith(
@@ -1994,23 +2226,14 @@ class _CardActions extends StatelessWidget {
           ),
         ),
         const SizedBox(width: UgamSpacing.sm),
-        // Quick priority toggle — gold star when this booking is priority.
-        _circleButton(
-          icon: passenger.isPriorityApproved
-              ? Icons.star_rounded
-              : Icons.star_outline_rounded,
-          fill: passenger.isPriorityApproved ? c.warmFill : c.cardElev,
-          iconColor: passenger.isPriorityApproved ? c.warm : c.ink2,
-          onTap: () => _togglePriority(context),
-          tooltip: tr('requests.chip.priority'),
-        ),
-        const SizedBox(width: UgamSpacing.sm),
-        // Per-state secondary action (Waitlist / Back to New / WhatsApp).
+        // Per-state secondary action (Waitlist / Back to New / WhatsApp). The
+        // priority toggle used to sit here as a third circle; it now lives in
+        // the overflow menu so the row stays primary + one secondary + menu.
         secondary,
         const SizedBox(width: UgamSpacing.sm),
         Container(
-          width: 40,
-          height: 40,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
           child: PopupMenuButton<_MenuItem>(
             tooltip: tr('requests.action.more_actions'),
@@ -2097,8 +2320,17 @@ class _AddRequestFormState extends State<_AddRequestForm> {
         requestLines: data.lines,
         note: data.note,
         tripType: data.tripType,
+        pickupLocationId: data.pickupLocationId,
+        pickupLocationName: data.pickupLocationName,
       );
-      await Get.find<TourController>().addPassenger(widget.tour.id, passenger);
+      await Get.find<TourController>().addPassenger(
+        widget.tour.id,
+        passenger,
+        // The organiser is adding a rider by hand — bypass the acceptsBookings
+        // gate so a locked tour can still take a late walk-in/phone booking.
+        // Customers stay blocked at the submit_booking_request RPC (026/030).
+        overrideLock: true,
+      );
       // Remember this customer in the admin's directory so the name
       // autocompletes next time — covers people who aren't in the phonebook.
       // rememberContact wants the RAW 10-digit phone.
@@ -2126,41 +2358,48 @@ class _AddRequestFormState extends State<_AddRequestForm> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            tr(
-              'requests.sheet.subtitle',
-              namedArgs: {'tourTitle': widget.tour.title},
+    // Tapping empty space unfocuses the name field, which dismisses the
+    // contact-autocomplete dropdown (opaque so gaps between fields count as
+    // taps; the scroll view still wins drags and fields still take their taps).
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      behavior: HitTestBehavior.opaque,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              tr(
+                'requests.sheet.subtitle',
+                namedArgs: {'tourTitle': widget.tour.title},
+              ),
+              style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
             ),
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          BookingCaptureForm(
-            key: _formKey,
-            fromCity: widget.tour.fromCity,
-            toCity: widget.tour.toCity,
-            enableContacts: true,
-            maxPerType: 10,
-            onChanged: () {
-              final n = _formKey.currentState?.totalSeats ?? 0;
-              if (n != _seatCount) setState(() => _seatCount = n);
-            },
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          UgamCTA(
-            label: _saving
-                ? tr('requests.sheet.saving')
-                : tr('requests.sheet.save'),
-            leadingIcon: Icons.check_rounded,
-            trailingValue: _seatCount > 0 ? '$_seatCount' : null,
-            loading: _saving,
-            onPressed: _submit,
-          ),
-        ],
+            const SizedBox(height: UgamSpacing.lg),
+            BookingCaptureForm(
+              key: _formKey,
+              fromCity: widget.tour.fromCity,
+              toCity: widget.tour.toCity,
+              enableContacts: true,
+              maxPerType: 10,
+              onChanged: () {
+                final n = _formKey.currentState?.totalSeats ?? 0;
+                if (n != _seatCount) setState(() => _seatCount = n);
+              },
+            ),
+            const SizedBox(height: UgamSpacing.lg),
+            UgamCTA(
+              label: _saving
+                  ? tr('requests.sheet.saving')
+                  : tr('requests.sheet.save'),
+              leadingIcon: Icons.check_rounded,
+              trailingValue: _seatCount > 0 ? '$_seatCount' : null,
+              loading: _saving,
+              onPressed: _submit,
+            ),
+          ],
+        ),
       ),
     );
   }

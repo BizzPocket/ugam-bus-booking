@@ -10,7 +10,6 @@ import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../utils/app_snackbar.dart';
-import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/time_format.dart';
@@ -28,17 +27,6 @@ class ManageBusesScreen extends StatelessWidget {
   const ManageBusesScreen({super.key, required this.tourId});
 
   TourController get _tourCtrl => Get.find<TourController>();
-
-  /// Localized departure(-return) label, e.g. `12 Jun` or `12 Jun–14`.
-  /// Month names follow the active app locale via [Formatters.formatDateShort].
-  String _formatDateRange(BuildContext context, Tour tour) {
-    final locale = context.locale.languageCode;
-    var label = Formatters.formatDateShort(tour.departureDate, locale: locale);
-    if (tour.returnDate != null) {
-      label += '–${tour.returnDate!.day}';
-    }
-    return label;
-  }
 
   /// Opens a sheet with the per-bus actions: edit, call the driver, delete.
   void _openBusMenu(BuildContext context, Tour tour, Bus bus) {
@@ -238,8 +226,7 @@ class ManageBusesScreen extends StatelessWidget {
             children: [
               UgamAppBar(
                 title: tr('manage_buses.title'),
-                subtitle:
-                    '${tour.title} · ${_formatDateRange(context, tour)}  ·  $summaryLine',
+                subtitle: summaryLine,
               ),
               const SizedBox(height: UgamSpacing.sm),
               Expanded(

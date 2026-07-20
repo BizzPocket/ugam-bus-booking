@@ -6,6 +6,7 @@ import '../components/seat_chart_tile.dart';
 import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
+import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 
 /// Read-only seat layout viewer for the customer "My Requests" screen.
@@ -117,7 +118,8 @@ class _CustomerSeatLayoutSheetState extends State<_CustomerSeatLayoutSheet> {
       );
     }
 
-    final mySeats = widget.entry.assignedSeats;
+    final entry = widget.entry;
+    final mySeats = entry.assignedSeats;
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -126,11 +128,14 @@ class _CustomerSeatLayoutSheetState extends State<_CustomerSeatLayoutSheet> {
       separatorBuilder: (_, _) => const SizedBox(height: UgamSpacing.lg),
       itemBuilder: (_, i) {
         final bus = _buses[i];
-        final mineOnThisBus = mySeats
-            .where((s) => s.busId == bus.id)
-            .map((s) => s.seatId)
-            .toSet();
-        return _BusLayoutCard(bus: bus, mySeatIds: mineOnThisBus);
+        // seatId → the leg the customer holds it for. Per-seat leg when stamped
+        // (mixed-leg requests), else the request's overall trip type — so a
+        // one-way rider's seat renders half instead of a full accent chair.
+        final mineOnThisBus = <String, TripType>{
+          for (final s in mySeats.where((s) => s.busId == bus.id))
+            s.seatId: s.leg ?? entry.tripType,
+        };
+        return _BusLayoutCard(bus: bus, mySeatLegs: mineOnThisBus);
       },
     );
   }
@@ -138,9 +143,12 @@ class _CustomerSeatLayoutSheetState extends State<_CustomerSeatLayoutSheet> {
 
 class _BusLayoutCard extends StatefulWidget {
   final Bus bus;
-  final Set<String> mySeatIds;
 
-  const _BusLayoutCard({required this.bus, required this.mySeatIds});
+  /// seatId → the leg the customer holds that seat for (drives the half render
+  /// for one-way seats). The keys are the customer's own seats on this bus.
+  final Map<String, TripType> mySeatLegs;
+
+  const _BusLayoutCard({required this.bus, required this.mySeatLegs});
 
   @override
   State<_BusLayoutCard> createState() => _BusLayoutCardState();
@@ -191,13 +199,15 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
                   // never shown. The customer's own seats highlight in accent;
                   // all other seats read as a neutral anonymous tile.
                   final isMine = cell.seatId != null &&
-                      widget.mySeatIds.contains(cell.seatId);
+                      widget.mySeatLegs.containsKey(cell.seatId);
                   return SeatChartTile(
                     cell: cell,
                     occupants: const [],
                     groupColors: const GroupColorResolver({}),
                     anonymous: true,
                     mine: isMine,
+                    mineLeg:
+                        isMine ? widget.mySeatLegs[cell.seatId] : null,
                   );
                 },
               ),
@@ -212,7 +222,7 @@ class _BusLayoutCardState extends State<_BusLayoutCard> {
 
   Widget _busHeader() {
     final c = UgamColors.of(context);
-    final mine = widget.mySeatIds.toList()..sort();
+    final mine = widget.mySeatLegs.keys.toList()..sort();
     return Row(
       children: [
         Icon(

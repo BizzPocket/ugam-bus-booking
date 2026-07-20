@@ -2,12 +2,15 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
+import '../services/sync_service.dart';
+import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
@@ -39,8 +42,24 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   final _store = CustomerRequestsStore();
   bool _loading = true;
   bool _refreshing = false;
+
+  /// True when we have nothing to show AND the device is offline — i.e. a fresh
+  /// device that can't reach the server. Distinguishes a real load failure from
+  /// a genuinely-empty journal so we surface a retry instead of a false "no
+  /// requests yet" blank. The journal is device-local (SharedPreferences), so
+  /// once there ARE cached tickets a network hiccup never blanks them — this
+  /// only ever fires while [_entries] is empty.
+  bool _loadFailed = false;
   List<CustomerRequestEntry> _entries = const [];
   _StatusFilter _filter = _StatusFilter.all;
+
+  /// Connectivity signal for the load-failure surface. The requests store talks
+  /// to Supabase directly (not via SyncService), so it never trips
+  /// `lastReadFailed`; [SyncService.isOnline] is the honest "definitely offline"
+  /// signal available here. Nullable/guarded so the screen never hard-depends on
+  /// the service being registered.
+  SyncService? get _sync =>
+      Get.isRegistered<SyncService>() ? Get.find<SyncService>() : null;
 
   /// Cached handler status per request id. Populated once per entry set so the
   /// `isRequestHandler` RPC is not re-fired on every rebuild.
@@ -91,10 +110,19 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
     try {
       final fresh = await _store.refreshAll();
       if (!mounted) return;
-      setState(() => _entries = fresh);
+      // Only a genuine can't-reach-the-server state with nothing to show should
+      // read as a failure; a populated (even if stale) list stays on screen and
+      // an empty journal on a live connection is the normal "no requests" empty.
+      final offline = _sync?.isOnline.value == false;
+      setState(() {
+        _entries = fresh;
+        _loadFailed = fresh.isEmpty && offline;
+      });
       _resolveHandlers(fresh);
     } catch (_) {
-      // Cached list is still usable.
+      // Cached list is still usable; only flag a failure when there is nothing
+      // already on screen to keep.
+      if (mounted) setState(() => _loadFailed = _entries.isEmpty);
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
@@ -151,15 +179,11 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
     final live = _live;
     switch (_filter) {
       case _StatusFilter.pending:
-        return live
-            .where((e) => e.status == 'pending' && !e.hasSeatsAssigned)
-            .toList();
+        return live.where(_isPending).toList();
       case _StatusFilter.confirmed:
-        return live
-            .where((e) => e.hasSeatsAssigned || e.status == 'accepted')
-            .toList();
+        return live.where(_isConfirmedish).toList();
       case _StatusFilter.cancelled:
-        return live.where((e) => e.status == 'rejected').toList();
+        return live.where((e) => e.isCancelled).toList();
       case _StatusFilter.all:
         return live;
     }
@@ -198,30 +222,18 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                   currentIndex: _filter.index,
                   onChanged: (i) =>
                       setState(() => _filter = _StatusFilter.values[i]),
+                  // Count badges intentionally omitted: the badge stole width
+                  // and truncated the longer gu/hi status words (પુષ્ટિ થયેલ /
+                  // रद्द). The label must always be fully readable, so the tab
+                  // shows the word alone and the list itself conveys the count.
                   items: [
-                    UgamTabItem(
-                      label: tr('customer_my_requests.tab_all'),
-                      count: live.length,
-                    ),
-                    UgamTabItem(
-                      label: tr('customer_my_requests.tab_pending'),
-                      count: live
-                          .where(
-                            (e) => e.status == 'pending' && !e.hasSeatsAssigned,
-                          )
-                          .length,
-                    ),
+                    UgamTabItem(label: tr('customer_my_requests.tab_all')),
+                    UgamTabItem(label: tr('customer_my_requests.tab_pending')),
                     UgamTabItem(
                       label: tr('customer_my_requests.tab_confirmed'),
-                      count: live
-                          .where(
-                            (e) => e.hasSeatsAssigned || e.status == 'accepted',
-                          )
-                          .length,
                     ),
                     UgamTabItem(
                       label: tr('customer_my_requests.tab_cancelled'),
-                      count: live.where((e) => e.status == 'rejected').length,
                     ),
                   ],
                 ),
@@ -230,6 +242,8 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
             Expanded(
               child: _loading
                   ? _LoadingShimmer()
+                  : (_loadFailed && live.isEmpty)
+                  ? UgamEmpty.error(onRetry: _refresh)
                   : live.isEmpty
                   ? UgamEmpty(
                       icon: Icons.inbox_outlined,
@@ -265,6 +279,9 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                           onEdit: () => _openEdit(_visible[i]),
                           onViewChart: () => _openFullChart(_visible[i]),
                           onAddAnother: () => _openAddAnother(_visible[i]),
+                          onCancel: () => _cancel(_visible[i]),
+                          onRequestCancel: () => _requestCancel(_visible[i]),
+                          onContact: () => _contactOrganiser(_visible[i]),
                         ),
                       ),
                     ),
@@ -296,6 +313,113 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       () => HandlerBusChartScreen(requestId: entry.id),
       transition: Transition.cupertino,
     );
+  }
+
+  /// Customer self-cancel — only offered while [CustomerRequestEntry.canCancel].
+  /// Confirms, calls the server RPC (which re-checks the gate), then refreshes.
+  /// A server refusal (the request was just confirmed) degrades to the
+  /// contact-organiser message instead of a silent no-op.
+  Future<void> _cancel(CustomerRequestEntry entry) async {
+    HapticFeedback.selectionClick();
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('customer_my_requests.cancel_title'),
+      message: tr('customer_my_requests.cancel_body'),
+      confirmLabel: tr('customer_my_requests.cancel_confirm'),
+      cancelLabel: tr('customer_my_requests.cancel_keep'),
+      confirmIcon: Icons.close_rounded,
+      destructive: true,
+    );
+    if (ok != true) return;
+    final result = await _store.cancel(entry.id);
+    if (!mounted) return;
+    if (result == null) {
+      AppSnackBar.warning(tr('customer_my_requests.cancel_blocked'));
+      _refresh();
+      return;
+    }
+    AppSnackBar.success(tr('customer_my_requests.cancel_done'));
+    _refresh();
+  }
+
+  /// Customer REQUESTS cancellation of a CONFIRMED / seat-assigned booking. This
+  /// does NOT free the seat — it raises a request the organiser approves later
+  /// (the purely-pending instant self-cancel stays a separate path). On success
+  /// it also hands the ask to the organiser over WhatsApp (the in-app flag drives
+  /// the organiser push; this puts the request in their chat too), then refreshes.
+  /// A server refusal degrades to a warning instead of a silent no-op.
+  Future<void> _requestCancel(CustomerRequestEntry entry) async {
+    HapticFeedback.selectionClick();
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('customer_my_requests.request_cancel_title'),
+      message: tr('customer_my_requests.request_cancel_body'),
+      confirmLabel: tr('customer_my_requests.request_cancel_confirm'),
+      cancelLabel: tr('customer_my_requests.cancel_keep'),
+      confirmIcon: Icons.event_seat_outlined,
+      destructive: true,
+    );
+    if (ok != true) return;
+    final result = await _store.requestCancellation(entry.id);
+    if (!mounted) return;
+    if (result == null) {
+      AppSnackBar.warning(tr('customer_my_requests.request_cancel_blocked'));
+      _refresh();
+      return;
+    }
+    // Hand the request off to the organiser over WhatsApp too. Prefer the phone
+    // captured on the entry, falling back to the live tour's createdBy — the
+    // same resolution _contactOrganiser uses.
+    Tour? tour;
+    if (Get.isRegistered<TourController>()) {
+      tour = Get.find<TourController>().getTour(entry.tourId);
+    }
+    tour ??= _tourFromEntry(entry);
+    final phone = (entry.organiserPhone != null &&
+            entry.organiserPhone!.isNotEmpty)
+        ? entry.organiserPhone
+        : tour.createdBy;
+    if (phone != null && phone.isNotEmpty) {
+      await WhatsAppService().sendCancellationRequest(
+        adminPhone: phone,
+        tour: tour,
+        customerName: entry.customerName,
+        singleSofaCount: entry.singleSofa,
+        doubleSofaCount: entry.doubleSofa,
+        tripType: entry.tripType,
+        note: entry.note,
+        pickupLocation: entry.pickupLocationName,
+        // Seat numbers are only shown to the customer once the tour is locked,
+        // so only forward them when they're actually visible.
+        seatIds: entry.seatsVisible
+            ? entry.assignedSeats.map((s) => s.seatId).toList()
+            : const [],
+      );
+    }
+    if (!mounted) return;
+    AppSnackBar.success(tr('customer_my_requests.request_cancel_done'));
+    _refresh();
+  }
+
+  /// Call the organiser — the only way to cancel once a booking is confirmed.
+  /// Prefers the phone captured on the entry, falling back to the live tour.
+  Future<void> _contactOrganiser(CustomerRequestEntry entry) async {
+    HapticFeedback.selectionClick();
+    var phone = entry.organiserPhone;
+    if ((phone == null || phone.isEmpty) && Get.isRegistered<TourController>()) {
+      phone = Get.find<TourController>().getTour(entry.tourId)?.createdBy;
+    }
+    final digits = (phone ?? '').replaceAll(RegExp(r'[^\d+]'), '');
+    if (digits.isEmpty) {
+      AppSnackBar.info(tr('customer_my_requests.contact_no_number'));
+      return;
+    }
+    final uri = Uri(scheme: 'tel', path: digits);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      AppSnackBar.info(tr('customer_my_requests.contact_no_number'));
+    }
   }
 }
 
@@ -346,6 +470,9 @@ class _RequestRow extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onViewChart;
   final VoidCallback onAddAnother;
+  final VoidCallback onCancel;
+  final VoidCallback onRequestCancel;
+  final VoidCallback onContact;
 
   const _RequestRow({
     required this.entry,
@@ -354,6 +481,9 @@ class _RequestRow extends StatelessWidget {
     required this.onEdit,
     required this.onViewChart,
     required this.onAddAnother,
+    required this.onCancel,
+    required this.onRequestCancel,
+    required this.onContact,
   });
 
   @override
@@ -456,6 +586,31 @@ class _RequestRow extends StatelessWidget {
                           ),
                         ],
                       ),
+                      if (entry.pickupLocationName != null &&
+                          entry.pickupLocationName!.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.place_rounded,
+                              size: 12,
+                              color: c.ink2,
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                '${tr('pickup.reflect_label')}: ${entry.pickupLocationName!}',
+                                style: UgamText.caption.copyWith(
+                                  color: c.ink2,
+                                  fontSize: 12,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: UgamSpacing.sm + 2),
                       Row(
                         children: [
@@ -485,19 +640,33 @@ class _RequestRow extends StatelessWidget {
                 ),
               ],
             ),
+            // Chip strip is informational only (edited / one-way / seats /
+            // cancel-requested / note). Actions live in the single action bar
+            // below, so we never stack more than two strips under the header.
             if (entry.wasEdited ||
                 entry.tripType.isOneWay ||
-                entry.canEdit ||
-                entry.hasSeatsAssigned) ...[
+                entry.hasSeatsAssigned ||
+                entry.cancellationRequested ||
+                (entry.note?.isNotEmpty ?? false)) ...[
               const SizedBox(height: UgamSpacing.sm + 2),
-              _RowFooter(entry: entry, c: c, onEdit: onEdit),
+              _RowFooter(entry: entry, c: c),
             ],
-            if (isHandler) ...[
-              const SizedBox(height: UgamSpacing.sm + 2),
-              _HandlerChartButton(c: c, onTap: onViewChart),
-            ],
+            // ONE action strip: the single most relevant CTA inline (the card's
+            // only accent element) plus a ⋮ overflow holding the rest. This
+            // demotes Edit / Add-another / Cancel behind one affordance instead
+            // of stacking a full-width section per action.
             const SizedBox(height: UgamSpacing.sm + 2),
-            _AddAnotherButton(c: c, onTap: onAddAnother),
+            _ActionBar(
+              entry: entry,
+              c: c,
+              isHandler: isHandler,
+              onEdit: onEdit,
+              onViewChart: onViewChart,
+              onAddAnother: onAddAnother,
+              onCancel: onCancel,
+              onRequestCancel: onRequestCancel,
+              onContact: onContact,
+            ),
           ],
         ),
       ),
@@ -505,25 +674,33 @@ class _RequestRow extends StatelessWidget {
   }
 
   (String, UgamStatusTone) _statusFor(CustomerRequestEntry e) {
-    // Reveal "Seats assigned" only once the tour is locked. While assignments
-    // are still provisional, show a neutral "being finalized" state instead.
+    // Reveal "Seats assigned" (with numbers) only once the tour is locked.
     if (e.seatsVisible) {
       return (
         tr('customer_my_requests.chip_seats_assigned'),
         UgamStatusTone.good,
       );
     }
+    // A cancelled/rejected ticket reads as cancelled regardless of stale seats.
+    if (e.isCancelled) {
+      return (tr('customer_my_requests.chip_cancelled'), UgamStatusTone.warm);
+    }
+    // Once the organiser has CONFIRMED the booking, say "Confirmed" — even before
+    // the tour is locked. The seat NUMBER still stays hidden until lock (handled
+    // by seatsVisible above and the footer seat chip), but the headline status
+    // must not read "still being decided" for a rider who is already confirmed.
+    // This branch MUST precede the provisional-seat branch below: confirming +
+    // seating a rider on an unlocked ('assigning') tour is the normal state, and
+    // the Confirmed tab already counts them — the pill has to agree.
+    if (e.status == 'accepted' || e.isConfirmed) {
+      return (tr('customer_my_requests.chip_confirmed'), UgamStatusTone.good);
+    }
+    // Provisionally seated but NOT yet confirmed → genuinely being finalized.
     if (e.hasSeatsAssigned) {
       return (
         tr('customer_my_requests.chip_seats_finalizing'),
         UgamStatusTone.warm,
       );
-    }
-    if (e.status == 'accepted') {
-      return (tr('customer_my_requests.chip_confirmed'), UgamStatusTone.good);
-    }
-    if (e.status == 'rejected') {
-      return (tr('customer_my_requests.chip_cancelled'), UgamStatusTone.warm);
     }
     return (tr('customer_my_requests.chip_pending'), UgamStatusTone.warm);
   }
@@ -577,13 +754,27 @@ class _RequestRow extends StatelessWidget {
 class _RowFooter extends StatelessWidget {
   final CustomerRequestEntry entry;
   final UgamColorSet c;
-  final VoidCallback onEdit;
 
   const _RowFooter({
     required this.entry,
     required this.c,
-    required this.onEdit,
   });
+
+  /// Assigned seat numbers, truncated so a large group booking can't bloat the
+  /// chip past one line. UgamReqChip has no maxLines of its own, so we cap the
+  /// list at source and append "…" (with a leading count) once it overflows.
+  static String _seatsChipLabel(CustomerRequestEntry e) {
+    final ids = e.assignedSeats.map((s) => s.seatId).toList();
+    const maxShown = 4;
+    if (ids.length <= maxShown) return ids.join(', ');
+    return tr(
+      'customer_my_requests.seats_more',
+      namedArgs: {
+        'shown': ids.take(maxShown).join(', '),
+        'count': ids.length.toString(),
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -594,6 +785,14 @@ class _RowFooter extends StatelessWidget {
         UgamReqChip(
           label: tr('customer_my_requests.chip_edited'),
           variant: UgamChipVariant.neutral,
+        ),
+      );
+    }
+    if (entry.cancellationRequested) {
+      widgets.add(
+        UgamReqChip(
+          label: tr('customer_my_requests.chip_cancel_requested'),
+          variant: UgamChipVariant.warm,
         ),
       );
     }
@@ -620,17 +819,20 @@ class _RowFooter extends StatelessWidget {
         UgamReqChip(
           label: tr(
             'customer_my_requests.chip_seats',
-            namedArgs: {
-              'seats': entry.assignedSeats.map((s) => s.seatId).join(", "),
-            },
+            namedArgs: {'seats': _seatsChipLabel(entry)},
           ),
           variant: UgamChipVariant.good,
         ),
       );
     } else if (entry.hasSeatsAssigned) {
+      // Seated but the tour isn't locked yet, so the NUMBER stays hidden. For a
+      // confirmed rider say the number is coming (the headline already reads
+      // "Confirmed"); for a still-provisional one, that seats are being finalized.
       widgets.add(
         UgamReqChip(
-          label: tr('customer_my_requests.chip_seats_finalizing'),
+          label: entry.isConfirmed
+              ? tr('customer_my_requests.chip_seat_after_lock')
+              : tr('customer_my_requests.chip_seats_finalizing'),
           variant: UgamChipVariant.neutral,
         ),
       );
@@ -645,37 +847,9 @@ class _RowFooter extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Wrap(spacing: 5, runSpacing: 5, children: widgets)),
-          if (entry.canEdit) ...[
-            const SizedBox(width: UgamSpacing.sm),
-            GestureDetector(
-              onTap: onEdit,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.md,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: c.accent,
-                  borderRadius: BorderRadius.circular(UgamRadius.chip),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.edit_rounded, size: 12, color: c.onAccent),
-                    const SizedBox(width: 4),
-                    Text(
-                      tr('customer_my_requests.edit_request_btn'),
-                      style: UgamText.bodyStrong.copyWith(
-                        color: c.onAccent,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ] else if (entry.note != null && entry.note!.isNotEmpty) ...[
+          // Edit moved into the action bar below; the footer now only flags a
+          // note the customer attached to the request.
+          if (entry.note != null && entry.note!.isNotEmpty) ...[
             const SizedBox(width: UgamSpacing.sm),
             Icon(Icons.sticky_note_2_outlined, size: 14, color: c.ink3),
           ],
@@ -685,18 +859,188 @@ class _RowFooter extends StatelessWidget {
   }
 }
 
-/// Handler-only affordance: opens the full bus chart for this request.
-/// Rendered only when `isRequestHandler` resolved true for the entry.
-class _HandlerChartButton extends StatelessWidget {
-  final UgamColorSet c;
+/// One selectable action for the row's action bar / overflow menu.
+class _RowAction {
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
 
-  const _HandlerChartButton({required this.c, required this.onTap});
+  /// Destructive (self-cancel) — tinted danger in the menu, and never chosen as
+  /// the accent primary CTA (that stays reserved for a positive action).
+  final bool destructive;
+
+  const _RowAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+}
+
+/// Single action strip for a request card: the ONE most relevant CTA inline
+/// (the card's only accent element) plus a ⋮ overflow that holds every other
+/// action. Replaces the old stack of full-width Edit / Handler-chart / Cancel /
+/// Add-another sections so no card ever shows more than two strips or more than
+/// one accent affordance.
+///
+/// Primary CTA priority: Edit → View chart → Add another. The cancel family is
+/// always demoted to the overflow (and never accent). The non-actionable
+/// "cancellation requested — awaiting organiser" state is surfaced as a footer
+/// chip, so no cancel action is offered once one has been raised.
+class _ActionBar extends StatelessWidget {
+  final CustomerRequestEntry entry;
+  final UgamColorSet c;
+  final bool isHandler;
+  final VoidCallback onEdit;
+  final VoidCallback onViewChart;
+  final VoidCallback onAddAnother;
+  final VoidCallback onCancel;
+  final VoidCallback onRequestCancel;
+  final VoidCallback onContact;
+
+  const _ActionBar({
+    required this.entry,
+    required this.c,
+    required this.isHandler,
+    required this.onEdit,
+    required this.onViewChart,
+    required this.onAddAnother,
+    required this.onCancel,
+    required this.onRequestCancel,
+    required this.onContact,
+  });
+
+  List<_RowAction> _actions() {
+    final actions = <_RowAction>[];
+    if (entry.canEdit) {
+      actions.add(
+        _RowAction(
+          icon: Icons.edit_rounded,
+          label: tr('customer_my_requests.edit_request_btn'),
+          onTap: onEdit,
+        ),
+      );
+    }
+    if (isHandler) {
+      actions.add(
+        _RowAction(
+          icon: Icons.grid_view_rounded,
+          label: tr('customer_my_requests.view_full_chart'),
+          onTap: onViewChart,
+        ),
+      );
+    }
+    // Always available — a second distinct request from the same number.
+    actions.add(
+      _RowAction(
+        icon: Icons.add_rounded,
+        label: tr('customer_my_requests.add_another'),
+        onTap: onAddAnother,
+      ),
+    );
+    // Cancel family — only when not already cancelled and no request pending
+    // (the requested state shows as a footer chip instead).
+    if (!entry.isCancelled && !entry.cancellationRequested) {
+      if (entry.canCancel) {
+        actions.add(
+          _RowAction(
+            icon: Icons.close_rounded,
+            label: tr('customer_my_requests.cancel_action'),
+            onTap: onCancel,
+            destructive: true,
+          ),
+        );
+      } else if (entry.canRequestCancel) {
+        actions.add(
+          _RowAction(
+            icon: Icons.event_seat_outlined,
+            label: tr('customer_my_requests.request_cancel_action'),
+            onTap: onRequestCancel,
+          ),
+        );
+      } else {
+        actions.add(
+          _RowAction(
+            icon: Icons.call_rounded,
+            label: tr('customer_my_requests.contact_to_cancel'),
+            onTap: onContact,
+          ),
+        );
+      }
+    }
+    return actions;
+  }
+
+  Future<void> _openOverflow(
+    BuildContext context,
+    List<_RowAction> actions,
+  ) async {
+    HapticFeedback.selectionClick();
+    await UgamSheet.show<void>(
+      context,
+      title: tr('customer_my_requests.actions_title'),
+      builder: (sheetCtx) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final a in actions)
+            _OverflowMenuRow(
+              action: a,
+              c: c,
+              onTap: () {
+                Navigator.of(sheetCtx).maybePop();
+                a.onTap();
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = _actions();
+    // addAnother is always present, so `actions` is never empty and the
+    // primary is never the destructive cancel.
+    final primary = actions.first;
+    final overflow = actions.skip(1).toList();
+
+    return Row(
+      children: [
+        Expanded(child: _PrimaryCta(action: primary, c: c)),
+        if (overflow.isNotEmpty) ...[
+          const SizedBox(width: UgamSpacing.sm),
+          GestureDetector(
+            onTap: () => _openOverflow(context, overflow),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              width: 44,
+              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm + 2),
+              decoration: BoxDecoration(
+                color: c.card,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.more_vert_rounded, size: 18, color: c.ink2),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// The single accent CTA for a request card. Filled with the accent so it reads
+/// as the row's one primary affordance.
+class _PrimaryCta extends StatelessWidget {
+  final _RowAction action;
+  final UgamColorSet c;
+
+  const _PrimaryCta({required this.action, required this.c});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: action.onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
         padding: const EdgeInsets.symmetric(
@@ -704,25 +1048,25 @@ class _HandlerChartButton extends StatelessWidget {
           vertical: UgamSpacing.sm + 2,
         ),
         decoration: BoxDecoration(
-          color: c.accentFill,
+          color: c.accent,
           borderRadius: BorderRadius.circular(UgamRadius.input),
         ),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.grid_view_rounded, size: 16, color: c.accent),
+            Icon(action.icon, size: 16, color: c.onAccent),
             const SizedBox(width: UgamSpacing.sm),
-            Expanded(
+            Flexible(
               child: Text(
-                tr('customer_my_requests.view_full_chart'),
+                action.label,
                 style: UgamText.bodyStrong.copyWith(
-                  color: c.accent,
+                  color: c.onAccent,
                   fontSize: 12.5,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: c.accent),
           ],
         ),
       ),
@@ -730,42 +1074,43 @@ class _HandlerChartButton extends StatelessWidget {
   }
 }
 
-/// "Add another request" — opens a blank create form for THIS row's tour so a
-/// customer can lodge a second distinct request from the same number. Styled as
-/// a low-emphasis bordered action (accent reserved for the primary edit/chart
-/// CTAs) so it never competes with the row's main affordance.
-class _AddAnotherButton extends StatelessWidget {
+/// One tappable row inside the ⋮ overflow sheet. Neutral, so it never competes
+/// with the card's single accent CTA; destructive actions tint danger.
+class _OverflowMenuRow extends StatelessWidget {
+  final _RowAction action;
   final UgamColorSet c;
   final VoidCallback onTap;
 
-  const _AddAnotherButton({required this.c, required this.onTap});
+  const _OverflowMenuRow({
+    required this.action,
+    required this.c,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final tint = action.destructive ? c.danger : c.ink;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
+        margin: const EdgeInsets.only(bottom: UgamSpacing.sm),
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm + 2,
+          vertical: UgamSpacing.md,
         ),
         decoration: BoxDecoration(
-          color: c.card,
+          color: c.cardElev,
           borderRadius: BorderRadius.circular(UgamRadius.input),
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.add_rounded, size: 16, color: c.accent),
-            const SizedBox(width: UgamSpacing.sm),
-            Flexible(
+            Icon(action.icon, size: 18, color: tint),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
               child: Text(
-                tr('customer_my_requests.add_another'),
-                style: UgamText.bodyStrong.copyWith(
-                  color: c.ink,
-                  fontSize: 12.5,
-                ),
+                action.label,
+                style: UgamText.bodyStrong.copyWith(color: tint, fontSize: 14),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -793,6 +1138,16 @@ class _LoadingShimmer extends StatelessWidget {
     );
   }
 }
+
+/// A request is truly PENDING (and self-cancellable): still 'pending', not
+/// organiser-confirmed, no seats yet. Mirrors [CustomerRequestEntry.canCancel].
+bool _isPending(CustomerRequestEntry e) =>
+    e.status == 'pending' && !e.hasSeatsAssigned && !e.isConfirmed;
+
+/// A request reads as CONFIRMED once the organiser confirms it, accepts it, or
+/// seats are assigned.
+bool _isConfirmedish(CustomerRequestEntry e) =>
+    e.hasSeatsAssigned || e.status == 'accepted' || e.isConfirmed;
 
 /// Route monogram (e.g. `"S→M"`) from the from/to city initials, for the
 /// graphite UgamBusBackdrop tile. Matches the sibling customer screens.

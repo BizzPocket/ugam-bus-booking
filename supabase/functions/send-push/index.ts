@@ -2,13 +2,19 @@
 // send-push  —  Supabase Edge Function
 // ------------------------------------------------------------
 // Delivers a Firebase Cloud Messaging (FCM HTTP v1) push to the admin who owns
-// a tour when a customer submits a booking_request. Invoked ONLY by the
-// `booking_requests_notify_push` Postgres trigger (via pg_net) — never by the
-// app or the public.
+// a tour. Two event shapes, both proven by the same shared secret (this function
+// has no user session):
 //
-// Auth model: deployed WITHOUT a verified JWT (the DB trigger has no user
-// session), so it proves itself with a shared secret header instead:
 //   header  x-push-secret: <value>   ==   env PUSH_TRIGGER_SECRET
+//
+//   1. { "request_id": "<uuid>", "event"?: "created"|"updated" }
+//        A customer booking request — invoked by the `booking_requests_notify_push`
+//        Postgres trigger (via pg_net). Gated on push_enabled + notify_booking_requests.
+//
+//   2. { "type": "wa_message", "owner_id": "<uuid>", "title": "...", "body": "...",
+//        "conversation_id"?: "<uuid>" }
+//        An inbound WhatsApp customer message — invoked by the `wa-webhook`
+//        function. Gated on push_enabled only.
 //
 // Secrets (set via `supabase secrets set`, NEVER in git):
 //   PUSH_TRIGGER_SECRET   shared secret, also stored in DB vault as
@@ -20,18 +26,19 @@
 // Deploy (folder name MUST equal the function name):
 //   supabase functions deploy send-push --no-verify-jwt
 //
-// Request body: { "request_id": "<uuid>" }
-// Response:     { sent, pruned, total } | { skipped } | { error }
+// Response:  { sent, pruned, total } | { skipped } | { error }
 // ============================================================
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   type BookingEvent,
   buildFcmMessage,
+  buildWaMessageFcm,
   getFcmAccessToken,
   isDeadTokenStatus,
   type ServiceAccount,
   shouldNotifyBookingRequest,
+  shouldNotifyMessage,
 } from "./lib.ts";
 
 const json = (body: unknown, status = 200) =>
@@ -40,25 +47,33 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
+interface Payload {
+  // booking-request path
+  request_id?: string;
+  event?: string;
+  // wa_message path
+  type?: string;
+  owner_id?: string;
+  title?: string;
+  body?: string;
+  conversation_id?: string;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
-  // 1. Shared-secret gate (the trigger is the only legitimate caller).
+  // 1. Shared-secret gate (the DB trigger / wa-webhook are the only callers).
   const expected = Deno.env.get("PUSH_TRIGGER_SECRET");
   if (!expected || req.headers.get("x-push-secret") !== expected) {
     return json({ error: "unauthorized" }, 401);
   }
 
-  let payload: { request_id?: string; event?: string };
+  let payload: Payload;
   try {
     payload = await req.json();
   } catch {
     return json({ error: "invalid JSON body" }, 400);
   }
-  const requestId = payload.request_id;
-  if (!requestId) return json({ error: "missing request_id" }, 400);
-  // 'updated' = customer edited an existing request; default to 'created'.
-  const event: BookingEvent = payload.event === "updated" ? "updated" : "created";
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -72,8 +87,34 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false },
   });
 
-  // 2. Booking request + its tour (title + owning admin). Service role bypasses
-  //    RLS, so we read the joined tour directly.
+  let sa: ServiceAccount;
+  try {
+    sa = JSON.parse(saJson) as ServiceAccount;
+  } catch {
+    return json({ error: "FCM_SERVICE_ACCOUNT is not valid JSON" }, 500);
+  }
+
+  if (payload.type === "wa_message") {
+    return await handleWaMessage(sb, sa, payload);
+  }
+  return await handleBookingRequest(sb, sa, payload);
+});
+
+// ── Booking-request push (unchanged behaviour) ──────────────────────────────
+async function handleBookingRequest(
+  sb: SupabaseClient,
+  sa: ServiceAccount,
+  payload: Payload,
+): Promise<Response> {
+  const requestId = payload.request_id;
+  if (!requestId) return json({ error: "missing request_id" }, 400);
+  const event: BookingEvent = payload.event === "updated"
+    ? "updated"
+    : payload.event === "cancelled"
+    ? "cancelled"
+    : "created";
+
+  // Booking request + its tour (title + owning admin). Service role bypasses RLS.
   const { data: reqRow, error: reqErr } = await sb
     .from("booking_requests")
     .select("id, customer_name, party_size, tour_id, tours(title, owner_id)")
@@ -81,7 +122,6 @@ Deno.serve(async (req: Request) => {
     .single();
   if (reqErr || !reqRow) return json({ error: "request not found" }, 404);
 
-  // supabase-js types the embedded relation loosely; narrow by hand.
   const tour = (reqRow as unknown as {
     tours: { title: string; owner_id: string } | null;
   }).tours;
@@ -89,8 +129,6 @@ Deno.serve(async (req: Request) => {
   const tourTitle = tour?.title ?? "your tour";
   if (!ownerId) return json({ error: "tour owner missing" }, 404);
 
-  // 3. Honour the admin's notification preferences (server-side source of
-  //    truth — a stale token on a disabled admin still gets nothing).
   const { data: admin } = await sb
     .from("admins")
     .select("push_enabled, notify_booking_requests")
@@ -100,7 +138,51 @@ Deno.serve(async (req: Request) => {
     return json({ skipped: "prefs_off_or_missing" });
   }
 
-  // 4. Every registered device for this admin.
+  return await deliver(sb, sa, ownerId, (token) =>
+    buildFcmMessage({
+      token,
+      tourTitle,
+      event,
+      request: reqRow as unknown as {
+        id: string;
+        customer_name: string;
+        party_size: number;
+      },
+    }));
+}
+
+// ── Inbound WhatsApp message push ───────────────────────────────────────────
+async function handleWaMessage(
+  sb: SupabaseClient,
+  sa: ServiceAccount,
+  payload: Payload,
+): Promise<Response> {
+  const ownerId = (payload.owner_id ?? "").trim();
+  if (!ownerId) return json({ skipped: "no_owner" });
+  const title = (payload.title ?? "New message").toString();
+  const body = (payload.body ?? "").toString();
+  const conversationId = payload.conversation_id;
+
+  const { data: admin } = await sb
+    .from("admins")
+    .select("push_enabled")
+    .eq("id", ownerId)
+    .single();
+  if (!shouldNotifyMessage(admin)) {
+    return json({ skipped: "prefs_off_or_missing" });
+  }
+
+  return await deliver(sb, sa, ownerId, (token) =>
+    buildWaMessageFcm({ token, title, body, conversationId }));
+}
+
+// ── Shared delivery: every device for an admin, prune dead tokens ───────────
+async function deliver(
+  sb: SupabaseClient,
+  sa: ServiceAccount,
+  ownerId: string,
+  buildMessage: (token: string) => Record<string, unknown>,
+): Promise<Response> {
   const { data: tokenRows } = await sb
     .from("device_tokens")
     .select("token")
@@ -108,13 +190,6 @@ Deno.serve(async (req: Request) => {
   const tokens = (tokenRows ?? []).map((r) => r.token as string);
   if (tokens.length === 0) return json({ skipped: "no_tokens" });
 
-  // 5. FCM access token + endpoint.
-  let sa: ServiceAccount;
-  try {
-    sa = JSON.parse(saJson) as ServiceAccount;
-  } catch {
-    return json({ error: "FCM_SERVICE_ACCOUNT is not valid JSON" }, 500);
-  }
   let accessToken: string;
   try {
     accessToken = await getFcmAccessToken(sa);
@@ -124,20 +199,9 @@ Deno.serve(async (req: Request) => {
   const endpoint =
     `https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`;
 
-  // 6. Send sequentially; collect dead tokens to prune.
   let sent = 0;
   const dead: string[] = [];
   for (const token of tokens) {
-    const message = buildFcmMessage({
-      token,
-      tourTitle,
-      event,
-      request: reqRow as unknown as {
-        id: string;
-        customer_name: string;
-        party_size: number;
-      },
-    });
     try {
       const res = await fetch(endpoint, {
         method: "POST",
@@ -145,7 +209,7 @@ Deno.serve(async (req: Request) => {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message: buildMessage(token) }),
       });
       if (res.ok) {
         sent++;
@@ -159,10 +223,9 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // 7. Prune dead tokens so the table doesn't accumulate uninstalled devices.
   if (dead.length > 0) {
     await sb.from("device_tokens").delete().in("token", dead);
   }
 
   return json({ sent, pruned: dead.length, total: tokens.length });
-});
+}

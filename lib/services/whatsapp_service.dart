@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -188,6 +189,7 @@ class WhatsAppService {
     String? note,
     bool isUpdate = false,
     TripType tripType = TripType.roundTrip,
+    String? pickupLocation,
   }) {
     final seatParts = <String>[];
     if (doubleSofaCount > 0) {
@@ -225,6 +227,8 @@ class WhatsAppService {
       '👤 *Name:* $customerName',
       '💺 *Seats:* ${seatParts.join(' + ')}',
       tripLine,
+      if (pickupLocation != null && pickupLocation.trim().isNotEmpty)
+        '🚏 *${tr('pickup.reflect_label')}:* ${pickupLocation.trim()}',
     ];
 
     if (note != null && note.trim().isNotEmpty) {
@@ -246,6 +250,7 @@ class WhatsAppService {
     String? note,
     bool isUpdate = false,
     TripType tripType = TripType.roundTrip,
+    String? pickupLocation,
   }) async {
     final msg = buildBookingRequestMessage(
       tour: tour,
@@ -255,6 +260,98 @@ class WhatsAppService {
       note: note,
       isUpdate: isUpdate,
       tripType: tripType,
+      pickupLocation: pickupLocation,
+    );
+    return _openWhatsApp(adminPhone, msg);
+  }
+
+  // ── Customer cancellation request ─────────────────────────
+
+  /// Builds the standardized cancellation-request message the customer sends
+  /// back to the admin via WhatsApp when they want to cancel a CONFIRMED or
+  /// SEAT-ASSIGNED booking (a purely-pending booking is self-cancelled in-app,
+  /// no handoff). This does NOT free the seat — it asks the organiser to.
+  ///
+  /// Format mirrors [buildBookingRequestMessage] (same opener, tour/route/date
+  /// and seats lines) so the organiser's chat stays consistent, but the intent
+  /// is unmistakably a cancellation. When [seatIds] is provided the specific
+  /// seat numbers are listed so the organiser knows exactly what to free.
+  String buildCancellationRequestMessage({
+    required Tour tour,
+    required String customerName,
+    required int singleSofaCount,
+    required int doubleSofaCount,
+    TripType tripType = TripType.roundTrip,
+    String? note,
+    String? pickupLocation,
+    List<String> seatIds = const [],
+  }) {
+    final seatParts = <String>[];
+    if (doubleSofaCount > 0) {
+      seatParts.add('$doubleSofaCount Double Sofa');
+    }
+    if (singleSofaCount > 0) {
+      seatParts.add('$singleSofaCount Single Sofa');
+    }
+
+    final tripLine = switch (tripType) {
+      TripType.roundTrip => '🔁 *Trip:* Round-trip (both legs)',
+      TripType.outboundOnly =>
+          '➡️ *Trip:* One-way — ${tour.fromCity} → ${tour.toCity} (outbound only)',
+      TripType.returnOnly =>
+          '⬅️ *Trip:* One-way — ${tour.toCity} → ${tour.fromCity} (return only)',
+    };
+
+    final lines = <String>[
+      '🛑 *Cancellation Request — Ugam Booking*',
+      '',
+      '🙏 Jay Gurudev',
+      '',
+      'Please cancel my booking / free my seat(s).',
+      '',
+      '🗺 *Tour:* ${tour.title}',
+      '📍 ${tour.fromCity} → ${tour.toCity}',
+      '📅 ${_formatDate(tour.departureDate)}'
+          '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      '',
+      '👤 *Name:* $customerName',
+      '💺 *Seats:* ${seatParts.join(' + ')}',
+      if (seatIds.isNotEmpty) '🔢 *Seat numbers:* ${seatIds.join(', ')}',
+      tripLine,
+      if (pickupLocation != null && pickupLocation.trim().isNotEmpty)
+        '🚏 *${tr('pickup.reflect_label')}:* ${pickupLocation.trim()}',
+    ];
+
+    if (note != null && note.trim().isNotEmpty) {
+      lines.addAll(['', '📝 ${note.trim()}']);
+    }
+
+    return lines.join('\n');
+  }
+
+  /// Opens WhatsApp on the customer's device with the cancellation request
+  /// pre-filled, addressed to [adminPhone]. Returns true if WhatsApp
+  /// opened successfully.
+  Future<bool> sendCancellationRequest({
+    required String adminPhone,
+    required Tour tour,
+    required String customerName,
+    required int singleSofaCount,
+    required int doubleSofaCount,
+    TripType tripType = TripType.roundTrip,
+    String? note,
+    String? pickupLocation,
+    List<String> seatIds = const [],
+  }) async {
+    final msg = buildCancellationRequestMessage(
+      tour: tour,
+      customerName: customerName,
+      singleSofaCount: singleSofaCount,
+      doubleSofaCount: doubleSofaCount,
+      tripType: tripType,
+      note: note,
+      pickupLocation: pickupLocation,
+      seatIds: seatIds,
     );
     return _openWhatsApp(adminPhone, msg);
   }

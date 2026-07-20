@@ -7,6 +7,8 @@ import 'routes/app_routes.dart';
 import 'controllers/tour_controller.dart';
 import 'controllers/money_controller.dart';
 import 'controllers/finance_controller.dart';
+import 'controllers/pickup_controller.dart';
+import 'controllers/inbox_controller.dart';
 import 'controllers/theme_controller.dart';
 import 'controllers/auth_controller.dart';
 import 'controllers/locale_controller.dart';
@@ -66,5 +68,11 @@ class AppBinding extends Bindings {
     Get.lazyPut<TourController>(() => TourController(), fenix: true);
     Get.lazyPut<MoneyController>(() => MoneyController(), fenix: true);
     Get.lazyPut<FinanceController>(() => FinanceController(), fenix: true);
+    Get.lazyPut<PickupController>(() => PickupController(), fenix: true);
+    // Admin-only WhatsApp inbox. Lazy + fenix: it only instantiates (and starts
+    // its realtime subscription) once an admin surface first reads it — the
+    // Dashboard unread badge / the Inbox screen — so a logged-out or customer
+    // session never subscribes.
+    Get.lazyPut<InboxController>(() => InboxController(), fenix: true);
   }
 }

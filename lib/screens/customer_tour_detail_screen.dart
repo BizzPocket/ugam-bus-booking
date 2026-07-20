@@ -104,6 +104,11 @@ class _HeroSection extends StatelessWidget {
     final topInset = MediaQuery.of(context).padding.top;
     final capacity = tour.totalBusSeats;
     final seatsLeft = capacity - tour.totalSeatsAssigned;
+    // Lock is the single gate (Tour.acceptsBookings) and MUST win over the
+    // seats/open badge — otherwise a locked tour whose buses aren't set yet
+    // (capacity == 0) falsely reads "OPEN FOR REQUESTS" while the CTA below
+    // already says "Bookings closed". Mirror the CTA's locked > full > open order.
+    final locked = !tour.acceptsBookings;
 
     return SizedBox(
       height: 320,
@@ -142,20 +147,28 @@ class _HeroSection extends StatelessWidget {
               children: [
                 _ChromeCircle(icon: Icons.arrow_back_rounded, onTap: onBack),
                 const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.md,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                  ),
-                  child: Text(
-                    tour.status.displayName.toUpperCase(),
-                    style: UgamText.micro.copyWith(
-                      color: Colors.white,
-                      fontSize: 10,
+                // Flexible + ellipsis so a long gu/hi status word (e.g.
+                // "assigning" → સીટ ગોઠવી રહ્યા છીએ) can't push past the two
+                // Spacers and overflow the chrome row on small screens.
+                Flexible(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: UgamSpacing.md,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    ),
+                    child: Text(
+                      tour.status.displayName.toUpperCase(),
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: UgamText.micro.copyWith(
+                        color: Colors.white,
+                        fontSize: 10,
+                      ),
                     ),
                   ),
                 ),
@@ -264,7 +277,14 @@ class _HeroSection extends StatelessWidget {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      if (capacity > 0)
+                      if (locked)
+                        UgamReqChip(
+                          label: tr(
+                            'customer_tour_detail.chip_bookings_closed',
+                          ),
+                          variant: UgamChipVariant.warm,
+                        )
+                      else if (capacity > 0)
                         UgamReqChip(
                           label: seatsLeft <= 0
                               ? tr('customer_tour_detail.chip_tour_full')

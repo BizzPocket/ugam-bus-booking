@@ -22,6 +22,7 @@ import '../services/realtime_service.dart';
 import '../services/seating_engine.dart';
 import '../services/seating_plan_applier.dart';
 import '../services/sync_service.dart';
+import '../services/whatsapp_outbound.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_normalize.dart';
@@ -85,8 +86,9 @@ class TourController extends GetxController {
   /// computed WITHOUT running the engine, so it's safe to evaluate on each
   /// rebuild. Folds the tour status plus, per bus, its id and seat-grid
   /// (seatId + seatType) and, per passenger, the fields that move the plan:
-  /// assigned seats, request-line seat-types + legs (drives leg-aware free), and
-  /// the waitlist / journeyDone flags the engine + decision filter gate on.
+  /// assigned seats, request-line seat-types + legs (drives leg-aware free), the
+  /// waitlist / journeyDone flags the engine + decision filter gate on, and the
+  /// priorityStatus the engine gates lower-berth / ordering placement on.
   /// Order-stable (we fold list order, which the engine preserves). A collision
   /// would have to match all of these while changing the plan — astronomically
   /// unlikely, and a stale read self-heals on the next genuine change.
@@ -99,7 +101,12 @@ class TourController extends GetxController {
       }
     }
     for (final p in t.passengers) {
-      h = Object.hash(h, p.id, p.isWaitlisted, p.journeyDone);
+      // priorityStatus is folded in because the engine gates placement on
+      // isPriorityApproved (lower-berth reservation, seating order) — a
+      // priority-only change moves the plan, so it must invalidate the cache or
+      // the "N need your decision" badge goes stale. priorityReason is NOT
+      // folded: the engine never reads it, so a reason edit shouldn't recompute.
+      h = Object.hash(h, p.id, p.isWaitlisted, p.journeyDone, p.priorityStatus);
       for (final a in p.assignedSeats) {
         h = Object.hash(h, a.busId, a.seatId);
       }
@@ -120,6 +127,20 @@ class TourController extends GetxController {
   SyncService get _sync => Get.find<SyncService>();
   AuthController get _auth => Get.find<AuthController>();
   RealtimeService get _realtime => Get.find<RealtimeService>();
+
+  /// Sends the customer-facing WhatsApp "booking confirmed" greeting for ONE
+  /// passenger and reports whether Meta accepted it. Held as a field (rather
+  /// than a direct `WhatsAppOutbound()` call) so tests can stub the network;
+  /// production uses the real Cloud API sender. Invoked by
+  /// [_confirmAndNotifyOnSeat] when a seat is placed on a rider who was never
+  /// confirmed through the Requests screen.
+  Future<bool> Function(Tour tour, Passenger passenger) confirmedSender =
+      _sendConfirmedGreeting;
+
+  static Future<bool> _sendConfirmedGreeting(Tour tour, Passenger p) async {
+    final res = await WhatsAppOutbound().sendConfirmed(tour: tour, passenger: p);
+    return res.anySent;
+  }
 
   StreamSubscription<DataChangedEvent>? _realtimeSub;
   Timer? _refreshDebounce;
@@ -276,6 +297,17 @@ class TourController extends GetxController {
     final newPassenger = Passenger.fromMap(row);
     final next = List<Passenger>.from(t.passengers);
     final pIdx = next.indexWhere((p) => p.id == pid);
+    // A customer-cancelled passenger (migration 034) is kept in the DB but must
+    // leave the active roster — treat a cancel like a delete for the in-memory
+    // tour so capacity/roster stop counting it. Nothing to do if it was never
+    // in the active list.
+    if (newPassenger.isCancelled) {
+      if (pIdx < 0) return;
+      next.removeAt(pIdx);
+      raw[idx] = t.copyWith(passengers: next);
+      _scheduleNotify();
+      return;
+    }
     if (pIdx < 0) {
       next.add(newPassenger);
     } else {
@@ -356,29 +388,18 @@ class TourController extends GetxController {
         }
       }
 
-      Future<List<Map<String, dynamic>>> fetch() => _sync.smartFetch(
+      // smartFetch now retries transient failures (timeouts, dropped sockets,
+      // 5xx) with exponential backoff internally, so the old bespoke cold-start
+      // retry loop is gone — a launch-time blip is absorbed in the sync layer
+      // before we ever see lastReadFailed here. We still branch on that flag
+      // below to keep an already-loaded list rather than blanking it.
+      final data = await _sync.smartFetch(
         table: 'tours',
         cacheKey: _tourCacheKey,
         filters: _tourFilters,
         orderBy: 'created_at',
         maxAge: 120000,
       );
-
-      var data = await fetch();
-
-      // COLD START: on the very first load the Supabase session and the
-      // connectivity probe can still be settling, so a transient fetch failure
-      // is expected — and we have no local cache to fall back on. Quietly retry
-      // a couple of times before surfacing anything, so launch never flashes
-      // the "Could not load tours" error screen for a blip that self-heals.
-      for (
-        var attempt = 0;
-        _sync.lastReadFailed && tours.isEmpty && attempt < 2;
-        attempt++
-      ) {
-        await Future<void>.delayed(Duration(milliseconds: 600 * (attempt + 1)));
-        data = await fetch();
-      }
 
       // smartFetch returns [] on BOTH "no tours" and "refresh failed". If it
       // (still) failed, don't let the empty result blank an already-loaded
@@ -881,16 +902,19 @@ class TourController extends GetxController {
     Passenger passenger, {
     bool overrideLock = false,
   }) async {
-    // Bookings close once the tour is locked/completed. This is the single
-    // server-write chokepoint for every admin/handler "Add request" path
-    // (Requests screen, tour workspace, future callers), so the guard lives
-    // here rather than at each button — no new request can be created from
-    // anywhere once the allocation is final.
+    // Bookings close to CUSTOMERS once the tour is locked/completed — but that
+    // gate lives on the anonymous submit_booking_request RPC (migration 026/030),
+    // the ONLY path a customer can create a request through. This controller
+    // method is reached exclusively by admin/handler surfaces (Requests
+    // "Add request", the return-ticket sheet), so its acceptsBookings check is a
+    // soft default, not the customer gate — the organiser must still be able to
+    // manage a locked tour by hand.
     //
-    // [overrideLock] is the deliberate escape hatch for an admin booking a new
-    // RETURN-only ticket into a freed seat during the return phase: the tour is
-    // locked, yet the agent explicitly wants to seat a late return rider. It
-    // skips ONLY the acceptsBookings gate; everything else is identical.
+    // [overrideLock] is the organiser's deliberate "add anyway", passed by every
+    // real admin add path: the manual Add-request form (a late walk-in/phone
+    // booking on a locked tour) and booking a new RETURN-only ticket into a freed
+    // seat during the return phase. It skips ONLY the acceptsBookings gate;
+    // everything else is identical.
     final existing = getTour(tourId);
     if (!overrideLock && existing != null && !existing.acceptsBookings) {
       AppSnackBar.error(tr('errors.bookings_closed'));
@@ -936,6 +960,30 @@ class TourController extends GetxController {
     ),
     failure: tr('errors.update_passenger'),
   );
+
+  /// Organiser DISMISSES a customer's cancellation request (migration 036) —
+  /// keeps the passenger on the tour and clears the `cancel_requested_at` marker
+  /// on BOTH the passenger row (this roster's badge/CTA) and the linked
+  /// booking_request (the customer's pending-cancellation banner + re-request
+  /// gate). The counterpart to approving (which removes the passenger). Routes
+  /// through the SECURITY DEFINER RPC because the booking_request marker is not
+  /// admin-writable directly; a server refusal reverts the optimistic clear.
+  Future<void> dismissCancellationRequest(String tourId, String passengerId) =>
+      _write(
+        optimistic: () => _updatePassengerLocal(
+          tourId,
+          passengerId,
+          (p) => p.copyWith(clearCancelRequested: true),
+        ),
+        persist: () async {
+          final ok = await _sync.callRpcResult(
+            'booking_request_admin_dismiss_cancel',
+            {'p_passenger_id': passengerId},
+          );
+          if (ok != true) throw Exception('dismiss cancellation refused');
+        },
+        failure: tr('errors.dismiss_cancel'),
+      );
 
   Future<void> updatePassengerPayment(
     String tourId,
@@ -1028,6 +1076,10 @@ class TourController extends GetxController {
       if (tour != null && tour.status == TourStatus.busBooked) {
         await updateStatus(tourId, TourStatus.assigning);
       }
+      // A seat placed from the chart on a not-yet-confirmed rider IS the
+      // confirmation: flip the flag + fire the WhatsApp greeting, matching the
+      // Requests "Confirm" button (which otherwise never runs on this path).
+      await _confirmAndNotifyOnSeat(tourId, [passengerId]);
     }
   }
 
@@ -1129,6 +1181,9 @@ class TourController extends GetxController {
     if (t != null && t.status == TourStatus.busBooked) {
       await updateStatus(tourId, TourStatus.assigning);
     }
+    // A group move can seat a previously-unseated sibling: confirm + notify any
+    // moved rider who was never confirmed, same as a single-seat placement.
+    await _confirmAndNotifyOnSeat(tourId, plan.keys);
     return true;
   }
 
@@ -1233,6 +1288,10 @@ class TourController extends GetxController {
     if (t != null && t.status == TourStatus.busBooked) {
       await updateStatus(tourId, TourStatus.assigning);
     }
+
+    // Any rider auto-fill just SEATED who was never confirmed is confirmed +
+    // notified now — the same implicit confirmation as a manual chart placement.
+    await _confirmAndNotifyOnSeat(tourId, changes.map((c) => c.passengerId));
 
     // F2 priority: surface a warning right after auto-fill (from ANY screen)
     // when an approved-priority passenger was seated but could not get a lower
@@ -1995,6 +2054,67 @@ class TourController extends GetxController {
       },
       failure: tr('errors.update_confirmed'),
     );
+  }
+
+  /// Implicit confirmation for seats placed from the CHART. The app's model is
+  /// "Confirm → then seat": the Requests "Confirm" button both flips
+  /// `isConfirmed` and fires the WhatsApp greeting. But a seat can also be placed
+  /// straight from the chart (tap-to-place, auto-fill, group move) on a rider who
+  /// was never confirmed — historically that seated them SILENTLY, with no
+  /// message. This closes that gap: any of [passengerIds] who now holds a seat
+  /// while still unconfirmed is confirmed (persisted) AND sent the same greeting,
+  /// so a seat assigned from ANY surface always notifies the customer.
+  ///
+  /// Idempotent: an already-confirmed rider is skipped, so re-seating / moving /
+  /// swapping never re-sends, and the front-door Confirm flow never double-sends.
+  /// The WhatsApp send is fire-and-forget so seat placement is never blocked on
+  /// the network.
+  Future<void> _confirmAndNotifyOnSeat(
+    String tourId,
+    Iterable<String> passengerIds,
+  ) async {
+    final tour = getTour(tourId);
+    if (tour == null) return;
+    final newly = <Passenger>[];
+    for (final id in passengerIds.toSet()) {
+      final p = tour.passengers.firstWhereOrNull((x) => x.id == id);
+      if (p == null || p.isConfirmed || p.assignedSeats.isEmpty) continue;
+      newly.add(p);
+    }
+    if (newly.isEmpty) return;
+
+    for (final p in newly) {
+      await setConfirmed(tourId, p.id, true);
+    }
+    unawaited(_broadcastConfirmed(tour, newly));
+  }
+
+  /// Fires the WhatsApp confirmation to each freshly-confirmed rider (bounded to
+  /// what [_confirmAndNotifyOnSeat] just flipped) and surfaces a SINGLE summary
+  /// toast — never one-per-rider, so a bulk auto-fill doesn't spam. A
+  /// per-recipient failure is logged and skipped, never thrown.
+  Future<void> _broadcastConfirmed(Tour tour, List<Passenger> passengers) async {
+    var sent = 0;
+    for (final p in passengers) {
+      try {
+        if (await confirmedSender(tour, p)) sent++;
+      } catch (e) {
+        dev.log('auto-confirm WhatsApp failed for ${p.id}: $e',
+            name: 'TourController');
+      }
+    }
+    if (sent <= 0) return;
+    try {
+      AppSnackBar.success(
+        passengers.length == 1
+            ? tr('seat.auto_confirm_sent_one',
+                namedArgs: {'name': passengers.first.name})
+            : tr('seat.auto_confirm_sent_many', namedArgs: {'count': '$sent'}),
+      );
+    } catch (_) {
+      // The toast is best-effort feedback — never let a missing localization or
+      // navigator context turn this fire-and-forget send into a crash.
+    }
   }
 
   // Handler

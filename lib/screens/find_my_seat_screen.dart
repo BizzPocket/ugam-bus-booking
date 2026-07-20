@@ -10,7 +10,7 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/handler_tour_ref.dart';
 import '../models/seat_ticket.dart';
-import '../models/tour_status.dart';
+import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import 'handler_bus_chart_screen.dart';
 
@@ -38,27 +38,6 @@ class _FindMySeatScreenState extends State<FindMySeatScreen> {
   String? _error;
   List<SeatTicket> _tickets = const [];
   List<HandlerTourRef> _handlerTours = const [];
-
-  bool _isLiveDeparture(DateTime? departureDate) {
-    if (departureDate == null) return true; // can't prove it's past
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final dep = DateTime(departureDate.year, departureDate.month, departureDate.day);
-    return !dep.isBefore(today);
-  }
-
-  bool _isLiveTicket(SeatTicket t) {
-    final status = t.status.toLowerCase();
-    if (status == TourStatus.completed.name) return false;
-    return _isLiveDeparture(t.departureDate);
-  }
-
-  bool _isLiveHandlerTour(HandlerTourRef ref) {
-    final status = ref.status.toLowerCase();
-    if (status == TourStatus.completed.name) return false;
-    final date = ref.departureDate == null ? null : DateTime.tryParse(ref.departureDate!);
-    return _isLiveDeparture(date);
-  }
 
   @override
   void dispose() {
@@ -88,8 +67,11 @@ class _FindMySeatScreenState extends State<FindMySeatScreen> {
       setState(() {
         final rawTickets = results[0] as List<SeatTicket>;
         final rawHandlerTours = results[1] as List<HandlerTourRef>;
-        _tickets = rawTickets.where(_isLiveTicket).toList();
-        _handlerTours = rawHandlerTours.where(_isLiveHandlerTour).toList();
+        // "Live" is keyed on lifecycle status (see [SeatTicket.isLive]), never
+        // the departure date — a still-locked tour is the CURRENT trip even the
+        // day after it departed, so a rider can always find their seat mid-trip.
+        _tickets = rawTickets.where((t) => t.isLive).toList();
+        _handlerTours = rawHandlerTours.where((h) => h.isLive).toList();
         _searched = true;
         _searching = false;
       });
@@ -314,7 +296,7 @@ class _TicketCard extends StatelessWidget {
             const SizedBox(height: UgamSpacing.lg),
             _BusDiagram(
               bus: bus,
-              mySeatIds: ticket.seatIdsForBus(bus.id),
+              mySeatLegs: ticket.seatLegsForBus(bus.id),
             ),
           ],
           if (handlerRequestId != null) ...[
@@ -383,9 +365,11 @@ class _HandlerEntryCard extends StatelessWidget {
 /// shown — matching the customer "Your seat" sheet's privacy mode).
 class _BusDiagram extends StatelessWidget {
   final Bus bus;
-  final Set<String> mySeatIds;
+  /// seatId → the leg the customer holds it for (drives the half render for a
+  /// one-way seat). The keys are the customer's own seats on this bus.
+  final Map<String, TripType> mySeatLegs;
 
-  const _BusDiagram({required this.bus, required this.mySeatIds});
+  const _BusDiagram({required this.bus, required this.mySeatLegs});
 
   @override
   Widget build(BuildContext context) {
@@ -430,14 +414,15 @@ class _BusDiagram extends StatelessWidget {
               cellHeight: kSeatTileH,
               driverLabel: tr('find_seat.driver'),
               tileBuilder: (ctx, cell) {
-                final isMine =
-                    cell.seatId != null && mySeatIds.contains(cell.seatId);
+                final isMine = cell.seatId != null &&
+                    mySeatLegs.containsKey(cell.seatId);
                 return SeatChartTile(
                   cell: cell,
                   occupants: const [],
                   groupColors: const GroupColorResolver({}),
                   anonymous: true,
                   mine: isMine,
+                  mineLeg: isMine ? mySeatLegs[cell.seatId] : null,
                 );
               },
             ),

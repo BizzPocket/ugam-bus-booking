@@ -65,7 +65,13 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
         ...data.lines,
       ];
 
-      final preservedSeatCount = preservedLines.fold<int>(0, (s, l) => s + l.qty);
+      // Berth count (a Double Sofa is two) so it can be compared against
+      // assignedSeats, which stores one entry PER BERTH. data.totalSeats is
+      // already berths; the preserved (non-sofa) lines are folded the same way.
+      final preservedSeatCount = preservedLines.fold<int>(
+        0,
+        (s, l) => s + l.qty * l.seatType.berthsPerUnit,
+      );
       final newTotalRequested = preservedSeatCount + data.totalSeats;
       List<SeatAssignment> newAssignedSeats = widget.passenger.assignedSeats;
       int released = 0;
@@ -80,6 +86,8 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
         requestLines: newLines,
         assignedSeats: newAssignedSeats,
         tripType: data.tripType,
+        pickupLocationId: data.pickupLocationId,
+        pickupLocationName: data.pickupLocationName,
       );
       await Get.find<TourController>().updatePassenger(widget.tour.id, updated);
       if (!mounted) return;
@@ -148,6 +156,8 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
               tripType: widget.passenger.tripType,
               lines: widget.passenger.requestLines,
               note: widget.passenger.note,
+              pickupLocationId: widget.passenger.pickupLocationId,
+              pickupLocationName: widget.passenger.pickupLocationName,
             ),
           ),
           const SizedBox(height: UgamSpacing.xl),

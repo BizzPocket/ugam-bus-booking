@@ -183,33 +183,87 @@ class LoginScreen extends GetView<AuthController> {
 }
 
 /// The admin password sub-form, revealed once a registered number is entered.
-class _PasswordStep extends StatelessWidget {
+///
+/// The field lives at the bottom of a [SingleChildScrollView] whose viewport is
+/// capped above by the sticky CTA and shrinks further when the keyboard opens.
+/// `autofocus` alone can't land it in view: focus (and Flutter's built-in
+/// scroll-into-view) fires on the first frame, while the reveal [AnimatedSize]
+/// is still collapsed and the keyboard is still sliding up — both of which then
+/// push the field back below the fold. So we explicitly scroll it into view
+/// once the reveal has expanded, and re-pin it as the keyboard settles.
+class _PasswordStep extends StatefulWidget {
   const _PasswordStep({required this.c, required this.controller});
 
   final UgamColorSet c;
   final AuthController controller;
 
   @override
+  State<_PasswordStep> createState() => _PasswordStepState();
+}
+
+class _PasswordStepState extends State<_PasswordStep>
+    with WidgetsBindingObserver {
+  final GlobalKey _fieldKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Bring the field into view once the reveal animation has grown it to its
+    // final height (the keyboard, on its own animation, then re-pins it via
+    // didChangeMetrics as its height settles).
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(UgamMotion.sheet);
+      _ensureFieldVisible();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Fires repeatedly while the keyboard slides up; each tick re-scrolls so the
+  // field tracks the shrinking viewport instead of ending up behind the keyboard.
+  @override
+  void didChangeMetrics() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureFieldVisible());
+  }
+
+  void _ensureFieldVisible() {
+    final ctx = _fieldKey.currentContext;
+    if (!mounted || ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 1.0, // pin the field's bottom just above the sticky CTA
+      duration: UgamMotion.route,
+      curve: UgamMotion.easeOut,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final adminName = controller.pendingAdmin.value?.name ?? '';
+    final adminName = widget.controller.pendingAdmin.value?.name ?? '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: UgamSpacing.xl),
         UgamInput(
+          key: _fieldKey,
           label: tr('login.password_label'),
           hint: tr('login.password_hint'),
-          controller: controller.passwordController,
+          controller: widget.controller.passwordController,
           obscure: true,
           autofocus: true,
           inputFormatters: const [],
-          onSubmitted: (_) => controller.verifyAdminPassword(),
+          onSubmitted: (_) => widget.controller.verifyAdminPassword(),
         ),
         if (adminName.isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.sm),
           Text(
             tr('login.signing_in_as', namedArgs: {'name': adminName}),
-            style: UgamText.caption.copyWith(color: c.ink2),
+            style: UgamText.caption.copyWith(color: widget.c.ink2),
           ),
         ],
       ],

@@ -93,6 +93,14 @@ class SeatChartTile extends StatelessWidget {
   /// Ignored unless [anonymous] is true. Off by default.
   final bool mine;
 
+  /// The leg the viewer holds THIS seat for, in [anonymous] + [mine] mode. A
+  /// one-way leg (GO-only / RET-only) means the customer occupies only half the
+  /// seat's journey, so the tile fills just half with accent (the travelled leg)
+  /// and leaves the other half neutral — a round-trip / null leg fills the whole
+  /// chair as before. Never reveals the other half's occupant (privacy-safe:
+  /// the empty half reads the same as any un-highlighted seat).
+  final TripType? mineLeg;
+
   const SeatChartTile({
     super.key,
     required this.cell,
@@ -108,6 +116,7 @@ class SeatChartTile extends StatelessWidget {
     this.markHalfDouble = false,
     this.anonymous = false,
     this.mine = false,
+    this.mineLeg,
   });
 
   /// Occupants deduped by passenger id. A WHOLE double held by one person
@@ -483,6 +492,12 @@ class SeatChartTile extends StatelessWidget {
   // surface + corner-id placement of [_bookedTile] so the chart reads
   // identically to the rest of the app, minus the name/phone/ring/leg/money.
   Widget _anonymousTile(UgamColorSet c) {
+    // The viewer's OWN seat held for a single leg (GO-only / RET-only) fills
+    // only half the chair with accent — they occupy just half the seat's
+    // journey — instead of the whole chair. Round-trip / null leg stays whole.
+    if (mine && (mineLeg?.isOneWay ?? false)) {
+      return _anonymousHalfTile(c, mineLeg!);
+    }
     final bg = mine ? c.accent : c.cardElev;
     final ringColor = mine ? c.accent : c.border;
     final idColor = mine ? c.onAccent : c.ink3;
@@ -507,6 +522,56 @@ class SeatChartTile extends StatelessWidget {
               cell.seatId ?? '',
               style: UgamText.tabular(
                 UgamText.micro.copyWith(color: idColor, fontSize: 8),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ANONYMOUS HALF — the viewer's own seat held for ONE leg only. The travelled
+  // leg's half is filled accent (GO = top, RET = bottom, matching the app's
+  // leg-share stack); the other half stays the neutral surface so the seat reads
+  // "half yours". Privacy-safe: the neutral half is identical to any other seat,
+  // so it never hints who (if anyone) holds the opposite leg.
+  Widget _anonymousHalfTile(UgamColorSet c, TripType leg) {
+    final goHalf = leg == TripType.outboundOnly;
+    Widget accentHalf() => Container(
+          color: c.accent,
+          alignment: Alignment.center,
+          child: Icon(Icons.event_seat_rounded, size: 15, color: c.onAccent),
+        );
+    Widget emptyHalf() => Container(
+          color: c.cardElev,
+          alignment: Alignment.center,
+          child: Icon(Icons.event_seat_outlined, size: 15, color: c.ink3),
+        );
+    return _chairFrame(
+      c: c,
+      fill: Colors.transparent,
+      borderColor: c.accent,
+      borderWidth: 1.5,
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              Expanded(child: goHalf ? accentHalf() : emptyHalf()),
+              Container(height: 1, color: c.border),
+              Expanded(child: goHalf ? emptyHalf() : accentHalf()),
+            ],
+          ),
+          Positioned(
+            top: 4,
+            left: 5,
+            child: Text(
+              cell.seatId ?? '',
+              // Top half is accent for GO (onAccent id) and neutral for RET (ink id).
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(
+                  color: goHalf ? c.onAccent : c.ink3,
+                  fontSize: 8,
+                ),
               ),
             ),
           ),
@@ -717,12 +782,13 @@ class SeatChartTile extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Shared sofa: two people on one half-width tile — a name AND a
-            // mobile won't both fit, so each half shows the NAME only. The
-            // mobile is one tap away (the occupant action sheet).
+            // Shared / half-taken sofa: show the mobile under the name just like
+            // every other tile. The half is only half-WIDTH but full-HEIGHT, and
+            // SeatOccupantLabel wraps both lines in a FittedBox(scaleDown), so the
+            // number shrinks to fit instead of being dropped — same as [_legHalf].
             SeatOccupantLabel(
               name: p.displayName,
-              phone: null,
+              phone: p.phone,
               nameColor: c.ink,
               phoneColor: c.ink2,
               nameSize: 13,

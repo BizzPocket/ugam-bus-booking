@@ -209,16 +209,28 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
         final isLocked = tour.status == TourStatus.locked;
         if (isLocked) {
+          final seatedCount =
+              tour.passengers.where((p) => p.assignedSeats.isNotEmpty).length;
           final pendingCount = tour.passengers
               .where((p) => p.assignedSeats.isNotEmpty)
               .where((p) => !_sentIds.contains(p.id))
               .length;
-          if (pendingCount <= 0) return const SizedBox.shrink();
+          // No seated riders → nothing to send at all.
+          if (seatedCount <= 0) return const SizedBox.shrink();
+          // Once the lock-time send has marked everyone as sent the CTA used to
+          // vanish, leaving no obvious way to re-broadcast the seat chart — the
+          // "notify to send the chart again" complaint. Keep a persistent
+          // re-send action instead: it re-dispatches the seat chart to EVERY
+          // seated rider (_sendSeatAllocations already targets all seated).
+          final resendAll = pendingCount <= 0;
           return UgamStickyCTA(
             child: UgamCTA(
-              label: tr('notify.send_all_pending'),
-              leadingIcon: Icons.chat_rounded,
-              trailingValue: '$pendingCount',
+              label: resendAll
+                  ? tr('notify.resend_all')
+                  : tr('notify.send_all_pending'),
+              leadingIcon:
+                  resendAll ? Icons.send_rounded : Icons.chat_rounded,
+              trailingValue: resendAll ? null : '$pendingCount',
               onPressed: () => _sendSeatAllocations(tour),
             ),
           );
@@ -1098,21 +1110,24 @@ class _NotifyRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
+          // Tonal per-row send (accentFill + coloured ink), never solid gold —
+          // solid champagne is reserved for the sticky send-all CTA so ~30 rows
+          // don't flood the accent. 44px hit area for comfortable tapping.
           GestureDetector(
             onTap: onSend,
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 40,
-              height: 40,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
-                color: isSent ? c.goodFill : c.accent,
+                color: isSent ? c.goodFill : c.accentFill,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
               child: Icon(
                 Icons.chat_rounded,
-                size: 17,
-                color: isSent ? c.good : c.onAccent,
+                size: 18,
+                color: isSent ? c.good : c.accent,
               ),
             ),
           ),
@@ -1438,12 +1453,18 @@ class _SendProgressDialog extends StatelessWidget {
     return PopScope(
       canPop: false,
       child: Dialog(
-        backgroundColor: c.cardElev,
+        // Card surface token + grid-aligned radius/padding, matching UgamDialog
+        // (this progress variant needs a non-dismissible ValueListenableBuilder
+        // body, so it stays a bespoke Dialog rather than UgamDialog.show).
+        backgroundColor: c.card,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(UgamRadius.sheet),
+          borderRadius: BorderRadius.circular(UgamRadius.card),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.xxl,
+            vertical: UgamSpacing.xxl + UgamSpacing.sm,
+          ),
           child: ValueListenableBuilder<int>(
             valueListenable: progress,
             builder: (_, done, _) {
@@ -1462,7 +1483,7 @@ class _SendProgressDialog extends StatelessWidget {
                       strokeWidth: 4,
                     ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: UgamSpacing.xl),
                   Text(
                     ready
                         ? tr('notify.alloc_sending_now')

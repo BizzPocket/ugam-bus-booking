@@ -58,9 +58,21 @@ class PushService {
     importance: Importance.high,
   );
 
-  /// Index of the Requests inbox tab in MainShell's `_adminPages`
-  /// ([Dashboard, Tours, Requests, Settings]). Tap deep-links land here.
-  static const int _requestsTabIndex = 2;
+  /// Android channel for inbound WhatsApp customer messages — its id MUST match
+  /// `channel_id` in `buildWaMessageFcm` (`messages`) or Android drops it.
+  static const AndroidNotificationChannel _messagesChannel =
+      AndroidNotificationChannel(
+    'messages',
+    'Customer messages',
+    description: 'Inbound WhatsApp messages from your customers',
+    importance: Importance.high,
+  );
+
+  /// Index of the Requests tab in MainShell's `_adminPages`
+  /// ([Dashboard, Tours, Charts, Requests, Settings]) — Requests is index 3.
+  /// (Was 2 before the Charts tab was inserted, which silently deep-linked
+  /// booking taps onto Charts.) Tap deep-links for `booking_request` land here.
+  static const int _requestsTabIndex = 3;
 
   // ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -71,10 +83,10 @@ class PushService {
     _initialised = true;
 
     // Android display channel for foreground heads-up notifications.
-    await _local
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
+    final androidLocal = _local.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    await androidLocal?.createNotificationChannel(_channel);
+    await androidLocal?.createNotificationChannel(_messagesChannel);
 
     await _local.initialize(
       settings: const InitializationSettings(
@@ -181,15 +193,20 @@ class PushService {
     if (!Platform.isAndroid) return;
     final n = message.notification;
     if (n == null) return;
+    // Route the local heads-up onto the channel that matches the push type so
+    // it inherits the right name/importance (and the user can mute each kind
+    // independently).
+    final ch =
+        message.data['type'] == 'wa_message' ? _messagesChannel : _channel;
     await _local.show(
       id: n.hashCode,
       title: n.title,
       body: n.body,
       notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
+          ch.id,
+          ch.name,
+          channelDescription: ch.description,
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
@@ -203,20 +220,33 @@ class PushService {
     _handleTapType(message.data['type'] as String?);
   }
 
-  /// Route a tapped notification to the right surface. Today there is one
-  /// type — `booking_request` → the admin Requests inbox tab.
+  /// Route a tapped notification to the right surface:
+  ///   `booking_request` → the admin Requests tab.
+  ///   `wa_message`      → the WhatsApp Inbox (a pushed route, not a tab).
   void _handleTapType(String? type) {
-    if (type != 'booking_request') return;
-    if (Get.currentRoute != AppRoutes.home) {
-      Get.offAllNamed(AppRoutes.home);
-    }
-    // The shell mounts asynchronously after navigation; select the Requests
-    // tab once its controller exists.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (Get.isRegistered<ShellController>()) {
-        Get.find<ShellController>().switchTab(_requestsTabIndex);
+    if (type == 'booking_request') {
+      if (Get.currentRoute != AppRoutes.home) {
+        Get.offAllNamed(AppRoutes.home);
       }
-    });
+      // The shell mounts asynchronously after navigation; select the Requests
+      // tab once its controller exists.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (Get.isRegistered<ShellController>()) {
+          Get.find<ShellController>().switchTab(_requestsTabIndex);
+        }
+      });
+    } else if (type == 'wa_message') {
+      // Land on the home shell, then push the inbox over it so the back
+      // affordance returns to home.
+      if (Get.currentRoute != AppRoutes.home) {
+        Get.offAllNamed(AppRoutes.home);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (Get.currentRoute != AppRoutes.inbox) {
+          Get.toNamed(AppRoutes.inbox);
+        }
+      });
+    }
   }
 
   /// Tear down listeners (not normally needed — the service is a singleton for

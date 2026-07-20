@@ -132,3 +132,6 @@ dist/
 
 # Editor/Xcode backups
 *.bak
+
+# Local agent session/memory state (machine-specific)
+.claude/projects/

@@ -35,6 +35,16 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
   MoneyController get _money => Get.find<MoneyController>();
   TourController get _tours => Get.find<TourController>();
 
+  /// True only when the money load failed AND nothing is already held — so a
+  /// transient read failure shows a retry instead of an all-zero P&L. Reads the
+  /// money obs inside the calling [Obx] to stay reactive across a retry.
+  bool get _showLoadError =>
+      _money.loadFailed.value &&
+      _money.collections.isEmpty &&
+      _money.expenses.isEmpty &&
+      _money.handovers.isEmpty &&
+      _money.incomes.isEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +94,14 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                   return UgamEmpty(
                     icon: Icons.insights_outlined,
                     title: tr('tour_money_board.no_buses'),
+                  );
+                }
+
+                // A failed money load leaves the obs lists empty; show the
+                // shared retry instead of an all-zero (false break-even) P&L.
+                if (_showLoadError) {
+                  return UgamEmpty.error(
+                    onRetry: () => _money.loadForTour(widget.tourId),
                   );
                 }
 

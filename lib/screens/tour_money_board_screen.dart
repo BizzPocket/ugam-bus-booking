@@ -37,6 +37,18 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
   MoneyController get _money => Get.find<MoneyController>();
   TourController get _tours => Get.find<TourController>();
 
+  /// True only when the money load failed AND there is nothing already held to
+  /// keep on screen — so a transient read failure shows a retry instead of an
+  /// all-zero board. Reads the money obs inside the calling [Obx], so it stays
+  /// reactive: a successful retry flips [MoneyController.loadFailed] and refills
+  /// the lists, re-running the builder.
+  bool get _showLoadError =>
+      _money.loadFailed.value &&
+      _money.collections.isEmpty &&
+      _money.expenses.isEmpty &&
+      _money.handovers.isEmpty &&
+      _money.incomes.isEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -98,6 +110,15 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                   );
                 }
 
+                // A failed money load leaves the obs lists empty; without this
+                // the board would render every bus at ₹0 as if the trip had no
+                // money. Swap in the shared retry only when nothing is held.
+                if (_showLoadError) {
+                  return UgamEmpty.error(
+                    onRetry: () => _money.loadForTour(widget.tourId),
+                  );
+                }
+
                 final buses = tour.buses;
                 // Touch the money obs lists so Obx re-renders on any change.
                 final summaries = _money.summariesForBuses(
@@ -153,7 +174,9 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
             // Sticky tour-totals capsule in the thumb zone.
             Obx(() {
               final tour = _tours.getTour(widget.tourId);
-              if (tour == null || tour.buses.isEmpty) {
+              // Hide the totals strip while the retry state is showing — an
+              // all-zero capsule under a load-error message would contradict it.
+              if (tour == null || tour.buses.isEmpty || _showLoadError) {
                 return const SizedBox.shrink();
               }
               return _TotalsCapsule(summary: _money.tourSummary(), c: c);
@@ -560,10 +583,14 @@ class _TotalsCapsule extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        tr('tour_money_board.outstanding_handover')
-                            .toUpperCase(),
-                        style: UgamText.micro.copyWith(color: c.ink3),
+                      Flexible(
+                        child: Text(
+                          tr('tour_money_board.outstanding_handover')
+                              .toUpperCase(),
+                          style: UgamText.micro.copyWith(color: c.ink3),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       const SizedBox(width: UgamSpacing.sm),
                       UgamStatusDot(
@@ -591,16 +618,20 @@ class _TotalsCapsule extends StatelessWidget {
             ),
             const SizedBox(width: UgamSpacing.md),
             // ── Two compact pills: collected + net ─────────────────
-            _CapsulePill(
-              label: tr('tour_money_board.collected'),
-              value: Formatters.formatMoneyInr(summary.totalCollected),
-              c: c,
+            Flexible(
+              child: _CapsulePill(
+                label: tr('tour_money_board.collected'),
+                value: Formatters.formatMoneyInr(summary.totalCollected),
+                c: c,
+              ),
             ),
             const SizedBox(width: UgamSpacing.sm),
-            _CapsulePill(
-              label: tr('tour_money_board.net'),
-              value: Formatters.formatMoneyInr(summary.totalNet),
-              c: c,
+            Flexible(
+              child: _CapsulePill(
+                label: tr('tour_money_board.net'),
+                value: Formatters.formatMoneyInr(summary.totalNet),
+                c: c,
+              ),
             ),
           ],
         ),

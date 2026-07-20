@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/money_controller.dart';
+import '../controllers/pickup_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
@@ -45,9 +46,24 @@ class _CollectionScreenState extends State<CollectionScreen> {
   /// 0 = All, 1 = To return, 2 = To collect
   int _filter = 0;
 
+  /// True only when the money load failed AND nothing is already held — so a
+  /// transient read failure shows a retry instead of a roster that falsely reads
+  /// as "nobody has paid". Reads the money obs inside the calling [Obx] to stay
+  /// reactive across a retry.
+  bool get _showLoadError =>
+      controller.loadFailed.value &&
+      controller.collections.isEmpty &&
+      controller.expenses.isEmpty &&
+      controller.handovers.isEmpty &&
+      controller.incomes.isEmpty;
+
   @override
   void initState() {
     super.initState();
+    // Warm the global pickup list once so the per-name code tags can resolve.
+    if (Get.isRegistered<PickupController>()) {
+      Get.find<PickupController>().ensureLoaded();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       controller.loadForTour(widget.tour.id);
     });
@@ -107,6 +123,15 @@ class _CollectionScreenState extends State<CollectionScreen> {
             ),
             Expanded(
               child: Obx(() {
+                // A failed load leaves the collections empty; show the shared
+                // retry rather than a roster where every seat falsely reads as
+                // "not collected".
+                if (_showLoadError) {
+                  return UgamEmpty.error(
+                    onRetry: () => controller.loadForTour(widget.tour.id),
+                  );
+                }
+
                 final s = controller.summaryForBus(widget.bus.id);
                 final lines = _seatLines.where(_passesFilter).toList();
 
@@ -221,10 +246,21 @@ class _CollectionScreenState extends State<CollectionScreen> {
     final due = line.due;
     final col = line.col;
 
+    // Only pre-seed the "returned" field with a GENUINE manual return. When the
+    // stored refund is merely the auto-recorded change (== max(0, received −
+    // due)), leave it BLANK so re-opening the sheet re-derives the change from
+    // the freshly typed received amount instead of freezing the stale refund —
+    // otherwise correcting an overpaid collection keeps the rider's money.
+    final storedRefund = col?.amountRefunded ?? 0;
+    final autoChange = col == null
+        ? 0.0
+        : (col.amountReceived - col.amountDue > 0
+              ? col.amountReceived - col.amountDue
+              : 0.0);
+    final isManualReturn =
+        storedRefund > 0 && (storedRefund - autoChange).abs() > 0.005;
     final returnedCtrl = TextEditingController(
-      text: (col?.amountRefunded ?? 0) == 0
-          ? ''
-          : (col!.amountRefunded).toStringAsFixed(0),
+      text: isManualReturn ? storedRefund.toStringAsFixed(0) : '',
     );
     final collectedByCtrl = TextEditingController(text: col?.collectedBy ?? '');
     final noteCtrl = TextEditingController(text: col?.note ?? '');
@@ -242,8 +278,14 @@ class _CollectionScreenState extends State<CollectionScreen> {
       // Live readout: as the handler keys in the cash received, show the change
       // to hand back (or the shortfall still owed), so it's never a silent
       // mental sum — the core "₹500 to return isn't shown" fix.
-      statusBuilder: (sCtx, amount) =>
-          _ChangeStatusPill(amount: amount.toDouble(), due: due),
+      statusBuilder: (sCtx, amount) => ValueListenableBuilder<TextEditingValue>(
+        valueListenable: returnedCtrl,
+        builder: (_, value, _) => _ChangeStatusPill(
+          amount: amount.toDouble(),
+          due: due,
+          returned: double.tryParse(value.text.trim()) ?? 0,
+        ),
+      ),
       details: (detailCtx) => Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -311,29 +353,43 @@ class _CollectionScreenState extends State<CollectionScreen> {
 class _ChangeStatusPill extends StatelessWidget {
   final double amount;
   final double due;
+  final double returned;
 
-  const _ChangeStatusPill({required this.amount, required this.due});
+  const _ChangeStatusPill({
+    required this.amount,
+    required this.due,
+    this.returned = 0,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final diff = amount - due;
+    // Mirror exactly what Save will persist: the auto-recorded change (or an
+    // explicit manual return) is netted out of received before comparing to due.
+    // So a typed return that leaves a shortfall never reads as "Settled", while
+    // a plain overpayment still surfaces the change to hand back.
+    final refund = refundToRecord(
+      due: due,
+      received: amount,
+      manualReturned: returned,
+    );
+    final shortfall = due - (amount - refund);
     final IconData icon;
     final Color tone;
     final String label;
-    if (diff > 0.005) {
-      icon = Icons.undo_rounded;
-      tone = c.warm;
-      label = tr(
-        'collection.change_to_return',
-        namedArgs: {'amount': Formatters.formatMoneyInr(diff)},
-      );
-    } else if (diff < -0.005) {
+    if (shortfall > 0.005) {
       icon = Icons.south_west_rounded;
       tone = c.accent;
       label = tr(
         'collection.still_to_collect',
-        namedArgs: {'amount': Formatters.formatMoneyInr(-diff)},
+        namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
+      );
+    } else if (refund > 0.005) {
+      icon = Icons.undo_rounded;
+      tone = c.warm;
+      label = tr(
+        'collection.change_to_return',
+        namedArgs: {'amount': Formatters.formatMoneyInr(refund)},
       );
     } else {
       icon = Icons.check_circle_rounded;
@@ -553,6 +609,11 @@ class _PassengerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final passenger = line.passenger;
+    // Global pickup-code lookup for the trailing name tag; null (degrade to
+    // name-only) when the controller isn't registered.
+    final pickup = Get.isRegistered<PickupController>()
+        ? Get.find<PickupController>()
+        : null;
     final due = line.due;
     final col = line.col;
     final received = col?.amountReceived ?? 0;
@@ -601,11 +662,42 @@ class _PassengerRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      passenger.displayName,
-                      style: UgamText.titleS.copyWith(color: c.ink),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    // Name stays flexible + ellipsised so a long name can never
+                    // overflow; the pickup-CODE tag is a fixed trailing chip.
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            passenger.displayName,
+                            style: UgamText.titleS.copyWith(color: c.ink),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        // Only with a live controller — an Obx whose closure
+                        // reads no observable throws (see PickupController.
+                        // codeFor).
+                        if (pickup != null)
+                          Obx(() {
+                            final code = pickup.codeFor(
+                              passenger.pickupLocationId,
+                            );
+                            if (code == null || code.isEmpty) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                left: UgamSpacing.sm,
+                              ),
+                              child: UgamReqChip(
+                                label: code,
+                                variant: UgamChipVariant.neutral,
+                              ),
+                            );
+                          }),
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(

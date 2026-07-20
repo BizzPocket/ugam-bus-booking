@@ -75,7 +75,7 @@ begin
        and rel.relname = 'passengers'
        and con.contype in ('u', 'p')
        and (
-         select array_agg(att.attname order by att.attname)
+         select array_agg(att.attname::text order by att.attname::text)
            from unnest(con.conkey) k
            join pg_attribute att
              on att.attrelid = con.conrelid and att.attnum = k
@@ -96,7 +96,7 @@ begin
        and idx.indisunique
        and not idx.indisprimary
        and (
-         select array_agg(att.attname order by att.attname)
+         select array_agg(att.attname::text order by att.attname::text)
            from unnest(idx.indkey) k
            join pg_attribute att
              on att.attrelid = idx.indrelid and att.attnum = k
@@ -115,6 +115,9 @@ end $$;
 --     (passenger_id) as the stable edit handle.
 --   • returns the request id so the client can track this exact request.
 -- The lock-gate checks (is_public + status not locked/completed) are preserved.
+-- The 014 version returned void; changing the return type to uuid needs a DROP
+-- first (CREATE OR REPLACE cannot change a function's return type).
+drop function if exists public.submit_booking_request(uuid, uuid, text, text, int, text, jsonb, jsonb, text);
 create or replace function public.submit_booking_request(
   p_request_id   uuid,
   p_tour_id      uuid,

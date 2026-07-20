@@ -656,6 +656,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     String fromSeatId,
   ) {
     setState(() {
+      // Starting a relocate exits edit-flags mode: the two modes can't both be
+      // active, else the in-hand mover is stranded under the relocate banner
+      // while seat taps route to the flag sheet.
+      _editMode = false;
       _selectedBusId = destination.id;
       _selectedPassengerId = mover.id;
       _relocate = (
@@ -2049,8 +2053,13 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                         // and embedded alike.
                         _EditSeatsToggle(
                           editMode: _editMode,
-                          onToggle: () =>
-                              setState(() => _editMode = !_editMode),
+                          onToggle: () => setState(() {
+                            _editMode = !_editMode;
+                            // Entering edit-flags cancels an active relocate so
+                            // the in-hand mover isn't stranded under a stale
+                            // banner — the two modes are mutually exclusive.
+                            if (_editMode) _relocate = null;
+                          }),
                           c: c,
                         ),
                         const SizedBox(width: UgamSpacing.gutter),
@@ -2440,64 +2449,21 @@ class _SeatPassengerPicker extends StatelessWidget {
 
   Widget _row(UgamColorSet c, Passenger p) {
     final isActive = p.id == activeId;
-    return GestureDetector(
+    return UgamPersonRow(
+      name: p.displayName,
+      subtitle: p.requestSummary,
+      initials: SeatChartTile.initials(p.displayName),
+      selected: isActive,
       onTap: () => onPick(p),
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.md),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-          border: isActive ? Border.all(color: c.accent, width: 1.5) : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isActive ? c.accent : c.accentFill,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                SeatChartTile.initials(p.displayName),
-                style: UgamText.bodyStrong.copyWith(
-                  color: isActive ? c.onAccent : c.accent,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    p.displayName,
-                    style: UgamText.bodyStrong.copyWith(color: c.ink),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    p.requestSummary,
-                    style: UgamText.micro.copyWith(color: c.ink2),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            if (isActive) ...[
-              const SizedBox(width: UgamSpacing.sm),
-              Icon(Icons.check_circle_rounded, size: 16, color: c.accent),
-            ],
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isActive) ...[
+            Icon(Icons.check_circle_rounded, size: 16, color: c.accent),
             const SizedBox(width: 4),
-            Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
           ],
-        ),
+          Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+        ],
       ),
     );
   }
@@ -2985,9 +2951,7 @@ class _PassengerCard extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
                 child: Text(
-                  passenger.name.isNotEmpty
-                      ? passenger.name[0].toUpperCase()
-                      : '?',
+                  SeatChartTile.initials(passenger.displayName),
                   style: UgamText.bodyStrong.copyWith(
                     color: c.accent,
                     fontSize: 13,
@@ -3332,7 +3296,7 @@ class _AssignmentDock extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
               child: Text(
-                p.name.isNotEmpty ? p.name[0].toUpperCase() : '?',
+                SeatChartTile.initials(p.displayName),
                 style: UgamText.bodyStrong.copyWith(color: c.accent, fontSize: 13),
               ),
             ),
@@ -3510,6 +3474,23 @@ class _AssignmentDock extends StatelessWidget {
               expand: true,
               onPressed: onDownloadChart,
             ),
+          ] else if (handlerId == null &&
+              pending.isEmpty &&
+              tour.status != TourStatus.locked &&
+              tour.status != TourStatus.completed) ...[
+            // Done-state dead-end fix: every seat is assigned but no handler is
+            // picked, so the lock gate stays closed and the in-detail handler
+            // nudge (only rendered while a passenger is expanded) is
+            // unreachable. Surface an inline CTA that routes to Manage Buses to
+            // pick a handler.
+            const SizedBox(height: UgamSpacing.xs),
+            UgamButton(
+              label: tr('tour_seat_assignment.btn_pick_handler_lock'),
+              icon: Icons.badge_outlined,
+              kind: UgamButtonKind.primary,
+              expand: true,
+              onPressed: onManageBuses,
+            ),
           ],
         ],
       ),
@@ -3553,82 +3534,32 @@ class _AssignmentDock extends StatelessWidget {
             itemBuilder: (_, i) {
               final p = pending[i];
               final selected = p.id == activeId;
-              return GestureDetector(
+              return UgamPersonRow(
+                name: p.displayName,
+                subtitle: p.requestSummary,
+                initials: SeatChartTile.initials(p.displayName),
+                selected: selected,
                 onTap: () {
-                  HapticFeedback.selectionClick();
                   Navigator.of(sheetCtx).pop();
                   onTapPassenger(p.id);
                 },
-                behavior: HitTestBehavior.opaque,
-                child: AnimatedContainer(
-                  duration: UgamMotion.tab,
-                  curve: Curves.easeOutCubic,
-                  padding: const EdgeInsets.all(UgamSpacing.md),
-                  decoration: BoxDecoration(
-                    color: cc.cardElev,
-                    borderRadius: BorderRadius.circular(UgamRadius.row),
-                    border: selected
-                        ? Border.all(color: cc.accent, width: 1.5)
-                        : null,
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: selected ? cc.accent : cc.accentFill,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Text(
-                          SeatChartTile.initials(p.displayName),
-                          style: UgamText.bodyStrong.copyWith(
-                            color: selected ? cc.onAccent : cc.accent,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: UgamSpacing.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              p.displayName,
-                              style: UgamText.bodyStrong.copyWith(
-                                color: cc.ink,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              p.requestSummary,
-                              style: UgamText.micro.copyWith(color: cc.ink2),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (selected) ...[
-                        const SizedBox(width: UgamSpacing.sm),
-                        Icon(
-                          Icons.check_circle_rounded,
-                          size: 16,
-                          color: cc.accent,
-                        ),
-                      ],
-                      const SizedBox(width: 4),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (selected) ...[
                       Icon(
-                        Icons.chevron_right_rounded,
-                        size: 18,
-                        color: cc.ink3,
+                        Icons.check_circle_rounded,
+                        size: 16,
+                        color: cc.accent,
                       ),
+                      const SizedBox(width: 4),
                     ],
-                  ),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: cc.ink3,
+                    ),
+                  ],
                 ),
               );
             },

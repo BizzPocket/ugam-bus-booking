@@ -2,6 +2,7 @@ import 'collection.dart';
 import 'expense.dart';
 import 'income_entry.dart';
 import 'bus_handover.dart';
+import 'passenger.dart';
 
 /// Aggregated money figures for a single bus on a tour.
 ///
@@ -65,6 +66,16 @@ class BusMoneySummary {
   /// net cash they hold once every cost (the owner's rent included) is paid.
   double get netCollected => collected + income - expensesTotal;
 
+  /// [passengers] + [dueForSeat] make to-collect the TRUE money still owed, not
+  /// just the recorded shortfalls: a seated rider with NO collection row on this
+  /// bus still owes their full seat fare, so admin no longer reads "to collect 0"
+  /// while the handler shows the full billed revenue. Mirrors
+  /// [HandlerBusMoney.compute] exactly (seat-AGNOSTIC: a rider with ANY row on
+  /// this bus is already covered by the recorded shortfall, so they are skipped
+  /// regardless of which seat that row names) so admin and handler can never
+  /// disagree. When [dueForSeat] is null (e.g. the handler's own call, which does
+  /// its own seated-uncollected pass) to-collect stays the recorded shortfalls
+  /// alone — no double-count.
   factory BusMoneySummary.compute({
     required String busId,
     required List<Collection> collections,
@@ -73,11 +84,37 @@ class BusMoneySummary {
     List<IncomeEntry> incomes = const [],
     double busRent = 0,
     double revenueBilled = 0,
+    Iterable<Passenger> passengers = const [],
+    double Function(Passenger passenger, String seatId)? dueForSeat,
   }) {
     final busCollections = collections.where((c) => c.busId == busId);
     final busExpenses = expenses.where((e) => e.busId == busId);
     final busHandovers = handovers.where((h) => h.busId == busId);
     final busIncomes = incomes.where((i) => i.busId == busId);
+
+    // Recorded shortfalls on existing collection rows …
+    var toCollect = busCollections.fold(
+      0.0,
+      (sum, c) => sum + c.stillToCollect,
+    );
+    // … plus seated riders nobody has opened a collection for yet, at their full
+    // seat fare. Keyed by passenger id (seat-agnostic): a rider with ANY row on
+    // this bus is already in the shortfall sum above, so skip them here.
+    if (dueForSeat != null) {
+      final collectedPassengerIds = busCollections
+          .map((c) => c.passengerId)
+          .toSet();
+      for (final p in passengers) {
+        if (collectedPassengerIds.contains(p.id)) continue;
+        final seatIds = p.assignedSeats
+            .where((a) => a.busId == busId)
+            .map((a) => a.seatId)
+            .toSet();
+        for (final seatId in seatIds) {
+          toCollect += dueForSeat(p, seatId);
+        }
+      }
+    }
 
     return BusMoneySummary(
       busId: busId,
@@ -94,10 +131,7 @@ class BusMoneySummary {
         0.0,
         (sum, c) => sum + c.changeToReturn,
       ),
-      toCollectTotal: busCollections.fold(
-        0.0,
-        (sum, c) => sum + c.stillToCollect,
-      ),
+      toCollectTotal: toCollect,
     );
   }
 }
@@ -216,6 +250,10 @@ class TourMoneySummary {
   double get totalOutstandingHandover =>
       totalExpectedHandover - totalHandedOver;
 
+  /// [toCollectTotal] overrides the recorded-shortfall sum with the caller's
+  /// per-bus roll-up (which also counts seated-but-uncollected riders), so the
+  /// tour total and the per-bus [BusMoneySummary.toCollectTotal] figures always
+  /// agree. When null, to-collect falls back to the recorded shortfalls alone.
   factory TourMoneySummary.compute({
     required List<Collection> collections,
     required List<Expense> expenses,
@@ -223,6 +261,7 @@ class TourMoneySummary {
     List<IncomeEntry> incomes = const [],
     double busRentsTotal = 0,
     double totalRevenueBilled = 0,
+    double? toCollectTotal,
   }) {
     return TourMoneySummary(
       totalCollected: collections.fold(0.0, (sum, c) => sum + c.netCollected),
@@ -238,7 +277,9 @@ class TourMoneySummary {
         (sum, h) => sum + h.handedOverAmount,
       ),
       totalToReturn: collections.fold(0.0, (sum, c) => sum + c.changeToReturn),
-      totalToCollect: collections.fold(0.0, (sum, c) => sum + c.stillToCollect),
+      totalToCollect:
+          toCollectTotal ??
+          collections.fold(0.0, (sum, c) => sum + c.stillToCollect),
     );
   }
 }

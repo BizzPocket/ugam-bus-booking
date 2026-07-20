@@ -1,0 +1,24 @@
+-- ============================================================
+-- 038  Admin-facing short CODE on pickup_locations
+-- ------------------------------------------------------------
+-- Gives each pickup point an OPTIONAL short keyword (e.g. "ST" for Surat) that
+-- the organiser sees on admin surfaces. Customers still see the full `name`;
+-- `code` is an organiser-only shorthand, never shown in the customer picker.
+--
+-- This ADDS a single nullable column to the table from 032. There is no data
+-- migration and no policy change — existing RLS on pickup_locations already
+-- covers the new column.
+--
+-- WHY THIS MUST BE LIVE BEFORE THE APP SHIPS: PickupLocation.toMap now writes
+-- 'code' on every insert/update. PostgREST rejects the WHOLE payload if the
+-- column is missing, so shipping the app against a DB without this column would
+-- break add/rename of pickup points entirely. Reads are unaffected (a missing
+-- column simply comes back null), so applying this before the release is a
+-- forward-only, zero-downtime change.
+--
+-- DEPLOYMENT: run THIS FILE ALONE in the Supabase SQL editor (do NOT `supabase
+-- db push` — the numbered history is out of sync with the live schema). No new
+-- secrets. Idempotent (add column if not exists).
+-- ============================================================
+
+alter table public.pickup_locations add column if not exists code text;

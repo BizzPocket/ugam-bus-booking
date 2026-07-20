@@ -70,6 +70,39 @@ Deno.test("buildFcmMessage — customer edit varies title/body, same deep-link",
   assertEquals(edit.data.event, "updated");
 });
 
+Deno.test("buildFcmMessage — customer cancel varies title/body, same deep-link", () => {
+  const cancelled = buildFcmMessage({
+    token: "tok4",
+    tourTitle: "Dwarka Yatra",
+    request: { id: "r4", customer_name: "Ramesh", party_size: 2 },
+    event: "cancelled",
+  });
+  assertEquals(cancelled.notification.title, "Booking cancelled");
+  assertEquals(
+    cancelled.notification.body,
+    "Ramesh cancelled their booking · Dwarka Yatra",
+  );
+  assertEquals(cancelled.data.type, "booking_request");
+  assertEquals(cancelled.data.event, "cancelled");
+});
+
+Deno.test("buildFcmMessage — cancel request awaits approval, same deep-link", () => {
+  const req = buildFcmMessage({
+    token: "tok5",
+    tourTitle: "Dwarka Yatra",
+    request: { id: "r5", customer_name: "Ramesh", party_size: 2 },
+    event: "cancel_requested",
+  });
+  assertEquals(req.notification.title, "Cancellation request");
+  assertEquals(
+    req.notification.body,
+    "Ramesh wants to cancel a confirmed seat — your approval needed · Dwarka Yatra",
+  );
+  // Distinct from a completed self-cancel — this one still needs the organiser.
+  assertEquals(req.data.type, "booking_request");
+  assertEquals(req.data.event, "cancel_requested");
+});
+
 Deno.test("isDeadTokenStatus — only terminal token errors prune", () => {
   assert(isDeadTokenStatus(404));
   assert(isDeadTokenStatus(400, "UNREGISTERED"));

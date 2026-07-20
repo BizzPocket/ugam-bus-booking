@@ -1,3 +1,5 @@
+import 'tour_status.dart';
+
 /// A single tour the queried phone number is the designated handler for,
 /// resolved by the `handler_requests_by_phone` RPC. Each ref carries a
 /// [requestId] — a booking_request id for that tour — so the UI can hand it
@@ -24,6 +26,12 @@ class HandlerTourRef {
     required this.departureDate,
     required this.status,
   });
+
+  /// Whether this handler tour is still live (worth showing in "Find my
+  /// seat"). Keyed on lifecycle STATUS, never the departure date: a handler
+  /// manages a tour across its whole lifecycle, so any non-completed status is
+  /// live even long after departure. Only [TourStatus.completed] is history.
+  bool get isLive => status.toLowerCase() != TourStatus.completed.name;
 
   factory HandlerTourRef.fromJson(Map<String, dynamic> m) {
     return HandlerTourRef(

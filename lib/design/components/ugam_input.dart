@@ -11,6 +11,7 @@ class UgamInput extends StatelessWidget {
   final String? label;
   final String? hint;
   final TextEditingController? controller;
+  final FocusNode? focusNode;
   final TextInputType? keyboardType;
   final List<TextInputFormatter> inputFormatters;
   final bool obscure;
@@ -31,6 +32,7 @@ class UgamInput extends StatelessWidget {
     this.label,
     this.hint,
     this.controller,
+    this.focusNode,
     this.keyboardType,
     this.inputFormatters = const [],
     this.obscure = false,
@@ -61,6 +63,7 @@ class UgamInput extends StatelessWidget {
         ],
         TextField(
           controller: controller,
+          focusNode: focusNode,
           keyboardType: keyboardType,
           inputFormatters: inputFormatters,
           obscureText: obscure,

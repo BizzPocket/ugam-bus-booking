@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../components/seat_chart_tile.dart';
+import '../controllers/pickup_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
@@ -106,21 +107,12 @@ class OccupantActionSheet extends StatefulWidget {
     void Function(Passenger occupant)? onCancelReturn,
   }) {
     if (occupants.isEmpty) return Future.value();
-    final c = UgamColors.of(context);
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      // Root navigator + safe area: escape the shell's nested tab Navigator so
-      // the sheet paints above (not behind) the bottom dock nav. See
-      // UgamSheet.show for the full rationale.
-      useRootNavigator: true,
-      useSafeArea: true,
-      backgroundColor: c.card,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(UgamRadius.sheet),
-        ),
-      ),
+    // Root-navigator presentation (escaping the shell's nested tab Navigator so
+    // the sheet paints above the bottom dock nav), the top-radius card
+    // background and the drag handle all come from the shared UgamSheet shell.
+    return UgamSheet.show<void>(
+      context,
+      showClose: false,
       builder: (_) => OccupantActionSheet(
         occupants: occupants,
         tourId: tourId,
@@ -145,6 +137,19 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
   int _idx = 0;
   TourController get _ctrl => Get.find<TourController>();
   Passenger get _occ => widget.occupants[_idx];
+
+  /// Global pickup-code lookup for the header tag; null (degrade to name-only)
+  /// when the controller isn't registered.
+  final PickupController? _pickup = Get.isRegistered<PickupController>()
+      ? Get.find<PickupController>()
+      : null;
+
+  @override
+  void initState() {
+    super.initState();
+    // Warm the global pickup list once so the header code tag can resolve.
+    _pickup?.ensureLoaded();
+  }
 
   /// Live occupant — re-read from the controller so an in-context priority /
   /// handler toggle reflects immediately without closing the sheet.
@@ -227,30 +232,14 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
     final phone = occ.phone;
     final priorityOn = _liveOcc.isPriorityApproved;
     final handlerOfThisBus = _isHandlerOfThisBus;
+    final pickup = _pickup;
 
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.sm + 4,
-        UgamSpacing.gutter,
-        UgamSpacing.lg + MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Column(
+    // Padding, the drag handle and the bottom-inset spacing are all provided by
+    // the shared UgamSheet shell; this content is a plain min-height column.
+    return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: UgamSpacing.md),
-              decoration: BoxDecoration(
-                color: c.border,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-
           // Person toggle — only for a genuinely shared sofa.
           if (shared) ...[
             UgamTabPills(
@@ -286,11 +275,41 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      occ.displayName,
-                      style: UgamText.titleM.copyWith(color: c.ink),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    // Name stays flexible + ellipsised so a long name can never
+                    // overflow; the pickup-CODE tag is a fixed trailing chip.
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            occ.displayName,
+                            style: UgamText.titleM.copyWith(color: c.ink),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        // Built only when the pickup controller exists: with no
+                        // controller there is nothing observable to watch, and
+                        // an Obx whose closure reads no observable throws (and
+                        // paints a 100000px error box that blows out this Row).
+                        if (pickup != null)
+                          Obx(() {
+                            final code = pickup.codeFor(occ.pickupLocationId);
+                            if (code == null || code.isEmpty) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                left: UgamSpacing.sm,
+                              ),
+                              child: UgamReqChip(
+                                label: code,
+                                variant: UgamChipVariant.neutral,
+                              ),
+                            );
+                          }),
+                      ],
                     ),
                     Text(
                       tr(
@@ -445,7 +464,6 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
             ],
           ],
         ],
-      ),
     );
   }
 }

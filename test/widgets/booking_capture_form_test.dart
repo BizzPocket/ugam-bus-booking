@@ -89,6 +89,57 @@ void main() {
     expect(single.firstWhere((l) => l.leg == TripType.returnOnly).qty, 1);
   });
 
+  testWidgets('one Double Sofa counts as 2 seats (berths), not 1', (
+    tester,
+  ) async {
+    _useTallSurface(tester);
+    final key = GlobalKey<BookingCaptureFormState>();
+    await tester.pumpWidget(
+      _host(BookingCaptureForm(key: key, fromCity: 'A', toCity: 'B')),
+    );
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Alpesh');
+    await tester.enterText(fields.at(1), _phone);
+
+    // One Double Sofa on the default (Full trip) tab.
+    await tester.tap(find.byKey(const Key('seat-add-doubleSofa')));
+    await tester.pump();
+
+    // Live total (drives the "Total seats: N" line + submit chip) is berths.
+    expect(
+      key.currentState!.totalSeats,
+      2,
+      reason: 'a double sofa physically occupies two berths',
+    );
+
+    final data = key.currentState!.collect()!;
+    // The requested UNIT count is still one double sofa …
+    expect(data.doubleSofa, 1);
+    // … but the SEAT total counts its two berths.
+    expect(data.totalSeats, 2);
+  });
+
+  testWidgets('mixed 1 Double + 1 Single = 3 seats', (tester) async {
+    _useTallSurface(tester);
+    final key = GlobalKey<BookingCaptureFormState>();
+    await tester.pumpWidget(
+      _host(BookingCaptureForm(key: key, fromCity: 'A', toCity: 'B')),
+    );
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Alpesh');
+    await tester.enterText(fields.at(1), _phone);
+
+    await tester.tap(find.byKey(const Key('seat-add-doubleSofa')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('seat-add-singleSofa')));
+    await tester.pump();
+
+    expect(key.currentState!.totalSeats, 3, reason: '2 (double) + 1 (single)');
+    expect(key.currentState!.collect()!.totalSeats, 3);
+  });
+
   testWidgets('forcedLeg hides the tab bar and pins every line to that leg', (
     tester,
   ) async {

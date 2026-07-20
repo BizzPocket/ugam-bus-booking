@@ -20,6 +20,13 @@ enum SeatType {
     }
   }
 
+  /// Physical berths one unit of this seat type occupies: a Double Sofa is an
+  /// upper+lower PAIR (2 berths), every other type is a single berth (1). This
+  /// is the one place the "a double sofa is worth two seats" rule lives — seat
+  /// totals, capacity accounting ([Passenger.seatBerths]) and group sizing all
+  /// route through it so they can't diverge.
+  int get berthsPerUnit => this == SeatType.doubleSofa ? 2 : 1;
+
   /// Parse from stored string.
   static SeatType fromString(String value) {
     return SeatType.values.firstWhere(

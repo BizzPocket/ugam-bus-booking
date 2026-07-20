@@ -55,6 +55,8 @@ class _AddReturnTicketSheetState extends State<AddReturnTicketSheet> {
         requestLines: data.lines, // already returnOnly via forcedLeg
         note: data.note,
         tripType: TripType.returnOnly,
+        pickupLocationId: data.pickupLocationId,
+        pickupLocationName: data.pickupLocationName,
       );
       await Get.find<TourController>()
           .addPassenger(widget.tour.id, passenger, overrideLock: true);
@@ -76,39 +78,46 @@ class _AddReturnTicketSheetState extends State<AddReturnTicketSheet> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            tr('tour_detail.add_return_ticket_hint'),
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          BookingCaptureForm(
-            key: _formKey,
-            fromCity: widget.tour.fromCity,
-            toCity: widget.tour.toCity,
-            enableContacts: true,
-            maxPerType: 10,
-            forcedLeg: TripType.returnOnly,
-            onChanged: () {
-              final n = _formKey.currentState?.totalSeats ?? 0;
-              if (n != _seatCount) setState(() => _seatCount = n);
-            },
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          UgamCTA(
-            label: _saving
-                ? tr('requests.sheet.saving')
-                : tr('tour_detail.add_return_ticket'),
-            leadingIcon: Icons.check_rounded,
-            trailingValue: _seatCount > 0 ? '$_seatCount' : null,
-            loading: _saving,
-            onPressed: _submit,
-          ),
-        ],
+    // Tapping empty space unfocuses the name field, which dismisses the
+    // contact-autocomplete dropdown (opaque so gaps between fields count as
+    // taps; the scroll view still wins drags and fields still take their taps).
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      behavior: HitTestBehavior.opaque,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              tr('tour_detail.add_return_ticket_hint'),
+              style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+            ),
+            const SizedBox(height: UgamSpacing.lg),
+            BookingCaptureForm(
+              key: _formKey,
+              fromCity: widget.tour.fromCity,
+              toCity: widget.tour.toCity,
+              enableContacts: true,
+              maxPerType: 10,
+              forcedLeg: TripType.returnOnly,
+              onChanged: () {
+                final n = _formKey.currentState?.totalSeats ?? 0;
+                if (n != _seatCount) setState(() => _seatCount = n);
+              },
+            ),
+            const SizedBox(height: UgamSpacing.lg),
+            UgamCTA(
+              label: _saving
+                  ? tr('requests.sheet.saving')
+                  : tr('tour_detail.add_return_ticket'),
+              leadingIcon: Icons.check_rounded,
+              trailingValue: _seatCount > 0 ? '$_seatCount' : null,
+              loading: _saving,
+              onPressed: _submit,
+            ),
+          ],
+        ),
       ),
     );
   }

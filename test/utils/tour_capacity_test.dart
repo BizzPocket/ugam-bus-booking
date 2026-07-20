@@ -237,12 +237,105 @@ void main() {
 
       final cap = computeTourCapacity(tour);
       expect(cap.capByType[SeatType.seater], 2);
-      expect(cap.freeByType[SeatType.seater], 1,
+      expect(cap.freeByType[SeatType.seater]?.round, 1,
           reason: 'GO+RET share one berth → max(GO,RET)=1 occupied seater');
       expect(cap.occupied, 1,
           reason: 'the reused berth is the busier leg = 1, not 2');
       expect(cap.free, 1, reason: 'the other seater seat is genuinely empty');
       expect(cap.needsDecision, 0);
+    });
+  });
+
+  group('computeTourCapacity — by-type counts WHOLE tiles, not half-berths', () {
+    test('capByType is in tiles: a Double Sofa cell counts as ONE unit, not two',
+        () {
+      // Two double-sofa tiles, empty. The "empty by type" row and the demand
+      // summary must speak the same unit — "a Double Sofa counts as ONE unit" —
+      // so a bus of two doubles reads capByType 2 (tiles), never 4 (berths).
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+          _seat(1, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL2'),
+        ])
+      ], const []);
+
+      final cap = computeTourCapacity(tour);
+      expect(cap.capByType[SeatType.doubleSofa], 2,
+          reason: 'two double tiles = 2 units, not 4 berths');
+      expect(cap.freeByType[SeatType.doubleSofa]?.round, 2,
+          reason: 'both doubles are wholly empty → 2 bookable doubles');
+    });
+
+    test(
+        'a half-occupied Double Sofa is NOT a free double (the miscount bug)',
+        () {
+      // Two double tiles. One round-trip single rider takes ONE half of DL1,
+      // leaving its other half physically empty; DL2 is wholly empty. A new
+      // Double Sofa request (a pair) can only take DL2 — the half-open DL1 can't
+      // seat a fresh pair. The OLD berth math read `4 − max(go,ret)=1 = 3` free,
+      // over-reporting bookable doubles; the fix counts WHOLE-empty tiles → 1.
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+          _seat(1, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL2'),
+        ])
+      ], [
+        _p('A', lines: [_line(SeatType.singleSofa, 1)]),
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      expect(cap.capByType[SeatType.doubleSofa], 2);
+      expect(cap.freeByType[SeatType.doubleSofa]?.round, 1,
+          reason:
+              'only the wholly-empty DL2 is a bookable double; the half-open '
+              'DL1 is not — old berth math wrongly said 3');
+      expect(cap.free, 3,
+          reason: 'headline berth-free (2 empty berths on DL2 + 1 on DL1) is '
+              'unchanged — only the by-type UNIT changed');
+    });
+
+    test('leg split: an outbound-only holder makes the seat RETURN-only free',
+        () {
+      // Two single sofas. One outbound-only rider takes the GO slot of SU1,
+      // which returns EMPTY. SU1 is free on RETURN only; SU2 is free on both.
+      // The by-type breakdown must read round=1 (SU2) + retOnly=1 (SU1) so the
+      // agent sees a return-only single they can still sell.
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ], [
+        _p('A',
+            lines: [_line(SeatType.singleSofa, 1)], trip: TripType.outboundOnly),
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      final s = cap.freeByType[SeatType.singleSofa]!;
+      expect(s.round, 1, reason: 'SL1 is empty on both legs');
+      expect(s.retOnly, 1, reason: "SU1's GO slot is held; it returns empty");
+      expect(s.goOnly, 0);
+      expect(s.total, 2);
+    });
+
+    test('leg split: a Double free on GO but held on RETURN is go-only', () {
+      // One double tile. A return-only single rider holds one berth coming back,
+      // so BOTH berths are empty going out → a go-only pair still fits (goOnly),
+      // but no round-trip pair does (retOnly berth is held on return).
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+        ])
+      ], [
+        _p('A',
+            lines: [_line(SeatType.singleSofa, 1)], trip: TripType.returnOnly),
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      final d = cap.freeByType[SeatType.doubleSofa]!;
+      expect(d.round, 0, reason: 'a return rider holds a berth — no round pair');
+      expect(d.goOnly, 1, reason: 'both berths are empty going → go-only pair fits');
+      expect(d.retOnly, 0);
     });
   });
 }

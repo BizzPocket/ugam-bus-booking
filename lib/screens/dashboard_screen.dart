@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/auth_controller.dart';
+import '../controllers/inbox_controller.dart';
 import '../controllers/money_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
@@ -17,6 +18,7 @@ import '../widgets/dashboard/loading_shimmer.dart';
 import '../widgets/dashboard/quick_actions.dart';
 import '../widgets/dashboard/recent_request_row.dart';
 import '../widgets/dashboard/trip_hero.dart';
+import 'inbox_screen.dart';
 import 'main_shell.dart';
 import 'seating_exceptions_screen.dart';
 import 'seats_screen.dart';
@@ -93,6 +95,18 @@ class DashboardScreen extends StatelessWidget {
                 DashboardTripHero(c: c),
                 const SizedBox(height: UgamSpacing.xl),
                 DashboardQuickActions(c: c, shell: shell),
+                // Unread WhatsApp messages nudge — only when there's something
+                // to read; the always-present entry point is the home-header
+                // chat icon. Neutral surface (accent stays rationed to the top
+                // attention CTA); the count rides an accent pill.
+                Obx(() {
+                  final unread = Get.find<InboxController>().totalUnread.value;
+                  if (unread <= 0) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: UgamSpacing.xl),
+                    child: _MessagesCard(count: unread, c: c),
+                  );
+                }),
                 const SizedBox(height: UgamSpacing.xl),
                 Obx(() {
                   final attention = _needsAttention(context, tourCtrl.tours);
@@ -184,6 +198,24 @@ class DashboardScreen extends StatelessWidget {
       if (tour.status == TourStatus.planning && tour.passengers.isEmpty) {
         continue;
       }
+      // A customer asked to cancel a CONFIRMED / seat-assigned booking
+      // (migration 035) — a discrete decision the organiser owes them. Surface
+      // it high, routing to the Requests home where the "Approve cancellation"
+      // primary lives and the seat is freed.
+      final cancelReqs =
+          tour.passengers.where((p) => p.isCancelRequested).length;
+      if (cancelReqs > 0) {
+        items.add(AttentionItem(
+          tour: tour,
+          reason: tr('dashboard.attention_cancel_requests',
+              args: ['$cancelReqs']),
+          ctaLabel: tr('dashboard.cta_review'),
+          ctaIcon: Icons.event_busy_rounded,
+          tone: UgamStatusTone.warm,
+          onTap: () => Get.find<ShellController>().switchTab(3),
+        ));
+        continue;
+      }
       // Money settlement: a handler still owing cash to the admin is a sharp,
       // money-on-the-line blocker. MoneyController holds rows for ONE tour at
       // a time, so we can only assert this for the tour whose money is loaded
@@ -215,7 +247,7 @@ class DashboardScreen extends StatelessWidget {
         items.add(AttentionItem(
           tour: tour,
           reason: tr('dashboard.attention_no_bus',
-              args: ['${tour.passengers.length}']),
+              namedArgs: {'n': '${tour.passengers.length}'}),
           ctaLabel: tr('dashboard.cta_add_bus'),
           ctaIcon: Icons.directions_bus_rounded,
           tone: UgamStatusTone.warm,
@@ -238,7 +270,7 @@ class DashboardScreen extends StatelessWidget {
           items.add(AttentionItem(
             tour: tour,
             reason: tr('dashboard.attention_seating_decisions',
-                args: ['$decisions']),
+                namedArgs: {'n': '$decisions'}),
             ctaLabel: tr('dashboard.cta_decide'),
             ctaIcon: Icons.error_outline_rounded,
             tone: UgamStatusTone.warm,
@@ -255,7 +287,8 @@ class DashboardScreen extends StatelessWidget {
         final remaining = tour.pendingSeatsToAssign;
         items.add(AttentionItem(
           tour: tour,
-          reason: tr('dashboard.attention_unassigned', args: ['$remaining']),
+          reason: tr('dashboard.attention_unassigned',
+              namedArgs: {'n': '$remaining'}),
           ctaLabel: tr('dashboard.cta_assign'),
           ctaIcon: Icons.grid_view_rounded,
           tone: UgamStatusTone.accent,
@@ -311,5 +344,76 @@ class DashboardScreen extends StatelessWidget {
     }
     entries.sort((a, b) => b.passenger.createdAt.compareTo(a.passenger.createdAt));
     return entries.take(5).toList();
+  }
+}
+
+/// Dashboard nudge card for unread WhatsApp customer messages. Neutral surface
+/// (accent-rationing law — the accent CTA belongs to the top attention row);
+/// the unread count rides a small accent pill. Opens the full [InboxScreen].
+class _MessagesCard extends StatelessWidget {
+  final int count;
+  final UgamColorSet c;
+
+  const _MessagesCard({required this.count, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCard.plain(
+      onTap: () => Get.to(() => const InboxScreen()),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: c.accentFill,
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+            ),
+            alignment: Alignment.center,
+            child: Icon(Icons.forum_rounded, size: 20, color: c.accent),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr('inbox.title'),
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tr('inbox.card_unread', namedArgs: {'count': '$count'}),
+                  style: UgamText.micro.copyWith(color: c.ink3),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            constraints: const BoxConstraints(minWidth: 22),
+            height: 22,
+            padding: const EdgeInsets.symmetric(horizontal: 7),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: c.accent,
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+            ),
+            child: Text(
+              count > 99 ? '99+' : '$count',
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(
+                  color: c.onAccent,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.xs),
+          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+        ],
+      ),
+    );
   }
 }

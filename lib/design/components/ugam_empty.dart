@@ -1,7 +1,9 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import 'ugam_cta.dart';
 
 /// Empty state. Single thin-stroke icon + title + optional body + optional
 /// CTA. No illustrations — illustrations read AI in this aesthetic.
@@ -18,6 +20,30 @@ class UgamEmpty extends StatelessWidget {
     this.body,
     this.cta,
   });
+
+  /// Shared "couldn't load — check your connection" state with a Retry button.
+  /// Structurally identical to the empty state (icon + title + body + one CTA),
+  /// so it lives here as a factory instead of a near-duplicate sibling widget.
+  /// Use everywhere a read fails ([SyncService.lastReadFailed]) and there is
+  /// nothing already on screen to keep. [onRetry] re-runs the failed load.
+  factory UgamEmpty.error({
+    Key? key,
+    required VoidCallback onRetry,
+    String? title,
+    String? message,
+  }) {
+    return UgamEmpty(
+      key: key,
+      icon: Icons.cloud_off_rounded,
+      title: title ?? tr('errors.connection_error'),
+      body: message ?? tr('errors.load_failed'),
+      cta: UgamCTA(
+        label: tr('actions.retry'),
+        leadingIcon: Icons.refresh_rounded,
+        onPressed: onRetry,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

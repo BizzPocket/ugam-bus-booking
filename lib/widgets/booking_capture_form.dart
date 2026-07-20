@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../controllers/pickup_controller.dart';
 import '../controllers/user_controller.dart';
 import '../design/ugam.dart';
 import '../models/app_user.dart';
+import '../models/pickup_location.dart';
 import '../models/request_line.dart';
 import '../models/seat_type.dart';
 import '../models/trip_type.dart';
@@ -46,6 +48,12 @@ class BookingCaptureData {
   final int singleSofa;
   final int seater;
 
+  /// Optional snapshotted pickup point (id + name) chosen from the GLOBAL list.
+  /// Both null when the booker skipped it. The name is snapshotted so a later
+  /// rename/retire never rewrites a historical request.
+  final String? pickupLocationId;
+  final String? pickupLocationName;
+
   const BookingCaptureData({
     required this.name,
     required this.phone,
@@ -56,9 +64,17 @@ class BookingCaptureData {
     required this.doubleSofa,
     required this.singleSofa,
     required this.seater,
+    this.pickupLocationId,
+    this.pickupLocationName,
   });
 
-  int get totalSeats => doubleSofa + singleSofa + seater;
+  /// Total seat *berths* this booking occupies — a Double Sofa counts as its
+  /// two berths (upper+lower), every other unit as one. Matches
+  /// [Passenger.seatBerths] so the "Total seats" label, the submit-button chip,
+  /// the stored `party_size`, and the admin "N seats" push all agree. The raw
+  /// per-type UNIT counts stay on [doubleSofa]/[singleSofa]/[seater].
+  int get totalSeats =>
+      lines.fold(0, (sum, l) => sum + l.qty * l.seatType.berthsPerUnit);
 }
 
 /// Pre-fill payload for edit mode. Build one from an existing
@@ -87,6 +103,11 @@ class BookingCaptureInitial {
   /// non-empty this is the source of truth and the scalar counts are ignored.
   final List<RequestLine> lines;
 
+  /// Snapshotted pickup point to pre-select on edit (both null when none was
+  /// saved). The name is what's shown; the id re-selects the matching option.
+  final String? pickupLocationId;
+  final String? pickupLocationName;
+
   const BookingCaptureInitial({
     this.name = '',
     this.phone = '',
@@ -96,6 +117,8 @@ class BookingCaptureInitial {
     this.seater = 0,
     this.note,
     this.lines = const [],
+    this.pickupLocationId,
+    this.pickupLocationName,
   });
 
   /// Hydrate from an existing list of [RequestLine]s, preserving each line's
@@ -109,6 +132,8 @@ class BookingCaptureInitial {
     TripType tripType = TripType.roundTrip,
     required Iterable<RequestLine> lines,
     String? note,
+    String? pickupLocationId,
+    String? pickupLocationName,
   }) {
     var d = 0, s = 0, st = 0;
     final hydrated = <RequestLine>[];
@@ -137,6 +162,8 @@ class BookingCaptureInitial {
       seater: st,
       note: note,
       lines: hydrated,
+      pickupLocationId: pickupLocationId,
+      pickupLocationName: pickupLocationName,
     );
   }
 }
@@ -231,6 +258,11 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   final _phone = TextEditingController();
   final _note = TextEditingController();
 
+  /// Name field focus — a listener dismisses the contact-autocomplete dropdown
+  /// the moment focus leaves the name field (tap phone / seat area / anywhere
+  /// the host unfocuses), so it no longer lingers until submit.
+  final _nameFocus = FocusNode();
+
   /// Quantity (+ any preserved berth position) per leg per seat type. Leg is the
   /// PRIMARY axis (a tab); seat type is a counter within the active leg. This is
   /// the entire seat-section state — there are no per-row drafts to add/remove.
@@ -241,6 +273,14 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   late TripType _activeLeg;
 
   bool _showNote = false;
+
+  /// Optional chosen pickup point (snapshotted id + name). Both null = none.
+  String? _pickupId;
+  String? _pickupName;
+
+  /// The global pickup-point list (shared across tours). Null when the
+  /// controller isn't registered — the selector then simply never appears.
+  PickupController? _pickup;
 
   String? _nameError;
   String? _phoneError;
@@ -253,16 +293,37 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   int get _totalSeats {
     var n = 0;
     for (final byType in _cells.values) {
-      for (final cell in byType.values) {
-        n += cell.qty;
+      for (final entry in byType.entries) {
+        n += entry.value.qty * entry.key.berthsPerUnit;
       }
     }
     return n;
   }
 
-  /// Live count of how many distinct seats this booking is for — a consumer
-  /// can read it to label its own submit button / count chip.
+  /// Live count of seat *berths* this booking occupies (a Double Sofa is two) —
+  /// a consumer reads it to label its own submit button / count chip. Berths,
+  /// not request units, so it agrees with the "Total seats" line and
+  /// [BookingCaptureData.totalSeats].
   int get totalSeats => _totalSeats;
+
+  /// Leg-weighted berth count for a live price ESTIMATE: a one-way (Go-only /
+  /// Return-only) berth is worth 0.5 of a full round-trip berth, matching the
+  /// 0.5-leg pricing the booking is actually charged at. A Double Sofa still
+  /// counts its two berths. Fractional by design (e.g. two Go-only singles →
+  /// 1.0); the caller multiplies by the per-seat price and rounds to whole
+  /// rupees at display. Pure (no validation / no setState), so it is safe to
+  /// read from a widget build. Distinct from [totalSeats], which counts physical
+  /// berths regardless of leg.
+  num get legWeightedSeats {
+    num n = 0;
+    for (final byLeg in _cells.entries) {
+      final factor = byLeg.key.isOneWay ? 0.5 : 1.0;
+      for (final entry in byLeg.value.entries) {
+        n += entry.value.qty * entry.key.berthsPerUnit * factor;
+      }
+    }
+    return n;
+  }
 
   /// Legs offered as tabs. A forced-leg surface collapses to just that one leg
   /// (and the tab bar is hidden). Order: Full trip, Go only, Return only.
@@ -270,9 +331,14 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       ? [widget.forcedLeg!]
       : const [TripType.roundTrip, TripType.outboundOnly, TripType.returnOnly];
 
-  /// Total seats booked on [leg] across all types — drives the per-tab badge.
+  /// Seat *berths* booked on [leg] across all types (Double Sofa = 2) — drives
+  /// the per-tab badge, kept in the same berth unit as the "Total seats" line.
   int _legSeatCount(TripType leg) =>
-      _cells[leg]?.values.fold<int>(0, (s, c) => s + c.qty) ?? 0;
+      _cells[leg]?.entries.fold<int>(
+        0,
+        (s, e) => s + e.value.qty * e.key.berthsPerUnit,
+      ) ??
+      0;
 
   /// Seat types selectable in this surface — Seater only when [showSeater].
   List<SeatType> get _selectableTypes => [
@@ -286,6 +352,14 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     super.initState();
     if (widget.enableContacts && Get.isRegistered<UserController>()) {
       _userCtrl = Get.find<UserController>();
+      // Dismiss the contact-autocomplete dropdown as soon as the name field
+      // loses focus (moving to the phone field / tapping elsewhere).
+      _nameFocus.addListener(_onNameFocusChanged);
+    }
+    if (Get.isRegistered<PickupController>()) {
+      _pickup = Get.find<PickupController>();
+      // Fire-and-forget: an Obx in build reveals the selector once it lands.
+      _pickup!.ensureLoaded();
     }
     // Start with an empty grid so every (leg, type) counter exists at 0.
     for (final leg in _legs) {
@@ -300,6 +374,8 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
         _note.text = e.note!;
         _showNote = true;
       }
+      _pickupId = e.pickupLocationId;
+      _pickupName = e.pickupLocationName;
     }
     // Open on the first leg that already has seats (so an edit lands on a
     // populated tab), else the first tab (Full trip, or the forced leg).
@@ -342,6 +418,8 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
 
   @override
   void dispose() {
+    _nameFocus.removeListener(_onNameFocusChanged);
+    _nameFocus.dispose();
     _name.dispose();
     _phone.dispose();
     _note.dispose();
@@ -423,6 +501,8 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       doubleSofa: doubleSofa,
       singleSofa: singleSofa,
       seater: seater,
+      pickupLocationId: _pickupId,
+      pickupLocationName: _pickupName,
     );
   }
 
@@ -441,6 +521,14 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   }
 
   // ─── CONTACTS ───────────────────────────────────────────────────────────
+
+  /// Collapse the autocomplete list once the name field is no longer focused.
+  /// Only touches state when there's something to hide, so it's a cheap no-op
+  /// on gaining focus.
+  void _onNameFocusChanged() {
+    if (_nameFocus.hasFocus || _contactMatches.isEmpty || !mounted) return;
+    setState(() => _contactMatches = const []);
+  }
 
   void _onNameChanged(String value) {
     if (_nameError != null) _nameError = null;
@@ -500,6 +588,45 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
     }
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
+  }
+
+  // ─── PICKUP POINT (optional, global list) ─────────────────────────────────
+
+  /// Open the single-select pickup sheet: a top "clear" row plus every ACTIVE
+  /// point. Pops the chosen id, [_kPickupClear] for the clear row, or null on
+  /// dismiss (leaving the current selection untouched). Never blocks submit.
+  Future<void> _openPickupSheet() async {
+    final pickup = _pickup;
+    if (pickup == null) return;
+    final options = pickup.active;
+    FocusScope.of(context).unfocus();
+    final result = await UgamSheet.show<String>(
+      context,
+      title: tr('pickup.sheet_title'),
+      builder: (_) =>
+          _PickupPickerSheet(options: options, selectedId: _pickupId),
+    );
+    if (result == null || !mounted) return;
+    HapticFeedback.selectionClick();
+    setState(() {
+      if (result == _kPickupClear) {
+        _pickupId = null;
+        _pickupName = null;
+      } else {
+        PickupLocation? loc;
+        for (final p in options) {
+          if (p.id == result) {
+            loc = p;
+            break;
+          }
+        }
+        if (loc != null) {
+          _pickupId = loc.id;
+          _pickupName = loc.name;
+        }
+      }
+    });
+    _notify();
   }
 
   // ─── SEAT COUNTERS ────────────────────────────────────────────────────────
@@ -652,6 +779,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
           label: tr('booking_form.label_name'),
           hint: tr('booking_form.hint_name'),
           controller: _name,
+          focusNode: widget.enableContacts ? _nameFocus : null,
           errorText: _nameError,
           prefix: widget.enableContacts
               ? Icon(Icons.search_rounded, size: 18, color: c.ink3)
@@ -667,7 +795,14 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
           onChanged: widget.lockPhone
               ? null
               : (_) {
-                  if (_phoneError != null) setState(() => _phoneError = null);
+                  // Typing the number is an intent to move on — drop any stale
+                  // name-autocomplete list that survived the focus change.
+                  if (_phoneError != null || _contactMatches.isNotEmpty) {
+                    setState(() {
+                      _phoneError = null;
+                      _contactMatches = const [];
+                    });
+                  }
                   _notify();
                 },
         ),
@@ -723,6 +858,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
           ),
         ],
         const SizedBox(height: UgamSpacing.lg),
+        _buildPickupField(c),
         if (!_showNote)
           Align(
             alignment: Alignment.centerLeft,
@@ -856,6 +992,35 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       ),
     );
   }
+
+  /// Optional pickup-point selector. Hidden entirely when the controller isn't
+  /// registered or the active list is empty; wrapped in an [Obx] so it appears
+  /// on its own once [PickupController.ensureLoaded] resolves. Tapping opens
+  /// [_openPickupSheet]. Never required — submit ignores it.
+  Widget _buildPickupField(UgamColorSet c) {
+    final pickup = _pickup;
+    if (pickup == null) return const SizedBox.shrink();
+    return Obx(() {
+      // Touch an Rx so this rebuilds when the list finishes loading.
+      pickup.loadedOnce.value;
+      final options = pickup.active;
+      if (options.isEmpty) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          UgamPickerField(
+            label: tr('pickup.form_label'),
+            value: _pickupName ?? '',
+            placeholder: tr('pickup.form_placeholder'),
+            icon: Icons.place_rounded,
+            onTap: _openPickupSheet,
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+        ],
+      );
+    });
+  }
 }
 
 // ─── PICK CONTACT BUTTON ────────────────────────────────────────────────────
@@ -986,6 +1151,14 @@ class _LegTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The gu/hi leg words are much longer than the English ones; with the icon
+    // AND the count badge inline they ellipsise the leg word away. Drop the icon
+    // for non-English locales (and let the label wrap to 2 lines) so the leg
+    // word is always fully readable.
+    // Null-safe: EasyLocalization's context.locale throws when no localization
+    // ancestor is present (e.g. widget tests); fall back to English (show icon).
+    final showIcon =
+        (Localizations.maybeLocaleOf(context)?.languageCode ?? 'en') == 'en';
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -1008,13 +1181,16 @@ class _LegTab extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 13, color: active ? c.accent : c.ink2),
-            const SizedBox(width: 5),
+            if (showIcon) ...[
+              Icon(icon, size: 13, color: active ? c.accent : c.ink2),
+              const SizedBox(width: 5),
+            ],
             Flexible(
               child: Text(
                 label,
-                maxLines: 1,
+                maxLines: showIcon ? 1 : 2,
                 overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
                 style: UgamText.bodyStrong.copyWith(
                   color: active ? c.accent : c.ink2,
                   fontSize: 12,
@@ -1145,8 +1321,9 @@ class _SeatCounterTile extends StatelessWidget {
             },
             behavior: HitTestBehavior.opaque,
             child: Container(
-              constraints: const BoxConstraints(minWidth: 36),
-              height: 32,
+              // >=44px min hit target on the most-used booking interaction while
+              // the pill stays visually compact.
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
               alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
@@ -1221,16 +1398,23 @@ class _StepperButton extends StatelessWidget {
     return GestureDetector(
       onTap: enabled ? onTap : null,
       behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 32,
-        height: 32,
-        margin: const EdgeInsets.symmetric(horizontal: 2),
-        decoration: BoxDecoration(
-          color: enabled ? c.accent : c.card,
-          borderRadius: BorderRadius.circular(8),
+      // 44×44 hit target (accessibility minimum) wrapping the compact 32×32
+      // visual chip — the stepper is the single most-used tap here.
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: Center(
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: enabled ? c.accent : c.card,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 18, color: enabled ? c.onAccent : c.ink3),
+          ),
         ),
-        alignment: Alignment.center,
-        child: Icon(icon, size: 18, color: enabled ? c.onAccent : c.ink3),
       ),
     );
   }
@@ -1444,6 +1628,107 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
             ),
           ),
       ],
+    );
+  }
+}
+
+// ─── PICKUP PICKER SHEET (self-contained, single-select) ────────────────────
+
+/// Sentinel popped by the "clear" row so the caller can tell an explicit
+/// "No pickup point" apart from a dismissed sheet (which pops null). No real
+/// pickup id (a uuid) can ever equal it.
+const String _kPickupClear = '__pickup_clear__';
+
+/// Single-select list of ACTIVE pickup points, with a top "clear" row. Pops the
+/// chosen point's id, [_kPickupClear] for clear, or null when dismissed. The
+/// currently-selected row shows a check. Mirrors the contact picker's row idiom.
+class _PickupPickerSheet extends StatelessWidget {
+  final List<PickupLocation> options;
+  final String? selectedId;
+
+  const _PickupPickerSheet({required this.options, required this.selectedId});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 400),
+      child: ListView.builder(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: options.length + 1,
+        itemBuilder: (_, i) {
+          if (i == 0) {
+            return _PickupOptionRow(
+              c: c,
+              icon: Icons.not_interested_rounded,
+              label: tr('pickup.clear'),
+              selected: selectedId == null,
+              onTap: () => Navigator.of(context).pop(_kPickupClear),
+            );
+          }
+          final p = options[i - 1];
+          return _PickupOptionRow(
+            c: c,
+            icon: Icons.place_rounded,
+            label: p.name,
+            selected: p.id == selectedId,
+            onTap: () => Navigator.of(context).pop(p.id),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PickupOptionRow extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PickupOptionRow({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(UgamRadius.input),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm + 2),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? c.accentFill : c.cardElev,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 18, color: selected ? c.accent : c.ink2),
+            ),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: UgamText.body.copyWith(color: c.ink),
+              ),
+            ),
+            if (selected)
+              Icon(Icons.check_rounded, size: 20, color: c.accent),
+          ],
+        ),
+      ),
     );
   }
 }

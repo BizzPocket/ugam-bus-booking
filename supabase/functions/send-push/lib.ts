@@ -16,14 +16,60 @@ export function shouldNotifyBookingRequest(a: AdminPrefs | null | undefined): bo
   return !!a && a.push_enabled === true && a.notify_booking_requests === true;
 }
 
+/// "Do we push an inbound-WhatsApp-message alert?". A customer message is a
+/// direct human reply, so it is gated only on the master `push_enabled` switch —
+/// not the booking-requests preference (that toggle is about tour bookings, a
+/// different surface). A missing admin row never notifies.
+export function shouldNotifyMessage(
+  a: { push_enabled?: boolean } | null | undefined,
+): boolean {
+  return !!a && a.push_enabled === true;
+}
+
+export interface WaMessageFcmInput {
+  token: string;
+  title: string;
+  body: string;
+  conversationId?: string;
+}
+
+/// Build the FCM HTTP v1 `message` for an inbound WhatsApp customer message.
+/// `data.type` is "wa_message" so the app's tap handler deep-links to the Inbox
+/// (and, when present, the specific conversation). Android pins it to the
+/// "messages" channel the app creates on launch — MUST match PushService.
+export function buildWaMessageFcm(
+  { token, title, body, conversationId }: WaMessageFcmInput,
+) {
+  return {
+    token,
+    notification: { title, body },
+    data: {
+      type: "wa_message",
+      ...(conversationId ? { conversation_id: String(conversationId) } : {}),
+    },
+    android: {
+      priority: "HIGH",
+      notification: { channel_id: "messages", sound: "default" },
+    },
+    apns: {
+      headers: { "apns-priority": "10" },
+      payload: { aps: { sound: "default" } },
+    },
+  };
+}
+
 export interface BookingRequestRow {
   id: string;
   customer_name: string;
   party_size: number;
 }
 
-/// 'created' = brand-new request; 'updated' = the customer edited their request.
-export type BookingEvent = "created" | "updated";
+/// 'created' = brand-new request; 'updated' = the customer edited their request;
+/// 'cancelled' = the customer self-cancelled a still-pending request;
+/// 'cancel_requested' = the customer asked to cancel an ALREADY-CONFIRMED /
+/// seat-assigned booking — nothing is freed yet, it awaits the organiser's
+/// approve/decline (distinct from 'cancelled', which already happened).
+export type BookingEvent = "created" | "updated" | "cancelled" | "cancel_requested";
 
 export interface FcmMessageInput {
   token: string;
@@ -43,10 +89,22 @@ export function buildFcmMessage(
 ) {
   const n = Number(request.party_size) || 1;
   const seats = n === 1 ? "1 seat" : `${n} seats`;
-  const isEdit = event === "updated";
-  const title = isEdit ? "Booking request updated" : "New booking request";
-  const verb = isEdit ? "changed to" : "requested";
-  const body = `${request.customer_name} ${verb} ${seats} · ${tourTitle}`;
+  let title: string;
+  let body: string;
+  if (event === "cancel_requested") {
+    title = "Cancellation request";
+    body =
+      `${request.customer_name} wants to cancel a confirmed seat — your approval needed · ${tourTitle}`;
+  } else if (event === "cancelled") {
+    title = "Booking cancelled";
+    body = `${request.customer_name} cancelled their booking · ${tourTitle}`;
+  } else if (event === "updated") {
+    title = "Booking request updated";
+    body = `${request.customer_name} changed to ${seats} · ${tourTitle}`;
+  } else {
+    title = "New booking request";
+    body = `${request.customer_name} requested ${seats} · ${tourTitle}`;
+  }
   return {
     token,
     notification: { title, body },

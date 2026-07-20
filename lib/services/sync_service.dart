@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as dev;
+import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:get/get.dart';
@@ -27,7 +29,12 @@ class RpcUnavailableException implements Exception {
 }
 
 class SyncService extends GetxService {
-  static const _readTimeout = Duration(seconds: 8);
+  // Per-attempt read timeout. Raised from 8s to 12s: a single slow moment on
+  // cellular used to blow the 8s budget and blank the whole screen. 12s per
+  // attempt, combined with the retry loop below, tolerates transient jank.
+  static const _readTimeout = Duration(seconds: 12);
+  // Per-attempt write timeout. Writes are idempotent (keyed by entity id) so a
+  // timeout that actually landed converges on retry — no need to inflate this.
   static const _writeTimeout = Duration(seconds: 12);
 
   /// Best-effort connectivity flag (interface up — not a reachability
@@ -105,10 +112,13 @@ class SyncService extends GetxService {
       return [];
     }
     try {
-      return await _withTimeout(
-        _fetchFromSupabase(table, filters, orderBy),
-        _readTimeout,
-        '$table fetch',
+      // Reads are idempotent — retry transient failures (incl. timeout) so one
+      // slow moment on cellular no longer blanks the screen. Terminal errors
+      // (auth/RLS/missing-table) still surface immediately via [_isRetryable].
+      return await _withRetry(
+        () => _fetchFromSupabase(table, filters, orderBy),
+        timeout: _readTimeout,
+        label: '$table fetch',
       );
     } catch (e, st) {
       dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
@@ -216,6 +226,10 @@ class SyncService extends GetxService {
     final passengersByTour = <String, List<Map<String, dynamic>>>{};
     for (final p in passengersRaw as List) {
       final m = Map<String, dynamic>.from(p as Map);
+      // A customer-cancelled passenger (migration 034) is kept in the DB for
+      // history but must never enter the active roster — drop it here so every
+      // downstream capacity/roster calc is correct without per-site filtering.
+      if (m['cancelled_at'] != null) continue;
       final tId = m['tour_id'] as String?;
       if (tId != null) passengersByTour.putIfAbsent(tId, () => []).add(m);
     }
@@ -270,15 +284,17 @@ class SyncService extends GetxService {
     String? cacheKey,
   }) async {
     _ensureOnline();
-    await _withTimeout(
-      _writeToServer(
+    // Idempotent by entity id (23505 -> update-by-id fallback), so a timeout
+    // that actually landed converges to the same row on retry.
+    await _withRetry(
+      () => _writeToServer(
         operation: 'insert',
         table: table,
         entityId: entityId,
         data: data,
       ),
-      _writeTimeout,
-      'insert $table',
+      timeout: _writeTimeout,
+      label: 'insert $table',
     );
   }
 
@@ -288,15 +304,17 @@ class SyncService extends GetxService {
     required Map<String, dynamic> data,
   }) async {
     _ensureOnline();
-    await _withTimeout(
-      _writeToServer(
+    // update-by-id (empty result -> insert fallback) is idempotent: re-running
+    // with the same data yields the identical row. Safe to retry on timeout.
+    await _withRetry(
+      () => _writeToServer(
         operation: 'update',
         table: table,
         entityId: entityId,
         data: data,
       ),
-      _writeTimeout,
-      'update $table',
+      timeout: _writeTimeout,
+      label: 'update $table',
     );
   }
 
@@ -305,15 +323,17 @@ class SyncService extends GetxService {
     required String entityId,
   }) async {
     _ensureOnline();
-    await _withTimeout(
-      _writeToServer(
+    // delete-by-id is idempotent: deleting an already-deleted row is a no-op
+    // (0 rows, no error). Safe to retry after a possibly-landed timeout.
+    await _withRetry(
+      () => _writeToServer(
         operation: 'delete',
         table: table,
         entityId: entityId,
         data: {'id': entityId},
       ),
-      _writeTimeout,
-      'delete $table',
+      timeout: _writeTimeout,
+      label: 'delete $table',
     );
   }
 
@@ -332,15 +352,20 @@ class SyncService extends GetxService {
     required List<Map<String, dynamic>> seatsB,
   }) async {
     _ensureOnline();
-    await _withTimeout(
-      _callRpc('swap_passenger_seats', {
+    // NON-IDEMPOTENT: running it twice swaps the pair back. A TimeoutException
+    // means the request MAY have reached the server, so we must NOT retry on
+    // timeout (that risks a silent double-swap / data corruption). Retry only
+    // on a pre-send connection error, where we are certain nothing was sent.
+    await _withRetry(
+      () => _callRpc('swap_passenger_seats', {
         'p_passenger_a': passengerAId,
         'p_seats_a': seatsA,
         'p_passenger_b': passengerBId,
         'p_seats_b': seatsB,
       }),
-      _writeTimeout,
-      'swap seats',
+      timeout: _writeTimeout,
+      label: 'swap seats',
+      isRetryable: _isPreSendConnectionError,
     );
   }
 
@@ -351,13 +376,16 @@ class SyncService extends GetxService {
     required List<Map<String, dynamic>> assignments,
   }) async {
     _ensureOnline();
-    await _withTimeout(
-      _callRpc('apply_seat_assignments', {
+    // IDEMPOTENT: sets the whole plan absolutely (not a relative delta), so
+    // re-applying the same assignments produces the same final seating whether
+    // or not the first attempt landed. Safe to retry transient incl. timeout.
+    await _withRetry(
+      () => _callRpc('apply_seat_assignments', {
         'p_tour_id': tourId,
         'p_assignments': assignments,
       }),
-      _writeTimeout,
-      'apply seat plan',
+      timeout: _writeTimeout,
+      label: 'apply seat plan',
     );
   }
 
@@ -367,6 +395,20 @@ class SyncService extends GetxService {
     } on PostgrestException catch (e) {
       // PGRST202 (PostgREST) / 42883 (Postgres) = function does not exist —
       // the migration isn't deployed. Signal a graceful fallback.
+      if (e.code == 'PGRST202' || e.code == '42883') {
+        throw RpcUnavailableException(fn);
+      }
+      rethrow;
+    }
+  }
+
+  /// Like [_callRpc] but returns the RPC's raw result — for functions that
+  /// report a boolean / row outcome the caller must branch on (e.g. the admin
+  /// dismiss-cancellation RPC). Same not-deployed signalling as [_callRpc].
+  Future<dynamic> callRpcResult(String fn, Map<String, dynamic> params) async {
+    try {
+      return await _client.rpc(fn, params: params);
+    } on PostgrestException catch (e) {
       if (e.code == 'PGRST202' || e.code == '42883') {
         throw RpcUnavailableException(fn);
       }
@@ -439,6 +481,136 @@ class SyncService extends GetxService {
         await _client.from(table).delete().eq('id', entityId);
         break;
     }
+  }
+
+  // ── Retry / transient-failure policy ────────────────────────────────
+  // Single home for resilience. Each attempt is bounded by [_withTimeout];
+  // only transient (network/transport/5xx/timeout) failures are re-run.
+  // Terminal errors (RLS/auth, unique-violation, missing-function) surface
+  // immediately, and the LAST error is rethrown once attempts are exhausted.
+
+  /// Runs [action] up to [maxAttempts] times with exponential backoff
+  /// (~400ms, then ~1200ms) between attempts. A retry happens only when the
+  /// error is deemed retryable — by [isRetryable] if supplied, otherwise by
+  /// [_isRetryable] (which honours [retryOnTimeout]). Idempotent callers pass
+  /// nothing (retry transient incl. timeout); the non-idempotent swap RPC
+  /// passes a pre-send-only predicate so a timeout never triggers a re-swap.
+  Future<T> _withRetry<T>(
+    Future<T> Function() action, {
+    required Duration timeout,
+    required String label,
+    int maxAttempts = 3,
+    bool retryOnTimeout = true,
+    bool Function(Object error)? isRetryable,
+  }) async {
+    final predicate = isRetryable ??
+        ((Object e) => _isRetryable(e, retryOnTimeout: retryOnTimeout));
+    Object? lastError;
+    StackTrace? lastStack;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await _withTimeout(action(), timeout, label);
+      } catch (e, st) {
+        lastError = e;
+        lastStack = st;
+        final isLastAttempt = attempt == maxAttempts - 1;
+        if (isLastAttempt || !predicate(e)) rethrow;
+        final backoffMs = (400 * math.pow(3, attempt)).round();
+        dev.log(
+          'RETRY $label — attempt ${attempt + 1}/$maxAttempts failed ($e); '
+          'waiting ${backoffMs}ms',
+          name: 'SyncService',
+        );
+        await Future<void>.delayed(Duration(milliseconds: backoffMs));
+      }
+    }
+    // Loop always returns or rethrows; this satisfies the analyzer.
+    Error.throwWithStackTrace(lastError!, lastStack ?? StackTrace.current);
+  }
+
+  /// Classifies whether [e] is a transient failure worth retrying. Retry only
+  /// network/transport/5xx failures (and, when [retryOnTimeout], timeouts);
+  /// every constraint, permission, auth, and missing-function error is
+  /// terminal and must surface immediately.
+  bool _isRetryable(Object e, {required bool retryOnTimeout}) {
+    // Missing function (deploy issue) — retrying never helps.
+    if (e is RpcUnavailableException) return false;
+
+    // Timeout — retryable only for idempotent operations.
+    if (e is TimeoutException) return retryOnTimeout;
+
+    // Invalid / expired session — terminal.
+    if (e is AuthException) return false;
+
+    if (e is PostgrestException) {
+      final code = e.code;
+      // Terminal constraint / permission / deploy codes.
+      const terminal = {
+        '42501', // insufficient_privilege (RLS denial)
+        '23505', // unique_violation (already has insert->update fallback)
+        '23503', // foreign_key_violation
+        '23514', // check_violation
+        '23502', // not_null_violation
+        '22P02', // invalid_text_representation
+        'PGRST202', // function not found
+        '42883', // function does not exist
+      };
+      if (code != null && terminal.contains(code)) return false;
+
+      // Explicit DB-unreachable signals — transient.
+      if (code == '503' || code == 'PGRST001') return true;
+
+      // Some transports carry the HTTP status in `code`. 5xx => transient,
+      // any 4xx (incl. 401/403 auth) => terminal.
+      final status = int.tryParse(code ?? '');
+      if (status != null) {
+        if (status >= 500) return true;
+        if (status >= 400) return false;
+      }
+
+      // Null/unknown code with a network-style message — transient.
+      return _looksLikeTransport(e.message);
+    }
+
+    // dart:io transport failures.
+    if (e is SocketException) return true;
+    if (e is HttpException) return true;
+
+    // package:http ClientException and friends carry their signature in
+    // toString() (avoids importing the transitive http dependency directly).
+    return _looksLikeTransport(e.toString());
+  }
+
+  /// True when [message] carries a network/transport failure signature.
+  bool _looksLikeTransport(String message) {
+    final m = message.toLowerCase();
+    return m.contains('socketexception') ||
+        m.contains('clientexception') ||
+        m.contains('httpexception') ||
+        m.contains('connection closed') ||
+        m.contains('connection reset') ||
+        m.contains('connection refused') ||
+        m.contains('connection terminated') ||
+        m.contains('failed host lookup') ||
+        m.contains('network is unreachable') ||
+        m.contains('no route to host') ||
+        m.contains('timed out') ||
+        m.contains('timeout') ||
+        m.contains('network');
+  }
+
+  /// Certain the request never left the device: DNS failure, no route, or
+  /// connection refused BEFORE any bytes were sent. Excludes connection
+  /// reset/closed (which can happen mid-flight after a write may already have
+  /// landed) and timeouts — used only for the non-idempotent swap RPC, where
+  /// re-running an already-sent request would corrupt the seat arrangement.
+  bool _isPreSendConnectionError(Object e) {
+    if (e is! SocketException) return false;
+    final m = e.toString().toLowerCase();
+    return m.contains('failed host lookup') ||
+        m.contains('connection refused') ||
+        m.contains('network is unreachable') ||
+        m.contains('no route to host');
   }
 
   Future<T> _withTimeout<T>(

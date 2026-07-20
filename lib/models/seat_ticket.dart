@@ -1,5 +1,7 @@
 import 'bus_details.dart';
 import 'seat_assignment.dart';
+import 'tour_status.dart';
+import 'trip_type.dart';
 
 /// One passenger's seats on one tour, resolved by the `seat_lookup_by_phone`
 /// RPC — the "Find my seat by phone" result. Unlike [CustomerRequestEntry] this
@@ -35,11 +37,28 @@ class SeatTicket {
     required this.buses,
   });
 
+  /// Whether this ticket's tour is still live (worth showing in "Find my
+  /// seat"). Keyed on lifecycle STATUS, never the departure date: a tour stays
+  /// [TourStatus.locked] until the organiser marks it [TourStatus.completed]
+  /// once the trip is truly over, so a still-locked tour is the CURRENT trip
+  /// even the day after it departed (a multi-day pilgrimage is still under way).
+  /// Only a completed tour is history. Mirrors [TourStatus.isActive].
+  bool get isLive => status.toLowerCase() != TourStatus.completed.name;
+
   /// The set of this passenger's seat ids on [busId].
   Set<String> seatIdsForBus(String busId) => assignedSeats
       .where((s) => s.busId == busId)
       .map((s) => s.seatId)
       .toSet();
+
+  /// seatId → the leg this passenger holds it for, on [busId]. Drives the
+  /// half render for a one-way seat. Seats with no stamped leg map to
+  /// [TripType.roundTrip] (rendered whole) — there is no request-level trip
+  /// type on a phone-lookup ticket to fall back to.
+  Map<String, TripType> seatLegsForBus(String busId) => {
+        for (final s in assignedSeats.where((s) => s.busId == busId))
+          s.seatId: s.leg ?? TripType.roundTrip,
+      };
 
   /// Distinct seat ids across all buses, sorted — for the summary chip.
   List<String> get seatIds {
@@ -73,7 +92,13 @@ class SeatTicket {
         final seatId = raw['seatId']?.toString();
         final busId = raw['busId']?.toString();
         if (seatId == null || busId == null) continue;
-        out.add(SeatAssignment(busId: busId, seatId: seatId));
+        out.add(SeatAssignment(
+          busId: busId,
+          seatId: seatId,
+          leg: raw['leg'] != null
+              ? TripType.fromString(raw['leg'].toString())
+              : null,
+        ));
       }
     }
     return out;

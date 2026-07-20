@@ -1,4 +1,33 @@
 {
+  "actions": {
+    "retry": "Retry"
+  },
+  "pickup": {
+    "form_label": "Pickup point",
+    "form_placeholder": "Select pickup point (optional)",
+    "sheet_title": "Choose pickup point",
+    "clear": "No pickup point",
+    "reflect_label": "Pickup",
+    "settings_title": "Pickup locations",
+    "settings_subtitle": "Manage pickup points for all tours",
+    "manage_title": "Pickup locations",
+    "add_hint": "Add a pickup point",
+    "add_button": "Add",
+    "empty_title": "No pickup points yet",
+    "empty_body": "Add pickup points customers can choose when they book. They apply to all tours.",
+    "rename_title": "Rename pickup point",
+    "rename_hint": "Pickup point name",
+    "code_label": "Code",
+    "code_hint": "e.g. ST",
+    "edit_title": "Edit pickup point",
+    "deactivate": "Hide",
+    "activate": "Show",
+    "inactive_badge": "Hidden",
+    "delete_title": "Delete pickup point?",
+    "delete_body": "This removes it from the list customers choose from. Past requests keep their saved pickup.",
+    "delete": "Delete",
+    "name_required": "Enter a name"
+  },
   "swap_reason": {
     "swap_seats": "Swap seats",
     "exact_match": "Exact match",
@@ -291,7 +320,9 @@
     "seats_full": "Full",
     "seats_filled_ratio": "{filled}/{total} filled",
     "seats_left_n": "{n} left",
-    "left_behind": "{n} left behind"
+    "left_behind": "{n} left behind",
+    "attention_cancel_requests": "{} want to cancel their seat",
+    "cta_review": "Review"
   },
   "tours": {
     "title": "My Tours",
@@ -352,7 +383,8 @@
       "seats_unit": {
         "one": "Seat",
         "other": "Seats"
-      }
+      },
+      "cancel_requested": "Cancellation requested"
     },
     "action": {
       "confirm": "Confirm",
@@ -364,10 +396,14 @@
       "unassign_all": "Unassign all seats",
       "decline_request": "Decline request",
       "more_actions": "More actions",
+      "mark_priority": "Mark priority",
+      "remove_priority": "Remove priority",
       "edit_request": "Edit request",
       "confirm_and_seat": "Confirm & seat",
       "add_to_group": "Add to group",
-      "change_group": "Change group"
+      "change_group": "Change group",
+      "approve_cancel": "Approve cancellation",
+      "dismiss_cancel": "Keep booking"
     },
     "decline_dialog": {
       "title": "Decline request?",
@@ -435,7 +471,12 @@
       "declined_title": "Declined",
       "declined_body": "{name} removed from this tour.",
       "bulk_waitlisted": "Moved {n} to waitlist",
-      "bulk_wa_opened": "Opened {n} WhatsApp chats"
+      "bulk_wa_opened": "Opened {n} WhatsApp chats",
+      "cancel_approved_title": "Cancellation approved",
+      "cancel_approved_body": "{name} removed and seat freed.",
+      "cancel_approved_wa_failed": "Approved, but couldn't open WhatsApp to notify them.",
+      "cancel_dismissed_title": "Request dismissed",
+      "cancel_dismissed_body": "{name} kept on this tour."
     },
     "bulk": {
       "waitlist": "Waitlist",
@@ -477,6 +518,16 @@
     "cta_remaining": "{n} left",
     "group": {
       "no_bus": "Add a bus to size groups"
+    },
+    "approve_cancel_dialog": {
+      "title": "Approve cancellation?",
+      "body": "{name} asked to cancel. This frees their seat and removes them from this tour.",
+      "confirm": "Approve & free seat"
+    },
+    "dismiss_cancel_dialog": {
+      "title": "Keep this booking?",
+      "body": "{name} asked to cancel. Dismiss the request and keep them on this tour?",
+      "confirm": "Keep booking"
     }
   },
   "find_seat": {
@@ -546,8 +597,28 @@
     "chip_oneway_return": "ONE-WAY RETURN",
     "chip_seats": "SEATS: {seats}",
     "chip_seats_finalizing": "Seats being finalized",
+    "chip_seat_after_lock": "Seat number coming soon",
     "seats_pending_toast": "Seats aren't finalized yet — you'll see them once the trip is confirmed.",
-    "add_another": "Add another request"
+    "add_another": "Add another request",
+    "cancel_action": "Cancel booking",
+    "cancel_title": "Cancel this booking?",
+    "cancel_body": "This withdraws your request and frees the seat. You can book again anytime.",
+    "cancel_confirm": "Cancel booking",
+    "cancel_keep": "Keep it",
+    "cancel_done": "Booking cancelled.",
+    "cancel_blocked": "This booking is already confirmed — please call the organiser to cancel.",
+    "contact_to_cancel": "Call organiser to cancel",
+    "contact_no_number": "Organiser's number isn't available. Please contact them directly.",
+    "request_cancel_title": "Ask to cancel this seat?",
+    "request_cancel_body": "Your seat is already confirmed, so we'll send the organiser a cancellation request. They'll free your seat once they approve it.",
+    "request_cancel_confirm": "Send request",
+    "request_cancel_action": "I want to cancel my seat",
+    "request_cancel_done": "Cancellation request sent to the organiser.",
+    "request_cancel_blocked": "Couldn't send the request — please call the organiser.",
+    "chip_cancel_requested": "Cancellation requested",
+    "cancel_requested_state": "Cancellation requested — awaiting organiser",
+    "seats_more": "{shown}… (+{count})",
+    "actions_title": "Manage request"
   },
   "add_bus": {
     "title": "Add Bus",
@@ -969,7 +1040,8 @@
     "cta_request_to_book": "Request to book",
     "chip_tour_full": "TOUR FULL",
     "chip_seats_left": "{n} SEATS LEFT",
-    "chip_open_requests": "OPEN FOR REQUESTS"
+    "chip_open_requests": "OPEN FOR REQUESTS",
+    "chip_bookings_closed": "BOOKINGS CLOSED"
   },
   "edit_tour": {
     "title": "Edit Tour",
@@ -1066,7 +1138,25 @@
     "tab_requests": "REQUESTS",
     "tab_assign": "ASSIGN",
     "tab_notify": "NOTIFY",
+    "tab_messages": "INBOX",
     "tab_settings": "SETTINGS"
+  },
+  "inbox": {
+    "title": "Messages",
+    "empty_title": "No messages yet",
+    "empty_subtitle": "Customer WhatsApp messages will show up here.",
+    "unknown": "Unknown number",
+    "reply_hint": "Message…",
+    "send": "Send",
+    "window_open": "Free reply window open",
+    "window_closed": "24h window closed — sent as template",
+    "send_failed": "Couldn't send. Tap to retry.",
+    "load_failed": "Couldn't load messages.",
+    "photo": "📷 Photo",
+    "document": "📎 Document",
+    "you": "You",
+    "new_label": "New",
+    "card_unread": "{count} unread"
   },
   "broadcast_fallback": {
     "label_route": "Route",
@@ -1148,7 +1238,9 @@
     "group_locked_msg": "Group members must stay on the same bus. Move the whole group instead.",
     "group_move_failed": "Could not move the group. Please try again.",
     "group_move_no_fit": "The whole group does not fit on this bus.",
-    "group_move_save": "Move whole group"
+    "group_move_save": "Move whole group",
+    "auto_confirm_sent_one": "Confirmed & sent WhatsApp to {name}",
+    "auto_confirm_sent_many": "Confirmed & notified {count} passengers on WhatsApp"
   },
   "manage_buses": {
     "title": "Manage Buses",
@@ -1240,6 +1332,7 @@
     "send_now_opened_title": "Opened for {name}",
     "title": "Notify",
     "send_all_pending": "Send to all pending",
+    "resend_all": "Re-send chart to everyone",
     "filter_all": "All",
     "filter_pending": "Pending",
     "filter_notified": "Notified",
@@ -1594,6 +1687,7 @@
     "edit_seats": "Edit seats",
     "done_editing_seats": "Done editing",
     "btn_lock_notify": "Lock & notify",
+    "btn_pick_handler_lock": "Pick a handler to lock",
     "seat_label": "Seat {seat}",
     "drop": {
       "class_mismatch_title": "Mismatched seat class",
@@ -2121,6 +2215,7 @@
     "save_failed": "Save failed",
     "delete_failed": "Delete failed",
     "connection_error": "Connection error",
+    "load_failed": "Couldn't load — check your connection.",
     "sign_in_required": "Sign in required",
     "sign_in_failed": "Sign in failed",
     "access_denied": "Access denied",
@@ -2173,7 +2268,8 @@
     "call_failed": "Call failed",
     "dialer_open_failed": "Could not open the dialer for {phone}.",
     "dialer_open_failed_generic": "Could not open the dialer.",
-    "duplicate": "Already exists — looks like a duplicate (e.g. the same bus number on this tour)."
+    "duplicate": "Already exists — looks like a duplicate (e.g. the same bus number on this tour).",
+    "dismiss_cancel": "Could not dismiss the cancellation request."
   },
   "enums": {
     "seat_type": {

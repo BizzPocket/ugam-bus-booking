@@ -350,4 +350,114 @@ void main() {
     expect(sync.inserts, isEmpty);
     expect(ctrl.getTour('t1')!.passengers.map((p) => p.id), isNot(contains('p2')));
   });
+
+  // ── Auto-confirm + notify when a seat is placed from the chart ──────────────
+  // A seat assigned straight from the chart to a rider who was never confirmed
+  // through the Requests screen used to seat them SILENTLY. It must now confirm
+  // them (persisted) AND fire the WhatsApp greeting — from every seating path.
+
+  test('assignSeats on an unconfirmed rider auto-confirms + notifies', () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith([_requesting('p1')], buses: [_bus('b1')]),
+    ]);
+    final sent = <String>[];
+    ctrl.confirmedSender = (tour, p) async {
+      sent.add(p.id);
+      return true;
+    };
+
+    await ctrl.assignSeats(
+      't1',
+      'p1',
+      [SeatAssignment(busId: 'b1', seatId: 'L1')],
+    );
+    await pumpEventQueue();
+
+    // Implicit confirmation: flag flipped AND the row was persisted.
+    expect(ctrl.getTour('t1')!.passengers.first.isConfirmed, isTrue);
+    expect(sync.updates, contains('passengers:p1'));
+    // The customer was notified exactly once.
+    expect(sent, ['p1']);
+  });
+
+  test('assignSeats on an already-confirmed rider does NOT re-notify', () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith(
+        [_requesting('p1').copyWith(isConfirmed: true)],
+        buses: [_bus('b1')],
+      ),
+    ]);
+    final sent = <String>[];
+    ctrl.confirmedSender = (tour, p) async {
+      sent.add(p.id);
+      return true;
+    };
+
+    await ctrl.assignSeats(
+      't1',
+      'p1',
+      [SeatAssignment(busId: 'b1', seatId: 'L1')],
+    );
+    await pumpEventQueue();
+
+    // Idempotent: the front-door Confirm already messaged them — no second send.
+    expect(sent, isEmpty);
+    expect(ctrl.getTour('t1')!.passengers.first.isConfirmed, isTrue);
+  });
+
+  test('clearing seats (empty assignments) never confirms or notifies',
+      () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith([_requesting('p1')], buses: [_bus('b1')]),
+    ]);
+    final sent = <String>[];
+    ctrl.confirmedSender = (tour, p) async {
+      sent.add(p.id);
+      return true;
+    };
+
+    await ctrl.assignSeats('t1', 'p1', const []);
+    await pumpEventQueue();
+
+    expect(ctrl.getTour('t1')!.passengers.first.isConfirmed, isFalse);
+    expect(sent, isEmpty);
+  });
+
+  test('fillTour auto-confirms + notifies every newly-seated unconfirmed rider',
+      () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith([_requesting('p1'), _requesting('p2')], buses: [_bus('b1')]),
+    ]);
+    final sent = <String>[];
+    ctrl.confirmedSender = (tour, p) async {
+      sent.add(p.id);
+      return true;
+    };
+
+    await ctrl.fillTour('t1');
+    await pumpEventQueue();
+
+    final pax = ctrl.getTour('t1')!.passengers;
+    final seatedIds =
+        pax.where((p) => p.assignedSeats.isNotEmpty).map((p) => p.id).toSet();
+    // Auto-fill actually seated riders...
+    expect(seatedIds, isNotEmpty);
+    // ...and every seated rider was confirmed AND notified.
+    for (final p in pax.where((p) => p.assignedSeats.isNotEmpty)) {
+      expect(p.isConfirmed, isTrue, reason: '${p.id} should be confirmed');
+    }
+    expect(sent.toSet(), seatedIds);
+  });
 }

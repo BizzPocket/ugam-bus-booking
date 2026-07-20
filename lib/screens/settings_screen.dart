@@ -105,6 +105,16 @@ class SettingsScreen extends StatelessWidget {
                           _Divider(c: c),
                           _SettingsRow(
                             c: c,
+                            icon: Icons.place_outlined,
+                            iconTone: UgamStatVariant.neutral,
+                            title: tr('pickup.settings_title'),
+                            subtitle: tr('pickup.settings_subtitle'),
+                            onTap: () =>
+                                Get.toNamed(AppRoutes.pickupLocations),
+                          ),
+                          _Divider(c: c),
+                          _SettingsRow(
+                            c: c,
                             icon: Icons.language_rounded,
                             iconTone: UgamStatVariant.neutral,
                             title: tr('settings.language'),

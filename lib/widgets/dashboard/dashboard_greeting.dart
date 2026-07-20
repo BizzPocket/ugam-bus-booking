@@ -2,7 +2,9 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../controllers/inbox_controller.dart';
 import '../../design/ugam.dart';
+import '../../screens/inbox_screen.dart';
 import '../../screens/main_shell.dart';
 import '../../utils/formatters.dart';
 
@@ -40,9 +42,15 @@ class DashboardGreeting extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Text(greeting,
+                  Flexible(
+                    child: Text(
+                      greeting,
                       style: UgamText.body
-                          .copyWith(color: c.ink2, fontSize: 13)),
+                          .copyWith(color: c.ink2, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   const SizedBox(width: UgamSpacing.sm),
                   UgamReqChip(
                     label: Formatters.formatDateShort(
@@ -63,6 +71,8 @@ class DashboardGreeting extends StatelessWidget {
             ],
           ),
         ),
+        _MessagesButton(c: c),
+        const SizedBox(width: UgamSpacing.sm),
         Semantics(
           label: tr('main_shell.tab_settings'),
           button: true,
@@ -89,6 +99,77 @@ class DashboardGreeting extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Home-header entry point to the WhatsApp inbox: a chat icon that carries an
+/// unread badge. Reading [InboxController] here is what first instantiates it
+/// (lazy + fenix), so its realtime subscription starts on the admin home.
+class _MessagesButton extends StatelessWidget {
+  final UgamColorSet c;
+
+  const _MessagesButton({required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final inbox = Get.find<InboxController>();
+
+    return Semantics(
+      label: tr('inbox.title'),
+      button: true,
+      child: GestureDetector(
+        onTap: () => Get.to(() => const InboxScreen()),
+        behavior: HitTestBehavior.opaque,
+        child: Obx(() {
+          final unread = inbox.totalUnread.value;
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: c.cardElev,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.forum_rounded,
+                  size: 20,
+                  color: unread > 0 ? c.accent : c.ink2,
+                ),
+              ),
+              if (unread > 0)
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 18),
+                    height: 18,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: c.accent,
+                      borderRadius: BorderRadius.circular(UgamRadius.chip),
+                      border: Border.all(color: c.bg, width: 1.5),
+                    ),
+                    child: Text(
+                      unread > 99 ? '99+' : '$unread',
+                      style: UgamText.tabular(
+                        UgamText.micro.copyWith(
+                          color: c.onAccent,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        }),
+      ),
     );
   }
 }

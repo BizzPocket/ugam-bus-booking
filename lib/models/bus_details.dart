@@ -514,16 +514,19 @@ class Bus {
   double amountDueFor(Passenger passenger) {
     final cellById = _cellsById();
     if (cellById.isEmpty) return 0;
+    // Sum the rounded PER-SEAT dues over the DISTINCT seats this passenger holds
+    // on this bus (a whole double sofa is two assignment entries on one seatId —
+    // one collection record). Delegating to [amountDueForSeat] guarantees the
+    // whole-passenger total equals the sum of its per-seat collection records, so
+    // rounding each seat to whole rupees can never introduce a ₹1 mismatch.
+    final seen = <String>{};
     double sum = 0;
     for (final a in passenger.assignedSeats) {
       if (a.busId != id) continue;
-      final c = cellById[a.seatId.split('#').first];
-      if (c == null) continue;
-      // Apply the trip factor PER BERTH from the leg of the matching request
-      // line (legs now live per line). A whole double sofa is two entries on the
-      // same seatId, so this still sums to the full sofa price.
-      final leg = passenger.legForSeatType(c.seatType!, position: c.position);
-      sum += berthPriceFor(c.seatType!, c.row) * tripFactor(leg);
+      final base = a.seatId.split('#').first;
+      if (cellById[base] == null) continue;
+      if (!seen.add(base)) continue;
+      sum += amountDueForSeat(passenger, base);
     }
     return sum;
   }
@@ -551,7 +554,11 @@ class Bus {
         ? _berthsHeld(passenger, baseSeatId).clamp(1, 2)
         : 1;
     final leg = passenger.legForSeatType(c.seatType!, position: c.position);
-    return berthPrice * berths * tripFactor(leg);
+    // Round the FINAL per-seat due to whole rupees at source. Fractional inputs
+    // (one-leg 0.5 factor, sofa/2, bus/seats) otherwise leave sub-rupee dues that
+    // never square against integer cash. This is the single per-collection-record
+    // amount, so rounding here keeps every stored due an integer.
+    return (berthPrice * berths * tripFactor(leg)).roundToDouble();
   }
 
   @override

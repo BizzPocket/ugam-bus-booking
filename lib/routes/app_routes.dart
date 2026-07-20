@@ -14,6 +14,8 @@ import '../screens/account_details_screen.dart';
 import '../screens/whatsapp_settings_screen.dart';
 import '../screens/notifications_settings_screen.dart';
 import '../screens/finance_screen.dart';
+import '../screens/pickup_locations_screen.dart';
+import '../screens/inbox_screen.dart';
 
 class AppRoutes {
   static const String splash = '/splash';
@@ -32,6 +34,8 @@ class AppRoutes {
   static const String whatsappSettings = '/settings/whatsapp';
   static const String notificationsSettings = '/settings/notifications';
   static const String finance = '/settings/finance';
+  static const String pickupLocations = '/settings/pickup-locations';
+  static const String inbox = '/inbox';
 
   static final routes = [
     GetPage(name: splash, page: () => const SplashScreen()),
@@ -108,6 +112,14 @@ class AppRoutes {
     GetPage(
       name: finance,
       page: () => const FinanceScreen(),
+    ),
+    GetPage(
+      name: pickupLocations,
+      page: () => const PickupLocationsScreen(),
+    ),
+    GetPage(
+      name: inbox,
+      page: () => const InboxScreen(),
     ),
   ];
 }

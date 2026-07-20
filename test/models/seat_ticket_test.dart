@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/seat_ticket.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 
 void main() {
   // A payload shaped exactly like the live `seat_lookup_by_phone` RPC output,
@@ -52,6 +53,23 @@ void main() {
     expect(t.seatIds, ['DU3', 'SL3']);
   });
 
+  test('parses the per-seat leg so a one-way seat can render half', () {
+    final t = SeatTicket.fromJson({
+      ...json,
+      'assigned_seats': [
+        {'busId': 'bus-rsr', 'seatId': 'DU1', 'leg': 'outboundOnly'},
+        {'busId': 'bus-rsr', 'seatId': 'SL2', 'leg': 'returnOnly'},
+        {'busId': 'bus-rsr', 'seatId': 'SU3'}, // no leg stamped
+      ],
+    });
+    final legs = t.seatLegsForBus('bus-rsr');
+    expect(legs['DU1'], TripType.outboundOnly);
+    expect(legs['SL2'], TripType.returnOnly);
+    // Unstamped seats fall back to round-trip (rendered whole) — a phone-lookup
+    // ticket has no request-level trip type to borrow.
+    expect(legs['SU3'], TripType.roundTrip);
+  });
+
   test('drops seat entries missing busId/seatId', () {
     final t = SeatTicket.fromJson({
       ...json,
@@ -63,5 +81,27 @@ void main() {
     });
     expect(t.assignedSeats.length, 1);
     expect(t.assignedSeats.single.seatId, 'A1');
+  });
+
+  group('isLive', () {
+    // The regression this guards: "Find my seat" must show a passenger their
+    // seat on the CURRENT trip. A tour stays `locked` until the organiser marks
+    // it completed once the trip is truly over, so lifecycle status — not the
+    // departure date — decides whether a ticket is still live. Keying on the
+    // date wrongly hid the active tour the day after it departed (a multi-day
+    // pilgrimage is still under way), leaving every rider with "No seats found".
+    test('a locked ticket is live even after its departure date has passed', () {
+      final t = SeatTicket.fromJson(
+        {...json, 'status': 'locked', 'departure_date': '2020-01-01'},
+      );
+      expect(t.isLive, isTrue);
+    });
+
+    test('a completed ticket is history, not live', () {
+      final t = SeatTicket.fromJson(
+        {...json, 'status': 'completed', 'departure_date': '2099-01-01'},
+      );
+      expect(t.isLive, isFalse);
+    });
   });
 }
