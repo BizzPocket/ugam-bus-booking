@@ -65,6 +65,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
   bool _searchVisible = false;
   String _query = '';
 
+  // Which request row is expanded (single-open accordion). Null = all collapsed.
+  String? _expandedId;
+
   // ── Bulk selection state ─────────────────────────────────────
   bool _selectionMode = false;
   final Set<String> _selectedIds = <String>{};
@@ -147,6 +150,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
     HapticFeedback.mediumImpact();
     setState(() {
       _selectionMode = true;
+      _expandedId = null;
       _selectedIds.add(id);
     });
   }
@@ -477,6 +481,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
             currentIndex: _selectedTourIndex,
             onChanged: (i) => setState(() {
               _selectedTourIndex = i;
+              _expandedId = null;
               _exitSelection();
             }),
             items: [
@@ -497,8 +502,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
           child: UgamTabPills(
             currentIndex: _filter.index,
-            onChanged: (i) =>
-                setState(() => _filter = _RequestFilter.values[i]),
+            onChanged: (i) => setState(() {
+              _filter = _RequestFilter.values[i];
+              _expandedId = null;
+            }),
             items: [
               UgamTabItem(
                 label: tr('requests.filter.new'),
@@ -608,6 +615,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
                         c: c,
                         selectionMode: _selectionMode,
                         selected: selected,
+                        expanded: _expandedId == p.id,
+                        onToggleExpand: () => setState(() {
+                          _expandedId = _expandedId == p.id ? null : p.id;
+                        }),
                         onLongPress: () => _enterSelection(p.id),
                         onSelectTap: () => _toggleSelect(p.id),
                       );
@@ -1213,6 +1224,8 @@ class _RequestCard extends StatelessWidget {
   final UgamColorSet c;
   final bool selectionMode;
   final bool selected;
+  final bool expanded;
+  final VoidCallback onToggleExpand;
   final VoidCallback onLongPress;
   final VoidCallback onSelectTap;
 
@@ -1222,6 +1235,8 @@ class _RequestCard extends StatelessWidget {
     required this.c,
     required this.selectionMode,
     required this.selected,
+    required this.expanded,
+    required this.onToggleExpand,
     required this.onLongPress,
     required this.onSelectTap,
   });
@@ -1267,22 +1282,226 @@ class _RequestCard extends StatelessWidget {
     return chips;
   }
 
-  @override
-  Widget build(BuildContext context) {
+  /// Plural-free collapsed summary: "1/2 · Double Sofa + Seater" (or "2 · …").
+  /// Uses plain interpolation — NEVER plural() — so it is safe in the test
+  /// harness and stays a single scannable line.
+  String _seatSummary() {
+    if (passenger.requestLines.isEmpty) return '';
+    final types = passenger.requestLines.map((l) => l.label).join(' + ');
+    final count = passenger.isPartiallyAssigned
+        ? '${passenger.totalSeatsAssigned}/${passenger.seatBerths}'
+        : '${passenger.seatBerths}';
+    return '$count · $types';
+  }
+
+  /// Tap-to-call phone shown only in the expanded body.
+  Widget _phoneRow(BuildContext context) {
+    if (passenger.phone.trim().isEmpty) return const SizedBox.shrink();
+    return GestureDetector(
+      onTap: () => PhoneDialer.call(passenger.phone),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.only(top: UgamSpacing.sm),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.phone_rounded, size: 14, color: c.ink2),
+            const SizedBox(width: 4),
+            Text(
+              passenger.phone,
+              style: UgamText.caption.copyWith(color: c.ink2, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The note quote box (moved verbatim from the old build()).
+  Widget _noteBox(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: UgamSpacing.md),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.md,
+          vertical: UgamSpacing.sm + 2,
+        ),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.chat_bubble_outline_rounded, size: 16, color: c.ink3),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: Text(
+                '"${passenger.note}"',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: UgamText.caption.copyWith(
+                  color: c.ink2,
+                  fontSize: 13,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The full info-chip list — the EXACT chip set the old card built, returned
+  /// raw so the expanded body wraps it. The `plural()` seat chips are guarded
+  /// by `requestLines.isNotEmpty` and only ever run inside the expand region.
+  List<Widget> _infoChips(BuildContext context) {
     final isAssigned = passenger.isFullyAssigned;
-    final isWaitlisted = passenger.isWaitlisted;
-    final isConfirmed = passenger.isConfirmed;
     final PassengerGroup? group = passenger.groupId == null
         ? null
         : tour.groups.firstWhereOrNull((g) => g.id == passenger.groupId);
+    return <Widget>[
+      if (passenger.requestLines.isNotEmpty)
+        UgamReqChip(
+          // Count BERTHS (a Double Sofa = 2 seats), so "2 × Double Sofa" reads
+          // as 4 SEATS. Unit word is localized + pluralised.
+          label: passenger.isPartiallyAssigned
+              ? '${passenger.totalSeatsAssigned}/${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
+                    .toUpperCase()
+              : '${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
+                    .toUpperCase(),
+          variant:
+              isAssigned ? UgamChipVariant.good : UgamChipVariant.accent,
+        ),
+      if (passenger.requestLines.isNotEmpty)
+        UgamReqChip(
+          label: passenger.requestLines
+              .map((l) => l.label)
+              .join(' + ')
+              .toUpperCase(),
+          variant:
+              isAssigned ? UgamChipVariant.good : UgamChipVariant.accent,
+        ),
+      if (passenger.tripType.isOneWay)
+        UgamReqChip(
+          // One-way loads a single leg, so it weighs HALF a physical seat per
+          // berth — surface that weight on the trip chip.
+          label: (passenger.tripType == TripType.outboundOnly
+                  ? tr(
+                      'requests.chip.trip_outbound',
+                      namedArgs: {'from': tour.fromCity, 'to': tour.toCity},
+                    )
+                  : tr(
+                      'requests.chip.trip_return',
+                      namedArgs: {'from': tour.toCity, 'to': tour.fromCity},
+                    ))
+              .toUpperCase(),
+          variant: UgamChipVariant.warm,
+        ),
+      if (passenger.isPartiallyAssigned)
+        UgamReqChip(
+          label: tr('requests.status.partial').toUpperCase(),
+          variant: UgamChipVariant.warm,
+        ),
+      if (passenger.isPriorityApproved) _PriorityBadge(c: c),
+      // Group badge taps into the single Groups & Priority home.
+      if (group != null)
+        GestureDetector(
+          onTap: selectionMode
+              ? null
+              : () {
+                  HapticFeedback.selectionClick();
+                  Get.toNamed(
+                    AppRoutes.tourGroups,
+                    arguments: {'tourId': tour.id},
+                  );
+                },
+          behavior: HitTestBehavior.opaque,
+          child: _GroupBadge(group: group, c: c),
+        ),
+      if (passenger.pickupLocationName != null &&
+          passenger.pickupLocationName!.isNotEmpty)
+        // "PICKUP: ST · SURAT" when a short code exists, else the name-only
+        // "PICKUP: SURAT". Wrapped in Obx so the code fills in if the pickup
+        // list finishes loading after first paint; degrades to name-only when
+        // the controller isn't registered.
+        Builder(
+          builder: (_) {
+            final pickup = Get.isRegistered<PickupController>()
+                ? Get.find<PickupController>()
+                : null;
+            final name = passenger.pickupLocationName;
+            UgamReqChip chip(String? code) {
+              final tail =
+                  (code == null || code.isEmpty) ? name : '$code · $name';
+              return UgamReqChip(
+                label: '${tr('pickup.reflect_label')}: $tail'.toUpperCase(),
+                variant: UgamChipVariant.neutral,
+              );
+            }
 
-    // Selection mode keeps a leading checkbox; normal mode drops the avatar
-    // entirely (no initials / profile pictures) so the name leads the card and
-    // the row stays compact.
+            // With no controller there is nothing observable to watch, so
+            // render the name-only chip directly — an Obx whose closure reads
+            // no observable throws.
+            if (pickup == null) return chip(null);
+            return Obx(
+              () => chip(pickup.codeFor(passenger.pickupLocationId)),
+            );
+          },
+        ),
+      // Customer has asked to cancel this confirmed/seated booking
+      // (migration 035). Warm badge so the organiser triages it; the ACTION
+      // (approve → free seat) lives on the card's primary CTA.
+      if (passenger.isCancelRequested)
+        UgamReqChip(
+          label: tr('requests.chip.cancel_requested').toUpperCase(),
+          variant: UgamChipVariant.warm,
+        ),
+      ..._assignedSeatChips(),
+    ];
+  }
+
+  /// Everything revealed on tap: phone, chips, note, and today's action row.
+  Widget _expandedBody(BuildContext context) {
+    final chips = _infoChips(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _phoneRow(context),
+        if (chips.isNotEmpty) ...[
+          const SizedBox(height: UgamSpacing.sm),
+          Wrap(
+            spacing: UgamSpacing.sm,
+            runSpacing: UgamSpacing.sm,
+            children: chips,
+          ),
+        ],
+        if (passenger.note != null && passenger.note!.isNotEmpty)
+          _noteBox(context),
+        const SizedBox(height: UgamSpacing.md),
+        _CardActions(
+          passenger: passenger,
+          tour: tour,
+          isAssigned: passenger.isFullyAssigned,
+          isWaitlisted: passenger.isWaitlisted,
+          isConfirmed: passenger.isConfirmed,
+          c: c,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Selection mode keeps a leading checkbox; normal mode drops the avatar so
+    // the name leads the row.
     final Widget? checkbox = selectionMode
         ? Container(
-            width: 28,
-            height: 28,
+            width: 24,
+            height: 24,
             decoration: BoxDecoration(
               color: selected ? c.accent : c.cardElev,
               shape: BoxShape.circle,
@@ -1293,28 +1512,31 @@ class _RequestCard extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: selected
-                ? Icon(Icons.check_rounded, size: 16, color: c.onAccent)
+                ? Icon(Icons.check_rounded, size: 14, color: c.onAccent)
                 : null,
           )
         : null;
+
+    // Attention edge: a pending customer cancellation gets a warm left edge so
+    // it pops during a scan; a selected row keeps the accent edge.
+    final Color edge = passenger.isCancelRequested
+        ? c.warm
+        : (selected ? c.accent : Colors.transparent);
 
     final card = AnimatedContainer(
       duration: UgamMotion.tab,
       curve: UgamMotion.easeOut,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(
-          color: selected ? c.accent : Colors.transparent,
-          width: 1.5,
-        ),
+        border: Border(left: BorderSide(color: edge, width: 3)),
       ),
       child: UgamCard.plain(
-        // 8pt grid: 12 padding on every side.
         padding: const EdgeInsets.all(UgamSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ── Collapsed header (always shown) ──
             Row(
               children: [
                 if (checkbox != null) ...[
@@ -1326,254 +1548,59 @@ class _RequestCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        passenger.displayName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: UgamText.titleS.copyWith(
-                          color: c.ink,
-                          fontSize: 16,
-                        ),
-                      ),
-                      const SizedBox(height: UgamSpacing.xs),
-                      // Phone (tap to call) + time-ago. The list is already
-                      // filtered by status, so the old status chip was noise —
-                      // the number the agent calls is far more useful here.
                       Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          if (passenger.phone.trim().isNotEmpty) ...[
-                            GestureDetector(
-                              onTap: selectionMode
-                                  ? null
-                                  : () => PhoneDialer.call(passenger.phone),
-                              behavior: HitTestBehavior.opaque,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(minHeight: 40),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.phone_rounded,
-                                      size: 14,
-                                      color: c.ink2,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      passenger.phone,
-                                      style: UgamText.caption.copyWith(
-                                        color: c.ink2,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              '·',
-                              style: UgamText.caption.copyWith(
-                                color: c.ink3,
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                          ],
-                          Flexible(
+                          Expanded(
                             child: Text(
-                              _timeAgo(passenger.createdAt),
+                              passenger.displayName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: UgamText.caption.copyWith(
-                                color: c.ink3,
-                                fontSize: 13,
-                              ),
+                              style: UgamText.titleS
+                                  .copyWith(color: c.ink, fontSize: 15),
                             ),
+                          ),
+                          const SizedBox(width: UgamSpacing.sm),
+                          Text(
+                            _timeAgo(passenger.createdAt),
+                            style: UgamText.caption
+                                .copyWith(color: c.ink3, fontSize: 12),
                           ),
                         ],
                       ),
+                      // Line 2 — seat summary (indicator strip added in Task 2).
+                      // Rendered only when there's content to show.
+                      Builder(builder: (context) {
+                        final summary = _seatSummary();
+                        if (summary.isEmpty) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            summary,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: UgamText.caption.copyWith(
+                              color: passenger.isPartiallyAssigned
+                                  ? c.warm
+                                  : c.accent,
+                              fontSize: 12,
+                            ),
+                          ),
+                        );
+                      }),
                     ],
                   ),
                 ),
               ],
             ),
-            // All info chips on ONE wrap directly under the name — seat count,
-            // request breakdown, one-way weight, partial, priority, group and
-            // any assigned seats — instead of three stacked blocks. 8pt-grid
-            // spacing (8) between chips. Built inline and spread so the gap
-            // above only appears when there's at least one chip.
-            ...(() {
-              final chips = <Widget>[
-                if (passenger.requestLines.isNotEmpty)
-                  UgamReqChip(
-                    // Count BERTHS (a Double Sofa = 2 seats), so "2 × Double
-                    // Sofa" reads as 4 SEATS. Unit word is localized + pluralised.
-                    label: passenger.isPartiallyAssigned
-                        ? '${passenger.totalSeatsAssigned}/${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
-                              .toUpperCase()
-                        : '${passenger.seatBerths} ${plural('requests.chip.seats_unit', passenger.seatBerths)}'
-                              .toUpperCase(),
-                    variant: isAssigned
-                        ? UgamChipVariant.good
-                        : UgamChipVariant.accent,
-                  ),
-                if (passenger.requestLines.isNotEmpty)
-                  UgamReqChip(
-                    label: passenger.requestLines
-                        .map((l) => l.label)
-                        .join(' + ')
-                        .toUpperCase(),
-                    variant: isAssigned
-                        ? UgamChipVariant.good
-                        : UgamChipVariant.accent,
-                  ),
-                if (passenger.tripType.isOneWay)
-                  UgamReqChip(
-                    // One-way loads a single leg, so it weighs HALF a physical
-                    // seat per berth — surface that weight on the trip chip.
-                    label: (passenger.tripType == TripType.outboundOnly
-                            ? tr(
-                                'requests.chip.trip_outbound',
-                                namedArgs: {
-                                  'from': tour.fromCity,
-                                  'to': tour.toCity,
-                                },
-                              )
-                            : tr(
-                                'requests.chip.trip_return',
-                                namedArgs: {
-                                  'from': tour.toCity,
-                                  'to': tour.fromCity,
-                                },
-                              ))
-                        .toUpperCase(),
-                    variant: UgamChipVariant.warm,
-                  ),
-                if (passenger.isPartiallyAssigned)
-                  UgamReqChip(
-                    label: tr('requests.status.partial').toUpperCase(),
-                    variant: UgamChipVariant.warm,
-                  ),
-                if (passenger.isPriorityApproved) _PriorityBadge(c: c),
-                // Group badge taps into the single Groups & Priority home.
-                if (group != null)
-                  GestureDetector(
-                    onTap: selectionMode
-                        ? null
-                        : () {
-                            HapticFeedback.selectionClick();
-                            Get.toNamed(
-                              AppRoutes.tourGroups,
-                              arguments: {'tourId': tour.id},
-                            );
-                          },
-                    behavior: HitTestBehavior.opaque,
-                    child: _GroupBadge(group: group, c: c),
-                  ),
-                if (passenger.pickupLocationName != null &&
-                    passenger.pickupLocationName!.isNotEmpty)
-                  // "PICKUP: ST · SURAT" when a short code exists, else the
-                  // name-only "PICKUP: SURAT". Wrapped in Obx so the code fills
-                  // in if the pickup list finishes loading after first paint;
-                  // degrades to name-only when the controller isn't registered.
-                  Builder(
-                    builder: (_) {
-                      final pickup = Get.isRegistered<PickupController>()
-                          ? Get.find<PickupController>()
-                          : null;
-                      final name = passenger.pickupLocationName;
-                      UgamReqChip chip(String? code) {
-                        final tail = (code == null || code.isEmpty)
-                            ? name
-                            : '$code · $name';
-                        return UgamReqChip(
-                          label: '${tr('pickup.reflect_label')}: $tail'
-                              .toUpperCase(),
-                          variant: UgamChipVariant.neutral,
-                        );
-                      }
-
-                      // With no controller there is nothing observable to
-                      // watch, so render the name-only chip directly — an Obx
-                      // whose closure reads no observable throws.
-                      if (pickup == null) return chip(null);
-                      return Obx(
-                        () => chip(pickup.codeFor(passenger.pickupLocationId)),
-                      );
-                    },
-                  ),
-                // Customer has asked to cancel this confirmed/seated booking
-                // (migration 035). Warm badge so the organiser triages it; the
-                // ACTION (approve → free seat) lives on the card's primary CTA.
-                if (passenger.isCancelRequested)
-                  UgamReqChip(
-                    label: tr('requests.chip.cancel_requested').toUpperCase(),
-                    variant: UgamChipVariant.warm,
-                  ),
-                ..._assignedSeatChips(),
-              ];
-              if (chips.isEmpty) return const <Widget>[];
-              return <Widget>[
-                const SizedBox(height: UgamSpacing.sm),
-                Wrap(
-                  spacing: UgamSpacing.sm,
-                  runSpacing: UgamSpacing.sm,
-                  children: chips,
-                ),
-              ];
-            })(),
-            if (passenger.note != null && passenger.note!.isNotEmpty) ...[
-              const SizedBox(height: UgamSpacing.md),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.md,
-                  vertical: UgamSpacing.sm + 2,
-                ),
-                decoration: BoxDecoration(
-                  color: c.cardElev,
-                  borderRadius: BorderRadius.circular(UgamRadius.input),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.chat_bubble_outline_rounded,
-                      size: 16,
-                      color: c.ink3,
-                    ),
-                    const SizedBox(width: UgamSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        '"${passenger.note}"',
-                        // Cap a very long note so it can't blow out the card
-                        // height; the full text is still visible on the request.
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: UgamText.caption.copyWith(
-                          color: c.ink2,
-                          fontSize: 13,
-                          fontStyle: FontStyle.italic,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (!selectionMode) ...[
-              const SizedBox(height: UgamSpacing.md),
-              _CardActions(
-                passenger: passenger,
-                tour: tour,
-                isAssigned: isAssigned,
-                isWaitlisted: isWaitlisted,
-                isConfirmed: isConfirmed,
-                c: c,
-              ),
-            ],
+            // ── Expand region (single-open accordion) ──
+            AnimatedSize(
+              duration: UgamMotion.tab,
+              curve: UgamMotion.easeOut,
+              alignment: Alignment.topCenter,
+              child: expanded
+                  ? _expandedBody(context)
+                  : const SizedBox(width: double.infinity),
+            ),
           ],
         ),
       ),
@@ -1581,7 +1608,7 @@ class _RequestCard extends StatelessWidget {
 
     return GestureDetector(
       onLongPress: selectionMode ? null : onLongPress,
-      onTap: selectionMode ? onSelectTap : null,
+      onTap: selectionMode ? onSelectTap : onToggleExpand,
       behavior: HitTestBehavior.opaque,
       child: card,
     );
