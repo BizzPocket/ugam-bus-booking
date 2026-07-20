@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,7 +8,7 @@ import '../tokens.dart';
 /// Labelled filled input. Label sits above the field in `micro` caps
 /// style. The field itself inherits the `InputDecorationTheme` from
 /// `UgamTheme.dark()` / `UgamTheme.light()`.
-class UgamInput extends StatelessWidget {
+class UgamInput extends StatefulWidget {
   final String? label;
   final String? hint;
   final TextEditingController? controller;
@@ -15,6 +16,8 @@ class UgamInput extends StatelessWidget {
   final TextInputType? keyboardType;
   final List<TextInputFormatter> inputFormatters;
   final bool obscure;
+  final bool obscureToggle;
+  final List<String>? autofillHints;
   final bool autofocus;
   final int? maxLength;
   final ValueChanged<String>? onChanged;
@@ -36,6 +39,8 @@ class UgamInput extends StatelessWidget {
     this.keyboardType,
     this.inputFormatters = const [],
     this.obscure = false,
+    this.obscureToggle = false,
+    this.autofillHints,
     this.autofocus = false,
     this.maxLength,
     this.onChanged,
@@ -50,40 +55,68 @@ class UgamInput extends StatelessWidget {
   });
 
   @override
+  State<UgamInput> createState() => _UgamInputState();
+}
+
+class _UgamInputState extends State<UgamInput> {
+  late bool _obscured = widget.obscure;
+
+  @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+
+    // When obscureToggle is on, the eye icon becomes the field's suffix. An
+    // explicitly-passed suffix takes precedence (no caller passes both today).
+    Widget? suffix = widget.suffix;
+    if (widget.obscureToggle && suffix == null) {
+      suffix = GestureDetector(
+        onTap: () => setState(() => _obscured = !_obscured),
+        behavior: HitTestBehavior.opaque,
+        child: Semantics(
+          button: true,
+          label: tr(_obscured ? 'login.show_password' : 'login.hide_password'),
+          child: Icon(
+            _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            size: 20,
+            color: c.ink3,
+          ),
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (label != null) ...[
-          Text(label!.toUpperCase(),
+        if (widget.label != null) ...[
+          Text(widget.label!.toUpperCase(),
               style: UgamText.micro.copyWith(color: c.ink2)),
           const SizedBox(height: UgamSpacing.sm),
         ],
         TextField(
-          controller: controller,
-          focusNode: focusNode,
-          keyboardType: keyboardType,
-          inputFormatters: inputFormatters,
-          obscureText: obscure,
-          autofocus: autofocus,
-          maxLength: maxLength,
-          maxLines: obscure ? 1 : maxLines,
-          minLines: minLines,
-          onChanged: onChanged,
-          onSubmitted: onSubmitted,
-          readOnly: readOnly,
-          enabled: enabled,
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          keyboardType: widget.keyboardType,
+          inputFormatters: widget.inputFormatters,
+          obscureText: _obscured,
+          autofillHints: widget.autofillHints,
+          autofocus: widget.autofocus,
+          maxLength: widget.maxLength,
+          maxLines: _obscured ? 1 : widget.maxLines,
+          minLines: widget.minLines,
+          onChanged: widget.onChanged,
+          onSubmitted: widget.onSubmitted,
+          readOnly: widget.readOnly,
+          enabled: widget.enabled,
           style: UgamText.body.copyWith(
-            color: enabled ? c.ink : c.ink3,
+            color: widget.enabled ? c.ink : c.ink3,
             fontSize: 15,
           ),
           decoration: InputDecoration(
-            hintText: hint,
-            errorText: errorText,
+            hintText: widget.hint,
+            errorText: widget.errorText,
             counterText: '',
-            prefixIcon: prefix,
+            prefixIcon: widget.prefix,
             suffixIcon: suffix,
           ),
         ),

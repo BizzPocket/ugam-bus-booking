@@ -1106,6 +1106,8 @@
     "phone_hint": "તમારો ફોન નંબર",
     "password_label": "પાસવર્ડ",
     "password_hint": "એડમિન પાસવર્ડ",
+    "show_password": "પાસવર્ડ બતાવો",
+    "hide_password": "પાસવર્ડ છુપાવો",
     "signing_in_as": "{name} તરીકે સાઇન ઇન…",
     "btn_sign_in": "સાઇન ઇન",
     "btn_different_number": "બીજો નંબર વાપરો",

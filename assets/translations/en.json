@@ -1106,6 +1106,8 @@
     "phone_hint": "Enter your phone number",
     "password_label": "PASSWORD",
     "password_hint": "Admin password",
+    "show_password": "Show password",
+    "hide_password": "Hide password",
     "signing_in_as": "Signing in as {name}",
     "btn_sign_in": "Sign in",
     "btn_different_number": "Use a different number",
