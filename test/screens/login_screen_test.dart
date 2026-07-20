@@ -85,4 +85,18 @@ void main() {
     await tester.pump();
     expect(find.text('login.password_incorrect'), findsOneWidget);
   });
+
+  testWidgets('biometric unlock button shows only when canBiometricUnlock',
+      (tester) async {
+    _swallowKnownPhoneInputOverflow(tester);
+    final c = _FakeAuthController();
+    Get.put<AuthController>(c);
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+    expect(find.text('login.unlock_biometric'), findsNothing);
+
+    c.canBiometricUnlock.value = true;
+    await tester.pump();
+    expect(find.text('login.unlock_biometric'), findsOneWidget);
+  });
 }

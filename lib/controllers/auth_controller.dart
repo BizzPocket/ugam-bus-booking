@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/admin.dart';
 import '../models/profile.dart';
 import '../services/admin_auth_service.dart';
+import '../services/biometric_credential_store.dart';
 import '../services/push_service.dart';
 import '../utils/app_snackbar.dart';
 import 'tour_controller.dart';
@@ -24,6 +25,7 @@ class AuthController extends GetxController {
   static const _keyRole = 'auth_role';
   static const _keyName = 'auth_name';
   static const _keyLastPhone = 'auth_last_phone';
+  static const _keyBiometricOffered = 'auth_biometric_offered';
 
   final phoneController = TextEditingController();
   final passwordController = TextEditingController();
@@ -46,6 +48,14 @@ class AuthController extends GetxController {
 
   /// Injectable so tests can supply a throwing/fake service.
   AdminAuthService adminAuth = AdminAuthService();
+
+  /// Injectable so tests can supply a fake biometric store.
+  BiometricCredentialStore biometric = BiometricCredentialStore();
+
+  /// Whether the login screen should offer the "Unlock with fingerprint"
+  /// affordance for the currently-prefilled phone number.
+  final RxBool canBiometricUnlock = false.obs;
+
   SupabaseClient get _client => Supabase.instance.client;
 
   bool get isAdmin => userRole.value == UserRole.admin;
@@ -179,14 +189,22 @@ class AuthController extends GetxController {
   }
 
   /// Prep the login screen after a logout / cold anonymous start: prefill the
-  /// last-used number so a returning admin only types the password. Biometric
-  /// availability is layered on in a later change.
+  /// last-used number so a returning admin only types the password, then
+  /// check whether a biometric credential is on file for that number so the
+  /// "Unlock with fingerprint" affordance can be shown.
   Future<void> prepareLoginScreen() async {
     final prefs = await SharedPreferences.getInstance();
     final last = prefs.getString(_keyLastPhone);
     if (last != null && last.isNotEmpty && phoneController.text.isEmpty) {
       phoneController.text = last;
       phoneNumber.value = last;
+    }
+
+    final phone = phoneController.text;
+    if (phone.isNotEmpty && await biometric.isAvailable()) {
+      canBiometricUnlock.value = await biometric.hasCredential(phone);
+    } else {
+      canBiometricUnlock.value = false;
     }
   }
 
@@ -293,6 +311,36 @@ class AuthController extends GetxController {
     passwordError.value = null;
   }
 
+  /// Replays the stored admin credential after a passing biometric prompt.
+  Future<void> unlockWithBiometric() async {
+    final phone = phoneController.text.trim();
+    if (phone.isEmpty) return;
+    final cred = await biometric.unlock(phone);
+    if (cred == null) return; // cancelled / failed — stay on the manual path
+
+    isLoading.value = true;
+    try {
+      final admin = await adminAuth.signIn(
+        phone: cred.phone,
+        password: cred.password,
+      );
+      await _completeLogin(admin, password: cred.password);
+    } on AuthException catch (_) {
+      // Stored password is stale (admin changed it server-side). Drop the
+      // credential and fall back to manual entry.
+      await biometric.clear();
+      canBiometricUnlock.value = false;
+      passwordError.value = tr('login.password_incorrect');
+    } catch (e) {
+      AppSnackBar.error(
+        tr('errors.sign_in', namedArgs: {'e': '$e'}),
+        title: tr('errors.connection_error'),
+      );
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
   Future<void> _completeLogin(Admin admin, {required String password}) async {
     isLoggedIn.value = true;
     currentAdmin.value = admin;
@@ -324,7 +372,41 @@ class AuthController extends GetxController {
       // ignore: unawaited_futures
       PushService.instance.register();
     }
+    await _maybeOfferBiometricEnroll(admin.phone, password);
     Get.offAllNamed('/');
+  }
+
+  /// Offers to enroll biometric quick-unlock once, the first time an admin
+  /// with no stored credential signs in on a device that supports it. Never
+  /// nags again after the first offer, whatever the admin chooses.
+  Future<void> _maybeOfferBiometricEnroll(String phone, String password) async {
+    if (!await biometric.isAvailable()) return;
+    if (await biometric.hasCredential(phone)) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_keyBiometricOffered) ?? false) return;
+    await prefs.setBool(_keyBiometricOffered, true);
+
+    final enable = await Get.dialog<bool>(
+      // Reuse a lightweight AlertDialog here to avoid a BuildContext
+      // dependency — Get.dialog supplies its own overlay.
+      AlertDialog(
+        title: Text(tr('login.biometric_enroll_title')),
+        content: Text(tr('login.biometric_enroll_message')),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(result: false),
+            child: Text(tr('app.action.cancel')),
+          ),
+          TextButton(
+            onPressed: () => Get.back(result: true),
+            child: Text(tr('login.biometric_enroll_confirm')),
+          ),
+        ],
+      ),
+    );
+    if (enable == true) {
+      await biometric.enroll(phone: phone, password: password);
+    }
   }
 
   Future<void> updateUserName(String name) async {

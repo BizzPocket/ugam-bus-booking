@@ -174,6 +174,32 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: UgamSpacing.md),
                         Obx(() {
+                          if (!controller.canBiometricUnlock.value) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding:
+                                const EdgeInsets.only(bottom: UgamSpacing.md),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: controller.unlockWithBiometric,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.fingerprint_rounded,
+                                      size: 20, color: c.accent),
+                                  const SizedBox(width: UgamSpacing.sm),
+                                  Text(
+                                    tr('login.unlock_biometric'),
+                                    style: UgamText.bodyStrong
+                                        .copyWith(color: c.accent),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                        Obx(() {
                           final showPasswordStep =
                               controller.awaitingAdminPassword.value;
                           final loading = controller.isLoading.value;

@@ -1119,7 +1119,11 @@
     "ping_failed_title": "पिंग विफल",
     "ping_failed_msg": "Supabase तक पहुँचा नहीं जा सका:\n{error}",
     "ping_loading": "सर्वर को पिंग किया जा रहा है…",
-    "password_incorrect": "गलत पासवर्ड"
+    "password_incorrect": "गलत पासवर्ड",
+    "unlock_biometric": "फ़िंगरप्रिंट से अनलॉक करें",
+    "biometric_enroll_title": "फ़िंगरप्रिंट लॉगिन चालू करें?",
+    "biometric_enroll_message": "अगली बार पासवर्ड टाइप किए बिना फ़िंगरप्रिंट या फ़ेस से साइन इन करें।",
+    "biometric_enroll_confirm": "चालू करें"
   },
   "charts": {
     "call_passenger": "यात्री को कॉल करें",

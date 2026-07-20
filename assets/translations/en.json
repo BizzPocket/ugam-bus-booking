@@ -1119,7 +1119,11 @@
     "ping_failed_title": "Ping Failed",
     "ping_failed_msg": "Could not reach Supabase:\n{error}",
     "ping_loading": "Pinging server…",
-    "password_incorrect": "Incorrect password"
+    "password_incorrect": "Incorrect password",
+    "unlock_biometric": "Unlock with fingerprint",
+    "biometric_enroll_title": "Enable fingerprint login?",
+    "biometric_enroll_message": "Next time, sign in with your fingerprint or face — no password typing.",
+    "biometric_enroll_confirm": "Enable"
   },
   "charts": {
     "call_passenger": "Call passenger",
