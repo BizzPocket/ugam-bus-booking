@@ -116,42 +116,53 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     // ── Supporting stat grid (demoted) ─────────────────
-                    Row(
-                      children: [
-                        Expanded(
-                          child: UgamStatTile(
-                            icon: Icons.payments_rounded,
-                            // Compact (₹1.2L) so large INR values never wrap
-                            // and blow out the tile height in the equal-height
-                            // supporting grid.
-                            value: Formatters.formatMoneyInrCompact(
-                              s.collected,
+                    // Income only earns a tile once there IS extra income —
+                    // otherwise it's a ₹0 filler tile (§A3). Compact (₹1.2L)
+                    // values so large INR figures never blow out tile height.
+                    Builder(
+                      builder: (_) {
+                        final tiles = <Widget>[
+                          Expanded(
+                            child: UgamStatTile(
+                              icon: Icons.payments_rounded,
+                              value: Formatters.formatMoneyInrCompact(
+                                s.collected,
+                              ),
+                              label: tr('bus_money.stat_collected'),
+                              variant: UgamStatVariant.good,
                             ),
-                            label: tr('bus_money.stat_collected'),
-                            variant: UgamStatVariant.good,
                           ),
-                        ),
-                        const SizedBox(width: UgamSpacing.md),
-                        Expanded(
-                          child: UgamStatTile(
-                            icon: Icons.savings_rounded,
-                            value: Formatters.formatMoneyInrCompact(s.income),
-                            label: tr('bus_money.stat_income'),
-                            variant: UgamStatVariant.good,
-                          ),
-                        ),
-                        const SizedBox(width: UgamSpacing.md),
-                        Expanded(
-                          child: UgamStatTile(
-                            icon: Icons.receipt_long_rounded,
-                            value: Formatters.formatMoneyInrCompact(
-                              s.expensesTotal,
+                          if (s.income > 0.005)
+                            Expanded(
+                              child: UgamStatTile(
+                                icon: Icons.savings_rounded,
+                                value: Formatters.formatMoneyInrCompact(
+                                  s.income,
+                                ),
+                                label: tr('bus_money.stat_income'),
+                                variant: UgamStatVariant.good,
+                              ),
                             ),
-                            label: tr('bus_money.stat_expenses'),
-                            variant: UgamStatVariant.warm,
+                          Expanded(
+                            child: UgamStatTile(
+                              icon: Icons.receipt_long_rounded,
+                              value: Formatters.formatMoneyInrCompact(
+                                s.expensesTotal,
+                              ),
+                              label: tr('bus_money.stat_expenses'),
+                              variant: UgamStatVariant.warm,
+                            ),
                           ),
-                        ),
-                      ],
+                        ];
+                        return Row(
+                          children: [
+                            for (var i = 0; i < tiles.length; i++) ...[
+                              if (i > 0) const SizedBox(width: UgamSpacing.md),
+                              tiles[i],
+                            ],
+                          ],
+                        );
+                      },
                     ),
                     const SizedBox(height: UgamSpacing.xl),
 
@@ -627,7 +638,7 @@ class _OutstandingHero extends StatelessWidget {
       elev: true,
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.xl,
+        vertical: UgamSpacing.lg,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -640,18 +651,18 @@ class _OutstandingHero extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.sm),
           // The screen's single focal figure — a big Sora number set over a
-          // soft copper halo, mirroring the dashboard passenger hero.
+          // soft copper halo. Sized for the cockpit, not a showroom (§A5).
           SizedBox(
-            height: 96,
+            height: 72,
             child: Stack(
               alignment: Alignment.center,
               clipBehavior: Clip.none,
               children: [
                 Container(
-                  width: 200,
-                  height: 200,
+                  width: 150,
+                  height: 150,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
@@ -673,7 +684,7 @@ class _OutstandingHero extends StatelessWidget {
                       Formatters.formatMoneyInr(amount),
                       style: UgamText.tabular(
                         UgamText.hero
-                            .copyWith(color: figureColor, fontSize: 44),
+                            .copyWith(color: figureColor, fontSize: 38),
                       ),
                       maxLines: 1,
                     ),
@@ -682,7 +693,7 @@ class _OutstandingHero extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: UgamSpacing.md),
+          const SizedBox(height: UgamSpacing.sm),
           // Expected handover sits beneath as quiet context.
           Text(
             tr('bus_money.stat_expected_handover').toUpperCase(),
