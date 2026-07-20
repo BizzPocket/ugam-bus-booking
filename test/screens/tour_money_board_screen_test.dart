@@ -10,6 +10,7 @@ import 'package:occubusbooking/models/collection.dart';
 import 'package:occubusbooking/models/expense.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/tour.dart';
+import 'package:occubusbooking/design/components/ugam_card.dart';
 import 'package:occubusbooking/screens/tour_money_board_screen.dart';
 
 /// Test double for [TourController] — skips the real network load + realtime
@@ -163,5 +164,49 @@ void main() {
     expect(find.text('tour_money_board.no_activity'), findsNWidgets(2));
     // Totals capsule reports the tour fully settled (0 outstanding).
     expect(find.text('tour_money_board.all_settled'), findsOneWidget);
+  });
+
+  testWidgets('to-collect bus tints danger; handover-due bus tints warm',
+      (tester) async {
+    useTallSurface(tester);
+    final tours = _FakeTourController();
+    final money = _FakeMoneyController();
+    Get.put<TourController>(tours);
+    Get.put<MoneyController>(money);
+    tours.tours.assignAll([_fakeTour()]);
+
+    money.collections.assignAll([
+      // Bus 1: billed 5000 but nothing received → revenue outstanding, no
+      // handover expected yet → actionNeeded via "to collect" (danger).
+      Collection(
+        tourId: 't1',
+        busId: 'b1',
+        passengerId: 'p1',
+        seatId: 'A1',
+        amountDue: 5000,
+        amountReceived: 0,
+      ),
+      // Bus 2: fully collected 5000, none handed over → handover due (warm).
+      Collection(
+        tourId: 't1',
+        busId: 'b2',
+        passengerId: 'p2',
+        seatId: 'B1',
+        amountDue: 5000,
+        amountReceived: 5000,
+      ),
+    ]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    final busA = tester.widget<UgamCard>(
+      find.byKey(const ValueKey('bus-money-row-b1')),
+    );
+    final busB = tester.widget<UgamCard>(
+      find.byKey(const ValueKey('bus-money-row-b2')),
+    );
+    expect(busA.tone, UgamCardTone.danger);
+    expect(busB.tone, UgamCardTone.warm);
   });
 }

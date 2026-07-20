@@ -300,7 +300,9 @@ class _BusMoneyRow extends StatelessWidget {
       UgamStatusTone statusTone,
     ) = switch (state) {
       BusMoneyState.actionNeeded => (
-        UgamCardTone.warm,
+        // Tone tracks the figure: a collect shortfall is red, a handover due
+        // is rose — so the card's tint says WHICH action at a glance (§A2/§A4).
+        hasHandoverDue ? UgamCardTone.warm : UgamCardTone.danger,
         hasHandoverDue
             ? tr('tour_money_board.handover')
             : tr('tour_money_board.to_collect'),
@@ -335,6 +337,7 @@ class _BusMoneyRow extends StatelessWidget {
         summary.income > 0.005;
 
     return UgamCard.plain(
+      key: ValueKey('bus-money-row-${bus.id}'),
       tone: cardTone,
       onTap: onTap,
       padding: const EdgeInsets.all(UgamSpacing.md),
