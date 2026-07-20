@@ -39,104 +39,107 @@ class LoginScreen extends GetView<AuthController> {
                       padding: const EdgeInsets.symmetric(
                         horizontal: UgamSpacing.xxl,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (canPop) ...[
-                            const SizedBox(height: UgamSpacing.sm),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: UgamIconButton(
-                                icon: Icons.close_rounded,
-                                onTap: Get.back,
-                                semanticLabel: tr('app.action.back'),
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: UgamSpacing.huge),
-                          // Brand block — centred logo (on a soft copper halo),
-                          // Sora wordmark, and tagline. The radial glow is the
-                          // signature futuristic flourish, echoing the dashboard
-                          // passenger hero.
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                height: 132,
-                                child: Stack(
-                                  alignment: Alignment.center,
-                                  clipBehavior: Clip.none,
-                                  children: [
-                                    Container(
-                                      width: 188,
-                                      height: 188,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        gradient: RadialGradient(
-                                          colors: [
-                                            c.glow,
-                                            c.glow.withValues(alpha: 0),
-                                          ],
-                                          stops: const [0.0, 0.7],
-                                        ),
-                                      ),
-                                    ),
-                                    const UgamLogo(size: 64),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: UgamSpacing.lg),
-                              Text(
-                                'UGAM',
-                                style: UgamText.hero.copyWith(
-                                  color: c.ink,
-                                  fontSize: 52,
-                                  letterSpacing: 2.0,
-                                ),
-                              ),
+                      child: AutofillGroup(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (canPop) ...[
                               const SizedBox(height: UgamSpacing.sm),
-                              Text(
-                                tr('login.tagline'),
-                                textAlign: TextAlign.center,
-                                style: UgamText.body.copyWith(color: c.ink2),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: UgamIconButton(
+                                  icon: Icons.close_rounded,
+                                  onTap: Get.back,
+                                  semanticLabel: tr('app.action.back'),
+                                ),
                               ),
                             ],
-                          ),
-                          const SizedBox(height: UgamSpacing.huge2),
-                          UgamPhoneInput(
-                            controller: controller.phoneController,
-                            label: tr('login.phone_label'),
-                            // Editing the number after the password step has
-                            // opened backs out of it — this replaces the old
-                            // "use another number" link, so switching numbers
-                            // stays possible without a dedicated button.
-                            onChanged: (_) {
-                              if (controller.awaitingAdminPassword.value) {
-                                controller.cancelAdminPassword();
-                              }
-                            },
-                            onSubmitted: (_) {
-                              if (!controller.awaitingAdminPassword.value) {
-                                controller.submitPhone();
-                              }
-                            },
-                          ),
-                          // Password step slides open smoothly instead of
-                          // popping in, so the two-step flow reads as one form.
-                          Obx(() {
-                            final showStep =
-                                controller.awaitingAdminPassword.value;
-                            return AnimatedSize(
-                              duration: UgamMotion.sheet,
-                              curve: UgamMotion.easeOut,
-                              alignment: Alignment.topCenter,
-                              child: showStep
-                                  ? _PasswordStep(c: c, controller: controller)
-                                  : const SizedBox(width: double.infinity),
-                            );
-                          }),
-                          const SizedBox(height: UgamSpacing.xl),
-                        ],
+                            const SizedBox(height: UgamSpacing.huge),
+                            // Brand block — centred logo (on a soft copper halo),
+                            // Sora wordmark, and tagline. The radial glow is the
+                            // signature futuristic flourish, echoing the dashboard
+                            // passenger hero.
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  height: 132,
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Container(
+                                        width: 188,
+                                        height: 188,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: RadialGradient(
+                                            colors: [
+                                              c.glow,
+                                              c.glow.withValues(alpha: 0),
+                                            ],
+                                            stops: const [0.0, 0.7],
+                                          ),
+                                        ),
+                                      ),
+                                      const UgamLogo(size: 64),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: UgamSpacing.lg),
+                                Text(
+                                  'UGAM',
+                                  style: UgamText.hero.copyWith(
+                                    color: c.ink,
+                                    fontSize: 52,
+                                    letterSpacing: 2.0,
+                                  ),
+                                ),
+                                const SizedBox(height: UgamSpacing.sm),
+                                Text(
+                                  tr('login.tagline'),
+                                  textAlign: TextAlign.center,
+                                  style: UgamText.body.copyWith(color: c.ink2),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: UgamSpacing.huge2),
+                            UgamPhoneInput(
+                              controller: controller.phoneController,
+                              label: tr('login.phone_label'),
+                              autofillHints: const [AutofillHints.username],
+                              // Editing the number after the password step has
+                              // opened backs out of it — this replaces the old
+                              // "use another number" link, so switching numbers
+                              // stays possible without a dedicated button.
+                              onChanged: (_) {
+                                if (controller.awaitingAdminPassword.value) {
+                                  controller.cancelAdminPassword();
+                                }
+                              },
+                              onSubmitted: (_) {
+                                if (!controller.awaitingAdminPassword.value) {
+                                  controller.submitPhone();
+                                }
+                              },
+                            ),
+                            // Password step slides open smoothly instead of
+                            // popping in, so the two-step flow reads as one form.
+                            Obx(() {
+                              final showStep =
+                                  controller.awaitingAdminPassword.value;
+                              return AnimatedSize(
+                                duration: UgamMotion.sheet,
+                                curve: UgamMotion.easeOut,
+                                alignment: Alignment.topCenter,
+                                child: showStep
+                                    ? _PasswordStep(c: c, controller: controller)
+                                    : const SizedBox(width: double.infinity),
+                              );
+                            }),
+                            const SizedBox(height: UgamSpacing.xl),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -255,6 +258,8 @@ class _PasswordStepState extends State<_PasswordStep>
           hint: tr('login.password_hint'),
           controller: widget.controller.passwordController,
           obscure: true,
+          obscureToggle: true,
+          autofillHints: const [AutofillHints.password],
           autofocus: true,
           inputFormatters: const [],
           onSubmitted: (_) => widget.controller.verifyAdminPassword(),

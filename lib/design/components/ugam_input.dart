@@ -154,6 +154,7 @@ class UgamPhoneInput extends StatelessWidget {
   final String? errorText;
   final ValueChanged<String>? onChanged;
   final ValueChanged<String>? onSubmitted;
+  final List<String>? autofillHints;
 
   const UgamPhoneInput({
     super.key,
@@ -162,6 +163,7 @@ class UgamPhoneInput extends StatelessWidget {
     this.errorText,
     this.onChanged,
     this.onSubmitted,
+    this.autofillHints,
   });
 
   @override
@@ -209,6 +211,7 @@ class UgamPhoneInput extends StatelessWidget {
                   keyboardType: TextInputType.phone,
                   maxLength: 10,
                   inputFormatters: const [IndianMobileFormatter()],
+                  autofillHints: autofillHints,
                   onChanged: onChanged,
                   onSubmitted: onSubmitted,
                   style:
