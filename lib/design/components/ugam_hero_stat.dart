@@ -33,6 +33,10 @@ class UgamHeroStat extends StatefulWidget {
   final bool initiallyExpanded;
   final VoidCallback? onTap;
 
+  /// When false, render the hero content directly (no wrapping [UgamCard]) so
+  /// it can live inside a card the caller already owns — avoids card-in-card.
+  final bool framed;
+
   const UgamHeroStat({
     super.key,
     required this.label,
@@ -42,6 +46,7 @@ class UgamHeroStat extends StatefulWidget {
     this.breakdown,
     this.initiallyExpanded = false,
     this.onTap,
+    this.framed = true,
   });
 
   @override
@@ -165,15 +170,23 @@ class _UgamHeroStatState extends State<UgamHeroStat> {
     // A breakdown card owns its own tap (the chevron toggle); otherwise the
     // whole card taps when an [onTap] is given.
     if (_hasBreakdown) {
-      return UgamCard.plain(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _toggle,
-          child: body,
-        ),
+      final tappable = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _toggle,
+        child: body,
       );
+      return widget.framed ? UgamCard.plain(child: tappable) : tappable;
     }
 
+    if (!widget.framed) {
+      return widget.onTap == null
+          ? body
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onTap,
+              child: body,
+            );
+    }
     return UgamCard.plain(
       onTap: widget.onTap,
       child: body,
