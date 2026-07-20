@@ -311,6 +311,50 @@ class _RequestsScreenState extends State<RequestsScreen> {
     return out;
   }
 
+  /// Wrap a request row in the shared swipe affordance. Right swipe = the
+  /// state's positive move (snaps back); left swipe = decline (removes the row).
+  /// Assigned rows and pending-cancellation rows expose no destructive left
+  /// swipe — decline isn't offered there.
+  Widget _swipeWrap(Tour tour, Passenger p, Widget card) {
+    final c = UgamColors.of(context);
+    final act = _RequestActions(passenger: p, tour: tour);
+
+    // Right-swipe action + icon by state.
+    final IconData rightIcon;
+    final VoidCallback onRight;
+    if (p.isCancelRequested) {
+      rightIcon = Icons.event_busy_rounded;
+      onRight = () => act.approveCancellation(context);
+    } else if (p.isFullyAssigned) {
+      rightIcon = Icons.chat_rounded;
+      onRight = act.sendAck;
+    } else if (p.isConfirmed) {
+      rightIcon = Icons.grid_view_rounded;
+      onRight = act.openAssignment;
+    } else {
+      rightIcon = Icons.event_seat_rounded;
+      onRight = act.confirmAndSeat;
+    }
+
+    // Left (destructive) swipe = decline, only where decline is offered. On
+    // Assigned / cancel-pending rows the gate returns false so a left swipe
+    // never dismisses the row.
+    final bool canDecline = !p.isFullyAssigned && !p.isCancelRequested;
+
+    return UgamSwipeAction(
+      key: ValueKey('swipe_${p.id}'),
+      borderRadius: BorderRadius.circular(UgamRadius.card),
+      rightIcon: rightIcon,
+      rightColor: c.accent,
+      onRight: onRight,
+      confirmDelete: canDecline
+          ? () => act.confirmDecline(context)
+          : () async => false,
+      deleteIcon: Icons.close_rounded,
+      child: card,
+    );
+  }
+
   // ── Build ────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -609,7 +653,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                     itemBuilder: (_, i) {
                       final p = passengers[i];
                       final selected = _selectedIds.contains(p.id);
-                      return _RequestCard(
+                      final card = _RequestCard(
                         passenger: p,
                         tour: selectedTour,
                         c: c,
@@ -622,6 +666,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
                         onLongPress: () => _enterSelection(p.id),
                         onSelectTap: () => _toggleSelect(p.id),
                       );
+                      // Selection mode disables swipe (tap selects, long-press
+                      // is already active); otherwise wrap in the swipe path.
+                      if (_selectionMode) return card;
+                      return _swipeWrap(selectedTour, p, card);
                     },
                   ),
           ),
@@ -1728,33 +1776,69 @@ class _GroupBadge extends StatelessWidget {
   }
 }
 
-class _CardActions extends StatelessWidget {
+/// Shared request-action logic used by BOTH the swipe wrapper (`UgamSwipeAction`
+/// in the list) and the expanded `_CardActions` button row, so the two paths
+/// never duplicate the confirm / decline / notify flows.
+class _RequestActions {
   final Passenger passenger;
   final Tour tour;
-  final bool isAssigned;
-  final bool isWaitlisted;
-  final bool isConfirmed;
-  final UgamColorSet c;
+  const _RequestActions({required this.passenger, required this.tour});
 
-  const _CardActions({
-    required this.passenger,
-    required this.tour,
-    required this.isAssigned,
-    required this.isWaitlisted,
-    required this.isConfirmed,
-    required this.c,
-  });
+  TourController get _tc => Get.find<TourController>();
 
-  TourController get _ctrl => Get.find<TourController>();
+  void openAssignment() {
+    Get.toNamed(
+      AppRoutes.seatAssignment,
+      arguments: {'tourId': tour.id, 'passengerId': passenger.id},
+    );
+  }
 
-  Future<void> _sendAck() async {
-    // Re-notify ("notify again") an already-seated passenger. Once the tour is
-    // LOCKED the seats are final, so this delivers the SAME full seat-allotment
-    // as the lock-time send — the highlighted seat chart + boarding place +
-    // departure + handler contact — not just a "seats confirmed" greeting.
-    // Before lock the seats are provisional (hidden), so we send only the
-    // lighter greeting. Before any seats exist, fall back to the free-text
-    // request-received deep-link the agent sends from their own WhatsApp.
+  /// One-tap "Confirm & seat": flip to Confirmed (clears any waitlist flag) and
+  /// fire the confirmation WhatsApp in the background. Per user request it no
+  /// longer auto-navigates — it confirms + messages and stays on the list.
+  Future<void> confirmAndSeat() async {
+    HapticFeedback.lightImpact();
+    await _tc.setConfirmed(tour.id, passenger.id, true);
+    unawaited(sendConfirmationMessage());
+  }
+
+  /// Fires the Cloud `seat_allocation` confirmation template and toasts the
+  /// outcome (surfacing Meta's rejection reason when the send fails).
+  Future<void> sendConfirmationMessage() async {
+    try {
+      final result = await WhatsAppOutbound().sendConfirmed(
+        tour: tour,
+        passenger: passenger,
+      );
+      if (result.anySent) {
+        AppSnackBar.success(
+          tr(
+            'requests.snack.confirm_sent_body',
+            namedArgs: {'name': passenger.displayName},
+          ),
+          title: tr('requests.snack.confirm_sent_title'),
+        );
+      } else {
+        final reason = result.results.isNotEmpty
+            ? result.results.first.error
+            : null;
+        debugPrint('Confirm send failed for ${passenger.phone}: '
+            '${result.results.map((r) => r.error).toList()}');
+        AppSnackBar.error(
+          reason == null || reason.isEmpty
+              ? tr('requests.snack.confirm_error')
+              : '${tr('requests.snack.confirm_error')}\n$reason',
+        );
+      }
+    } catch (e) {
+      AppSnackBar.error('${tr('requests.snack.confirm_error')}\n$e');
+    }
+  }
+
+  /// Re-notify a passenger over WhatsApp: the full seat-allotment once seats are
+  /// final, the lighter greeting before that, or the request-received deep-link
+  /// when no seats exist yet.
+  Future<void> sendAck() async {
     if (passenger.assignedSeats.isNotEmpty) {
       try {
         final result =
@@ -1801,6 +1885,113 @@ class _CardActions extends StatelessWidget {
     }
   }
 
+  /// Decline (delete) the request after a destructive confirm. Returns true if
+  /// the row was removed, false if the organiser cancelled the dialog.
+  Future<bool> confirmDecline(BuildContext context) async {
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('requests.decline_dialog.title'),
+      message: tr(
+        'requests.decline_dialog.body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('requests.decline_dialog.confirm'),
+      destructive: true,
+      confirmIcon: Icons.close_rounded,
+    );
+    if (!confirmed) return false;
+    await _tc.removePassenger(tour.id, passenger.id);
+    var waFailed = false;
+    try {
+      final wa = await WhatsAppOutbound().sendRequestCancelled(
+        tour: tour,
+        passenger: passenger,
+      );
+      waFailed = !wa.anySent;
+    } catch (_) {
+      waFailed = true;
+    }
+    AppSnackBar.success(
+      tr(
+        'requests.snack.declined_body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      title: tr('requests.snack.declined_title'),
+    );
+    if (waFailed) {
+      AppSnackBar.warning(
+          'Request was cancelled, but WhatsApp notification failed.');
+    }
+    return true;
+  }
+
+  /// Organiser APPROVES a customer's cancellation request (migration 035),
+  /// reusing removePassenger to free any seat + drop the row. Returns true if
+  /// approved, false if the dialog was cancelled.
+  Future<bool> approveCancellation(BuildContext context) async {
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('requests.approve_cancel_dialog.title'),
+      message: tr(
+        'requests.approve_cancel_dialog.body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('requests.approve_cancel_dialog.confirm'),
+      destructive: true,
+      confirmIcon: Icons.check_rounded,
+    );
+    if (!confirmed) return false;
+    await _tc.removePassenger(tour.id, passenger.id);
+    var waFailed = false;
+    try {
+      final wa = await WhatsAppOutbound().sendRequestCancelled(
+        tour: tour,
+        passenger: passenger,
+      );
+      waFailed = !wa.anySent;
+    } catch (_) {
+      waFailed = true;
+    }
+    AppSnackBar.success(
+      tr(
+        'requests.snack.cancel_approved_body',
+        namedArgs: {'name': passenger.displayName},
+      ),
+      title: tr('requests.snack.cancel_approved_title'),
+    );
+    if (waFailed) {
+      AppSnackBar.warning(tr('requests.snack.cancel_approved_wa_failed'));
+    }
+    return true;
+  }
+}
+
+class _CardActions extends StatelessWidget {
+  final Passenger passenger;
+  final Tour tour;
+  final bool isAssigned;
+  final bool isWaitlisted;
+  final bool isConfirmed;
+  final UgamColorSet c;
+
+  const _CardActions({
+    required this.passenger,
+    required this.tour,
+    required this.isAssigned,
+    required this.isWaitlisted,
+    required this.isConfirmed,
+    required this.c,
+  });
+
+  TourController get _ctrl => Get.find<TourController>();
+
+  _RequestActions get _act =>
+      _RequestActions(passenger: passenger, tour: tour);
+
+  Future<void> _sendAck() => _act.sendAck();
+
   Future<void> _toWaitlist() async {
     await _ctrl.setWaitlisted(tour.id, passenger.id, true);
     AppSnackBar.success(
@@ -1830,42 +2021,7 @@ class _CardActions extends StatelessWidget {
     await _sendConfirmationMessage();
   }
 
-  /// Fires the Cloud `seat_allocation` confirmation template to this passenger
-  /// and toasts the outcome. Split out of [_confirm] so "Confirm & seat" can
-  /// reuse the exact same send without re-confirming.
-  Future<void> _sendConfirmationMessage() async {
-    try {
-      final result = await WhatsAppOutbound().sendConfirmed(
-        tour: tour,
-        passenger: passenger,
-      );
-      if (result.anySent) {
-        AppSnackBar.success(
-          tr(
-            'requests.snack.confirm_sent_body',
-            namedArgs: {'name': passenger.displayName},
-          ),
-          title: tr('requests.snack.confirm_sent_title'),
-        );
-      } else {
-        // Surface Meta's actual rejection reason (unknown template, wrong
-        // language, parameter-count mismatch, etc.) instead of a generic
-        // failure — the Cloud API error is the only thing that tells us why.
-        final reason = result.results.isNotEmpty
-            ? result.results.first.error
-            : null;
-        debugPrint('Confirm send failed for ${passenger.phone}: '
-            '${result.results.map((r) => r.error).toList()}');
-        AppSnackBar.error(
-          reason == null || reason.isEmpty
-              ? tr('requests.snack.confirm_error')
-              : '${tr('requests.snack.confirm_error')}\n$reason',
-        );
-      }
-    } catch (e) {
-      AppSnackBar.error('${tr('requests.snack.confirm_error')}\n$e');
-    }
-  }
+  Future<void> _sendConfirmationMessage() => _act.sendConfirmationMessage();
 
   /// "Back to New" on a confirmed card — drop the confirmed flag.
   Future<void> _unconfirm() async {
@@ -1882,42 +2038,8 @@ class _CardActions extends StatelessWidget {
     );
   }
 
-  Future<void> _confirmDecline(BuildContext context) async {
-    final confirmed = await UgamDialog.confirm(
-      context,
-      title: tr('requests.decline_dialog.title'),
-      message: tr(
-        'requests.decline_dialog.body',
-        namedArgs: {'name': passenger.displayName},
-      ),
-      cancelLabel: tr('app.action.cancel'),
-      confirmLabel: tr('requests.decline_dialog.confirm'),
-      destructive: true,
-      confirmIcon: Icons.close_rounded,
-    );
-    if (!confirmed) return;
-    await _ctrl.removePassenger(tour.id, passenger.id);
-    var waFailed = false;
-    try {
-      final wa = await WhatsAppOutbound().sendRequestCancelled(
-        tour: tour,
-        passenger: passenger,
-      );
-      waFailed = !wa.anySent;
-    } catch (_) {
-      waFailed = true;
-    }
-    AppSnackBar.success(
-      tr(
-        'requests.snack.declined_body',
-        namedArgs: {'name': passenger.displayName},
-      ),
-      title: tr('requests.snack.declined_title'),
-    );
-    if (waFailed) {
-      AppSnackBar.warning('Request was cancelled, but WhatsApp notification failed.');
-    }
-  }
+  Future<void> _confirmDecline(BuildContext context) =>
+      _act.confirmDecline(context);
 
   /// Organiser APPROVES a customer's cancellation request (migration 035). This
   /// reuses the exact decline/free-seat mechanism: `removePassenger` deletes the
@@ -1925,42 +2047,8 @@ class _CardActions extends StatelessWidget {
   /// `assigned_seats` jsonb column ON that row) and drops the rider from the
   /// roster — the seating engine recomputes capacity automatically. Notifies the
   /// customer via the same WhatsApp cancellation sender the decline path uses.
-  Future<void> _approveCancellation(BuildContext context) async {
-    final confirmed = await UgamDialog.confirm(
-      context,
-      title: tr('requests.approve_cancel_dialog.title'),
-      message: tr(
-        'requests.approve_cancel_dialog.body',
-        namedArgs: {'name': passenger.displayName},
-      ),
-      cancelLabel: tr('app.action.cancel'),
-      confirmLabel: tr('requests.approve_cancel_dialog.confirm'),
-      destructive: true,
-      confirmIcon: Icons.check_rounded,
-    );
-    if (!confirmed) return;
-    await _ctrl.removePassenger(tour.id, passenger.id);
-    var waFailed = false;
-    try {
-      final wa = await WhatsAppOutbound().sendRequestCancelled(
-        tour: tour,
-        passenger: passenger,
-      );
-      waFailed = !wa.anySent;
-    } catch (_) {
-      waFailed = true;
-    }
-    AppSnackBar.success(
-      tr(
-        'requests.snack.cancel_approved_body',
-        namedArgs: {'name': passenger.displayName},
-      ),
-      title: tr('requests.snack.cancel_approved_title'),
-    );
-    if (waFailed) {
-      AppSnackBar.warning(tr('requests.snack.cancel_approved_wa_failed'));
-    }
-  }
+  Future<void> _approveCancellation(BuildContext context) =>
+      _act.approveCancellation(context);
 
   /// Organiser DISMISSES the customer's cancellation request — the counterpart
   /// to approving. Keeps the passenger on the tour and clears the marker on both
@@ -1990,27 +2078,9 @@ class _CardActions extends StatelessWidget {
     );
   }
 
-  void _openAssignment() {
-    Get.toNamed(
-      AppRoutes.seatAssignment,
-      arguments: {'tourId': tour.id, 'passengerId': passenger.id},
-    );
-  }
+  void _openAssignment() => _act.openAssignment();
 
-  /// One-tap "Confirm & seat": collapse the two-step Confirm → Assign into a
-  /// single move. Flip the passenger to Confirmed (clears any waitlist flag in
-  /// the controller), fire the confirmation WhatsApp, then jump straight into
-  /// the seat grid pre-selected to this passenger. The send runs in the
-  /// background (unawaited) so the seat grid opens instantly — the toast still
-  /// reports the outcome via the global snackbar.
-  Future<void> _confirmAndSeat() async {
-    HapticFeedback.lightImpact();
-    await _ctrl.setConfirmed(tour.id, passenger.id, true);
-    unawaited(_sendConfirmationMessage());
-    // NOTE: per user request, confirming no longer auto-navigates to seat
-    // allocation — it confirms + sends the WhatsApp message and stays on the
-    // Requests list. Seats are assigned via the sticky Seats CTA / Assigned tab.
-  }
+  Future<void> _confirmAndSeat() => _act.confirmAndSeat();
 
   void _openEdit(BuildContext context) {
     EditRequestSheet.show(context: context, tour: tour, passenger: passenger);

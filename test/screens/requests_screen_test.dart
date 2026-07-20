@@ -199,4 +199,23 @@ void main() {
     // Not yet expanded → the action row is not built.
     expect(find.text('requests.action.confirm_and_seat'), findsNothing);
   });
+
+  testWidgets('rows are swipeable normally, not in selection mode',
+      (tester) async {
+    await _pumpScreen(
+      tester,
+      _tour(passengers: [
+        _newPassenger('p1', name: 'Anjali QA'),
+        _newPassenger('p2', name: 'Mahesh QA'),
+      ]),
+    );
+
+    // Each visible request row is wrapped in a swipe action (Dismissible).
+    expect(find.byType(Dismissible), findsNWidgets(2));
+
+    // Long-press enters bulk selection → swipe wrappers are removed.
+    await tester.longPress(find.text('Anjali QA'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Dismissible), findsNothing);
+  });
 }
