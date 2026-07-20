@@ -10,9 +10,15 @@ import '../utils/phone_normalize.dart';
 /// Admin accounts are created via the Supabase dashboard (not from the app);
 /// `createAdmin` is therefore intentionally absent.
 class AdminAuthService {
-  static final AdminAuthService _instance = AdminAuthService._internal();
+  static final AdminAuthService _instance = AdminAuthService.internal();
   factory AdminAuthService() => _instance;
-  AdminAuthService._internal();
+
+  /// Generative constructor, kept accessible (not private) so tests can
+  /// subclass with a throwing/fake override for a single method — e.g. to
+  /// exercise `AuthController`'s wrong-password path without hitting
+  /// Supabase. Production code should still go through the
+  /// `AdminAuthService()` factory above, which returns the shared singleton.
+  AdminAuthService.internal();
 
   SupabaseClient get _client => Supabase.instance.client;
 

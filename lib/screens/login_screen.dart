@@ -6,8 +6,23 @@ import '../components/ugam_logo.dart';
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
 
-class LoginScreen extends GetView<AuthController> {
+class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  AuthController get controller => Get.find<AuthController>();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.prepareLoginScreen();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -252,18 +267,20 @@ class _PasswordStepState extends State<_PasswordStep>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: UgamSpacing.xl),
-        UgamInput(
-          key: _fieldKey,
-          label: tr('login.password_label'),
-          hint: tr('login.password_hint'),
-          controller: widget.controller.passwordController,
-          obscure: true,
-          obscureToggle: true,
-          autofillHints: const [AutofillHints.password],
-          autofocus: true,
-          inputFormatters: const [],
-          onSubmitted: (_) => widget.controller.verifyAdminPassword(),
-        ),
+        Obx(() => UgamInput(
+              key: _fieldKey,
+              label: tr('login.password_label'),
+              hint: tr('login.password_hint'),
+              controller: widget.controller.passwordController,
+              obscure: true,
+              obscureToggle: true,
+              autofillHints: const [AutofillHints.password],
+              autofocus: true,
+              errorText: widget.controller.passwordError.value,
+              inputFormatters: const [],
+              onChanged: (_) => widget.controller.passwordError.value = null,
+              onSubmitted: (_) => widget.controller.verifyAdminPassword(),
+            )),
         if (adminName.isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.sm),
           Text(

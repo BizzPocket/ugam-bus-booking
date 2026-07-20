@@ -1118,7 +1118,8 @@
     "ping_success_msg": "Connection to Supabase successful.\n{result}",
     "ping_failed_title": "Ping Failed",
     "ping_failed_msg": "Could not reach Supabase:\n{error}",
-    "ping_loading": "Pinging server…"
+    "ping_loading": "Pinging server…",
+    "password_incorrect": "Incorrect password"
   },
   "charts": {
     "call_passenger": "Call passenger",

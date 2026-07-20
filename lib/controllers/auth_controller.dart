@@ -6,7 +6,6 @@ import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../config/supabase_config.dart';
 import '../models/admin.dart';
 import '../models/profile.dart';
 import '../services/admin_auth_service.dart';
@@ -23,6 +22,7 @@ class AuthController extends GetxController {
   static const _keyPhone = 'auth_phone';
   static const _keyRole = 'auth_role';
   static const _keyName = 'auth_name';
+  static const _keyLastPhone = 'auth_last_phone';
 
   final phoneController = TextEditingController();
   final passwordController = TextEditingController();
@@ -33,6 +33,9 @@ class AuthController extends GetxController {
   final awaitingAdminPassword = false.obs;
   final Rxn<Admin> pendingAdmin = Rxn<Admin>();
 
+  /// Inline error shown on the password field (instead of a toast).
+  final RxnString passwordError = RxnString();
+
   final isLoggedIn = false.obs;
   final userName = ''.obs;
   final userPhone = ''.obs;
@@ -40,7 +43,8 @@ class AuthController extends GetxController {
   final Rxn<Profile> currentProfile = Rxn<Profile>();
   final Rxn<Admin> currentAdmin = Rxn<Admin>();
 
-  AdminAuthService get _adminAuth => AdminAuthService();
+  /// Injectable so tests can supply a throwing/fake service.
+  AdminAuthService adminAuth = AdminAuthService();
   SupabaseClient get _client => Supabase.instance.client;
 
   bool get isAdmin => userRole.value == UserRole.admin;
@@ -105,7 +109,7 @@ class AuthController extends GetxController {
 
     if (userRole.value == UserRole.admin && _client.auth.currentSession != null) {
       try {
-        final admin = await _adminAuth.findByPhone(phone);
+        final admin = await adminAuth.findByPhone(phone);
         if (admin != null) {
           currentAdmin.value = admin;
           // Re-arm push on cold start for an already-logged-in admin.
@@ -165,6 +169,26 @@ class AuthController extends GetxController {
     await prefs.setString(_keyName, userName.value);
   }
 
+  /// Remembers the phone number across logout so a returning admin doesn't
+  /// have to retype it — unlike [_persistSession]'s keys, this one survives
+  /// [_clearSessionLocally].
+  Future<void> persistLastPhone(String phone) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyLastPhone, phone);
+  }
+
+  /// Prep the login screen after a logout / cold anonymous start: prefill the
+  /// last-used number so a returning admin only types the password. Biometric
+  /// availability is layered on in a later change.
+  Future<void> prepareLoginScreen() async {
+    final prefs = await SharedPreferences.getInstance();
+    final last = prefs.getString(_keyLastPhone);
+    if (last != null && last.isNotEmpty && phoneController.text.isEmpty) {
+      phoneController.text = last;
+      phoneNumber.value = last;
+    }
+  }
+
   String get maskedPhone {
     final phone = phoneController.text;
     if (phone.length >= 10) {
@@ -193,7 +217,7 @@ class AuthController extends GetxController {
 
     isLoading.value = true;
     try {
-      final admin = await _adminAuth.findByPhone(phone);
+      final admin = await adminAuth.findByPhone(phone);
       if (admin != null) {
         pendingAdmin.value = admin;
         awaitingAdminPassword.value = true;
@@ -220,6 +244,7 @@ class AuthController extends GetxController {
 
   /// Step 2 — Supabase Auth sign-in.
   Future<void> verifyAdminPassword() async {
+    passwordError.value = null;
     final pending = pendingAdmin.value;
     if (pending == null) {
       awaitingAdminPassword.value = false;
@@ -233,19 +258,15 @@ class AuthController extends GetxController {
 
     isLoading.value = true;
     try {
-      final admin = await _adminAuth.signIn(
+      final admin = await adminAuth.signIn(
         phone: pending.phone,
         password: password,
       );
       await _loginAsAdmin(admin);
-    } on AuthException catch (e) {
-      // TEMP DIAGNOSTIC — shows the exact synthetic email being attempted so we
-      // can tell "email not found" from "wrong password". Remove after debugging.
-      AppSnackBar.error(
-        '${e.message}\n[debug] trying: '
-        '${SupabaseConfig.phoneToSyntheticEmail(pending.phone)}',
-        title: tr('errors.sign_in_failed'),
-      );
+    } on AuthException catch (_) {
+      // Wrong password (or unknown synthetic email) — surface inline on the
+      // field, not as a toast, and never echo the synthetic email.
+      passwordError.value = tr('login.password_incorrect');
     } catch (e) {
       AppSnackBar.error(
         tr('errors.sign_in', namedArgs: {'e': '$e'}),
@@ -268,6 +289,7 @@ class AuthController extends GetxController {
     pendingAdmin.value = null;
     awaitingAdminPassword.value = false;
     passwordController.clear();
+    passwordError.value = null;
   }
 
   Future<void> _loginAsAdmin(Admin admin) async {
@@ -306,7 +328,7 @@ class AuthController extends GetxController {
   /// Throws on failure so the caller can surface an error and keep the
   /// unsaved edits on screen.
   Future<void> saveAdmin(Admin updated) async {
-    final saved = await _adminAuth.updateAdmin(updated);
+    final saved = await adminAuth.updateAdmin(updated);
     currentAdmin.value = saved;
     userName.value = saved.name;
     await _persistSession();
@@ -316,7 +338,7 @@ class AuthController extends GetxController {
     // Drop this device's push token BEFORE signing out — the unregister RPC is
     // scoped by auth.uid(), so it needs the live Supabase session.
     await PushService.instance.unregister();
-    await _adminAuth.signOut();
+    await adminAuth.signOut();
     await _clearSessionLocally();
     Get.offAllNamed('/splash');
   }
@@ -340,6 +362,7 @@ class AuthController extends GetxController {
     passwordController.clear();
     awaitingAdminPassword.value = false;
     pendingAdmin.value = null;
+    passwordError.value = null;
     if (Get.isRegistered<UserController>()) {
       Get.find<UserController>().reset();
     }

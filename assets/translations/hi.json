@@ -1118,7 +1118,8 @@
     "ping_success_msg": "Supabase से कनेक्शन सफल।\n{result}",
     "ping_failed_title": "पिंग विफल",
     "ping_failed_msg": "Supabase तक पहुँचा नहीं जा सका:\n{error}",
-    "ping_loading": "सर्वर को पिंग किया जा रहा है…"
+    "ping_loading": "सर्वर को पिंग किया जा रहा है…",
+    "password_incorrect": "गलत पासवर्ड"
   },
   "charts": {
     "call_passenger": "यात्री को कॉल करें",

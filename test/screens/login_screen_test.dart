@@ -8,6 +8,9 @@ class _FakeAuthController extends AuthController {
   @override
   // ignore: must_call_super
   void onInit() {} // skip _restore (SharedPreferences + Supabase)
+
+  @override
+  Future<void> prepareLoginScreen() async {}
 }
 
 Widget _harness() => GetMaterialApp(
@@ -65,5 +68,21 @@ void main() {
         .widgetList<TextField>(find.byType(TextField))
         .firstWhere((f) => f.obscureText == true);
     expect(obscured.autofillHints, contains(AutofillHints.password));
+  });
+
+  testWidgets('inline password error shows on the field', (tester) async {
+    _swallowKnownPhoneInputOverflow(tester);
+    final c = _FakeAuthController();
+    Get.put<AuthController>(c);
+    await tester.pumpWidget(_harness());
+    c.awaitingAdminPassword.value = true;
+    // Let the reveal chain (AnimatedSize + post-frame Future.delayed +
+    // animated Scrollable.ensureVisible) fully settle — see the identical
+    // note on the "revealed password field" test above — otherwise a
+    // fixed-duration pump leaves a Timer pending at teardown.
+    await tester.pumpAndSettle();
+    c.passwordError.value = 'login.password_incorrect';
+    await tester.pump();
+    expect(find.text('login.password_incorrect'), findsOneWidget);
   });
 }
