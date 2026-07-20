@@ -49,6 +49,8 @@ dependencies:
   supabase_flutter: ^2.8.0
   # Secure storage for Supabase session refresh tokens
   flutter_secure_storage: ^9.2.2
+  # On-device biometric unlock (fingerprint / Face ID) for admin quick sign-in.
+  local_auth: ^2.3.0
 
   # URL launcher for WhatsApp direct share
   url_launcher: ^6.3.1

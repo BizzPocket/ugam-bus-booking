@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -262,7 +263,7 @@ class AuthController extends GetxController {
         phone: pending.phone,
         password: password,
       );
-      await _loginAsAdmin(admin);
+      await _completeLogin(admin, password: passwordController.text);
     } on AuthException catch (_) {
       // Wrong password (or unknown synthetic email) — surface inline on the
       // field, not as a toast, and never echo the synthetic email.
@@ -292,7 +293,7 @@ class AuthController extends GetxController {
     passwordError.value = null;
   }
 
-  Future<void> _loginAsAdmin(Admin admin) async {
+  Future<void> _completeLogin(Admin admin, {required String password}) async {
     isLoggedIn.value = true;
     currentAdmin.value = admin;
     userPhone.value = admin.phone;
@@ -303,6 +304,15 @@ class AuthController extends GetxController {
     pendingAdmin.value = null;
     passwordController.clear();
     await _persistSession();
+    await persistLastPhone(admin.phone);
+    // Commit the autofill context so the OS offers to save the number+password.
+    // Must run while the login screen's AutofillGroup is still mounted, i.e.
+    // BEFORE navigating away.
+    try {
+      TextInput.finishAutofillContext();
+    } catch (_) {
+      // Headless / test environments have no platform channel for this.
+    }
     if (Get.isRegistered<UserController>()) {
       // ignore: unawaited_futures
       Get.find<UserController>().ensureLoadedForCurrentAdmin();
