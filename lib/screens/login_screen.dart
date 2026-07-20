@@ -69,7 +69,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
                             ],
-                            const SizedBox(height: UgamSpacing.huge),
+                            const SizedBox(height: UgamSpacing.xl),
                             // Brand block — centred logo (on a soft copper halo),
                             // Sora wordmark, and tagline. The radial glow is the
                             // signature futuristic flourish, echoing the dashboard
@@ -118,7 +118,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: UgamSpacing.huge2),
+                            const SizedBox(height: UgamSpacing.huge),
                             UgamPhoneInput(
                               controller: controller.phoneController,
                               label: tr('login.phone_label'),
