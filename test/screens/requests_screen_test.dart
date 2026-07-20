@@ -157,4 +157,46 @@ void main() {
     expect(find.textContaining('note-B'), findsOneWidget);
     expect(find.textContaining('note-A'), findsNothing);
   });
+
+  testWidgets('collapsed row renders Material-icon indicators for flags',
+      (tester) async {
+    await _pumpScreen(
+      tester,
+      _tour(
+        passengers: [
+          _newPassenger('p1',
+              name: 'Anjali QA',
+              note: 'has-note',
+              groupId: 'g1',
+              pickupLocationName: 'Raj Hotel',
+              priority: PriorityStatus.approved,
+              tripType: TripType.outboundOnly),
+        ],
+        groups: [
+          PassengerGroup(id: 'g1', tourId: 't1', label: 'A', colorIndex: 2),
+        ],
+      ),
+    );
+
+    // Scope to THIS request row (the card wrapping the name) so the assertions
+    // don't collide with the same icon elsewhere on the screen (e.g. the
+    // capacity meter also renders a forward arrow).
+    final row = find
+        .ancestor(
+          of: find.text('Anjali QA'),
+          matching: find.byType(AnimatedContainer),
+        )
+        .first;
+    Finder iconInRow(IconData icon) =>
+        find.descendant(of: row, matching: find.byIcon(icon));
+
+    // Collapsed → indicator icons present, expanded content still absent.
+    expect(iconInRow(Icons.star_rounded), findsOneWidget); // priority
+    expect(iconInRow(Icons.place_outlined), findsOneWidget); // pickup
+    expect(iconInRow(Icons.chat_bubble_outline_rounded), findsOneWidget); // note
+    expect(iconInRow(Icons.arrow_forward_rounded),
+        findsOneWidget); // outbound one-way
+    // Not yet expanded → the action row is not built.
+    expect(find.text('requests.action.confirm_and_seat'), findsNothing);
+  });
 }

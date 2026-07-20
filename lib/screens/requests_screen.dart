@@ -1294,6 +1294,39 @@ class _RequestCard extends StatelessWidget {
     return '$count · $types';
   }
 
+  /// Small Material-icon strip on the collapsed row's second line. STRICTLY
+  /// Icons.* glyphs tinted with tokens — no emoji. One icon per active flag,
+  /// mirroring the full labelled chips shown on expand.
+  List<Widget> _indicatorIcons(BuildContext context) {
+    final PassengerGroup? group = passenger.groupId == null
+        ? null
+        : tour.groups.firstWhereOrNull((g) => g.id == passenger.groupId);
+    final raw = <Widget>[
+      if (passenger.isCancelRequested)
+        Icon(Icons.event_busy_rounded, size: 14, color: c.warm),
+      if (passenger.isPriorityApproved)
+        Icon(Icons.star_rounded, size: 14, color: c.warm),
+      if (passenger.tripType.isOneWay)
+        Icon(
+          passenger.tripType == TripType.outboundOnly
+              ? Icons.arrow_forward_rounded
+              : Icons.arrow_back_rounded,
+          size: 14,
+          color: c.warm,
+        ),
+      if (group != null) GroupDot(colorIndex: group.colorIndex, size: 8),
+      if (passenger.pickupLocationName != null &&
+          passenger.pickupLocationName!.isNotEmpty)
+        Icon(Icons.place_outlined, size: 14, color: c.ink3),
+      if (passenger.note != null && passenger.note!.isNotEmpty)
+        Icon(Icons.chat_bubble_outline_rounded, size: 14, color: c.ink3),
+    ];
+    return [
+      for (final w in raw)
+        Padding(padding: const EdgeInsets.only(left: 6), child: w),
+    ];
+  }
+
   /// Tap-to-call phone shown only in the expanded body.
   Widget _phoneRow(BuildContext context) {
     if (passenger.phone.trim().isEmpty) return const SizedBox.shrink();
@@ -1567,23 +1600,34 @@ class _RequestCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      // Line 2 — seat summary (indicator strip added in Task 2).
-                      // Rendered only when there's content to show.
+                      // Line 2 — seat summary + a Material-icon indicator strip
+                      // (priority / group / pickup / note / one-way). Rendered
+                      // only when there's a summary or at least one indicator.
                       Builder(builder: (context) {
                         final summary = _seatSummary();
-                        if (summary.isEmpty) return const SizedBox.shrink();
+                        final indicators = _indicatorIcons(context);
+                        if (summary.isEmpty && indicators.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
                         return Padding(
                           padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            summary,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: UgamText.caption.copyWith(
-                              color: passenger.isPartiallyAssigned
-                                  ? c.warm
-                                  : c.accent,
-                              fontSize: 12,
-                            ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  summary,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: UgamText.caption.copyWith(
+                                    color: passenger.isPartiallyAssigned
+                                        ? c.warm
+                                        : c.accent,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              ...indicators,
+                            ],
                           ),
                         );
                       }),
