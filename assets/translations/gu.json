@@ -2186,7 +2186,9 @@
     "open": "ખુલ્લું",
     "no_buses": "આ ટૂરમાં હજી કોઈ બસ નથી.",
     "collect": "એકઠી કરો",
-    "more_detail": "વધુ વિગત"
+    "more_detail": "વધુ વિગત",
+    "trip_in_profit": "ટ્રીપ નફામાં છે",
+    "trip_at_loss": "ટ્રીપ ખોટમાં છે"
   },
   "tour_overview": {
     "tour_not_found": "ટૂર મળ્યો નહીં.",

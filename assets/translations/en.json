@@ -2186,7 +2186,9 @@
     "open": "Open",
     "no_buses": "No buses on this tour yet.",
     "collect": "Collect",
-    "more_detail": "More detail"
+    "more_detail": "More detail",
+    "trip_in_profit": "Trip is in profit",
+    "trip_at_loss": "Trip is at a loss"
   },
   "tour_overview": {
     "tour_not_found": "Tour not found.",

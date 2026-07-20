@@ -209,4 +209,35 @@ void main() {
     expect(busA.tone, UgamCardTone.danger);
     expect(busB.tone, UgamCardTone.warm);
   });
+
+  testWidgets('P&L hero shows the trip outcome headline + net figure',
+      (tester) async {
+    useTallSurface(tester);
+    final tours = _FakeTourController();
+    final money = _FakeMoneyController();
+    Get.put<TourController>(tours);
+    Get.put<MoneyController>(money);
+    tours.tours.assignAll([_fakeTour()]);
+    money.collections.assignAll([
+      Collection(
+        tourId: 't1',
+        busId: 'b1',
+        passengerId: 'p1',
+        seatId: 'A1',
+        amountDue: 1000,
+        amountReceived: 1000,
+      ),
+    ]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    // The hero exists and its outcome headline matches the computed sign.
+    expect(find.byKey(const ValueKey('pnl-hero')), findsOneWidget);
+    final billed = money.tourSummary().totalNetBilled;
+    final key = billed >= 0
+        ? 'tour_money_board.trip_in_profit'
+        : 'tour_money_board.trip_at_loss';
+    expect(find.text(key), findsOneWidget);
+  });
 }

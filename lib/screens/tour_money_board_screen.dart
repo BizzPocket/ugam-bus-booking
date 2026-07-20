@@ -207,56 +207,89 @@ class _PnlEntryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final billed = summary.totalNetBilled;
-    final tone = billed >= 0 ? c.good : c.danger;
+    final inProfit = billed >= 0;
+    final tone = inProfit ? c.good : c.danger;
     return UgamCard.plain(
+      key: const ValueKey('pnl-hero'),
       onTap: onTap,
-      child: Row(
+      elev: true,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: c.accentFill,
-              borderRadius: BorderRadius.circular(UgamRadius.stat),
-            ),
-            child: Icon(Icons.insights_rounded, size: 20, color: c.accent),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr('trip_pnl.title'),
-                  style: UgamText.titleS.copyWith(color: c.ink),
+          // Soft copper halo — the screen's one signature glow (§A4). Depth
+          // from light, not borders: this hero sits above the flatter rows.
+          Positioned(
+            left: -30,
+            top: -60,
+            child: IgnorePointer(
+              child: Container(
+                width: 200,
+                height: 200,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [c.glow, c.glow.withValues(alpha: 0)],
+                    stops: const [0.0, 0.7],
+                  ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  tr('trip_pnl.entry_sub'),
-                  style: UgamText.caption.copyWith(color: c.ink3),
-                ),
-              ],
+              ),
             ),
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            mainAxisSize: MainAxisSize.min,
+          Row(
             children: [
-              Text(
-                Formatters.formatMoneyInr(billed.abs()),
-                style: UgamText.numLg.copyWith(color: tone, fontSize: 18),
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: c.accentFill,
+                  borderRadius: BorderRadius.circular(UgamRadius.stat),
+                ),
+                child: Icon(Icons.insights_rounded, size: 20, color: c.accent),
               ),
-              const SizedBox(height: 2),
-              Text(
-                billed >= 0 ? tr('trip_pnl.profit') : tr('trip_pnl.loss'),
-                style: UgamText.micro.copyWith(color: tone),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      tr('trip_pnl.title').toUpperCase(),
+                      style: UgamText.micro.copyWith(
+                        color: c.ink3,
+                        letterSpacing: 0.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      inProfit
+                          ? tr('tour_money_board.trip_in_profit')
+                          : tr('tour_money_board.trip_at_loss'),
+                      style: UgamText.titleS.copyWith(color: c.ink),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    Text(
+                      Formatters.formatMoneyInr(billed.abs()),
+                      style: UgamText.tabular(
+                        UgamText.numXl.copyWith(color: tone),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      tr('trip_pnl.entry_sub'),
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                  ],
+                ),
               ),
+              const SizedBox(width: UgamSpacing.sm),
+              Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
             ],
           ),
-          const SizedBox(width: UgamSpacing.xs),
-          Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
         ],
       ),
     );

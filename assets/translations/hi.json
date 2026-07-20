@@ -2186,7 +2186,9 @@
     "open": "खुला",
     "no_buses": "इस टूर में अभी कोई बस नहीं है.",
     "collect": "वसूली करें",
-    "more_detail": "अधिक विवरण"
+    "more_detail": "अधिक विवरण",
+    "trip_in_profit": "ट्रिप मुनाफ़े में है",
+    "trip_at_loss": "ट्रिप घाटे में है"
   },
   "tour_overview": {
     "tour_not_found": "टूर नहीं मिला.",
