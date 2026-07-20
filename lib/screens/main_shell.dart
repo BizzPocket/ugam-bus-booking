@@ -1,6 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
@@ -114,19 +113,10 @@ class _MainShellState extends State<MainShell> {
   /// (scroll position, filter selections, picked passenger, etc.).
   final Set<int> _visitedTabs = {0};
 
-  @override
-  void initState() {
-    super.initState();
-    // Set the status bar style once, not on every rebuild. The previous
-    // implementation called this from build(), so every Obx fire (which
-    // happens on every tour write) bounced through a platform channel
-    // for no reason — pure waste on the hot path.
-    SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle.dark.copyWith(
-        statusBarColor: Colors.transparent,
-      ),
-    );
-  }
+  // Status-bar / system-nav styling is set app-wide and theme-aware in
+  // `app.dart`'s `GetMaterialApp.builder` (a single AnnotatedRegion). It used
+  // to be hardcoded here to `SystemUiOverlayStyle.dark` (dark icons), which
+  // rendered the glyphs invisible on the dark theme — removed.
 
   @override
   Widget build(BuildContext context) {

@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/components/ugam_capacity_meter.dart';
+import '../design/components/ugam_free_by_type.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/seat_type.dart';
@@ -149,11 +150,19 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
 
             final exceptions = _ctrl.exceptionsForTour(tour.id);
             final total = tour.totalBusSeats;
-            // ONE engine snapshot drives every "how full?" surface on this
-            // screen — the summary meter, each bus row's meter, and the
-            // pre-fill shortfall below — so they can never disagree. Leg-aware
-            // by construction: a berth shared by two opposite one-way riders is
-            // ONE physical seat, split into honest GO/RET loads per leg.
+            // TWO snapshots, each answering a DIFFERENT question so no surface
+            // lies:
+            //  * [actual] — real [assignedSeats], the SAME seats the grid shows
+            //    — drives every "how full?" fill surface: the seats-placed
+            //    headline, each bus row's meter, and the "full" dot. This is why
+            //    a bus can never read "full" while its grid still has empty
+            //    seats — they read the identical placements.
+            //  * [cap] — the engine's would-fill plan ([SeatingEngine.propose])
+            //    — drives ONLY the capacity-shortfall / "needs decision" banner,
+            //    which asks "can everyone fit?", not "who is placed?".
+            // Both are leg-aware: a berth shared by two opposite one-way riders
+            // is ONE physical seat, split into honest GO/RET loads per leg.
+            final actual = total > 0 ? computeActualCapacity(tour) : null;
             final cap = total > 0 ? computeTourCapacity(tour) : null;
 
             // Demand summary: how many of each seat type the passengers
@@ -214,7 +223,7 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                 // (what to book), on the 8pt grid — replaces the two tall
                 // stat/requirements cards.
                 _SummaryCard(
-                  cap: cap,
+                  actual: actual,
                   total: total,
                   singles: reqSingles,
                   doubles: reqDoubles,
@@ -274,7 +283,8 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                             ),
                           _BusRow(
                             bus: tour.buses[i],
-                            busCap: cap?.byBus[tour.buses[i].id],
+                            busCap: actual?.byBus[tour.buses[i].id],
+                            freeByType: actual?.freeByType[tour.buses[i].id],
                             hasExceptions: exceptions.isNotEmpty,
                             onTap: () => _onBusTap(tour.buses[i]),
                             c: c,
@@ -351,9 +361,11 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
 /// hairline divider, then what the agent still has to book (single/double/
 /// seater counts + total). Replaces the two tall stat + requirements cards.
 class _SummaryCard extends StatelessWidget {
-  /// Engine snapshot driving the seats-placed meter. Null only when the tour
-  /// has no buses yet (total == 0) — then the meter row collapses away.
-  final TourCapacity? cap;
+  /// ACTUAL-assignment snapshot driving the seats-placed meter — the SAME real
+  /// seats the grid shows, so "placed" means placed, not "the plan would place".
+  /// Null only when the tour has no buses yet (total == 0) — then the meter row
+  /// collapses to a plain "0 / total".
+  final ActualCapacity? actual;
   final int total;
   final int singles;
   final int doubles;
@@ -362,7 +374,7 @@ class _SummaryCard extends StatelessWidget {
   final UgamColorSet c;
 
   const _SummaryCard({
-    required this.cap,
+    required this.actual,
     required this.total,
     required this.singles,
     required this.doubles,
@@ -400,8 +412,12 @@ class _SummaryCard extends StatelessWidget {
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
           const SizedBox(height: UgamSpacing.sm),
-          if (cap != null)
-            UgamCapacityMeter.tour(cap!)
+          if (actual != null)
+            UgamCapacityMeter.tourCounts(
+              capacity: actual!.capacity,
+              goOccupied: actual!.goOccupied,
+              retOccupied: actual!.retOccupied,
+            )
           else
             Text(
               '0 / $total',
@@ -712,9 +728,16 @@ class _BannerAction extends StatelessWidget {
 class _BusRow extends StatelessWidget {
   final Bus bus;
 
-  /// This bus's slice of the engine snapshot, keyed by bus id. Null only when
-  /// the tour has no engine plan yet — the row then degrades to an empty meter.
+  /// This bus's ACTUAL leg-aware occupancy slice, keyed by bus id. Null only when
+  /// the tour has no capacity snapshot yet — the row then degrades to an empty
+  /// meter.
   final BusCapacity? busCap;
+
+  /// This bus's GENUINELY-empty tiles by seat type (from real assignments) —
+  /// drives the compact free-by-type line under the meter. Null when there's no
+  /// snapshot; an entry per seat type the bus has (zero rows are skipped in the
+  /// UI).
+  final Map<SeatType, SeatTypeFree>? freeByType;
 
   /// True when the last generated plan has unresolved exceptions on this tour
   /// — flags any not-yet-full bus warm while issues remain.
@@ -725,6 +748,7 @@ class _BusRow extends StatelessWidget {
   const _BusRow({
     required this.bus,
     required this.busCap,
+    required this.freeByType,
     required this.hasExceptions,
     required this.onTap,
     required this.c,
@@ -739,6 +763,24 @@ class _BusRow extends StatelessWidget {
     final full = total > 0 && (busCap?.free ?? total) == 0;
     final clean = full && !hasExceptions;
     final tone = clean ? c.good : c.warm;
+
+    // Free-by-type breakdown from ACTUAL seats: one pill per seat type this bus
+    // still has openings on — so "4 ખાલી" berths reads as real seats (a Double
+    // Sofa is ONE tile worth two berths). Ordered single · double · seater;
+    // types with nothing free are skipped, so a full bus shows no line (the
+    // meter already says "full"). Cyan → / violet ← badges carry the one-way
+    // surplus; the leg caption shows only when some type has a one-way opening.
+    final fbt = freeByType;
+    final typePills = <(String, SeatTypeFree)>[
+      if (fbt != null)
+        for (final st in const [
+          SeatType.singleSofa,
+          SeatType.doubleSofa,
+          SeatType.seater,
+        ])
+          if ((fbt[st]?.total ?? 0) > 0) (st.displayName, fbt[st]!),
+    ];
+    final anyOneWay = typePills.any((p) => p.$2.hasOneWay);
 
     return GestureDetector(
       onTap: onTap,
@@ -800,6 +842,22 @@ class _BusRow extends StatelessWidget {
                     retOccupied: 0,
                   ),
             ),
+            // Compact free-by-type line beneath the meter (actual seats).
+            if (typePills.isNotEmpty) ...[
+              const SizedBox(height: UgamSpacing.sm),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final (label, free) in typePills)
+                    UgamTypeFreePill(c: c, label: label, free: free),
+                ],
+              ),
+              if (anyOneWay) ...[
+                const SizedBox(height: 6),
+                const UgamLegCaption(),
+              ],
+            ],
           ],
         ),
       ),
@@ -817,7 +875,7 @@ class _NoBuses extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

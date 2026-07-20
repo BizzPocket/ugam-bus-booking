@@ -319,9 +319,10 @@ class CombinedSeatGrid extends StatelessWidget {
   Widget _wrapTile(BuildContext context, SeatCell cell, Widget tile) {
     final seatId = cell.seatId;
     if (enableDrag && seatId != null) {
-      return SeatDragWrapper(
+      final draggable = canDragSeat?.call(cell) ?? false;
+      final wrapped = SeatDragWrapper(
         seatId: seatId,
-        draggable: canDragSeat?.call(cell) ?? false,
+        draggable: draggable,
         dragLabel: dragLabelFor?.call(cell),
         dragActive: dragActive,
         highlight: dropHighlightFor?.call(cell) ?? SeatDropHighlight.none,
@@ -333,6 +334,18 @@ class CombinedSeatGrid extends StatelessWidget {
         onSeatDropped: onSeatDraggedToSeat,
         child: tile,
       );
+      // A NON-draggable seat (an empty/held cell) has no drag gesture of its
+      // own, so it can still carry the long-press-for-flags gesture even while
+      // drag is enabled for booked seats. Draggable (booked) seats keep
+      // long-press = drag and reach flags from the occupant tap menu instead.
+      if (!draggable && onSeatLongPressForFlags != null) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPress: () => onSeatLongPressForFlags!(seatId),
+          child: wrapped,
+        );
+      }
+      return wrapped;
     }
     if (onSeatLongPressForFlags != null && seatId != null) {
       return GestureDetector(

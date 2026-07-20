@@ -343,6 +343,182 @@ TourCapacity computeTourCapacity(Tour tour) {
   );
 }
 
+/// ACTUAL, leg-aware occupancy of a tour read from persisted
+/// [Passenger.assignedSeats] — the SAME real seats the seat GRID renders — NOT
+/// the engine's would-fill plan.
+///
+/// Why it exists: [computeTourCapacity] runs [SeatingEngine.propose] and counts
+/// what the engine WOULD place, so a bus reads "full" the moment there is enough
+/// *demand* to fill it — even before anyone is actually seated. That is the right
+/// question for the capacity-shortfall / "needs decision" banner ("can everyone
+/// fit?"), but it made the tour-overview meters and the "full" dot disagree with
+/// the grid, which shows only real assignments. This snapshot answers the OTHER
+/// question — "who is actually placed?" — so the overview's fill ratios can never
+/// claim a bus is full while its grid still has empty seats. Uses the same
+/// leg-split convention as [Tour.occupiedBerthsFor] (`min(seatsOnBus, goBerths)`
+/// / `retBerths` per passenger), so it agrees with every other actual-seat
+/// surface in the app.
+class ActualCapacity {
+  /// Sellable berths across every bus (physical total minus reserved) — the SAME
+  /// denominator [computeTourCapacity] uses, so only the numerator changes.
+  final int capacity;
+
+  /// Berths ACTUALLY assigned on the outbound (GO) leg, summed across buses.
+  final int goOccupied;
+
+  /// Berths ACTUALLY assigned on the return (RETURN) leg, summed across buses.
+  final int retOccupied;
+
+  /// Per-bus actual leg-aware occupancy, keyed by bus id — reuses [BusCapacity]
+  /// (a plain capacity/go/ret holder) but populated from real assignments.
+  final Map<String, BusCapacity> byBus;
+
+  /// Per-bus GENUINELY-empty WHOLE tiles by seat type, split by open leg — read
+  /// from the same real [Passenger.assignedSeats] as [byBus]. Keyed by bus id,
+  /// then by [SeatType]; every seat type the bus HAS appears (all-zero when that
+  /// type is fully taken). A tile is free on a leg only when ZERO berths are
+  /// placed on it that leg (a Double Sofa needs BOTH berths free), counted in
+  /// tiles (a double = 1 unit) so it matches the demand line. The per-seat leg
+  /// comes from [SeatAssignment.leg], falling back to the holder's
+  /// [Passenger.derivedTripType] for legacy rows with no recorded leg. See
+  /// [SeatTypeFree] for the round / go-only / return-only split.
+  final Map<String, Map<SeatType, SeatTypeFree>> freeByType;
+
+  const ActualCapacity({
+    required this.capacity,
+    required this.goOccupied,
+    required this.retOccupied,
+    required this.byBus,
+    required this.freeByType,
+  });
+
+  /// Busier leg — the berths physically tied up at the peak of the journey.
+  int get occupied => math.max(goOccupied, retOccupied);
+
+  /// Berths empty on BOTH legs — sellable as a full round-trip.
+  int get free => (capacity - occupied).clamp(0, capacity);
+
+  /// True when both legs carry the same load — the meter renders a single bar.
+  bool get legsSymmetric => goOccupied == retOccupied;
+
+  /// If a seat is actually free, the bus is NOT full.
+  bool get isFull => capacity > 0 && free == 0;
+}
+
+/// Compute the [ActualCapacity] for [tour] from its persisted seat assignments.
+/// Pure and side-effect free — safe to call from a widget build. Cheap: no
+/// engine run, just two passes over the bus grids + passengers.
+ActualCapacity computeActualCapacity(Tour tour) {
+  // Sellable berths per bus (physical berths minus held/reserved cells) — the
+  // SAME denominator [computeTourCapacity] derives, so switching a meter from the
+  // engine plan to this changes only the OCCUPANCY, never the "/ n" total.
+  final capByBus = <String, int>{};
+  var capacityTotal = 0;
+  for (final b in tour.buses) {
+    var berths = 0;
+    for (final cell in b.layout?.grid ?? const []) {
+      final st = cell.seatType;
+      if (cell.seatId == null || st == null || cell.reserved) continue;
+      berths += st == SeatType.doubleSofa ? 2 : 1;
+    }
+    capByBus[b.id] = berths;
+    capacityTotal += berths;
+  }
+
+  // Actual leg-aware berths placed per bus, from assignedSeats. Mirrors
+  // [Tour.occupiedBerthsFor]: each passenger charges min(seatsOnThisBus, goBerths)
+  // to GO and min(seatsOnThisBus, retBerths) to RET — exact when a passenger's
+  // seats sit on one bus (the engine keeps them together), a safe bound otherwise.
+  final goByBus = <String, int>{};
+  final retByBus = <String, int>{};
+  for (final p in tour.passengers) {
+    final perBus = <String, int>{};
+    for (final a in p.assignedSeats) {
+      perBus[a.busId] = (perBus[a.busId] ?? 0) + 1;
+    }
+    perBus.forEach((busId, seatsOnBus) {
+      goByBus[busId] = (goByBus[busId] ?? 0) + math.min(seatsOnBus, p.goBerths);
+      retByBus[busId] = (retByBus[busId] ?? 0) + math.min(seatsOnBus, p.retBerths);
+    });
+  }
+
+  final byBus = <String, BusCapacity>{
+    for (final b in tour.buses)
+      b.id: BusCapacity(
+        busId: b.id,
+        capacity: capByBus[b.id] ?? 0,
+        goOccupied: (goByBus[b.id] ?? 0).clamp(0, capByBus[b.id] ?? 0),
+        retOccupied: (retByBus[b.id] ?? 0).clamp(0, capByBus[b.id] ?? 0),
+      ),
+  };
+
+  var go = 0, ret = 0;
+  for (final bc in byBus.values) {
+    go += bc.goOccupied;
+    ret += bc.retOccupied;
+  }
+
+  // Per-SEAT leg occupancy from the real assignments — a tile-by-type breakdown
+  // needs to know which leg each physical seat is taken on, so (unlike the berth
+  // totals above) this reads each [SeatAssignment.leg], falling back to the
+  // holder's [Passenger.derivedTripType] for legacy rows. A whole double held
+  // solo is two entries on one seatId; a half-open double just one.
+  final goBySeat = <String, int>{};
+  final retBySeat = <String, int>{};
+  for (final p in tour.passengers) {
+    for (final a in p.assignedSeats) {
+      final leg = a.leg ?? p.derivedTripType;
+      final k = '${a.busId}:${a.seatId}';
+      if (leg.usesOutbound) goBySeat[k] = (goBySeat[k] ?? 0) + 1;
+      if (leg.usesReturn) retBySeat[k] = (retBySeat[k] ?? 0) + 1;
+    }
+  }
+
+  // Bucket every non-reserved cell into round / go-only / return-only per type,
+  // mirroring [computeTourCapacity]'s freeByType but from the actual seats. Every
+  // seat type the bus HAS appears (all-zero when fully taken); the UI skips the
+  // zero rows.
+  final freeByType = <String, Map<SeatType, SeatTypeFree>>{};
+  for (final b in tour.buses) {
+    final present = <SeatType>{};
+    final round = <SeatType, int>{};
+    final goOnly = <SeatType, int>{};
+    final retOnly = <SeatType, int>{};
+    for (final cell in b.layout?.grid ?? const []) {
+      final sid = cell.seatId;
+      final st = cell.seatType;
+      if (sid == null || st == null || cell.reserved) continue;
+      present.add(st);
+      final k = '${b.id}:$sid';
+      final goOpen = (goBySeat[k] ?? 0) == 0;
+      final retOpen = (retBySeat[k] ?? 0) == 0;
+      if (goOpen && retOpen) {
+        round[st] = (round[st] ?? 0) + 1;
+      } else if (goOpen) {
+        goOnly[st] = (goOnly[st] ?? 0) + 1;
+      } else if (retOpen) {
+        retOnly[st] = (retOnly[st] ?? 0) + 1;
+      }
+    }
+    freeByType[b.id] = {
+      for (final st in present)
+        st: SeatTypeFree(
+          round: round[st] ?? 0,
+          goOnly: goOnly[st] ?? 0,
+          retOnly: retOnly[st] ?? 0,
+        ),
+    };
+  }
+
+  return ActualCapacity(
+    capacity: capacityTotal,
+    goOccupied: go,
+    retOccupied: ret,
+    byBus: byBus,
+    freeByType: freeByType,
+  );
+}
+
 /// The live, non-mutating list of seating exceptions that genuinely still need
 /// the agent's decision: the engine's exceptions MINUS overflow riders the agent
 /// has already HELD on the waitlist (a held rider isn't a pending decision).

@@ -191,9 +191,13 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
         ),
         title: tr('create_tour.snackbar.created_title'),
       );
-      Get.off(
-        () => TourDetailScreen(tourId: newTour.id),
-        transition: Transition.cupertino,
+      // Replace CreateTour on the NESTED tab navigator (the shell dock stays,
+      // back lands on the tour list). A root-level Get.off here replaced the
+      // WHOLE shell with a rootless TourDetailScreen — dock gone, dead back.
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => TourDetailScreen(tourId: newTour.id),
+        ),
       );
 
       // Fulfil "Create & Broadcast": open WhatsApp's broadcast/group picker

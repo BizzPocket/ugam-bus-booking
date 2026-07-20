@@ -79,70 +79,12 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
       _ensureMoney(tour.id);
       final cap = tourCtrl.capacityFor(tour);
 
-      return Column(
-        children: [
-          _picker(context, c, tour, upcoming),
-          const SizedBox(height: UgamSpacing.md),
-          _heroCard(context, c, tour, cap, money),
-        ],
-      );
+      // Picker merged into the hero header — the separate picker card repeated
+      // the route + phase the hero already shows, costing a whole card of
+      // height. The header's switch button opens the same picker sheet when
+      // more than one tour is active.
+      return _heroCard(context, c, tour, cap, money, upcoming);
     });
-  }
-
-  /// The tour selector. A neutral tappable card (UgamCard) — never the solid
-  /// accent. Opens a UgamSheet picker when more than one tour exists.
-  Widget _picker(BuildContext context, UgamColorSet c, Tour tour,
-      List<Tour> all) {
-    final multi = all.length > 1;
-    return UgamCard.plain(
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      radius: UgamRadius.row,
-      onTap: multi ? () => _openPicker(context, c, all) : null,
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.directions_bus_rounded, size: 18, color: c.ink2),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('${tour.fromCity} → ${tour.toCity}',
-                    style: UgamText.titleS.copyWith(color: c.ink),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                Text(
-                    '${tour.title} ${tr('dashboard.picker_phase_suffix', namedArgs: {
-                          'step': '${tour.status.stepIndex + 1}',
-                          'total': '${TourStatus.totalSteps}',
-                        })}',
-                    style: UgamText.caption.copyWith(color: c.ink3),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-              ],
-            ),
-          ),
-          if (multi)
-            Semantics(
-              label: tr('dashboard.choose_trip'),
-              button: true,
-              child: SizedBox(
-                width: 48,
-                height: 48,
-                child: Icon(Icons.expand_more_rounded, color: c.ink2),
-              ),
-            ),
-        ],
-      ),
-    );
   }
 
   /// The "both, stacked" hero card. While the agent is still filling the bus
@@ -150,7 +92,7 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
   /// departure date has arrived it flips to an inline P&L breakdown. Card tap
   /// opens the tour workspace (or the full P&L screen in P&L mode).
   Widget _heroCard(BuildContext context, UgamColorSet c, Tour tour,
-      TourCapacity cap, MoneyController money) {
+      TourCapacity cap, MoneyController money, List<Tour> all) {
     final dateStr = Formatters.formatDateShort(
       tour.departureDate,
       locale: context.locale.languageCode,
@@ -191,6 +133,26 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
                 variant:
                     isReturn ? UgamChipVariant.warm : UgamChipVariant.neutral,
               ),
+              // Switch-trip affordance — only when more than one tour is active.
+              // A nested tap target inside the (also-tappable) card: taps on the
+              // chevron open the picker sheet; taps elsewhere open the tour.
+              if (all.length > 1) ...[
+                const SizedBox(width: UgamSpacing.xs),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _openPicker(context, c, all),
+                  child: Semantics(
+                    label: tr('dashboard.choose_trip'),
+                    button: true,
+                    child: SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: Icon(Icons.unfold_more_rounded,
+                          size: 20, color: c.ink2),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: UgamSpacing.xs),
@@ -206,13 +168,13 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: UgamSpacing.lg),
+          const SizedBox(height: UgamSpacing.md),
           Container(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.lg),
+          const SizedBox(height: UgamSpacing.md),
           // Lower panel: seat-fill gauge while filling, inline P&L once the
           // tour is locked and its departure date has arrived.
           if (pnl) _pnlBreakdown(c, m) else _seatGauge(c, tour, cap),
-          const SizedBox(height: UgamSpacing.lg),
+          const SizedBox(height: UgamSpacing.md),
           // Footer — pax + open affordance.
           Row(
             children: [

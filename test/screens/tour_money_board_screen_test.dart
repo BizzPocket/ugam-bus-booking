@@ -128,16 +128,16 @@ void main() {
     expect(find.text('Bus 2'), findsOneWidget);
     expect(find.text('Sleeper'), findsNWidgets(2));
 
-    // Bus 1 needs action → its status dot carries the "handover due" label key
-    // (namedArgs aren't interpolated without EasyLocalization). The outstanding
-    // 800 leads the row as the headline figure.
-    expect(find.text('tour_money_board.handover_due'), findsOneWidget);
-    // Bus 2 is settled.
+    // Bus 1 needs action → it leads with the outstanding ₹800 as its action
+    // figure (asserted below) and carries NO status word: the warm card tone +
+    // the tinted figure already signal the attention state. Bus 2 is settled →
+    // its status dot shows the "settled" label key.
     expect(find.text('tour_money_board.settled'), findsOneWidget);
 
-    // Tour-totals capsule: collected 1500, expenses 200, net 1300, with the
-    // tour open (Bus 1's 800 still outstanding).
-    expect(find.text('tour_money_board.tour_totals'), findsOneWidget);
+    // Sticky totals capsule: collected 1500, expenses 200, net 1300, with the
+    // tour still open (Bus 1's 800 outstanding). The capsule leads with the
+    // OUTSTANDING HANDOVER label + an "open" status dot — that dot proves the
+    // capsule rendered.
     expect(find.text('tour_money_board.open'), findsOneWidget);
     expect(find.text('₹1,500'), findsOneWidget); // total collected
     expect(find.text('₹1,300'), findsOneWidget); // net

@@ -146,7 +146,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                       onTap: _openPnl,
                       c: c,
                     ),
-                    const SizedBox(height: UgamSpacing.xl),
+                    const SizedBox(height: UgamSpacing.md),
                     Text(
                       tr('tour_money_board.per_bus'),
                       style: UgamText.micro.copyWith(
@@ -284,56 +284,71 @@ class _BusMoneyRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // warm = needs action (outstanding handover / shortfall) — attention only.
-    // good = settled. neutral = nothing has moved yet → no tint.
+    // A bus that still owes money leads with its ONE action figure — the
+    // handover still due, else the passenger shortfall to collect. A settled
+    // bus shows what it collected in mint; a bus with nothing owed and nothing
+    // collected reads as a quiet "no activity". The card tone carries the same
+    // attention signal the old ring did; a status WORD is added only where it
+    // says something the tinted figure doesn't (settled / not-started).
+    final hasHandoverDue = summary.outstandingHandover > 0.005;
     final (
       UgamCardTone cardTone,
-      UgamStatusTone tone,
-      String statusLabel,
+      String numLabel,
+      double numAmount,
+      Color numColor,
+      String? statusWord,
+      UgamStatusTone statusTone,
     ) = switch (state) {
       BusMoneyState.actionNeeded => (
         UgamCardTone.warm,
+        hasHandoverDue
+            ? tr('tour_money_board.handover')
+            : tr('tour_money_board.to_collect'),
+        hasHandoverDue ? summary.outstandingHandover : summary.toCollectTotal,
+        hasHandoverDue ? c.warm : c.danger,
+        null,
         UgamStatusTone.warm,
-        summary.outstandingHandover > 0.005
-            ? tr(
-                'tour_money_board.handover_due',
-                namedArgs: {
-                  'n': Formatters.formatMoneyInr(summary.outstandingHandover),
-                },
-              )
-            : tr(
-                'tour_money_board.to_collect_amount',
-                namedArgs: {
-                  'n': Formatters.formatMoneyInr(summary.toCollectTotal),
-                },
-              ),
       ),
       BusMoneyState.settled => (
         UgamCardTone.good,
-        UgamStatusTone.good,
+        tr('tour_money_board.collected'),
+        summary.collected,
+        c.good,
         tr('tour_money_board.settled'),
+        UgamStatusTone.good,
       ),
       BusMoneyState.neutral => (
         UgamCardTone.none,
-        UgamStatusTone.neutral,
+        tr('tour_money_board.to_collect'),
+        summary.toCollectTotal,
+        c.ink2,
         tr('tour_money_board.no_activity'),
+        UgamStatusTone.neutral,
       ),
     };
+
+    // Collected / handover only carry information once cash has changed hands —
+    // until then they are ₹0 filler, so the strip is hidden and the card
+    // collapses to identity + action figure + collect.
+    final hasMoved = summary.collected > 0.005 ||
+        summary.handedOver > 0.005 ||
+        summary.income > 0.005;
 
     return UgamCard.plain(
       tone: cardTone,
       onTap: onTap,
-      padding: const EdgeInsets.all(UgamSpacing.lg),
+      padding: const EdgeInsets.all(UgamSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ── Title row: icon + name/type + status dot ───────────────
+          // ── Identity + the ONE action figure, on a single line ─────
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   color: c.cardElev,
                   borderRadius: BorderRadius.circular(UgamRadius.seat),
@@ -341,7 +356,7 @@ class _BusMoneyRow extends StatelessWidget {
                 alignment: Alignment.center,
                 child: Icon(
                   Icons.directions_bus_filled_rounded,
-                  size: 18,
+                  size: 17,
                   color: c.ink2,
                 ),
               ),
@@ -357,143 +372,109 @@ class _BusMoneyRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: UgamSpacing.xs),
-                    Text(
-                      bus.busType,
-                      style: UgamText.caption.copyWith(color: c.ink3),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    // Extra income the handler holds (cabin/gallery/other).
-                    // It already folds into the headline outstanding figure
-                    // above; surface it compactly so the row shows WHERE the
-                    // extra cash came from. Only when there is income.
-                    if (summary.income > 0.005) ...[
-                      const SizedBox(height: UgamSpacing.xs),
-                      Text(
-                        '+${Formatters.formatMoneyInr(summary.income)} '
-                        '${tr('bus_money.stat_income')}',
-                        style: UgamText.tabular(
-                          UgamText.micro.copyWith(
-                            color: c.good,
-                            fontWeight: FontWeight.w700,
+                    const SizedBox(height: 1),
+                    // Type + a compact status word (settled / not-started);
+                    // action-needed shows none — its tinted figure says it.
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            bus.busType,
+                            style: UgamText.caption.copyWith(color: c.ink3),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                        if (statusWord != null) ...[
+                          const SizedBox(width: UgamSpacing.sm),
+                          UgamStatusDot(label: statusWord, tone: statusTone),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
               ),
               const SizedBox(width: UgamSpacing.sm),
-              Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          // ── Headline: the ONE action number for this bus ───────────
-          // Outstanding handover when there's cash still owed to admin,
-          // else what's still to collect — shown large and tabular so the
-          // row's action lands first. Quiet ink when nothing's due.
-          Builder(
-            builder: (_) {
-              final hasHandoverDue = summary.outstandingHandover > 0.005;
-              final hasToCollect = summary.toCollectTotal > 0.005;
-              final actionAmount = hasHandoverDue
-                  ? summary.outstandingHandover
-                  : summary.toCollectTotal;
-              final actionLabel = hasHandoverDue
-                  ? tr('tour_money_board.outstanding_handover')
-                  : tr('tour_money_board.to_collect');
-              final figureColor = hasHandoverDue
-                  ? c.warm
-                  : (hasToCollect ? c.danger : c.ink2);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    actionLabel.toUpperCase(),
-                    style: UgamText.micro.copyWith(
-                      color: c.ink3,
-                      letterSpacing: 0.5,
-                      fontWeight: FontWeight.w700,
+              // The action figure rides on the identity line — right-aligned,
+              // tabular, tinted by state — so the row answers "how much?" in
+              // one glance without a second full-width headline block. Skipped
+              // when settled: the mint "Settled" dot + the collected/handover
+              // pills below already tell that story, so a figure here would
+              // just duplicate a pill.
+              if (state != BusMoneyState.settled) ...[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      numLabel.toUpperCase(),
+                      style: UgamText.micro.copyWith(
+                        color: c.ink3,
+                        letterSpacing: 0.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    Formatters.formatMoneyInr(actionAmount),
-                    style: UgamText.numXl.copyWith(color: figureColor),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          // ── Two compact tonal pills: collected + handover ──────────
-          // The two figures the agent glances at most, side by side as quiet
-          // tonal chips — no metric grid, no second-tier ink competing with
-          // the headline above.
-          Row(
-            children: [
-              Expanded(
-                child: _MoneyPill(
-                  label: tr('tour_money_board.collected'),
-                  value: Formatters.formatMoneyInr(summary.collected),
-                  c: c,
+                    const SizedBox(height: 1),
+                    Text(
+                      Formatters.formatMoneyInr(numAmount),
+                      style: UgamText.tabular(
+                        UgamText.numLg.copyWith(color: numColor),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: UgamSpacing.sm),
-              Expanded(
-                child: _MoneyPill(
-                  label: tr('tour_money_board.handover'),
-                  value: Formatters.formatMoneyInr(summary.handedOver),
-                  c: c,
-                ),
-              ),
+                const SizedBox(width: UgamSpacing.xs),
+              ],
+              Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
             ],
           ),
+          // Extra income the handler holds (cabin/gallery/other) — surfaced
+          // compactly, and only when there is any.
+          if (summary.income > 0.005) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Text(
+              '+${Formatters.formatMoneyInr(summary.income)} '
+              '${tr('bus_money.stat_income')}',
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(
+                  color: c.good,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          // ── Collected + handover — only once money has moved ───────
+          if (hasMoved) ...[
+            const SizedBox(height: UgamSpacing.md),
+            Row(
+              children: [
+                Expanded(
+                  child: _MoneyPill(
+                    label: tr('tour_money_board.collected'),
+                    value: Formatters.formatMoneyInr(summary.collected),
+                    c: c,
+                  ),
+                ),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(
+                  child: _MoneyPill(
+                    label: tr('tour_money_board.handover'),
+                    value: Formatters.formatMoneyInr(summary.handedOver),
+                    c: c,
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: UgamSpacing.md),
-          // ── Secondary figures, folded behind a tap ─────────────────
-          // To-collect / to-return / expenses are rarely the first question,
-          // so they hide inside an expandable breakdown rather than sitting in
-          // an always-on 3-number strip.
-          UgamHeroStat(
-            label: tr('tour_money_board.more_detail'),
-            value: Formatters.formatMoneyInr(summary.expensesTotal),
-            tone: c.ink2,
-            breakdown: [
-              HeroStatLine(
-                tr('tour_money_board.to_collect'),
-                Formatters.formatMoneyInr(summary.toCollectTotal),
-                tone: summary.toCollectTotal > 0.005 ? c.danger : c.ink2,
-              ),
-              HeroStatLine(
-                tr('tour_money_board.to_return'),
-                Formatters.formatMoneyInr(summary.toReturnTotal),
-                tone: summary.toReturnTotal > 0.005 ? c.warm : c.ink2,
-              ),
-              HeroStatLine(
-                tr('tour_money_board.expenses'),
-                Formatters.formatMoneyInr(summary.expensesTotal),
-                tone: c.ink2,
-              ),
-            ],
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          // Status dot only — the outstanding figure now leads the row as the
-          // headline, so the trailing amount duplicate is dropped here.
-          Align(
-            alignment: Alignment.centerLeft,
-            child: UgamStatusDot(label: statusLabel, tone: tone),
-          ),
-          const SizedBox(height: UgamSpacing.lg),
-          // One-tap shortcut straight into this bus's CollectionScreen —
-          // no detour through BusMoneyScreen. The row itself still opens
-          // the full per-bus detail view. Tonal (quiet primary) so it never
-          // competes with the single solid-champagne totals capsule below.
+          // One-tap shortcut straight into this bus's CollectionScreen. The row
+          // itself still opens the full per-bus detail view (to-collect,
+          // to-return, expenses live there). Tonal so it never competes with the
+          // single solid-champagne totals capsule below.
           UgamButton(
             label: tr('tour_money_board.collect'),
             icon: Icons.groups_rounded,
@@ -603,15 +584,21 @@ class _TotalsCapsule extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: UgamSpacing.xs),
-                  Text(
-                    Formatters.formatMoneyInr(outstanding),
-                    style: UgamText.tabular(
-                      UgamText.numXl.copyWith(
-                        color: settled ? c.good : c.warm,
+                  // Scale a long outstanding figure down to fit rather than
+                  // ellipsize it — the thumb-zone capsule must never clip the
+                  // very number it exists to show (e.g. "-₹1,81,000").
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      Formatters.formatMoneyInr(outstanding),
+                      style: UgamText.tabular(
+                        UgamText.numXl.copyWith(
+                          color: settled ? c.good : c.warm,
+                        ),
                       ),
+                      maxLines: 1,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),

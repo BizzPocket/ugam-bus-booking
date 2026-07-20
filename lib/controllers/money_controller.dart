@@ -38,7 +38,7 @@ class MoneyController extends GetxController {
   /// [FinanceController.loadFailed]: the screens read this to show a retry state
   /// instead of silently rendering an all-zero money board (a failed load is NOT
   /// the same as "this tour has no money"). Reset to false at the start of every
-  /// load and only re-raised when [SyncService.lastReadFailed] trips.
+  /// load and only re-raised when one of the reads reports `failed`.
   final loadFailed = false.obs;
 
   /// True once at least one load has genuinely succeeded for the current tour, so
@@ -110,20 +110,20 @@ class MoneyController extends GetxController {
         ),
       ]);
 
-      // smartFetch never throws — it returns [] and trips [lastReadFailed] on any
-      // failure or when offline. The four reads run concurrently and share the
-      // one flag, but it stays true if ANY of them failed, so capture it right
-      // after the wait. Only COMMIT the fetched rows when the load genuinely
-      // succeeded: a transient timeout must keep whatever we already hold rather
-      // than blank the money board to ₹0 (which reads as "this tour has no
-      // money" — the bug this guard fixes). The screens observe [loadFailed] to
-      // show a retry instead.
-      final failed = _sync.lastReadFailed;
+      // smartFetch never throws — it returns [] with a per-call `failed` flag on
+      // any failure or when offline. The four reads run concurrently; this load
+      // has failed if ANY of them did. Each flag is that call's OWN outcome (no
+      // shared service field), so an unrelated concurrent read can't corrupt it.
+      // Only COMMIT the fetched rows when the load genuinely succeeded: a
+      // transient timeout must keep whatever we already hold rather than blank
+      // the money board to ₹0 (which reads as "this tour has no money" — the bug
+      // this guard fixes). The screens observe [loadFailed] to show a retry.
+      final failed = results.any((r) => r.failed);
       if (!failed) {
-        collections.assignAll(results[0].map(Collection.fromMap).toList());
-        expenses.assignAll(results[1].map(Expense.fromMap).toList());
-        handovers.assignAll(results[2].map(BusHandover.fromMap).toList());
-        incomes.assignAll(results[3].map(IncomeEntry.fromMap).toList());
+        collections.assignAll(results[0].rows.map(Collection.fromMap).toList());
+        expenses.assignAll(results[1].rows.map(Expense.fromMap).toList());
+        handovers.assignAll(results[2].rows.map(BusHandover.fromMap).toList());
+        incomes.assignAll(results[3].rows.map(IncomeEntry.fromMap).toList());
         loadedOnce.value = true;
       }
       loadFailed.value = failed;

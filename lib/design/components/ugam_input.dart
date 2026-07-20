@@ -2,8 +2,10 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../utils/phone_normalize.dart';
 import '../text_styles.dart';
 import '../tokens.dart';
+import '../ui_scale.dart';
 
 /// Labelled filled input. Label sits above the field in `micro` caps
 /// style. The field itself inherits the `InputDecorationTheme` from
@@ -125,6 +127,25 @@ class _UgamInputState extends State<UgamInput> {
   }
 }
 
+/// Keeps a phone field to the 10 significant digits. Strips every non-digit
+/// and, when a pasted value carries a country code (`+91 98765 43210`,
+/// `919876543210`, …), drops the leading prefix by keeping the *last* 10
+/// digits — instead of letting `maxLength` truncate the wrong (trailing) end.
+class IndianMobileFormatter extends TextInputFormatter {
+  const IndianMobileFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final normalised = normalisePhone(newValue.text);
+    if (normalised == newValue.text) return newValue;
+    return TextEditingValue(
+      text: normalised,
+      selection: TextSelection.collapsed(offset: normalised.length),
+    );
+  }
+}
+
 /// Two-input row: country-code pill on the left, 10-digit phone field
 /// on the right. Country code is fixed to `+91` in this build.
 class UgamPhoneInput extends StatelessWidget {
@@ -146,6 +167,10 @@ class UgamPhoneInput extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    // Field height scales with the device but never below 44px (the min tap
+    // target) — at the 0.85 floor that's 54 * 0.85 ≈ 46px, still tappable.
+    final s = UgamScale.of(context);
+    final fieldH = 54 * s;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -158,8 +183,8 @@ class UgamPhoneInput extends StatelessWidget {
         Row(
           children: [
             Container(
-              width: 90,
-              height: 54,
+              width: 90 * s,
+              height: fieldH,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: c.cardElev,
@@ -178,12 +203,12 @@ class UgamPhoneInput extends StatelessWidget {
             const SizedBox(width: UgamSpacing.md),
             Expanded(
               child: SizedBox(
-                height: 54,
+                height: fieldH,
                 child: TextField(
                   controller: controller,
                   keyboardType: TextInputType.phone,
                   maxLength: 10,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  inputFormatters: const [IndianMobileFormatter()],
                   onChanged: onChanged,
                   onSubmitted: onSubmitted,
                   style:

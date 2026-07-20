@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
 
+import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/settings_scaffold.dart';
 
@@ -66,8 +67,12 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
           businessEmail: _businessEmail.text.trim(),
         ),
       );
+      if (!mounted) return;
       AppSnackBar.success(tr('settings_pages.saved'));
-      Get.back();
+      // Pop the navigator this page lives on (nested tab stack). A bare
+      // Get.back() pops the ROOT navigator, which does nothing once this page
+      // is pushed nested — the screen would stay open after saving.
+      AppNav.pop(context);
     } catch (_) {
       AppSnackBar.error(tr('settings_pages.save_error'));
     } finally {

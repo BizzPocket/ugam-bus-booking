@@ -1743,6 +1743,9 @@
     "dock_all_pending_title": "सभी शेष ({count})",
     "dock_view_all": "सभी देखें",
     "dock_see_all": "सभी {count} देखें",
+    "dock_see_all_short": "सभी देखें",
+    "now_seating": "अभी बैठा रहे हैं",
+    "up_next": "आगे · {count}",
     "assigned_card_done_title": "सभी सीटें असाइन हो गईं",
     "assigned_card_done_sub": "हर यात्री बैठ गया है. बदलाव के लिए सीट पर टैप करें."
   },
@@ -1782,7 +1785,8 @@
     "free": "यह सीट खाली करें",
     "seat_here": "{name} को यहाँ बैठाएँ",
     "swap_in": "{name} को बदलकर यहाँ बैठाएँ",
-    "edit_request": "रिक्वेस्ट बदलें"
+    "edit_request": "रिक्वेस्ट बदलें",
+    "seat_flags": "सीट रोकें / प्रीमियम"
   },
   "edit_request": {
     "title": "रिक्वेस्ट बदलें",
@@ -1940,6 +1944,7 @@
     "att_boarded": "चढ़े {present}/{total}",
     "att_tally": "{present} उपस्थित · {left} छूट गए",
     "att_none": "इस लेग पर अभी कोई यात्री नहीं है।",
+    "pickup_none": "पिकअप स्थान के बिना",
     "att_mark_present": "उपस्थित दर्ज करें",
     "error_save_attendance": "हाज़िरी सहेजी नहीं जा सकी। कृपया पुनः प्रयास करें।",
     "error_save_collection": "वसूली सहेजी नहीं जा सकी। कृपया पुनः प्रयास करें।",

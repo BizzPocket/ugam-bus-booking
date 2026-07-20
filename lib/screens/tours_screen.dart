@@ -413,8 +413,8 @@ class _TourRow extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(UgamRadius.photo),
                 child: SizedBox(
-                  width: 88,
-                  height: 88,
+                  width: 72,
+                  height: 72,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [

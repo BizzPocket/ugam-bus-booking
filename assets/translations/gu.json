@@ -1743,6 +1743,9 @@
     "dock_all_pending_title": "બધા બાકી ({count})",
     "dock_view_all": "બધા જુઓ",
     "dock_see_all": "બધા {count} જુઓ",
+    "dock_see_all_short": "બધા જુઓ",
+    "now_seating": "હમણાં બેસાડો છો",
+    "up_next": "પછી · {count}",
     "assigned_card_done_title": "બધી સીટ ફાળવાઈ ગઈ",
     "assigned_card_done_sub": "દરેક મુસાફર બેસી ગયા છે. ફેરફાર માટે સીટ પર ટૅપ કરો."
   },
@@ -1782,7 +1785,8 @@
     "free": "આ સીટ ખાલી કરો",
     "seat_here": "{name}ને અહીં બેસાડો",
     "swap_in": "{name}ને અહીં બદલીને બેસાડો",
-    "edit_request": "વિનંતી બદલો"
+    "edit_request": "વિનંતી બદલો",
+    "seat_flags": "સીટ રોકો / પ્રીમિયમ"
   },
   "edit_request": {
     "title": "વિનંતી બદલો",
@@ -1940,6 +1944,7 @@
     "att_boarded": "ચઢ્યા {present}/{total}",
     "att_tally": "{present} હાજર · {left} છૂટી ગયા",
     "att_none": "આ લેગ પર હજી કોઈ પ્રવાસી નથી.",
+    "pickup_none": "પિકઅપ સ્થળ વગર",
     "att_mark_present": "હાજર નોંધો",
     "error_save_attendance": "હાજરી સાચવી શકાઈ નહીં. ફરી પ્રયાસ કરો.",
     "error_save_collection": "વસૂલાત સાચવી શકાઈ નહીં. ફરી પ્રયાસ કરો.",

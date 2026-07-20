@@ -1004,7 +1004,7 @@ class _NoPassengers extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
       child: UgamEmpty(
         icon: Icons.people_outline_rounded,
         title: tr('tour_groups.no_passengers_yet'),

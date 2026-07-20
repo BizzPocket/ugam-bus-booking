@@ -1743,6 +1743,9 @@
     "dock_all_pending_title": "All pending ({count})",
     "dock_view_all": "View all",
     "dock_see_all": "See all {count}",
+    "dock_see_all_short": "See all",
+    "now_seating": "Now seating",
+    "up_next": "Up next · {count}",
     "assigned_card_done_title": "All seats assigned",
     "assigned_card_done_sub": "Every passenger is seated. Tap a seat to make changes."
   },
@@ -1782,7 +1785,8 @@
     "free": "Free this seat",
     "seat_here": "Seat {name} here",
     "swap_in": "Swap {name} in here",
-    "edit_request": "Edit request"
+    "edit_request": "Edit request",
+    "seat_flags": "Hold / premium seat"
   },
   "edit_request": {
     "title": "Edit request",
@@ -1940,6 +1944,7 @@
     "att_boarded": "Boarded {present}/{total}",
     "att_tally": "{present} present · {left} left behind",
     "att_none": "No passengers on this leg yet.",
+    "pickup_none": "No pickup point",
     "att_mark_present": "Mark present",
     "error_save_attendance": "Couldn't save attendance. Please try again.",
     "error_save_collection": "Couldn't save the collection. Please try again.",

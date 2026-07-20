@@ -24,8 +24,8 @@ class UgamEmpty extends StatelessWidget {
   /// Shared "couldn't load — check your connection" state with a Retry button.
   /// Structurally identical to the empty state (icon + title + body + one CTA),
   /// so it lives here as a factory instead of a near-duplicate sibling widget.
-  /// Use everywhere a read fails ([SyncService.lastReadFailed]) and there is
-  /// nothing already on screen to keep. [onRetry] re-runs the failed load.
+  /// Use everywhere a read fails (a smartFetch result with `failed` set) and
+  /// there is nothing already on screen to keep. [onRetry] re-runs the load.
   factory UgamEmpty.error({
     Key? key,
     required VoidCallback onRetry,

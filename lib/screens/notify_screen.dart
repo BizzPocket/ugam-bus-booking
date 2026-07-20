@@ -306,7 +306,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
         const SizedBox(height: UgamSpacing.md),
         if (filtered.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xxl),
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
             child: Center(
               child: Text(
                 _query.isNotEmpty

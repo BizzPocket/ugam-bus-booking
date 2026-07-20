@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ugam — Layout Directions (Charcoal Copper · Boarding Pass)</title>
+<style>
+  :root{
+    --bg:#0E0E10; --card:#1A1A1D; --elev:#242428; --bd:rgba(255,255,255,.09);
+    --ink:#F2F2F4; --ink2:#A6A6AE; --ink3:#6E6E76;
+    --accent:#D08A5E; --onAccent:#1A0E07; --accentF:rgba(208,138,94,.16);
+    --good:#34D399; --goodF:rgba(52,211,153,.16); --warm:#E06A9A; --dash:#3b3b43;
+  }
+  body{margin:0;background:#0a0a0b;color:#fff;font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
+  .wrap{max-width:1240px;margin:0 auto;padding:32px 20px 90px}
+  h1{font-size:28px;letter-spacing:-.5px;margin:0 0 6px}
+  .lead{color:#9b9ba6;max-width:860px;font-size:15px}
+  .eyebrow{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.7px;text-transform:uppercase}
+  .row3{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:26px;margin-top:28px}
+  .col .cap{margin:0 0 12px}
+  .col .cap h2{margin:0;font-size:19px}
+  .col .cap p{margin:3px 0 0;color:#9b9ba6;font-size:13px}
+  .device{width:340px;margin:0 auto;border-radius:30px;overflow:hidden;border:1px solid #2a2a30;
+    box-shadow:0 22px 50px rgba(0,0,0,.5);background:var(--bg)}
+  .scr{padding:20px 16px 22px;background:var(--bg)}
+
+  /* shared bits */
+  .greet{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .greet .hi{font-size:12px;color:var(--ink2)} .greet .nm{font-size:22px;font-weight:700;color:var(--ink);letter-spacing:-.3px}
+  .av{width:36px;height:36px;border-radius:999px;background:var(--accent);color:var(--onAccent);
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+  .lab{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--ink3);margin:18px 2px 10px;font-weight:600}
+
+  /* TICKET (hero) */
+  .ticket{background:var(--card);border:1px solid var(--bd);border-radius:16px;overflow:hidden}
+  .tk-top{padding:16px 16px 14px}
+  .route{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .route .end{text-align:center}
+  .route .code{font-size:23px;font-weight:800;color:var(--ink);line-height:1}
+  .route .cty{font-size:10px;color:var(--ink2);text-transform:uppercase;letter-spacing:.6px;margin-top:3px}
+  .route .path{flex:1;border-top:2px dashed var(--dash);position:relative;height:2px;margin:0 6px;top:-7px}
+  .route .path:after{content:"\1F68C";position:absolute;left:50%;top:-13px;transform:translateX(-50%);
+    background:var(--card);padding:0 6px;font-size:13px}
+  .tk-sub{display:flex;align-items:center;gap:8px;margin-top:12px}
+  .dot{width:7px;height:7px;border-radius:999px;background:var(--accent)}
+  .tk-sub .st{font-size:12px;color:var(--accent);font-weight:600}
+  .tk-sub .sp{flex:1}
+  .tk-sub .ct{font-size:13px;color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+  .prog{height:5px;border-radius:3px;background:var(--elev);margin-top:10px;overflow:hidden}
+  .prog>span{display:block;height:100%;width:11%;background:var(--accent)}
+  .perf{position:relative;border-top:2px dashed var(--dash)}
+  .perf:before,.perf:after{content:"";position:absolute;top:-9px;width:18px;height:18px;border-radius:999px;background:var(--bg)}
+  .perf:before{left:-9px}.perf:after{right:-9px}
+  .tk-stub{padding:13px 16px}
+  .cta{background:var(--accent);color:var(--onAccent);border-radius:999px;padding:12px;text-align:center;font-weight:700;font-size:14px}
+  .cta.sm{padding:10px;font-size:13px}
+
+  /* stat strip */
+  .strip{display:flex;background:var(--card);border:1px solid var(--bd);border-radius:14px;margin-top:14px;overflow:hidden}
+  .strip>div{flex:1;text-align:center;padding:13px 6px;border-right:1px solid var(--bd)}
+  .strip>div:last-child{border-right:0}
+  .strip .n{font-size:19px;font-weight:800;color:var(--ink)} .strip .k{font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+
+  /* quick actions */
+  .qa{display:flex;gap:10px;margin-top:14px}
+  .qa>div{flex:1;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px 4px;text-align:center}
+  .qa .ic{width:30px;height:30px;border-radius:999px;background:var(--elev);margin:0 auto 7px;
+    display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:15px}
+  .qa .t{font-size:10px;color:var(--ink2)}
+
+  /* request row */
+  .rrow{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:11px 12px;margin-top:10px}
+  .rrow .a{width:30px;height:30px;border-radius:999px;background:var(--elev);color:var(--ink2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .rrow .nm{font-size:13px;font-weight:600;color:var(--ink)} .rrow .s{font-size:11px;color:var(--ink2)}
+  .rrow .pill{margin-left:auto;background:var(--goodF);color:var(--good);font-size:12px;font-weight:700;padding:6px 12px;border-radius:999px}
+
+  /* compact ticket row (Ops) */
+  .trow{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-top:10px}
+  .trow .rt{font-size:15px;font-weight:800;color:var(--ink);letter-spacing:.3px}
+  .trow .rt small{font-weight:500;color:var(--ink3)}
+  .trow .dt{font-size:11px;color:var(--ink2);margin-top:2px}
+  .trow .seats{margin-left:auto;text-align:right}
+  .trow .seats .v{font-size:14px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+  .trow .seats .k{font-size:10px;color:var(--ink3);text-transform:uppercase}
+
+  /* income bar (Ops) */
+  .inc{display:flex;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:15px 16px}
+  .inc .k{font-size:11px;color:var(--ink3);text-transform:uppercase;letter-spacing:.6px}
+  .inc .v{font-size:26px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;margin-top:2px}
+  .inc .tr{background:var(--goodF);color:var(--good);font-size:12px;font-weight:700;padding:5px 10px;border-radius:999px}
+
+  /* appbar (Ops) */
+  .abar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .abar .t{font-size:20px;font-weight:800;color:var(--ink)}
+  .abar .ics{display:flex;gap:8px}
+  .abar .ic{width:36px;height:36px;border-radius:999px;background:var(--card);border:1px solid var(--bd);
+    display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:15px}
+
+  /* money mini (Sectioned) */
+  .money{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;display:flex;align-items:center;gap:14px}
+  .money .mi{width:42px;height:42px;border-radius:12px;background:var(--accentF);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:18px}
+  .money .v{font-size:24px;font-weight:800;color:var(--ink)} .money .k{font-size:11px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Charcoal Copper · Boarding Pass — layout directions</div>
+  <h1>Three dashboard layouts (final colors)</h1>
+  <p class="lead">Colors are locked. These explore the <b>structure</b> — how the boarding-pass language organizes
+  the home screen. Same content in each. Pick a direction (or mix: "A's hero ticket + C's sections") and I'll build it live on your real app.</p>
+
+  <div class="row3">
+
+    <!-- A: HERO TICKET -->
+    <div class="col">
+      <div class="cap"><h2>A · Hero Ticket</h2><p>The active trip is the centerpiece — one big boarding pass up top, action inside the stub.</p></div>
+      <div class="device"><div class="scr">
+        <div class="greet"><div><div class="hi">Namaste</div><div class="nm">zeel</div></div><div class="av">Z</div></div>
+        <div class="ticket">
+          <div class="tk-top">
+            <div class="route"><div class="end"><div class="code">SRT</div><div class="cty">Surat</div></div>
+              <div class="path"></div><div class="end"><div class="code">AML</div><div class="cty">Amreli</div></div></div>
+            <div class="tk-sub"><span class="dot"></span><span class="st">Collecting</span><span class="sp"></span><span class="ct">4/36</span></div>
+            <div class="prog"><span></span></div>
+          </div>
+          <div class="perf"></div>
+          <div class="tk-stub"><div class="cta">Choose handler</div></div>
+        </div>
+        <div class="strip">
+          <div><div class="n">1</div><div class="k">Active</div></div>
+          <div><div class="n">0</div><div class="k">Today</div></div>
+          <div><div class="n">3</div><div class="k">Waitlist</div></div>
+        </div>
+        <div class="qa">
+          <div><div class="ic">+</div><div class="t">Create</div></div>
+          <div><div class="ic">◉</div><div class="t">Tours</div></div>
+          <div><div class="ic">▦</div><div class="t">Assign</div></div>
+          <div><div class="ic">◐</div><div class="t">Notify</div></div>
+        </div>
+        <div class="lab">Recent requests</div>
+        <div class="rrow"><div class="a">Z</div><div><div class="nm">zeel</div><div class="s">test · 3 seats</div></div><div class="pill">Review</div></div>
+      </div></div>
+    </div>
+
+    <!-- B: OPS -->
+    <div class="col">
+      <div class="cap"><h2>B · Ops Summary</h2><p>Data-first &amp; dense. Income bar on top, trips as compact ticket rows. Serious operator tool.</p></div>
+      <div class="device"><div class="scr">
+        <div class="abar"><div class="t">Ugam</div><div class="ics"><div class="ic">⌕</div><div class="ic">◍</div></div></div>
+        <div class="inc"><div><div class="k">This week · income</div><div class="v">₹42,500</div></div><div class="tr">↗ 12%</div></div>
+        <div class="strip">
+          <div><div class="n">1</div><div class="k">Active</div></div>
+          <div><div class="n">0</div><div class="k">Today</div></div>
+          <div><div class="n">3</div><div class="k">Waitlist</div></div>
+        </div>
+        <div class="lab">Active tours</div>
+        <div class="trow"><div><div class="rt">SRT <small>→</small> AML</div><div class="dt">Mon 20 Jun · Collecting</div></div>
+          <div class="seats"><div class="v">4/36</div><div class="k">seats</div></div></div>
+        <div class="trow"><div><div class="rt">SRT <small>→</small> DKR</div><div class="dt">Fri 27 Jun · Planning</div></div>
+          <div class="seats"><div class="v">0/54</div><div class="k">seats</div></div></div>
+        <div class="qa">
+          <div><div class="ic">+</div><div class="t">Create</div></div>
+          <div><div class="ic">▦</div><div class="t">Assign</div></div>
+          <div><div class="ic">◐</div><div class="t">Notify</div></div>
+          <div><div class="ic">₹</div><div class="t">Money</div></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- C: SECTIONED -->
+    <div class="col">
+      <div class="cap"><h2>C · Sectioned</h2><p>Calm &amp; scannable. Labeled sections (Today / Money / Attention), each one clean ticket-card.</p></div>
+      <div class="device"><div class="scr">
+        <div class="greet"><div><div class="hi">Namaste</div><div class="nm">zeel</div></div><div class="av">Z</div></div>
+        <div class="lab" style="margin-top:6px">Today</div>
+        <div class="ticket">
+          <div class="tk-top">
+            <div class="route"><div class="end"><div class="code">SRT</div><div class="cty">Surat</div></div>
+              <div class="path"></div><div class="end"><div class="code">AML</div><div class="cty">Amreli</div></div></div>
+            <div class="tk-sub"><span class="dot"></span><span class="st">Collecting</span><span class="sp"></span><span class="ct">4/36</span></div>
+          </div>
+          <div class="perf"></div>
+          <div class="tk-stub"><div class="cta sm">Choose handler</div></div>
+        </div>
+        <div class="lab">Money</div>
+        <div class="money"><div class="mi">₹</div><div><div class="v">42,500</div><div class="k">Income this week · tap for report</div></div></div>
+        <div class="lab">Needs attention</div>
+        <div class="rrow"><div class="a">!</div><div><div class="nm">test</div><div class="s">All seats assigned · choose handler</div></div><div class="pill" style="background:var(--accentF);color:var(--accent)">Do</div></div>
+      </div></div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

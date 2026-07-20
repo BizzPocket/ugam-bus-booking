@@ -54,8 +54,8 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   _StatusFilter _filter = _StatusFilter.all;
 
   /// Connectivity signal for the load-failure surface. The requests store talks
-  /// to Supabase directly (not via SyncService), so it never trips
-  /// `lastReadFailed`; [SyncService.isOnline] is the honest "definitely offline"
+  /// to Supabase directly (not via SyncService), so it never gets a smartFetch
+  /// read-failure result; [SyncService.isOnline] is the honest "definitely offline"
   /// signal available here. Nullable/guarded so the screen never hard-depends on
   /// the service being registered.
   SyncService? get _sync =>

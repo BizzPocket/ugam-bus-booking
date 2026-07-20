@@ -97,8 +97,8 @@ class AdminSetupScreen extends StatelessWidget {
                               ),
                             ),
                             Container(
-                              width: 64,
-                              height: 64,
+                              width: 52,
+                              height: 52,
                               decoration: BoxDecoration(
                                 color: c.accentFill,
                                 borderRadius: BorderRadius.circular(
@@ -108,7 +108,7 @@ class AdminSetupScreen extends StatelessWidget {
                               alignment: Alignment.center,
                               child: Icon(
                                 Icons.support_agent_rounded,
-                                size: 34,
+                                size: 28,
                                 color: c.accent,
                               ),
                             ),

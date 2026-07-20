@@ -4,11 +4,14 @@ import 'package:get/get.dart';
 import 'package:occubusbooking/controllers/tour_controller.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/bus_type.dart';
+import 'package:occubusbooking/design/components/ugam_free_by_type.dart';
 import 'package:occubusbooking/models/passenger.dart';
 import 'package:occubusbooking/models/request_line.dart';
+import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/screens/tour_overview_screen.dart';
 import 'package:occubusbooking/services/seating_engine.dart';
 
@@ -87,6 +90,33 @@ Tour _fakeTour() {
   );
 }
 
+SeatCell _cell(int row, int col, SeatType t, SeatPosition? pos, String id) =>
+    SeatCell(row: row, col: col, seatType: t, position: pos, seatId: id);
+
+Bus _busCells(String id, String name, List<SeatCell> cells) {
+  var maxRow = 0;
+  for (final cell in cells) {
+    if (cell.row > maxRow) maxRow = cell.row;
+  }
+  return Bus(
+    id: id,
+    name: name,
+    busType: 'Sleeper',
+    layout: BusLayout(rows: maxRow + 1, cols: SeatGridCols.count, grid: cells),
+  );
+}
+
+Tour _tourWith(List<Bus> buses, List<Passenger> ps) => Tour(
+      id: 't1',
+      title: 'T',
+      fromCity: 'A',
+      toCity: 'B',
+      departureDate: DateTime(2026, 7, 1),
+      pricePerSeat: 100,
+      buses: buses,
+      passengers: ps,
+    );
+
 Widget _harness() => GetMaterialApp(
       theme: ThemeData(brightness: Brightness.dark),
       home: const TourOverviewScreen(tourId: 't1'),
@@ -154,6 +184,146 @@ void main() {
     await tester.pump(); // settle the post-fill setState
 
     expect(ctrl.fillCalls, 1);
+  });
+
+  testWidgets(
+      'a bus with unassigned demand is NOT shown full (matches the empty grid)',
+      (tester) async {
+    // The reported bug: enough DEMAND exists to fill the bus, but nobody is
+    // actually seated yet. The old overview ran the engine plan and painted the
+    // bus "ભરાઈ ગઈ / full"; the grid (real assignedSeats) was empty. The fixed
+    // overview reads actual assignments, so an empty bus reads free, never full.
+    const tourId = 't1';
+    final tour = Tour(
+      id: tourId,
+      title: 'Dwarka Yatra',
+      fromCity: 'Surat',
+      toCity: 'Dwarka',
+      departureDate: DateTime(2026, 7, 1),
+      pricePerSeat: 1200,
+      // One small bus (4 berths). Demand OVER-fills it, so the engine plan would
+      // have read it full — but no passenger has an assignedSeat.
+      buses: [_bus('b1', 'Bus 1', seats: 4)],
+      passengers: [
+        _passenger('p1', tourId), // 1 double sofa = 2 berths
+        _passenger('p2', tourId),
+        _passenger('p3', tourId),
+      ],
+    );
+    for (final p in tour.passengers) {
+      expect(p.assignedSeats, isEmpty, reason: 'precondition: nothing is placed');
+    }
+
+    final ctrl = _FakeTourController();
+    Get.put<TourController>(ctrl);
+    ctrl.tours.assignAll([tour]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    // l10n is not initialized in tests, so the meter renders raw keys:
+    // 'capacity.full' when a leg is full, 'capacity.free_n' otherwise. The bus
+    // must read FREE (grid is empty), never FULL.
+    expect(find.text('capacity.full'), findsNothing,
+        reason: 'nothing is assigned — no leg can be full');
+    expect(find.text('capacity.free_n'), findsWidgets,
+        reason: 'the empty bus shows free capacity, matching the grid');
+  });
+
+  testWidgets('a bus with mixed free types renders one pill per free type',
+      (tester) async {
+    // Empty bus with a single + a double, nobody assigned → both types free
+    // round-trip → two pills, and no one-way caption.
+    final ctrl = _FakeTourController();
+    Get.put<TourController>(ctrl);
+    ctrl.tours.assignAll([
+      _tourWith([
+        _busCells('b1', 'Bus 1', [
+          _cell(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _cell(1, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+        ])
+      ], const [])
+    ]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    expect(find.byType(UgamTypeFreePill), findsNWidgets(2),
+        reason: 'one pill for the free single, one for the free double');
+    expect(find.byType(UgamLegCaption), findsNothing,
+        reason: 'all seats free both legs — no one-way surplus');
+  });
+
+  testWidgets('a genuinely full bus renders no type pills', (tester) async {
+    final ctrl = _FakeTourController();
+    Get.put<TourController>(ctrl);
+    ctrl.tours.assignAll([
+      _tourWith([
+        _busCells('b1', 'Bus 1', [
+          _cell(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+        ])
+      ], [
+        Passenger(
+          id: 'A',
+          tourId: 't1',
+          name: 'A',
+          phone: '+910000000000',
+          requestLines: const [
+            RequestLine(seatType: SeatType.singleSofa, qty: 1),
+          ],
+          assignedSeats: const [
+            SeatAssignment(busId: 'b1', seatId: 'SU1', leg: TripType.roundTrip),
+          ],
+        ),
+      ])
+    ]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    expect(find.byType(UgamTypeFreePill), findsNothing);
+  });
+
+  testWidgets('a return-only opening surfaces a pill + the leg caption',
+      (tester) async {
+    // One single seat taken GOING only → it returns empty. The meter reads
+    // round-trip-full, but the type line must still surface the return-only
+    // seat (the "available for one leg" case) with the go/return colour key.
+    final ctrl = _FakeTourController();
+    Get.put<TourController>(ctrl);
+    ctrl.tours.assignAll([
+      _tourWith([
+        _busCells('b1', 'Bus 1', [
+          _cell(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+        ])
+      ], [
+        Passenger(
+          id: 'A',
+          tourId: 't1',
+          name: 'A',
+          phone: '+910000000000',
+          requestLines: const [
+            RequestLine(
+                seatType: SeatType.singleSofa,
+                qty: 1,
+                leg: TripType.outboundOnly),
+          ],
+          assignedSeats: const [
+            SeatAssignment(
+                busId: 'b1', seatId: 'SU1', leg: TripType.outboundOnly),
+          ],
+          tripType: TripType.outboundOnly,
+        ),
+      ])
+    ]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    expect(find.byType(UgamTypeFreePill), findsOneWidget,
+        reason: 'the return-only single is still a bookable seat');
+    expect(find.byType(UgamLegCaption), findsOneWidget,
+        reason: 'a one-way-only opening shows the go/return colour key');
   });
 
   testWidgets('shows the "need your decision" chip when the plan has exceptions',

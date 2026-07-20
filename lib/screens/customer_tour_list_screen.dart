@@ -368,7 +368,7 @@ class _TopBar extends StatelessWidget {
               },
               child: Text(
                 tr('customer_tour_list.header_explore'),
-                style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 28),
+                style: UgamText.titleXl.copyWith(color: c.ink),
               ),
             ),
           ),

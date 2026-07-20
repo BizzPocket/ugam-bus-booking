@@ -207,27 +207,19 @@ class _ChartsScreenState extends State<ChartsScreen> {
                 ),
                 const SizedBox(height: UgamSpacing.md),
               ],
-              if (tour.buses.length > 1) ...[
-                UgamSelectorPills(
-                  items: [
-                    for (final b in tour.buses) UgamSelectorItem(label: b.name),
-                  ],
-                  currentIndex: tour.buses.indexWhere((b) => b.id == bus.id),
-                  onChanged: (i) => _pickBus(tour.buses[i].id),
-                ),
-                const SizedBox(height: UgamSpacing.sm),
-              ],
               Padding(
-                padding: EdgeInsets.fromLTRB(
+                padding: const EdgeInsets.fromLTRB(
                   UgamSpacing.gutter,
-                  tour.buses.length > 1 ? 0 : UgamSpacing.sm,
+                  UgamSpacing.sm,
                   UgamSpacing.gutter,
                   UgamSpacing.sm,
                 ),
-                child: _Tally(
+                child: _BusBar(
+                  tour: tour,
                   bus: bus,
                   assigned: assignedCount,
                   total: totalSeats,
+                  onPickBus: _pickBus,
                   c: c,
                 ),
               ),
@@ -325,20 +317,70 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ─── Tally ─────────────────────────────────────────────────────────────
+// ─── Bus bar ───────────────────────────────────────────────────────────
 
-/// Per-bus placed/total tally: a big tabular count, the bus name, and a thin
-/// NEUTRAL fill bar — the at-a-glance fill state for the bus on screen.
-/// Champagne is rationed elsewhere, so the bar reads in ink, not accent. The
-/// count + bar already say "how full"; the redundant % is omitted.
-class _Tally extends StatelessWidget {
+/// One compact row that merges what used to be a separate bus-selector strip
+/// AND a full `n/total` tally card. The bus selector sits on the left (pills
+/// when the tour carries >1 bus, else the single bus's name so it never
+/// disappears), the placed/total fill on the right. Folding the standalone
+/// tally card away reclaims a whole vertical band for the seat grid without
+/// losing the fill signal or the bus name.
+class _BusBar extends StatelessWidget {
+  final Tour tour;
   final Bus bus;
+  final int assigned;
+  final int total;
+  final ValueChanged<String> onPickBus;
+  final UgamColorSet c;
+
+  const _BusBar({
+    required this.tour,
+    required this.bus,
+    required this.assigned,
+    required this.total,
+    required this.onPickBus,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final multiBus = tour.buses.length > 1;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: multiBus
+              ? UgamSelectorPills(
+                  padding: EdgeInsets.zero,
+                  items: [
+                    for (final b in tour.buses) UgamSelectorItem(label: b.name),
+                  ],
+                  currentIndex: tour.buses.indexWhere((b) => b.id == bus.id),
+                  onChanged: (i) => onPickBus(tour.buses[i].id),
+                )
+              : Text(
+                  bus.name.toUpperCase(),
+                  style: UgamText.micro.copyWith(color: c.ink2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+        ),
+        const SizedBox(width: UgamSpacing.md),
+        _FillIndicator(assigned: assigned, total: total, c: c),
+      ],
+    );
+  }
+}
+
+/// The compact placed/total signal on the right of the [_BusBar]: a tabular
+/// `n/total` count and a short NEUTRAL-ink fill bar. Ink, not champagne — the
+/// accent stays rationed to the one Edit-seats CTA.
+class _FillIndicator extends StatelessWidget {
   final int assigned;
   final int total;
   final UgamColorSet c;
 
-  const _Tally({
-    required this.bus,
+  const _FillIndicator({
     required this.assigned,
     required this.total,
     required this.c,
@@ -347,47 +389,29 @@ class _Tally extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ratio = total == 0 ? 0.0 : assigned / total;
-    return UgamCard.plain(
-      elev: true,
-      radius: UgamRadius.row,
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.md,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$assigned/$total',
-                style: UgamText.numLg.copyWith(color: c.ink),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                bus.name.toUpperCase(),
-                style: UgamText.micro.copyWith(color: c.ink2),
-              ),
-            ],
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '$assigned/$total',
+          style: UgamText.tabular(
+            UgamText.numLg.copyWith(color: c.ink, fontSize: 16),
           ),
-          const SizedBox(width: UgamSpacing.lg),
-          // Count + bar only (the % was redundant with both). Bar is NEUTRAL
-          // ink — champagne stays rationed to true accent signals.
-          Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(UgamRadius.chip),
-              child: LinearProgressIndicator(
-                value: ratio.clamp(0.0, 1.0),
-                minHeight: 6,
-                backgroundColor: c.card,
-                valueColor: AlwaysStoppedAnimation(c.ink2),
-              ),
+        ),
+        const SizedBox(width: UgamSpacing.sm),
+        SizedBox(
+          width: 52,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(UgamRadius.chip),
+            child: LinearProgressIndicator(
+              value: ratio.clamp(0.0, 1.0),
+              minHeight: 6,
+              backgroundColor: c.card,
+              valueColor: AlwaysStoppedAnimation(c.ink2),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

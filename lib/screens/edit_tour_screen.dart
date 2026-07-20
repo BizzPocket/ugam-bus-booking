@@ -392,7 +392,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
       AppSnackBar.success(
         tr('edit_tour.delete.deleted', namedArgs: {'title': tour.title}),
       );
-      Get.until((route) => route.isFirst);
+      // Pop the NESTED tab stack back to the tab root (tour list). The just-
+      // deleted tour's Edit + Detail screens both drop away. A root-level
+      // Get.until ran on the root navigator (already at its first route) → a
+      // no-op that left the deleted tour's screens stranded on screen.
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (_) {
       if (mounted) setState(() => _saving = false);
     }

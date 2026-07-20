@@ -4,68 +4,7 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="069cdba7-46ea-4b35-b56b-21e7253b6116" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/caches/deviceStreaming.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/caches/deviceStreaming.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/assets/translations/en.json" beforeDir="false" afterPath="$PROJECT_DIR$/assets/translations/en.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/assets/translations/gu.json" beforeDir="false" afterPath="$PROJECT_DIR$/assets/translations/gu.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/assets/translations/hi.json" beforeDir="false" afterPath="$PROJECT_DIR$/assets/translations/hi.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/app.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/components/seat_chart_tile.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/components/seat_chart_tile.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/controllers/customer_memory_controller.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/controllers/customer_memory_controller.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/controllers/money_controller.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/controllers/money_controller.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/controllers/tour_controller.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/controllers/tour_controller.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/design/components/ugam_empty.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/design/components/ugam_empty.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/design/components/ugam_input.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/design/components/ugam_input.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/models/bus_details.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/models/bus_details.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/models/collection.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/models/collection.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/models/handler_tour_ref.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/models/handler_tour_ref.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/models/money_summary.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/models/money_summary.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/models/passenger.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/models/passenger.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/models/seat_ticket.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/models/seat_ticket.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/models/seat_type.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/models/seat_type.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/routes/app_routes.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/routes/app_routes.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/add_return_ticket_sheet.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/add_return_ticket_sheet.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/bus_money_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/bus_money_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/collection_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/collection_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/customer_booking_request_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/customer_booking_request_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/customer_my_requests_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/customer_my_requests_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/customer_tour_detail_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/customer_tour_detail_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/dashboard_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/dashboard_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/find_my_seat_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/find_my_seat_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/login_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/login_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/manage_buses_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/manage_buses_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/notify_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/notify_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/requests_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/requests_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/settings_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/settings_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/tour_money_board_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/tour_money_board_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/tour_seat_assignment_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/tour_seat_assignment_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/tours_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/tours_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/screens/trip_pnl_screen.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/screens/trip_pnl_screen.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/customer_requests_store.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/customer_requests_store.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/push_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/push_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/sync_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/sync_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/whatsapp_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/whatsapp_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/utils/tour_capacity.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/utils/tour_capacity.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/booking_capture_form.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/booking_capture_form.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/customer_seat_layout_sheet.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/customer_seat_layout_sheet.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/dashboard/dashboard_greeting.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/dashboard/dashboard_greeting.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/dashboard/trip_hero.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/dashboard/trip_hero.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/edit_request_sheet.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/edit_request_sheet.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/group_picker.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/group_picker.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/occupant_action_sheet.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/occupant_action_sheet.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pubspec.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/pubspec.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/functions/send-push/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/functions/send-push/index.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/functions/send-push/lib.test.ts" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/functions/send-push/lib.test.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/functions/send-push/lib.ts" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/functions/send-push/lib.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/supabase/migrations/030_multiple_requests_per_phone.sql" beforeDir="false" afterPath="$PROJECT_DIR$/supabase/migrations/030_multiple_requests_per_phone.sql" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/controllers/tour_controller_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/controllers/tour_controller_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/models/fare_calculation_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/models/fare_calculation_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/models/one_leg_mismatched_seat_type_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/models/one_leg_mismatched_seat_type_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/models/seat_ticket_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/models/seat_ticket_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/utils/tour_capacity_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/utils/tour_capacity_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/widgets/booking_capture_form_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/widgets/booking_capture_form_test.dart" afterDir="false" />
-    </list>
+    <list default="true" id="069cdba7-46ea-4b35-b56b-21e7253b6116" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

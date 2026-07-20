@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ugam UI Refinement — Visual Preview</title>
+<style>
+  :root{
+    --bg:#0A0A0A; --card:#181818; --cardElev:#242424; --border:#323232;
+    --ink:#fff; --ink2:#A1A1AA; --ink3:#6B6B72;
+    --accent:#C9A86A; --accentFill:rgba(201,168,106,.16); --onAccent:#1A1408;
+    --good:#34D399; --goodFill:rgba(52,211,153,.16);
+    --warm:#FFB020; --warmFill:rgba(255,176,32,.18); --danger:#FF453A;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5;}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 80px;}
+  h1{font-size:30px;letter-spacing:-.5px;margin:0 0 6px;}
+  h2{font-size:21px;margin:48px 0 6px;}
+  h3{font-size:15px;margin:0 0 10px;color:var(--ink2);font-weight:600;
+    text-transform:uppercase;letter-spacing:.6px;}
+  p{color:var(--ink2);margin:6px 0 14px;}
+  .eyebrow{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;}
+  .lead{font-size:15px;color:var(--ink2);max-width:760px}
+  .pill{display:inline-block;background:var(--accentFill);color:var(--accent);
+    border-radius:999px;padding:3px 10px;font-size:12px;font-weight:600;margin-right:6px}
+  .section{background:var(--card);border:1px solid var(--border);border-radius:16px;
+    padding:22px;margin-top:16px}
+  /* before/after */
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0 4px}
+  .ba figure{margin:0}
+  .ba img{width:100%;border-radius:14px;border:1px solid var(--border);display:block}
+  .ba figcaption{font-size:12px;color:var(--ink3);margin-top:8px;text-align:center;
+    text-transform:uppercase;letter-spacing:.5px}
+  .ba .lbl{font-weight:700}
+  .ba .lbl.before{color:var(--ink3)} .ba .lbl.after{color:var(--accent)}
+  .screen-title{font-size:16px;font-weight:600;margin:26px 0 2px}
+  .screen-note{font-size:13px;color:var(--ink2);margin:0 0 6px}
+  /* component demos */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .demo{background:var(--cardElev);border:1px solid var(--border);border-radius:14px;padding:18px}
+  .demo .t{font-size:13px;color:var(--ink2);margin-bottom:14px;font-weight:600}
+  .cta{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;
+    border-radius:999px;font-weight:700;font-size:14px}
+  .cta.solid{background:var(--accent);color:var(--onAccent)}
+  .cta.tonal{background:var(--accentFill);color:var(--accent);border:1px solid var(--border)}
+  .cta.ghost{background:transparent;color:var(--ink2);border:1px solid var(--border)}
+  .cta.danger{background:rgba(255,69,58,.14);color:var(--danger)}
+  .stack>*{margin-bottom:10px} .stack>*:last-child{margin-bottom:0}
+  .bar{height:6px;border-radius:4px;background:var(--border);overflow:hidden;margin:6px 0}
+  .bar>span{display:block;height:100%;border-radius:4px}
+  .bar.neutral>span{background:var(--ink2);width:30%}
+  .bar.gold>span{background:var(--accent);width:30%}
+  .strike{position:relative;opacity:.65}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-size:12px;font-weight:600;border-radius:6px;padding:4px 9px}
+  .chip.accent{background:var(--accentFill);color:var(--accent)}
+  .chip.good{background:var(--goodFill);color:var(--good)}
+  .chip.warm{background:var(--warmFill);color:var(--warm)}
+  .chip.neutral{background:var(--cardElev);color:var(--ink2);border:1px solid var(--border)}
+  .circles{display:flex;align-items:center;gap:14px}
+  .ic{border-radius:999px;background:var(--cardElev);border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;color:var(--ink)}
+  .ic.s38{width:38px;height:38px} .ic.s42{width:42px;height:42px} .ic.s44{width:44px;height:44px}
+  .ic span{font-size:11px;color:var(--ink3)}
+  .swatchrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+  .sw{width:74px}.sw i{display:block;height:46px;border-radius:10px;border:1px solid var(--border)}
+  .sw b{font-size:11px;display:block;margin-top:6px;font-weight:600}
+  .sw em{font-size:10px;color:var(--ink3);font-style:normal}
+  table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+  td,th{border-bottom:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
+  th{color:var(--ink3);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
+  td .was{color:var(--ink3)} td .now{color:var(--accent);font-weight:600}
+  code{background:var(--cardElev);border:1px solid var(--border);border-radius:6px;
+    padding:1px 6px;font-size:12px;color:var(--ink)}
+  .ok{color:var(--good)} .note{font-size:12px;color:var(--ink3);margin-top:8px}
+  @media(max-width:640px){.ba{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Ugam UI Refinement · Visual preview</div>
+  <h1>What the redesign actually changes</h1>
+  <p class="lead">Palette is <b>unchanged</b> — champagne gold on graphite stays exactly as you have it.
+  This pass fixes <b>execution</b>: surface depth, consistent spacing, and one canonical version of each
+  drifted component. Below: real before/after screenshots from the emulator, then rendered swatches of the
+  canonical components (using your actual hex tokens).</p>
+  <div><span class="pill">depth: done & live</span><span class="pill">palette: untouched</span><span class="pill">dark + light + Gujarati</span></div>
+
+  <h2>1 · Surface depth — the one visible change</h2>
+  <p>The real lever isn't lighter fills (subtle = invisible, stronger = "too gray") — it's a
+  <b>hairline edge on every card</b>: <code>border = white @ 9%</code> in dark mode (the same crisp
+  edge the dock nav already uses), plus a small fill lift
+  <span class="was">card #141414 → </span><span class="now">#181818</span>.
+  The fill stays near-black, so it never goes gray — the <b>defined edges</b> do the separating.
+  Cards now read as distinct panels instead of one flat dark sheet.</p>
+  <p class="note">Today neutral dark cards in <code>UgamCard</code> draw no border and no shadow — so they had no edge at all. That's the gap this closes.</p>
+
+  <div class="section">
+    <div class="screen-title">Dashboard</div>
+    <p class="screen-note">Tiles, money card and stat tiles lift off the background.</p>
+    <div class="ba">
+      <figure><img src="img/before-dash.png"><figcaption><span class="lbl before">Before</span> · flat</figcaption></figure>
+      <figure><img src="img/after-dash.png"><figcaption><span class="lbl after">After</span> · lifted</figcaption></figure>
+    </div>
+    <div class="screen-title">Seat chart</div>
+    <p class="screen-note">The chart panel + progress card read as distinct surfaces.</p>
+    <div class="ba">
+      <figure><img src="img/before-charts.png"><figcaption><span class="lbl before">Before</span></figcaption></figure>
+      <figure><img src="img/after-charts.png"><figcaption><span class="lbl after">After</span></figcaption></figure>
+    </div>
+    <div class="screen-title">Tours</div>
+    <div class="ba">
+      <figure><img src="img/before-tours.png"><figcaption><span class="lbl before">Before</span></figcaption></figure>
+      <figure><img src="img/after-tours.png"><figcaption><span class="lbl after">After</span></figcaption></figure>
+    </div>
+    <div class="screen-title">Requests</div>
+    <div class="ba">
+      <figure><img src="img/before-requests.png"><figcaption><span class="lbl before">Before</span></figcaption></figure>
+      <figure><img src="img/after-requests.png"><figcaption><span class="lbl after">After</span></figcaption></figure>
+    </div>
+    <div class="screen-title">Settings</div>
+    <div class="ba">
+      <figure><img src="img/before-settings.png"><figcaption><span class="lbl before">Before</span></figcaption></figure>
+      <figure><img src="img/after-settings.png"><figcaption><span class="lbl after">After</span></figcaption></figure>
+    </div>
+  </div>
+
+  <h2>2 · Component direction (rendered with your real tokens)</h2>
+  <p>These won't look dramatically different on screen — that's the point. Today each family has several
+  variants; the spec collapses each to one. Confirm the canonical look:</p>
+  <div class="grid">
+    <div class="demo">
+      <div class="t">Buttons — one solid champagne per screen, rest tonal/ghost</div>
+      <div class="stack">
+        <div class="cta solid">Primary action</div>
+        <div class="cta tonal">Secondary (tonal)</div>
+        <div class="cta ghost">Tertiary (ghost)</div>
+        <div class="cta danger">Destructive</div>
+      </div>
+    </div>
+    <div class="demo">
+      <div class="t">Progress bars — height 6, neutral fill (accent stays rationed)</div>
+      <div>Canonical <span class="ok">✓</span></div>
+      <div class="bar neutral"><span></span></div>
+      <div class="strike">Today's gold violation (bus_status, manage_buses)</div>
+      <div class="bar gold strike"><span></span></div>
+      <div class="note">Semantic capacity tint (good/warm) kept where it carries meaning.</div>
+    </div>
+    <div class="demo">
+      <div class="t">Chips / status — 4 token variants, no raw hex</div>
+      <div class="chips">
+        <span class="chip accent">accent</span>
+        <span class="chip good">paid</span>
+        <span class="chip warm">ladies</span>
+        <span class="chip neutral">neutral</span>
+      </div>
+      <div class="note">Kills the hardcoded rose <code>#EC4899</code> in TourStatusBadge.</div>
+    </div>
+    <div class="demo">
+      <div class="t">Icon circles — one scale: 38 / 42 / 44 (fixes the 50px + non-circle)</div>
+      <div class="circles">
+        <div class="ic s38"><span>38</span></div>
+        <div class="ic s42"><span>42</span></div>
+        <div class="ic s44"><span>44</span></div>
+      </div>
+      <div class="note">Customer <code>_IconCircle</code> + handler <code>_StatusAppBar</code> reuse <code>UgamIconButton</code>.</div>
+    </div>
+    <div class="demo">
+      <div class="t">Palette — unchanged (for reference)</div>
+      <div class="swatchrow">
+        <div class="sw"><i style="background:#0A0A0A"></i><b>bg</b><em>#0A0A0A</em></div>
+        <div class="sw"><i style="background:#181818"></i><b>card</b><em>#181818</em></div>
+        <div class="sw"><i style="background:#242424"></i><b>cardElev</b><em>#242424</em></div>
+        <div class="sw"><i style="background:#C9A86A"></i><b>accent</b><em>#C9A86A</em></div>
+        <div class="sw"><i style="background:#34D399"></i><b>good</b><em>#34D399</em></div>
+        <div class="sw"><i style="background:#FFB020"></i><b>warm</b><em>#FFB020</em></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>3 · Structural fixes (under the hood — same look, consistent system)</h2>
+  <div class="section">
+    <table>
+      <tr><th>Area</th><th>Today</th><th>After</th></tr>
+      <tr><td>Dock clearance (scroll bottom pad)</td>
+        <td class="was">8 different values: 8, 20, 24, 32, 40, 112, 140, 160</td>
+        <td class="now">one token: <code>dockClearance = 140</code> (+ tall for selection bars)</td></tr>
+      <tr><td>Home headers</td>
+        <td class="was">3 custom: <code>_Greeting</code>, <code>_TopBar</code>, <code>_StatusAppBar</code></td>
+        <td class="now">one <code>UgamHomeBar</code>; <code>UgamAppBar</code> on every pushed screen</td></tr>
+      <tr><td>Empty / sparse screens</td>
+        <td class="was">bare voids + inline conditionals (charts, tour_detail)</td>
+        <td class="now"><code>UgamEmpty</code> everywhere — no dead space</td></tr>
+      <tr><td>Lateral gutter</td>
+        <td class="was">mostly 14, but 16/20 sneak in (legal_document)</td>
+        <td class="now">14 everywhere (documented reading-width exceptions only)</td></tr>
+      <tr><td>Sheets</td>
+        <td class="was">occupant_action_sheet re-rolls modal chrome</td>
+        <td class="now">all sheets through <code>UgamSheet.show()</code></td></tr>
+    </table>
+    <div class="note">All 39 screens get a per-screen pass (admin → handler → customer), each fix traceable to an audit finding.</div>
+  </div>
+
+  <h2 style="margin-top:40px">Confirm?</h2>
+  <p class="lead">If the depth + component direction look right, I'll move to the implementation plan.
+  Otherwise tell me what to change — push depth more/less, different button hierarchy, scope to admin-only first, etc.</p>
+</div>
+</body>
+</html>

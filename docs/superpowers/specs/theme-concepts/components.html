@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ugam — Component Gallery (Charcoal Copper)</title>
+<style>
+  :root{
+    --bg:#0E0E10; --card:#1A1A1D; --elev:#242428; --bd:rgba(255,255,255,.09); --bd2:#33333A;
+    --ink:#F2F2F4; --ink2:#A6A6AE; --ink3:#6E6E76;
+    --accent:#D08A5E; --onAccent:#1A0E07; --accentF:rgba(208,138,94,.16);
+    --good:#34D399; --goodF:rgba(52,211,153,.16); --warm:#E06A9A; --warmF:rgba(224,106,154,.18); --danger:#FF5247;
+  }
+  body{margin:0;background:#070708;color:var(--ink);font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
+  .wrap{max-width:1200px;margin:0 auto;padding:32px 20px 90px}
+  h1{font-size:28px;letter-spacing:-.5px;margin:0 0 6px}
+  .lead{color:var(--ink2);max-width:860px;font-size:15px}
+  .eyebrow{color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.7px;text-transform:uppercase}
+  h2.grp{font-size:13px;text-transform:uppercase;letter-spacing:1.4px;color:var(--ink3);margin:40px 0 0;
+    border-bottom:1px solid #1d1d20;padding-bottom:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:18px;margin-top:18px}
+  .cell{background:#121214;border:1px solid #202024;border-radius:14px;overflow:hidden}
+  .stage{background:var(--bg);padding:20px 16px;min-height:96px;display:flex;align-items:center;justify-content:center}
+  .meta{padding:11px 14px;border-top:1px solid #202024}
+  .meta .nm{font-size:13px;font-weight:700;color:var(--ink)}
+  .meta .nt{font-size:11px;color:var(--ink3);margin-top:1px}
+  .full .stage{justify-content:stretch}
+  .w100{width:100%}
+
+  /* ---- component styles (charcoal copper) ---- */
+  .appbar{display:flex;align-items:center;gap:10px;width:100%}
+  .circ{width:42px;height:42px;border-radius:999px;background:var(--elev);display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:16px;border:1px solid var(--bd)}
+  .circ.sm{width:38px;height:38px}.circ.lg{width:44px;height:44px}
+  .circ.accent{background:var(--accentF);color:var(--accent);border-color:transparent}
+  .ab-t .ey{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--accent);font-weight:700}
+  .ab-t .ti{font-size:18px;font-weight:700;color:var(--ink)}
+  .grow{flex:1}
+
+  .dock{display:flex;align-items:center;gap:6px;background:var(--elev);border:1px solid var(--bd);
+    border-radius:999px;padding:5px;width:100%}
+  .dock .it{width:38px;height:38px;border-radius:999px;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:15px}
+  .dock .it.on{background:var(--accent);color:var(--onAccent);width:auto;padding:0 14px;gap:6px;font-size:12px;font-weight:700}
+
+  .sheet{width:100%;background:var(--card);border:1px solid var(--bd);border-radius:18px 18px 8px 8px;padding:14px}
+  .sheet .h{width:36px;height:4px;border-radius:999px;background:var(--bd2);margin:0 auto 12px}
+  .sheet .t{font-size:14px;font-weight:700}
+  .sheet .b{font-size:12px;color:var(--ink2);margin-top:4px}
+
+  .dialog{width:100%;background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:16px;text-align:center}
+  .dialog .t{font-size:15px;font-weight:700}.dialog .b{font-size:12px;color:var(--ink2);margin:6px 0 12px}
+  .dialog .rowb{display:flex;gap:8px}.dialog .rowb>*{flex:1}
+
+  .card{width:100%;background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:15px}
+  .card .t{font-size:14px;font-weight:700}.card .b{font-size:12px;color:var(--ink2);margin-top:4px}
+
+  .stat{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px 18px;text-align:center;min-width:84px}
+  .stat .n{font-size:22px;font-weight:800}.stat .k{font-size:10px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+
+  .backdrop{width:100%;height:70px;border-radius:14px;background:linear-gradient(120deg,#2a2118,#1a1a1d);
+    display:flex;align-items:center;justify-content:center;color:var(--accent);font-weight:800;letter-spacing:1px}
+
+  .cta{width:100%;background:var(--accent);color:var(--onAccent);border-radius:999px;padding:13px;text-align:center;font-weight:700;font-size:14px}
+  .btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+  .btn{border-radius:999px;padding:10px 16px;font-size:13px;font-weight:700}
+  .btn.pri{background:var(--accent);color:var(--onAccent)}
+  .btn.ton{background:var(--accentF);color:var(--accent);border:1px solid var(--bd)}
+  .btn.gho{background:transparent;color:var(--ink2);border:1px solid var(--bd2)}
+  .btn.dan{background:rgba(255,82,71,.14);color:var(--danger)}
+
+  .field{width:100%}
+  .field .l{font-size:11px;color:var(--ink2);margin-bottom:6px}
+  .input{width:100%;background:var(--elev);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--ink2);font-size:13px;box-sizing:border-box}
+  .picker{display:flex;align-items:center;background:var(--elev);border:1px solid var(--bd);border-radius:10px;padding:12px;font-size:13px;color:var(--ink)}
+  .picker .chev{margin-left:auto;color:var(--ink3)}
+  .search{display:flex;align-items:center;gap:8px;background:var(--elev);border-radius:999px;padding:11px 14px;width:100%;box-sizing:border-box;color:var(--ink3);font-size:13px}
+  .datepill{display:inline-flex;align-items:center;gap:6px;background:var(--accentF);color:var(--accent);border-radius:999px;padding:7px 13px;font-size:12px;font-weight:700}
+  .seg{display:flex;background:var(--elev);border:1px solid var(--bd);border-radius:999px;padding:4px;width:100%;box-sizing:border-box}
+  .seg>div{flex:1;text-align:center;padding:8px;font-size:12px;color:var(--ink2);border-radius:999px}
+  .seg>div.on{background:var(--accent);color:var(--onAccent);font-weight:700}
+  .tabs{display:flex;background:var(--elev);border:1px solid var(--bd);border-radius:12px;padding:4px;width:100%;box-sizing:border-box}
+  .tabs>div{flex:1;text-align:center;padding:8px 4px;font-size:12px;color:var(--ink2);border-radius:9px}
+  .tabs>div.on{background:var(--card);color:var(--ink);font-weight:700}
+  .tabs .c{color:var(--accent);font-weight:700}
+
+  .seatgrid{display:grid;grid-template-columns:repeat(4,40px);gap:8px}
+  .seat{width:40px;height:40px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:10px}
+  .seat.free{border:1.5px dashed var(--bd2);color:var(--ink3)}
+  .seat.booked{background:var(--elev);border:1px solid var(--bd);color:var(--ink)}
+  .seat.sel{background:var(--accent);color:var(--onAccent);font-weight:700}
+  .seat.block{background:#141416;color:#3a3a40}
+  .seat.paid{background:var(--elev);border:1px solid var(--good);color:var(--good)}
+
+  .legend{display:flex;flex-wrap:wrap;gap:10px}
+  .lg{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink2)}
+  .lg i{width:12px;height:12px;border-radius:4px;display:inline-block}
+
+  .reqrow{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:11px 12px;width:100%;box-sizing:border-box}
+  .reqrow .av{width:30px;height:30px;border-radius:999px;background:var(--elev);color:var(--ink2);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .reqrow .nm{font-size:13px;font-weight:600}.reqrow .s{font-size:11px;color:var(--ink2)}
+  .reqrow .chip{margin-left:auto}
+
+  .routeh{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:700}
+  .routeh .a{color:var(--ink)}.routeh .ar{color:var(--accent)}
+
+  .dots{display:flex;flex-direction:column;gap:8px}
+  .sd{display:flex;align-items:center;gap:7px;font-size:12px}
+  .sd i{width:7px;height:7px;border-radius:999px}
+
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-size:12px;font-weight:600;border-radius:6px;padding:4px 9px}
+  .chip.a{background:var(--accentF);color:var(--accent)}
+  .chip.g{background:var(--goodF);color:var(--good)}
+  .chip.w{background:var(--warmF);color:var(--warm)}
+  .chip.n{background:var(--elev);color:var(--ink2);border:1px solid var(--bd)}
+
+  .empty{text-align:center}
+  .empty .ic{font-size:30px;color:var(--ink3)}
+  .empty .t{font-size:14px;font-weight:700;margin-top:8px}
+  .empty .b{font-size:12px;color:var(--ink2);margin-top:3px}
+
+  .skel{width:100%}
+  .sk{height:14px;border-radius:6px;background:linear-gradient(90deg,#1a1a1d,#242428,#1a1a1d);margin-bottom:8px}
+  .sk.w60{width:60%}.sk.w40{width:40%}.sk.big{height:48px}
+
+  .snack{display:flex;align-items:center;gap:10px;background:var(--elev);border:1px solid var(--bd);border-radius:12px;padding:12px 14px;width:100%;box-sizing:border-box}
+  .snack .i{width:22px;height:22px;border-radius:999px;background:var(--goodF);color:var(--good);display:flex;align-items:center;justify-content:center;font-size:12px}
+  .snack .m{font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Charcoal Copper · component gallery</div>
+  <h1>Every component in the system</h1>
+  <p class="lead">All ~24 <code>ugam_*</code> components rendered in the final charcoal-copper tone. Tell me which
+  ones you want rebuilt into the boarding-pass / ticket language (e.g. cards, tour rows, stat tiles) and which
+  stay as-is (inputs, dialogs, snackbars usually don't need to be tickets). Mark them and I'll scope the build.</p>
+
+  <h2 class="grp">Chrome &amp; navigation</h2>
+  <div class="grid">
+    <div class="cell full"><div class="stage"><div class="appbar"><div class="circ">‹</div><div class="ab-t grow"><div class="ey">Finance</div><div class="ti">Tour money</div></div><div class="circ">⌕</div></div></div>
+      <div class="meta"><div class="nm">UgamAppBar</div><div class="nt">Back · eyebrow/title · actions</div></div></div>
+    <div class="cell full"><div class="stage"><div class="dock"><div class="it on">⌂ Home</div><div class="it">◉</div><div class="it">▦</div><div class="it">▢</div><div class="it">⚙</div></div></div>
+      <div class="meta"><div class="nm">UgamDockNav</div><div class="nt">5-tab capsule · active copper pill</div></div></div>
+    <div class="cell full"><div class="stage"><div class="sheet"><div class="h"></div><div class="t">Edit request</div><div class="b">Bottom sheet with handle + title</div></div></div>
+      <div class="meta"><div class="nm">UgamSheet</div><div class="nt">Modal bottom sheet</div></div></div>
+    <div class="cell full"><div class="stage"><div class="dialog"><div class="t">Delete tour?</div><div class="b">This can't be undone.</div><div class="rowb"><div class="btn gho">Cancel</div><div class="btn dan">Delete</div></div></div></div>
+      <div class="meta"><div class="nm">UgamDialog</div><div class="nt">Centered modal + buttons</div></div></div>
+  </div>
+
+  <h2 class="grp">Surfaces</h2>
+  <div class="grid">
+    <div class="cell full"><div class="stage"><div class="card"><div class="t">Card title</div><div class="b">Base surface with hairline edge.</div></div></div>
+      <div class="meta"><div class="nm">UgamCard</div><div class="nt">Base tile (plain / media / elev / tone)</div></div></div>
+    <div class="cell"><div class="stage"><div class="stat"><div class="n">36</div><div class="k">Seats</div></div></div>
+      <div class="meta"><div class="nm">UgamStatTile</div><div class="nt">Number + label</div></div></div>
+    <div class="cell full"><div class="stage"><div class="backdrop">SRT → AML</div></div>
+      <div class="meta"><div class="nm">UgamBusBackdrop</div><div class="nt">Decorative tour tile</div></div></div>
+    <div class="cell"><div class="stage"><div class="card" style="background:var(--elev)"><div class="t">Glass</div><div class="b">Elevated surface</div></div></div>
+      <div class="meta"><div class="nm">UgamGlassContainer</div><div class="nt">Raised inner surface</div></div></div>
+  </div>
+
+  <h2 class="grp">Actions &amp; inputs</h2>
+  <div class="grid">
+    <div class="cell full"><div class="stage"><div class="cta">Choose handler</div></div>
+      <div class="meta"><div class="nm">UgamCTA</div><div class="nt">Primary sticky pill</div></div></div>
+    <div class="cell full"><div class="stage"><div class="btns"><div class="btn pri">Primary</div><div class="btn ton">Tonal</div><div class="btn gho">Ghost</div><div class="btn dan">Danger</div></div></div>
+      <div class="meta"><div class="nm">UgamButton</div><div class="nt">6 kinds</div></div></div>
+    <div class="cell"><div class="stage"><div class="btns"><div class="circ sm">+</div><div class="circ">⌕</div><div class="circ lg accent">★</div></div></div>
+      <div class="meta"><div class="nm">UgamIconButton</div><div class="nt">38 / 42 / 44 circle</div></div></div>
+    <div class="cell full"><div class="stage"><div class="field"><div class="l">Phone</div><div class="input">9327148044</div></div></div>
+      <div class="meta"><div class="nm">UgamInput</div><div class="nt">Labeled text field</div></div></div>
+    <div class="cell full"><div class="stage"><div class="search">⌕ &nbsp;Search tours…</div></div>
+      <div class="meta"><div class="nm">UgamSearchField</div><div class="nt">Pill search</div></div></div>
+    <div class="cell full"><div class="stage"><div class="field"><div class="l">Handler</div><div class="picker">Pick a handler <span class="chev">›</span></div></div></div>
+      <div class="meta"><div class="nm">UgamPickerField</div><div class="nt">Labeled selector</div></div></div>
+    <div class="cell"><div class="stage"><div class="datepill">▣ 20 Jun</div></div>
+      <div class="meta"><div class="nm">UgamDatePill</div><div class="nt">Date chip</div></div></div>
+    <div class="cell full"><div class="stage"><div class="seg"><div class="on">System</div><div>Light</div><div>Dark</div></div></div>
+      <div class="meta"><div class="nm">UgamSelectorPills</div><div class="nt">Segmented control</div></div></div>
+    <div class="cell full"><div class="stage"><div class="tabs"><div class="on">New <span class="c">0</span></div><div>Wait <span class="c">0</span></div><div>Done <span class="c">1</span></div></div></div>
+      <div class="meta"><div class="nm">UgamTabPills</div><div class="nt">Tabs + counts</div></div></div>
+  </div>
+
+  <h2 class="grp">Domain</h2>
+  <div class="grid">
+    <div class="cell full"><div class="stage"><div class="seatgrid">
+      <div class="seat sel">SU1</div><div class="seat booked">SL1</div><div class="seat free">SU2</div><div class="seat free">SL2</div>
+      <div class="seat paid">DL1</div><div class="seat booked">DU1</div><div class="seat block">DL2</div><div class="seat free">DU2</div></div></div>
+      <div class="meta"><div class="nm">UgamSeatGrid</div><div class="nt">free / booked / selected / paid / blocked</div></div></div>
+    <div class="cell full"><div class="stage"><div class="legend">
+      <span class="lg"><i style="border:1.5px dashed var(--bd2)"></i>Empty</span>
+      <span class="lg"><i style="background:var(--elev)"></i>Booked</span>
+      <span class="lg"><i style="background:var(--accent)"></i>Selected</span>
+      <span class="lg"><i style="background:var(--good)"></i>Paid</span>
+      <span class="lg"><i style="background:var(--warm)"></i>Ladies</span></div></div>
+      <div class="meta"><div class="nm">UgamSeatChartLegend</div><div class="nt">State key</div></div></div>
+    <div class="cell full"><div class="stage"><div class="reqrow"><div class="av">Z</div><div><div class="nm">zeel</div><div class="s">test · 3 seats</div></div><span class="chip a chip">Review</span></div></div>
+      <div class="meta"><div class="nm">UgamRequestRow</div><div class="nt">Avatar + name + action</div></div></div>
+    <div class="cell"><div class="stage"><div class="routeh"><span class="a">Surat</span><span class="ar">→</span><span class="a">Amreli</span></div></div>
+      <div class="meta"><div class="nm">UgamRouteHeader</div><div class="nt">From → To</div></div></div>
+    <div class="cell"><div class="stage"><div class="dots">
+      <div class="sd"><i style="background:var(--accent)"></i>Planning</div>
+      <div class="sd"><i style="background:var(--warm)"></i>Collecting</div>
+      <div class="sd"><i style="background:var(--good)"></i>Locked</div></div></div>
+      <div class="meta"><div class="nm">UgamStatusDot</div><div class="nt">Dot + label tones</div></div></div>
+    <div class="cell full"><div class="stage"><div class="chips"><span class="chip a">accent</span><span class="chip g">paid</span><span class="chip w">ladies</span><span class="chip n">neutral</span></div></div>
+      <div class="meta"><div class="nm">UgamReqChip</div><div class="nt">4 variants</div></div></div>
+  </div>
+
+  <h2 class="grp">States</h2>
+  <div class="grid">
+    <div class="cell full"><div class="stage"><div class="empty"><div class="ic">◔</div><div class="t">No new requests</div><div class="b">They'll show here when passengers book.</div></div></div>
+      <div class="meta"><div class="nm">UgamEmpty</div><div class="nt">Icon + title + body + CTA</div></div></div>
+    <div class="cell full"><div class="stage"><div class="skel"><div class="sk big"></div><div class="sk w60"></div><div class="sk w40"></div></div></div>
+      <div class="meta"><div class="nm">UgamSkeleton</div><div class="nt">Loading shimmer</div></div></div>
+    <div class="cell full"><div class="stage"><div class="snack"><div class="i">✓</div><div class="m">Tour saved</div></div></div>
+      <div class="meta"><div class="nm">UgamSnackbar</div><div class="nt">Toast / feedback</div></div></div>
+  </div>
+
+</div>
+</body>
+</html>

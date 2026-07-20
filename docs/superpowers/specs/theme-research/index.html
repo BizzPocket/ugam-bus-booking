@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ugam — Fresh Theme Directions</title>
+<style>
+  body{margin:0;background:#070708;color:#fff;
+    font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
+  .wrap{max-width:1180px;margin:0 auto;padding:32px 20px 90px}
+  h1{font-size:30px;letter-spacing:-.5px;margin:0 0 6px}
+  .lead{color:#9b9ba6;max-width:820px;font-size:15px}
+  .eyebrow{color:#8aa0ff;font-size:12px;font-weight:700;letter-spacing:.7px;text-transform:uppercase}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:22px;margin-top:26px}
+  .pal{border-radius:18px;overflow:hidden;border:1px solid #222}
+  /* phone mock uses each palette's vars */
+  .mock{padding:20px 18px 22px;background:var(--bg)}
+  .mhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .mhead b{font-size:18px;color:var(--ink);letter-spacing:-.3px}
+  .dot{width:30px;height:30px;border-radius:999px;background:var(--accent)}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:15px;margin-bottom:12px}
+  .card .k{font-size:12px;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px}
+  .card .v{font-size:30px;font-weight:800;color:var(--accent);line-height:1.1;margin-top:2px}
+  .card .s{font-size:13px;color:var(--ink2);margin-top:4px}
+  .row{display:flex;gap:10px;margin-bottom:12px}
+  .tile{flex:1;background:var(--card);border:1px solid var(--bd);border-radius:14px;
+    padding:14px 10px;text-align:center}
+  .tile .n{font-size:20px;font-weight:800;color:var(--ink)}
+  .tile .l{font-size:11px;color:var(--ink3);margin-top:3px}
+  .btn{height:44px;border-radius:999px;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:14px;background:var(--accent);color:var(--onAccent)}
+  .chips{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .chip{font-size:12px;font-weight:600;border-radius:6px;padding:4px 9px}
+  .chip.g{background:var(--goodF);color:var(--good)}
+  .chip.w{background:var(--warmF);color:var(--warm)}
+  .chip.n{background:var(--cardElev);color:var(--ink2);border:1px solid var(--bd)}
+  .meta{background:#0e0e10;padding:16px 18px}
+  .meta h3{margin:0 0 4px;font-size:17px}
+  .meta p{margin:0 0 10px;color:#9b9ba6;font-size:13px}
+  .sw{display:flex;gap:6px;flex-wrap:wrap}
+  .sw i{width:46px;height:30px;border-radius:7px;border:1px solid #2a2a2a;position:relative}
+  .sw i b{position:absolute;left:0;right:0;bottom:-15px;font-size:9px;color:#777;text-align:center;font-weight:500}
+  .sw{margin-bottom:16px}
+  .name{font-size:11px;color:#7a7a85;margin-top:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Ugam · full theme rebuild — fresh directions</div>
+  <h1>Five fresh palettes (none derived from the current gold)</h1>
+  <p class="lead">A pilgrimage/travel app for a Gujarati community — it should feel modern, distinctive and
+  trustworthy, not templated. All are dark-first (your agents work outdoors) with a single confident accent,
+  success-green / attention-amber / danger kept distinct. Each mock below is rendered in its own palette so you
+  see it in context. Pick the one(s) you want to see live on the real app.</p>
+
+  <div class="grid">
+
+    <!-- A. Midnight Indigo -->
+    <div class="pal" style="
+      --bg:#0B0E18;--card:#151A2A;--cardElev:#1F2740;--bd:rgba(255,255,255,.09);
+      --ink:#EEF1FB;--ink2:#A2A9C4;--ink3:#686F8C;--accent:#7C93FF;--onAccent:#0B0E18;
+      --good:#3DDC97;--goodF:rgba(61,220,151,.16);--warm:#FFB454;--warmF:rgba(255,180,84,.16)">
+      <div class="mock">
+        <div class="mhead"><b>Ugam</b><div class="dot"></div></div>
+        <div class="card"><div class="k">This week · income</div><div class="v">₹42,500</div>
+          <div class="s">Surat → Amreli · 4/36 seats</div></div>
+        <div class="row"><div class="tile"><div class="n">1</div><div class="l">Active</div></div>
+          <div class="tile"><div class="n">0</div><div class="l">Today</div></div>
+          <div class="tile"><div class="n">3</div><div class="l">Waitlist</div></div></div>
+        <div class="btn">Choose handler</div>
+        <div class="chips"><span class="chip g">Paid</span><span class="chip w">Ladies</span><span class="chip n">Neutral</span></div>
+      </div>
+      <div class="meta">
+        <h3>A · Midnight Indigo</h3>
+        <p>Cool, premium, techy-fresh. Electric periwinkle on deep indigo-navy. Reads modern and calm.</p>
+        <div class="sw">
+          <i style="background:#0B0E18"><b>bg</b></i><i style="background:#151A2A"><b>card</b></i>
+          <i style="background:#1F2740"><b>elev</b></i><i style="background:#7C93FF"><b>accent</b></i>
+          <i style="background:#3DDC97"><b>good</b></i><i style="background:#FFB454"><b>warm</b></i>
+        </div>
+        <div class="name">#0B0E18 · #7C93FF accent</div>
+      </div>
+    </div>
+
+    <!-- B. Aurora Teal -->
+    <div class="pal" style="
+      --bg:#08130F;--card:#102019;--cardElev:#173026;--bd:rgba(255,255,255,.09);
+      --ink:#ECFBF5;--ink2:#99B3AA;--ink3:#5F786F;--accent:#2FE0C6;--onAccent:#04221C;
+      --good:#7CF0A6;--goodF:rgba(124,240,166,.15);--warm:#FFC24D;--warmF:rgba(255,194,77,.16)">
+      <div class="mock">
+        <div class="mhead"><b>Ugam</b><div class="dot"></div></div>
+        <div class="card"><div class="k">This week · income</div><div class="v">₹42,500</div>
+          <div class="s">Surat → Amreli · 4/36 seats</div></div>
+        <div class="row"><div class="tile"><div class="n">1</div><div class="l">Active</div></div>
+          <div class="tile"><div class="n">0</div><div class="l">Today</div></div>
+          <div class="tile"><div class="n">3</div><div class="l">Waitlist</div></div></div>
+        <div class="btn">Choose handler</div>
+        <div class="chips"><span class="chip g">Paid</span><span class="chip w">Ladies</span><span class="chip n">Neutral</span></div>
+      </div>
+      <div class="meta">
+        <h3>B · Aurora Teal</h3>
+        <p>Fresh, calm, "journey." Vivid teal/aqua on deep jade-black. Distinct from any travel-app cliché.</p>
+        <div class="sw">
+          <i style="background:#08130F"><b>bg</b></i><i style="background:#102019"><b>card</b></i>
+          <i style="background:#173026"><b>elev</b></i><i style="background:#2FE0C6"><b>accent</b></i>
+          <i style="background:#7CF0A6"><b>good</b></i><i style="background:#FFC24D"><b>warm</b></i>
+        </div>
+        <div class="name">#08130F · #2FE0C6 accent</div>
+      </div>
+    </div>
+
+    <!-- C. Royal Violet -->
+    <div class="pal" style="
+      --bg:#110A1C;--card:#1D1333;--cardElev:#281B45;--bd:rgba(255,255,255,.10);
+      --ink:#F3EEFB;--ink2:#B0A6C6;--ink3:#756B8C;--accent:#C18BFF;--onAccent:#15082A;
+      --good:#3DDC97;--goodF:rgba(61,220,151,.16);--warm:#FFB454;--warmF:rgba(255,180,84,.16)">
+      <div class="mock">
+        <div class="mhead"><b>Ugam</b><div class="dot"></div></div>
+        <div class="card"><div class="k">This week · income</div><div class="v">₹42,500</div>
+          <div class="s">Surat → Amreli · 4/36 seats</div></div>
+        <div class="row"><div class="tile"><div class="n">1</div><div class="l">Active</div></div>
+          <div class="tile"><div class="n">0</div><div class="l">Today</div></div>
+          <div class="tile"><div class="n">3</div><div class="l">Waitlist</div></div></div>
+        <div class="btn">Choose handler</div>
+        <div class="chips"><span class="chip g">Paid</span><span class="chip w">Ladies</span><span class="chip n">Neutral</span></div>
+      </div>
+      <div class="meta">
+        <h3>C · Royal Violet</h3>
+        <p>Bold, premium, devotional-regal. Soft violet on deep plum. Distinctive without being loud.</p>
+        <div class="sw">
+          <i style="background:#110A1C"><b>bg</b></i><i style="background:#1D1333"><b>card</b></i>
+          <i style="background:#281B45"><b>elev</b></i><i style="background:#C18BFF"><b>accent</b></i>
+          <i style="background:#3DDC97"><b>good</b></i><i style="background:#FFB454"><b>warm</b></i>
+        </div>
+        <div class="name">#110A1C · #C18BFF accent</div>
+      </div>
+    </div>
+
+    <!-- D. Cobalt Sky -->
+    <div class="pal" style="
+      --bg:#0A0F17;--card:#121A28;--cardElev:#1B2840;--bd:rgba(255,255,255,.09);
+      --ink:#EDF3FB;--ink2:#9DAAC2;--ink3:#65728C;--accent:#3D9BFF;--onAccent:#04121F;
+      --good:#3DDC97;--goodF:rgba(61,220,151,.16);--warm:#FFB454;--warmF:rgba(255,180,84,.16)">
+      <div class="mock">
+        <div class="mhead"><b>Ugam</b><div class="dot"></div></div>
+        <div class="card"><div class="k">This week · income</div><div class="v">₹42,500</div>
+          <div class="s">Surat → Amreli · 4/36 seats</div></div>
+        <div class="row"><div class="tile"><div class="n">1</div><div class="l">Active</div></div>
+          <div class="tile"><div class="n">0</div><div class="l">Today</div></div>
+          <div class="tile"><div class="n">3</div><div class="l">Waitlist</div></div></div>
+        <div class="btn">Choose handler</div>
+        <div class="chips"><span class="chip g">Paid</span><span class="chip w">Ladies</span><span class="chip n">Neutral</span></div>
+      </div>
+      <div class="meta">
+        <h3>D · Cobalt Sky</h3>
+        <p>Clean, trustworthy, modern-transit. Vivid sky-blue on deep navy. The most "neutral-safe" fresh option.</p>
+        <div class="sw">
+          <i style="background:#0A0F17"><b>bg</b></i><i style="background:#121A28"><b>card</b></i>
+          <i style="background:#1B2840"><b>elev</b></i><i style="background:#3D9BFF"><b>accent</b></i>
+          <i style="background:#3DDC97"><b>good</b></i><i style="background:#FFB454"><b>warm</b></i>
+        </div>
+        <div class="name">#0A0F17 · #3D9BFF accent</div>
+      </div>
+    </div>
+
+    <!-- E. Sunset Coral -->
+    <div class="pal" style="
+      --bg:#160C12;--card:#241420;--cardElev:#321C2C;--bd:rgba(255,255,255,.10);
+      --ink:#FBEEF2;--ink2:#C6A6B2;--ink3:#8C6B78;--accent:#FF6B81;--onAccent:#2A0710;
+      --good:#3DDC97;--goodF:rgba(61,220,151,.16);--warm:#FFC24D;--warmF:rgba(255,194,77,.16)">
+      <div class="mock">
+        <div class="mhead"><b>Ugam</b><div class="dot"></div></div>
+        <div class="card"><div class="k">This week · income</div><div class="v">₹42,500</div>
+          <div class="s">Surat → Amreli · 4/36 seats</div></div>
+        <div class="row"><div class="tile"><div class="n">1</div><div class="l">Active</div></div>
+          <div class="tile"><div class="n">0</div><div class="l">Today</div></div>
+          <div class="tile"><div class="n">3</div><div class="l">Waitlist</div></div></div>
+        <div class="btn">Choose handler</div>
+        <div class="chips"><span class="chip g">Paid</span><span class="chip w">Ladies</span><span class="chip n">Neutral</span></div>
+      </div>
+      <div class="meta">
+        <h3>E · Sunset Coral</h3>
+        <p>Warm + fresh (not gold). Coral-rose on deep mulberry — energetic, welcoming, devotional warmth reimagined.</p>
+        <div class="sw">
+          <i style="background:#160C12"><b>bg</b></i><i style="background:#241420"><b>card</b></i>
+          <i style="background:#321C2C"><b>elev</b></i><i style="background:#FF6B81"><b>accent</b></i>
+          <i style="background:#3DDC97"><b>good</b></i><i style="background:#FFC24D"><b>warm</b></i>
+        </div>
+        <div class="name">#160C12 · #FF6B81 accent</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

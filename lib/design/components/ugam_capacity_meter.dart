@@ -52,6 +52,24 @@ class UgamCapacityMeter extends StatelessWidget {
         density: UgamMeterDensity.tour,
       );
 
+  /// Tour-wide meter from raw leg counts — used when the occupancy comes from
+  /// ACTUAL assignments ([computeActualCapacity]) rather than the engine plan,
+  /// so the "seats placed" headline matches the grid. Same two-leg rendering as
+  /// [UgamCapacityMeter.tour].
+  factory UgamCapacityMeter.tourCounts({
+    required int capacity,
+    required int goOccupied,
+    required int retOccupied,
+    Key? key,
+  }) =>
+      UgamCapacityMeter._(
+        key: key,
+        capacity: capacity,
+        goOccupied: goOccupied,
+        retOccupied: retOccupied,
+        density: UgamMeterDensity.tour,
+      );
+
   /// Dashboard-hero meter — same data, tighter type.
   factory UgamCapacityMeter.hero(TourCapacity cap, {Key? key}) =>
       UgamCapacityMeter._(

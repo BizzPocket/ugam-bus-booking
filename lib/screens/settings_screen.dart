@@ -8,8 +8,11 @@ import '../controllers/auth_controller.dart';
 import '../controllers/finance_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../design/ugam.dart';
-import '../routes/app_routes.dart';
 import '../widgets/language_picker_sheet.dart';
+import 'account_details_screen.dart';
+import 'finance_screen.dart';
+import 'notifications_settings_screen.dart';
+import 'pickup_locations_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -89,8 +92,11 @@ class SettingsScreen extends StatelessWidget {
                             iconTone: UgamStatVariant.neutral,
                             title: tr('settings.account_details_title'),
                             subtitle: tr('settings.account_details_subtitle'),
-                            onTap: () =>
-                                Get.toNamed(AppRoutes.accountDetails),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const AccountDetailsScreen(),
+                              ),
+                            ),
                           ),
                           _Divider(c: c),
                           _SettingsRow(
@@ -99,8 +105,12 @@ class SettingsScreen extends StatelessWidget {
                             iconTone: UgamStatVariant.neutral,
                             title: tr('settings.notifications_title'),
                             subtitle: tr('settings.notifications_subtitle'),
-                            onTap: () =>
-                                Get.toNamed(AppRoutes.notificationsSettings),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    const NotificationsSettingsScreen(),
+                              ),
+                            ),
                           ),
                           _Divider(c: c),
                           _SettingsRow(
@@ -109,8 +119,11 @@ class SettingsScreen extends StatelessWidget {
                             iconTone: UgamStatVariant.neutral,
                             title: tr('pickup.settings_title'),
                             subtitle: tr('pickup.settings_subtitle'),
-                            onTap: () =>
-                                Get.toNamed(AppRoutes.pickupLocations),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const PickupLocationsScreen(),
+                              ),
+                            ),
                           ),
                           _Divider(c: c),
                           _SettingsRow(
@@ -224,7 +237,9 @@ class _FinanceCardState extends State<_FinanceCard> {
 
       return UgamCard.plain(
         elev: true,
-        onTap: () => Get.toNamed(AppRoutes.finance),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const FinanceScreen()),
+        ),
         padding: const EdgeInsets.all(UgamSpacing.lg),
         child: Row(
           children: [
@@ -293,8 +308,8 @@ class _ProfileHero extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 60,
-            height: 60,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
             alignment: Alignment.center,
             child: Obx(

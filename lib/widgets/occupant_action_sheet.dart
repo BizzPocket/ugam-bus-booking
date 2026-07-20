@@ -72,6 +72,11 @@ class OccupantActionSheet extends StatefulWidget {
   /// return leg.
   final void Function(Passenger occupant)? onCancelReturn;
 
+  /// Opens the seat's Hold/Premium flag sheet for THIS seat (not the occupant).
+  /// Offered as an action row when set (action mode) — the tap-menu home for
+  /// seat flags now that the standalone "edit seats" mode is gone.
+  final VoidCallback? onSeatFlags;
+
   const OccupantActionSheet({
     super.key,
     required this.occupants,
@@ -85,6 +90,7 @@ class OccupantActionSheet extends StatefulWidget {
     this.onSwapIn,
     this.onRelocateToBus,
     this.onCancelReturn,
+    this.onSeatFlags,
   });
 
   static Future<void> show(
@@ -105,6 +111,7 @@ class OccupantActionSheet extends StatefulWidget {
       String fromSeatId,
     )? onRelocateToBus,
     void Function(Passenger occupant)? onCancelReturn,
+    VoidCallback? onSeatFlags,
   }) {
     if (occupants.isEmpty) return Future.value();
     // Root-navigator presentation (escaping the shell's nested tab Navigator so
@@ -125,6 +132,7 @@ class OccupantActionSheet extends StatefulWidget {
         onSwapIn: onSwapIn,
         onRelocateToBus: onRelocateToBus,
         onCancelReturn: onCancelReturn,
+        onSeatFlags: onSeatFlags,
       ),
     );
   }
@@ -394,6 +402,20 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
               accent: handlerOfThisBus,
               onTap: _toggleHandler,
             ),
+
+            // Seat-level flags (Hold / Premium) for THIS seat — the tap-menu
+            // home for what the removed "edit seats" mode used to do. The caller
+            // owns the flag sheet; we just hand control to it.
+            if (widget.onSeatFlags != null)
+              _ActionRow(
+                icon: Icons.tune_rounded,
+                label: tr('occupant_sheet.seat_flags'),
+                c: c,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  widget.onSeatFlags!();
+                },
+              ),
 
             _ActionRow(
               icon: Icons.person_remove_rounded,

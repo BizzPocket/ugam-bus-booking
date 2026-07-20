@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../components/bus_message_composer_field.dart';
 import '../components/combined_seat_grid.dart';
+import '../components/pickup_grouped_list.dart';
 import '../components/seat_chart_tile.dart';
 import '../design/group_color.dart';
 import '../design/price_band_color.dart';
@@ -24,11 +25,11 @@ import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/pickup_grouping.dart';
 import '../utils/seat_money_state.dart';
 import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
 import 'fullscreen_chart_screen.dart';
-
 
 /// The ways the handler reads the chart: the visual seat [grid], the
 /// call-first [list] (a roster of full name + mobile per seat), or the
@@ -621,8 +622,10 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     // EVERY rider per seat (a Double Sofa can seat up to four across GO+RET),
     // so the full-screen chart shows the same complete roster the inline grid
     // and its occupant sheet now show — not just one holder per leg.
-    final occupantsForFullscreen =
-        occupantListForBus(_manifest!.passengers, bus.id);
+    final occupantsForFullscreen = occupantListForBus(
+      _manifest!.passengers,
+      bus.id,
+    );
     FullscreenChartScreen.open(
       context,
       layout: layout,
@@ -688,7 +691,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     if (_error != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(UgamSpacing.huge),
+          padding: const EdgeInsets.all(UgamSpacing.lg),
           child: UgamEmpty(
             icon: Icons.cloud_off_rounded,
             title: tr('handler_chart.error_load_title'),
@@ -701,7 +704,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     if (manifest == null || manifest.buses.isEmpty) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(UgamSpacing.huge),
+          padding: const EdgeInsets.all(UgamSpacing.lg),
           child: UgamEmpty(
             icon: Icons.event_seat_outlined,
             title: tr('handler_chart.no_bus_chart_title'),
@@ -967,12 +970,14 @@ class _SeatGrid extends StatelessWidget {
   /// outstanding state wins — so a shared sofa with only one person's cash
   /// entered stays red instead of looking settled.
   SeatMoneyState _seatMoneyState(List<Passenger> occupants, String seatId) =>
-      seatMoneyStateOf(occupants.map(
-        (p) => riderMoneyStateOf(
-          bus.amountDueForSeat(p, seatId),
-          collectionFor(p.id, seatId),
+      seatMoneyStateOf(
+        occupants.map(
+          (p) => riderMoneyStateOf(
+            bus.amountDueForSeat(p, seatId),
+            collectionFor(p.id, seatId),
+          ),
         ),
-      ));
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -980,7 +985,7 @@ class _SeatGrid extends StatelessWidget {
     final layout = bus.layout;
     if (layout == null || layout.totalCells == 0) {
       return Container(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
         alignment: Alignment.center,
         child: Text(
           tr('handler_chart.no_seat_layout'),
@@ -1056,6 +1061,42 @@ class _Dot extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+// ─── Call button ───────────────────────────────────────────────────────
+
+/// The round tap-to-call button shared by the roster row, the shared-seat
+/// chooser, and the attendance list. Dials [phone] via the platform dialer.
+class _CallButton extends StatelessWidget {
+  final String phone;
+  final UgamColorSet c;
+
+  const _CallButton({required this.phone, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: tr('handler_chart.call_semantic', namedArgs: {'phone': phone}),
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          PhoneDialer.call(phone);
+        },
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: c.accentFill,
+            shape: BoxShape.circle,
+          ),
+          alignment: Alignment.center,
+          child: Icon(Icons.call_rounded, size: 17, color: c.accent),
+        ),
+      ),
     );
   }
 }
@@ -1214,7 +1255,7 @@ class _SeatRoster extends StatelessWidget {
     final layout = bus.layout;
     if (layout == null || layout.totalCells == 0) {
       return Container(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
         alignment: Alignment.center,
         child: Text(
           tr('handler_chart.no_seat_layout'),
@@ -1224,32 +1265,24 @@ class _SeatRoster extends StatelessWidget {
       );
     }
 
-    // Walk every seat cell in placement order; emit a row per distinct
-    // occupant. `grid` is the flat seat list (only [hasSeat] cells stored).
-    final rows = <Widget>[];
+    // Walk every seat cell in placement order; emit an entry per distinct
+    // occupant, then group the roster by pickup location. Seat order is
+    // preserved WITHIN each pickup group. `grid` is the flat seat list (only
+    // [hasSeat] cells stored).
+    final entries = <({String seatId, Passenger passenger})>[];
     for (final cell in layout.grid) {
       final seatId = cell.seatId;
       if (seatId == null) continue;
       final occupants = fullOccupantsBySeat[seatId] ?? const <Passenger>[];
       if (occupants.isEmpty) continue;
       for (final p in occupants) {
-        rows.add(
-          _RosterRow(
-            seatId: seatId,
-            passenger: p,
-            money: _moneyState(p, seatId),
-            // A roster row is one specific rider — go straight to their sheet
-            // (single-element list skips the chooser).
-            onTap: () => onTapSeat(seatId, <Passenger>[p]),
-            c: c,
-          ),
-        );
+        entries.add((seatId: seatId, passenger: p));
       }
     }
 
-    if (rows.isEmpty) {
+    if (entries.isEmpty) {
       return Container(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
         alignment: Alignment.center,
         child: Text(
           tr(
@@ -1262,9 +1295,23 @@ class _SeatRoster extends StatelessWidget {
       );
     }
 
-    return UgamCard.plain(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
-      child: Column(children: rows),
+    return PickupGroupedList<({String seatId, Passenger passenger})>(
+      groups: groupByPickup<({String seatId, Passenger passenger})>(
+        entries,
+        idOf: (e) => e.passenger.pickupLocationId,
+        nameOf: (e) => e.passenger.pickupLocationName,
+      ),
+      rowBuilder: (e) => _RosterRow(
+        seatId: e.seatId,
+        passenger: e.passenger,
+        money: _moneyState(e.passenger, e.seatId),
+        // A roster row is one specific rider — go straight to their sheet
+        // (single-element list skips the chooser).
+        onTap: () => onTapSeat(e.seatId, <Passenger>[e.passenger]),
+        c: c,
+      ),
+      unassignedLabel: tr('handler_chart.pickup_none'),
+      c: c,
     );
   }
 }
@@ -1386,30 +1433,7 @@ class _RosterRow extends StatelessWidget {
             // Tap-to-call.
             if (hasPhone) ...[
               const SizedBox(width: UgamSpacing.sm),
-              Semantics(
-                button: true,
-                label: tr(
-                  'handler_chart.call_semantic',
-                  namedArgs: {'phone': p.phone},
-                ),
-                child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    PhoneDialer.call(p.phone);
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: c.accentFill,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(Icons.call_rounded, size: 17, color: c.accent),
-                  ),
-                ),
-              ),
+              _CallButton(phone: p.phone, c: c),
             ],
           ],
         ),
@@ -1522,9 +1546,8 @@ class _OccupantChooserSheetState extends State<_OccupantChooserSheet> {
               UgamTabItem(label: tr('handler_chart.att_leg_ret')),
             ],
             currentIndex: _leg == CollectLeg.go ? 0 : 1,
-            onChanged: (i) => setState(
-              () => _leg = i == 0 ? CollectLeg.go : CollectLeg.ret,
-            ),
+            onChanged: (i) =>
+                setState(() => _leg = i == 0 ? CollectLeg.go : CollectLeg.ret),
           ),
         ],
         const SizedBox(height: UgamSpacing.md),
@@ -1613,30 +1636,7 @@ class _LegSharedTile extends StatelessWidget {
             ),
             if (hasPhone) ...[
               const SizedBox(width: UgamSpacing.sm),
-              Semantics(
-                button: true,
-                label: tr(
-                  'handler_chart.call_semantic',
-                  namedArgs: {'phone': p.phone},
-                ),
-                child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    PhoneDialer.call(p.phone);
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: c.accentFill,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(Icons.call_rounded, size: 17, color: c.accent),
-                  ),
-                ),
-              ),
+              _CallButton(phone: p.phone, c: c),
             ],
             const SizedBox(width: 6),
             Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
@@ -2084,7 +2084,9 @@ class _CollectSheetState extends State<_CollectSheet> {
                             ),
                             decoration: BoxDecoration(
                               color: c.warmFill,
-                              borderRadius: BorderRadius.circular(UgamRadius.chip),
+                              borderRadius: BorderRadius.circular(
+                                UgamRadius.chip,
+                              ),
                             ),
                             child: Text(
                               tr('handler_chart.handler_badge'),
@@ -3263,7 +3265,7 @@ class _AttendanceView extends StatelessWidget {
         const SizedBox(height: UgamSpacing.lg),
         if (rows.isEmpty)
           Container(
-            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
             alignment: Alignment.center,
             child: Text(
               tr('handler_chart.att_none'),
@@ -3279,21 +3281,22 @@ class _AttendanceView extends StatelessWidget {
             duration: UgamMotion.sheet,
             switchInCurve: UgamMotion.easeOut,
             switchOutCurve: UgamMotion.easeOut,
-            child: UgamCard.plain(
+            child: PickupGroupedList<_AttendanceEntry>(
               key: ValueKey<AttendanceLeg>(leg),
-              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
-              child: Column(
-                children: [
-                  for (final r in rows)
-                    _AttendanceRow(
-                      bus: bus,
-                      passenger: r.passenger,
-                      present: r.present,
-                      onChanged: (v) => onTogglePresent(r.passenger, v),
-                      c: c,
-                    ),
-                ],
+              groups: groupByPickup<_AttendanceEntry>(
+                rows,
+                idOf: (e) => e.passenger.pickupLocationId,
+                nameOf: (e) => e.passenger.pickupLocationName,
               ),
+              rowBuilder: (e) => _AttendanceRow(
+                bus: bus,
+                passenger: e.passenger,
+                present: e.present,
+                onChanged: (v) => onTogglePresent(e.passenger, v),
+                c: c,
+              ),
+              unassignedLabel: tr('handler_chart.pickup_none'),
+              c: c,
             ),
           ),
       ],
@@ -3396,6 +3399,11 @@ class _AttendanceRow extends StatelessWidget {
               ],
             ),
           ),
+          // Tap-to-call — reach a no-show straight from the attendance list.
+          if (hasPhone) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            _CallButton(phone: p.phone, c: c),
+          ],
           // Present / left-behind toggle.
           const SizedBox(width: UgamSpacing.sm),
           Semantics(

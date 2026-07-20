@@ -91,9 +91,9 @@ class DashboardScreen extends StatelessWidget {
                       initials: authCtrl.initials,
                       c: c,
                     )),
-                const SizedBox(height: UgamSpacing.xl),
+                const SizedBox(height: UgamSpacing.md),
                 DashboardTripHero(c: c),
-                const SizedBox(height: UgamSpacing.xl),
+                const SizedBox(height: UgamSpacing.md),
                 DashboardQuickActions(c: c, shell: shell),
                 // Unread WhatsApp messages nudge — only when there's something
                 // to read; the always-present entry point is the home-header
@@ -103,11 +103,11 @@ class DashboardScreen extends StatelessWidget {
                   final unread = Get.find<InboxController>().totalUnread.value;
                   if (unread <= 0) return const SizedBox.shrink();
                   return Padding(
-                    padding: const EdgeInsets.only(top: UgamSpacing.xl),
+                    padding: const EdgeInsets.only(top: UgamSpacing.md),
                     child: _MessagesCard(count: unread, c: c),
                   );
                 }),
-                const SizedBox(height: UgamSpacing.xl),
+                const SizedBox(height: UgamSpacing.md),
                 Obx(() {
                   final attention = _needsAttention(context, tourCtrl.tours);
                   if (attention.isEmpty) {
@@ -147,7 +147,7 @@ class DashboardScreen extends StatelessWidget {
                   final recent = _recentRequests(tourCtrl.tours);
                   if (recent.isEmpty) return const SizedBox.shrink();
                   return Padding(
-                    padding: const EdgeInsets.only(top: UgamSpacing.xl),
+                    padding: const EdgeInsets.only(top: UgamSpacing.md),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,

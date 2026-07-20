@@ -1013,7 +1013,7 @@ class _PassengersTab extends StatelessWidget {
     if (all.isEmpty) {
       return SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.only(top: UgamSpacing.huge),
+          padding: const EdgeInsets.only(top: UgamSpacing.lg),
           child: _PassengersEmptyState(tour: tour),
         ),
       );
@@ -1418,7 +1418,7 @@ class _BusesTab extends StatelessWidget {
     if (tour.buses.isEmpty) {
       return SliverToBoxAdapter(
         child: Padding(
-          padding: const EdgeInsets.only(top: UgamSpacing.huge),
+          padding: const EdgeInsets.only(top: UgamSpacing.lg),
           child: UgamEmpty(
             icon: Icons.directions_bus_outlined,
             title: tr('tour_detail.no_buses_title'),
@@ -1486,8 +1486,8 @@ class _BusListItem extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(UgamRadius.photo),
               child: SizedBox(
-                width: 84,
-                height: 84,
+                width: 64,
+                height: 64,
                 child: UgamBusBackdrop(seed: '${bus.id}-bus'),
               ),
             ),

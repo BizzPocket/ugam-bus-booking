@@ -9,7 +9,7 @@ import '../controllers/pickup_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../controllers/user_controller.dart';
 import '../design/components/ugam_capacity_meter.dart';
-import '../design/group_color.dart' show kOneWayTint, kReturnTint;
+import '../design/components/ugam_free_by_type.dart';
 import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/passenger_group.dart';
@@ -943,7 +943,7 @@ class _CapacityBannerState extends State<_CapacityBanner> {
                       // Colour key for the leg badges — shown only when some type
                       // actually has a going-/returning-only opening, so the
                       // common round-trip case stays uncluttered.
-                      if (anyOneWay) const _LegCaption(),
+                      if (anyOneWay) const UgamLegCaption(),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -953,7 +953,7 @@ class _CapacityBannerState extends State<_CapacityBanner> {
                     alignment: WrapAlignment.start,
                     children: [
                       for (final (label, free) in typeFree)
-                        _TypeFreePill(c: c, label: label, free: free),
+                        UgamTypeFreePill(c: c, label: label, free: free),
                     ],
                   ),
                 ],
@@ -962,139 +962,6 @@ class _CapacityBannerState extends State<_CapacityBanner> {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// One "Single Sofa · 2" free-seat pill in the capacity banner's by-type row.
-/// The primary number is the ROUND-TRIP-free count (green when seats remain,
-/// muted when none); a going-only or return-only surplus rides alongside it as a
-/// cyan / violet leg badge with a directional arrow, so the agent sees at a
-/// glance which legs each open seat can still take.
-class _TypeFreePill extends StatelessWidget {
-  final UgamColorSet c;
-  final String label;
-  final SeatTypeFree free;
-  const _TypeFreePill({
-    required this.c,
-    required this.label,
-    required this.free,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final roundTone = free.round > 0 ? c.good : c.ink3;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
-          ),
-          const SizedBox(width: 5),
-          // Round-trip-free — the seats sellable as a fresh both-legs booking.
-          Text(
-            '${free.round}',
-            style: UgamText.tabular(
-              UgamText.micro.copyWith(
-                color: roundTone,
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-              ),
-            ),
-          ),
-          // Going-only surplus (a return rider holds the seat coming back): a
-          // GO-cyan badge with a forward arrow → an outbound-only rider fits.
-          if (free.goOnly > 0)
-            _LegBadge(
-              tint: kOneWayTint,
-              icon: Icons.arrow_forward_rounded,
-              count: free.goOnly,
-            ),
-          // Return-only surplus (an outbound rider holds it going): a RET-violet
-          // badge with a back arrow ← a return-only rider fits.
-          if (free.retOnly > 0)
-            _LegBadge(
-              tint: kReturnTint,
-              icon: Icons.arrow_back_rounded,
-              count: free.retOnly,
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A small leg-tinted "→ 2" badge inside a [_TypeFreePill]: the arrow gives the
-/// direction (forward = going, back = returning), the colour reinforces it (GO
-/// cyan / RET violet — the same tints the seat chart uses for one-way seats).
-class _LegBadge extends StatelessWidget {
-  final Color tint;
-  final IconData icon;
-  final int count;
-  const _LegBadge({required this.tint, required this.icon, required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 5),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 10, color: tint),
-          const SizedBox(width: 1),
-          Text(
-            '$count',
-            style: UgamText.tabular(
-              UgamText.micro.copyWith(
-                color: tint,
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Colour key for the by-type leg badges: a cyan "Go only" swatch + a violet
-/// "Return only" swatch, reusing the shared seat-legend wording. Rendered only
-/// when some type has a one-way-only opening, so it never clutters the common
-/// round-trip case. Uses the same GO-cyan / RET-violet tints as the seat chart.
-class _LegCaption extends StatelessWidget {
-  const _LegCaption();
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    Widget key(Color tint, String label) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 7,
-              height: 7,
-              decoration: BoxDecoration(color: tint, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 3),
-            Text(label,
-                style: UgamText.micro.copyWith(color: c.ink3, fontSize: 9)),
-          ],
-        );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        key(kOneWayTint, tr('seat_legend.go')),
-        const SizedBox(width: 8),
-        key(kReturnTint, tr('seat_legend.ret')),
-      ],
     );
   }
 }

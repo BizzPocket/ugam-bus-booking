@@ -38,7 +38,7 @@ class CustomerMoreScreen extends StatelessWidget {
                   UgamSpacing.gutter,
                   UgamSpacing.sm,
                   UgamSpacing.gutter,
-                  UgamSpacing.huge2,
+                  UgamSpacing.lg,
                 ),
                 children: [
                   _BrandHero(c: c),

@@ -5,8 +5,8 @@ import 'package:get/get.dart';
 import '../controllers/finance_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour_finance.dart';
-import '../routes/app_routes.dart';
 import '../utils/formatters.dart';
+import 'tour_money_board_screen.dart';
 
 /// FINANCE — the cross-tour Profit & Loss report.
 ///
@@ -43,7 +43,11 @@ class _FinanceScreenState extends State<FinanceScreen> {
   }
 
   void _openTour(TourFinance tf) {
-    Get.toNamed(AppRoutes.tourMoney, arguments: {'tourId': tf.tourId});
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TourMoneyBoardScreen(tourId: tf.tourId),
+      ),
+    );
   }
 
   @override
@@ -565,7 +569,7 @@ class _Empty extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
       child: UgamEmpty(
         icon: Icons.insights_rounded,
         title: tr('finance.empty_title'),

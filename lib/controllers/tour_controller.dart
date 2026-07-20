@@ -391,9 +391,11 @@ class TourController extends GetxController {
       // smartFetch now retries transient failures (timeouts, dropped sockets,
       // 5xx) with exponential backoff internally, so the old bespoke cold-start
       // retry loop is gone — a launch-time blip is absorbed in the sync layer
-      // before we ever see lastReadFailed here. We still branch on that flag
-      // below to keep an already-loaded list rather than blanking it.
-      final data = await _sync.smartFetch(
+      // before we ever see a failure here. The failure flag is per-call (part of
+      // the returned record, not a shared field on SyncService), so a concurrent
+      // read that fails — e.g. the cold-start `customer_memory` load hitting a
+      // missing table — can never mark THIS tours load as failed.
+      final result = await _sync.smartFetch(
         table: 'tours',
         cacheKey: _tourCacheKey,
         filters: _tourFilters,
@@ -405,7 +407,7 @@ class TourController extends GetxController {
       // (still) failed, don't let the empty result blank an already-loaded
       // list — keep what we have and warn, or raise the hard error only when we
       // genuinely have nothing to show after the retries.
-      if (_sync.lastReadFailed) {
+      if (result.failed) {
         if (tours.isEmpty) {
           hasError.value = true;
           errorMessage.value = tr('errors.load_tours');
@@ -416,7 +418,7 @@ class TourController extends GetxController {
         return;
       }
 
-      final loaded = data.map((item) => Tour.fromMap(item)).toList();
+      final loaded = result.rows.map((item) => Tour.fromMap(item)).toList();
 
       // Preserve local tours that have a pending insert op — they exist
       // locally but the server fetch may have raced ahead of the write
@@ -841,14 +843,16 @@ class TourController extends GetxController {
     final cached = _seatSnapshots[tourId];
     if (cached != null) return cached;
 
-    final rows = await _sync.smartFetch(
+    final result = await _sync.smartFetch(
       table: 'tour_seat_snapshots',
       cacheKey: 'seat_snapshots_$tourId',
       filters: {'tour_id': tourId},
       orderBy: 'captured_at',
       maxAge: 120000,
     );
-    final snapshots = rows.map(TourSeatSnapshot.fromMap).toList();
+    // History is best-effort: a failed/missing-table read degrades to the live
+    // chart fallback, so we just take whatever rows came back.
+    final snapshots = result.rows.map(TourSeatSnapshot.fromMap).toList();
     _seatSnapshots[tourId] = snapshots;
     return snapshots;
   }

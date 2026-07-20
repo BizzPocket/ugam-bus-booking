@@ -64,7 +64,7 @@ class DashboardGreeting extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 displayName,
-                style: UgamText.titleXl.copyWith(color: c.ink, fontSize: 26),
+                style: UgamText.titleL.copyWith(color: c.ink),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),

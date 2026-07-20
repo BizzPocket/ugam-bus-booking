@@ -277,7 +277,7 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
     );
     return inline
         ? Padding(
-            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
             child: empty,
           )
         : empty;

@@ -1,8 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'design/theme.dart';
 import 'design/tokens.dart';
+import 'design/ui_scale.dart';
 import 'routes/app_routes.dart';
 import 'controllers/tour_controller.dart';
 import 'controllers/money_controller.dart';
@@ -44,6 +46,46 @@ class MyApp extends StatelessWidget {
         initialBinding: AppBinding(),
         defaultTransition: Transition.fadeIn,
         transitionDuration: UgamMotion.route,
+        // App-wide, theme-aware system chrome. This is the ONE place the OS
+        // status/navigation bars are styled — the builder sits under the
+        // MaterialApp's resolved Theme, so `Theme.of` gives the live brightness
+        // and this re-runs on every theme toggle AND "System" brightness flip.
+        // Every screen (admin + customer + pushed) inherits it because none of
+        // them use a Material AppBar to set their own overlay.
+        builder: (context, child) {
+          final c = UgamColors.of(context);
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          // App-wide responsive text scaling. One override here scales every
+          // label/title/number on every screen (admin + customer + pushed) with
+          // the device — smaller phones shrink toward the tuned baseline instead
+          // of reading oversized. The user's accessibility font preference is
+          // honoured but capped at 1.3× so large settings can't overflow layouts.
+          final mq = MediaQuery.of(context);
+          final ui = UgamScale.of(context);
+          final userFactor = mq.textScaler.scale(1.0).clamp(0.9, 1.3);
+          final overlay = SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            // Icons must contrast the ground: light glyphs on the dark theme,
+            // dark glyphs on the light theme. (This is the exact bug the old
+            // hardcoded `SystemUiOverlayStyle.dark` got backwards.)
+            statusBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
+            statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
+            systemNavigationBarColor: c.bg,
+            systemNavigationBarIconBrightness:
+                isDark ? Brightness.light : Brightness.dark,
+            systemNavigationBarDividerColor: Colors.transparent,
+          );
+          return MediaQuery(
+            data: mq.copyWith(
+              textScaler: TextScaler.linear(userFactor * ui),
+            ),
+            child: AnnotatedRegion<SystemUiOverlayStyle>(
+              value: overlay,
+              child: child ?? const SizedBox.shrink(),
+            ),
+          );
+        },
       );
     });
   }

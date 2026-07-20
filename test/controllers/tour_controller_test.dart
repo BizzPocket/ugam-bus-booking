@@ -10,6 +10,7 @@ import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/models/tour_status.dart';
+import 'package:occubusbooking/controllers/auth_controller.dart';
 import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/services/sync_service.dart';
 
@@ -460,4 +461,89 @@ void main() {
     }
     expect(sent.toSet(), seatedIds);
   });
+
+  // ── Cold-start read-failure isolation (the "Retry every launch" bug) ────────
+  // Root cause: read-failure used to live in a SINGLE shared field on the
+  // SyncService singleton. At cold start the `tours` and `customer_memory` reads
+  // run concurrently; a fast `customer_memory` PGRST205 (missing table) flipped
+  // the shared flag, and the tours load — which had actually SUCCEEDED — read the
+  // corrupted flag and blanked to the error/Retry screen. smartFetch now returns
+  // the failure per-call, so one read's outcome can never bleed into another's.
+
+  test('a failing customer_memory read does NOT blank a successful tours load',
+      () async {
+    final sync = _ScriptedSync((table) => table == 'tours'
+        ? (rows: [_tourWith(const []).toMap()], failed: false)
+        // customer_memory table missing (PGRST205) → this read fails...
+        : (rows: const <Map<String, dynamic>>[], failed: true));
+    Get.put<SyncService>(sync);
+    Get.put<AuthController>(_NoInitAuth());
+    final ctrl = TourController();
+
+    // Mimic the cold-start interleave: the customer_memory read fails alongside
+    // the tours load. The tours load must key off ITS OWN result, not a shared
+    // flag the customer_memory failure could have tripped.
+    await Future.wait([
+      ctrl.refreshTours(),
+      sync.smartFetch(table: 'customer_memory', cacheKey: 'm'),
+    ]);
+
+    expect(ctrl.hasError.value, isFalse,
+        reason: 'a sibling read failing must not error the tours load');
+    expect(ctrl.tours.map((t) => t.id), ['t1']);
+  });
+
+  test('tours load surfaces the error only when ITS OWN read failed', () async {
+    final sync = _ScriptedSync(
+      (_) => (rows: const <Map<String, dynamic>>[], failed: true),
+    );
+    Get.put<SyncService>(sync);
+    Get.put<AuthController>(_NoInitAuth());
+    final ctrl = TourController();
+
+    await ctrl.refreshTours();
+
+    expect(ctrl.hasError.value, isTrue);
+    expect(ctrl.tours, isEmpty);
+  });
+}
+
+/// SyncService whose reads are scripted by table name so a test can make one
+/// table fail while another succeeds. [onInit] is a no-op so it doesn't start
+/// the real connectivity listener.
+class _ScriptedSync extends SyncService {
+  _ScriptedSync(this._resultFor);
+
+  final ({List<Map<String, dynamic>> rows, bool failed}) Function(String table)
+      _resultFor;
+
+  @override
+  // ignore: must_call_super
+  void onInit() {}
+
+  @override
+  Future<({List<Map<String, dynamic>> rows, bool failed})> smartFetch({
+    required String table,
+    required String cacheKey,
+    String? select,
+    Map<String, String>? filters,
+    String? orderBy,
+    int maxAge = 300000,
+  }) async {
+    // Yield to the event loop so concurrent reads genuinely interleave.
+    await Future<void>.delayed(Duration.zero);
+    return _resultFor(table);
+  }
+
+  @override
+  Future<void> invalidateCache(String key) async {}
+}
+
+/// AuthController with a no-op [onInit] (skips the SharedPreferences/Supabase
+/// session restore) that stays in the default customer scope — so TourController
+/// takes the anonymous, non-admin tour path (no owner filter, no archive sweep).
+class _NoInitAuth extends AuthController {
+  @override
+  // ignore: must_call_super
+  void onInit() {}
 }

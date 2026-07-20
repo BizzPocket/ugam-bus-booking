@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/passenger.dart';
 import 'package:occubusbooking/models/request_line.dart';
+import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
@@ -41,6 +42,23 @@ Passenger _p(String id,
     );
 
 RequestLine _line(SeatType t, int qty) => RequestLine(seatType: t, qty: qty);
+
+// A passenger who has been ASSIGNED real seats — the persisted state the seat
+// GRID reads. [computeActualCapacity] must count these, NOT the engine's
+// would-fill plan.
+Passenger _pSeated(String id,
+        {required List<RequestLine> lines,
+        required List<SeatAssignment> seats,
+        TripType trip = TripType.roundTrip}) =>
+    Passenger(
+      id: id,
+      tourId: 't1',
+      name: id,
+      phone: '+910000000000',
+      requestLines: lines.map((l) => l.copyWith(leg: trip)).toList(),
+      assignedSeats: seats,
+      tripType: trip,
+    );
 
 // A passenger whose travelled leg is finished: completeOutboundLeg() clears
 // their seats and flags journeyDone. Their request lines stay on record.
@@ -336,6 +354,180 @@ void main() {
       expect(d.round, 0, reason: 'a return rider holds a berth — no round pair');
       expect(d.goOnly, 1, reason: 'both berths are empty going → go-only pair fits');
       expect(d.retOnly, 0);
+    });
+  });
+
+  group('computeActualCapacity — reflects real assignedSeats, not the plan', () {
+    test('unassigned demand reads FULL in the plan but EMPTY in actual (the bug)',
+        () {
+      // The reported bug: two riders REQUEST the only two berths but neither is
+      // actually seated yet. The engine plan fills them → the overview said
+      // "ભરાઈ ગઈ / full"; the grid (real seats) is empty. Actual capacity must
+      // report the bus as genuinely empty so the two can never disagree.
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ], [
+        _p('A', lines: [_line(SeatType.singleSofa, 1)]),
+        _p('B', lines: [_line(SeatType.singleSofa, 1)]),
+      ]);
+
+      // Engine plan: both placeable → the OLD overview read the bus FULL.
+      expect(computeTourCapacity(tour).byBus['b1']!.free, 0);
+
+      // Actual seats: nobody is assigned → the bus is genuinely EMPTY.
+      final actual = computeActualCapacity(tour);
+      expect(actual.byBus['b1']!.occupied, 0);
+      expect(actual.byBus['b1']!.free, 2, reason: 'no seat is actually assigned');
+      expect(actual.free, 2);
+      expect(actual.isFull, isFalse);
+    });
+
+    test('counts real assignedSeats and agrees with occupiedBerthsFor', () {
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ], [
+        _pSeated('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [SeatAssignment(busId: 'b1', seatId: 'SU1')]),
+      ]);
+
+      final actual = computeActualCapacity(tour);
+      expect(actual.capacity, 2);
+      expect(actual.byBus['b1']!.occupied, 1);
+      expect(actual.byBus['b1']!.free, 1);
+      expect(actual.occupied, tour.occupiedBerthsFor('b1'),
+          reason: 'matches the model helper the grid header uses');
+    });
+
+    test('a genuinely full bus reads full', () {
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ], [
+        _pSeated('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [SeatAssignment(busId: 'b1', seatId: 'SU1')]),
+        _pSeated('B',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [SeatAssignment(busId: 'b1', seatId: 'SL1')]),
+      ]);
+
+      final actual = computeActualCapacity(tour);
+      expect(actual.byBus['b1']!.free, 0);
+      expect(actual.isFull, isTrue);
+    });
+
+    test('leg-aware: an outbound-only holder fills GO, leaves RETURN free', () {
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+        ])
+      ], [
+        _pSeated('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [SeatAssignment(busId: 'b1', seatId: 'SU1')],
+            trip: TripType.outboundOnly),
+      ]);
+
+      final actual = computeActualCapacity(tour);
+      final bc = actual.byBus['b1']!;
+      expect(bc.goOccupied, 1);
+      expect(bc.retOccupied, 0, reason: 'the seat returns empty');
+      expect(bc.free, 0, reason: 'busier (GO) leg is full → no round-trip seat');
+      expect(actual.legsSymmetric, isFalse);
+    });
+  });
+
+  group('computeActualCapacity — per-bus free-by-type, leg-aware from real seats',
+      () {
+    test('mixed bus: round / return-only / go-only tiles bucket per type', () {
+      // A bus with two singles, one double, one seater. Actual assignments:
+      //  * SU1 — round-trip rider → taken BOTH legs (not free any leg).
+      //  * SL1 — outbound-only rider → free RETURNING only (single retOnly).
+      //  * DL1 — untouched double → free BOTH legs (double round).
+      //  * ST1 — untouched seater → free BOTH legs (seater round).
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+          _seat(1, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+          _seat(2, 0, SeatType.seater, null, 'ST1'),
+        ])
+      ], [
+        _pSeated('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [
+              SeatAssignment(busId: 'b1', seatId: 'SU1', leg: TripType.roundTrip)
+            ]),
+        _pSeated('B',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [
+              SeatAssignment(
+                  busId: 'b1', seatId: 'SL1', leg: TripType.outboundOnly)
+            ],
+            trip: TripType.outboundOnly),
+      ]);
+
+      final byType = computeActualCapacity(tour).freeByType['b1']!;
+      final single = byType[SeatType.singleSofa]!;
+      expect(single.round, 0, reason: 'SU1 taken both legs; SL1 taken going');
+      expect(single.retOnly, 1, reason: 'SL1 returns empty → return-only single');
+      expect(single.goOnly, 0);
+
+      expect(byType[SeatType.doubleSofa]!.round, 1, reason: 'DL1 wholly empty');
+      expect(byType[SeatType.seater]!.round, 1, reason: 'ST1 wholly empty');
+    });
+
+    test('a half-occupied double is a free double on NEITHER leg', () {
+      // One round-trip single rider takes HALF of DL1; a fresh pair can't sit
+      // there on either leg, so the double lands in no free bucket.
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL1'),
+          _seat(1, 4, SeatType.doubleSofa, SeatPosition.lower, 'DL2'),
+        ])
+      ], [
+        _pSeated('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [
+              SeatAssignment(busId: 'b1', seatId: 'DL1', leg: TripType.roundTrip)
+            ]),
+      ]);
+
+      final d = computeActualCapacity(tour).freeByType['b1']![SeatType.doubleSofa]!;
+      expect(d.round, 1, reason: 'only the wholly-empty DL2 is a bookable double');
+      expect(d.total, 1, reason: 'the half-taken DL1 is free on no leg');
+    });
+
+    test('a fully-assigned bus has zero free of every type', () {
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ], [
+        _pSeated('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [
+              SeatAssignment(busId: 'b1', seatId: 'SU1', leg: TripType.roundTrip)
+            ]),
+        _pSeated('B',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: const [
+              SeatAssignment(busId: 'b1', seatId: 'SL1', leg: TripType.roundTrip)
+            ]),
+      ]);
+
+      final s = computeActualCapacity(tour).freeByType['b1']![SeatType.singleSofa]!;
+      expect(s.total, 0, reason: 'both singles are taken round-trip');
     });
   });
 }

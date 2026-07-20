@@ -461,7 +461,7 @@ class _CustomerBookingRequestScreenState
                   UgamSpacing.gutter,
                   UgamSpacing.sm,
                   UgamSpacing.gutter,
-                  UgamSpacing.huge,
+                  UgamSpacing.lg,
                 ),
                 children: [
                   _TourPreviewCard(tour: widget.tour, c: c),

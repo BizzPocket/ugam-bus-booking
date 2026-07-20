@@ -1110,23 +1110,28 @@ class _LegTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < legs.length; i++) ...[
-          if (i > 0) const SizedBox(width: UgamSpacing.sm),
-          Expanded(
-            child: _LegTab(
-              key: Key('legtab-${legs[i].name}'),
-              c: c,
-              label: labelOf(legs[i]),
-              icon: iconOf(legs[i]),
-              count: countOf(legs[i]),
-              active: legs[i] == active,
-              onTap: () => onSelect(legs[i]),
+    // IntrinsicHeight + stretch so every tab matches the tallest: a label that
+    // wraps to 2 lines in one leg won't leave its neighbours shorter.
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < legs.length; i++) ...[
+            if (i > 0) const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: _LegTab(
+                key: Key('legtab-${legs[i].name}'),
+                c: c,
+                label: labelOf(legs[i]),
+                icon: iconOf(legs[i]),
+                count: countOf(legs[i]),
+                active: legs[i] == active,
+                onTap: () => onSelect(legs[i]),
+              ),
             ),
-          ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -1151,14 +1156,13 @@ class _LegTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The gu/hi leg words are much longer than the English ones; with the icon
-    // AND the count badge inline they ellipsise the leg word away. Drop the icon
-    // for non-English locales (and let the label wrap to 2 lines) so the leg
-    // word is always fully readable.
-    // Null-safe: EasyLocalization's context.locale throws when no localization
-    // ancestor is present (e.g. widget tests); fall back to English (show icon).
-    final showIcon =
-        (Localizations.maybeLocaleOf(context)?.languageCode ?? 'en') == 'en';
+    // Vertical layout: the direction glyph (+ optional seat-count badge) sits on
+    // top and the full leg word runs across the tab's whole width below it,
+    // centred and free to wrap to 2 lines. This keeps the label readable in
+    // every locale — the long gu/hi words ("આવક-જાવક", "ફક્ત આવવા") no longer
+    // fight an inline icon for horizontal room and get ellipsised — WITHOUT
+    // depending on fragile locale detection to decide whether to show the icon.
+    final fg = active ? c.accent : c.ink2;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -1167,7 +1171,7 @@ class _LegTab extends StatelessWidget {
         curve: UgamMotion.easeOut,
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.sm,
-          vertical: 9,
+          vertical: 8,
         ),
         decoration: BoxDecoration(
           color: active ? c.accentFill : c.cardElev,
@@ -1177,45 +1181,50 @@ class _LegTab extends StatelessWidget {
             width: active ? 1.5 : 1,
           ),
         ),
-        child: Row(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (showIcon) ...[
-              Icon(icon, size: 13, color: active ? c.accent : c.ink2),
-              const SizedBox(width: 5),
-            ],
-            Flexible(
-              child: Text(
-                label,
-                maxLines: showIcon ? 1 : 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: UgamText.bodyStrong.copyWith(
-                  color: active ? c.accent : c.ink2,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-            if (count > 0) ...[
-              const SizedBox(width: 5),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: active ? c.accent : c.ink3.withValues(alpha: 0.25),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '$count',
-                  style: UgamText.tabular(
-                    UgamText.caption.copyWith(
-                      color: active ? c.onAccent : c.ink2,
-                      fontSize: 11,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 15, color: fg),
+                if (count > 0) ...[
+                  const SizedBox(width: 5),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                    decoration: BoxDecoration(
+                      color:
+                          active ? c.accent : c.ink3.withValues(alpha: 0.25),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$count',
+                      style: UgamText.tabular(
+                        UgamText.caption.copyWith(
+                          color: active ? c.onAccent : c.ink2,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: UgamText.bodyStrong.copyWith(
+                color: fg,
+                fontSize: 12,
+                height: 1.15,
               ),
-            ],
+            ),
           ],
         ),
       ),

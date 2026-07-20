@@ -5,8 +5,14 @@ import 'package:flutter/material.dart';
 /// Single source of truth for color, radius, spacing, and motion. The brand
 /// is a single **warm copper** accent on **cool graphite** neutrals. The look
 /// is futuristic and minimal: soft surfaces that float on near-black, depth
-/// from light (a quiet copper `glow`) rather than borders, big calm type, and
-/// generous space. Dark is the primary mode; light is a clean mirror.
+/// from light (a quiet copper `glow`) rather than borders. Dark is the primary
+/// mode; light is a clean mirror.
+///
+/// Density: this is an operational tool — an agent scans status across many
+/// tours and acts fast, so the app is tuned for a **glanceable cockpit**, not a
+/// spacious showroom. The spacing scale's top steps are compressed and corners
+/// are crisp (16, not 22) so more of what needs action fits above the fold.
+/// Hierarchy comes from contrast + the rationed copper accent, not from air.
 ///
 /// Re-skinning the whole app = editing the two [Brand] seeds + the two color
 /// sets below. No component references raw colors — they read
@@ -112,23 +118,32 @@ class UgamColorSet {
   });
 }
 
-/// Radius scale — rounder/softer for the futuristic-simple look.
+/// Radius scale — crisp/precise for the operational look. Corners read as a
+/// tool (16), not a toy (22). Reshaped app-wide from here: every [UgamCard],
+/// sheet, stat tile and row derives its radius from these tokens.
 class UgamRadius {
   const UgamRadius._();
 
-  static const double card = 22;
+  static const double card = 16; // was 22 — precise, not soft
   static const double photo = 16;
   static const double input = 14;
   static const double button = 16;
   static const double chip = 999; // pill
   static const double iconBtn = 999; // circle when w==h
-  static const double sheet = 28;
-  static const double stat = 20;
-  static const double row = 18;
+  static const double sheet = 22; // was 28
+  static const double stat = 16; // was 20
+  static const double row = 14; // was 18
   static const double seat = 14;
 }
 
-/// Spacing scale. Default lateral gutter is 14; default vertical rhythm 20.
+/// Spacing scale. Default lateral gutter is 14; default section rhythm 16.
+///
+/// The lower half (xs..lg) is the fine detail inside components and is left
+/// untouched. The upper half (xl..huge3) — section seams, card padding, hero
+/// spacing — was compressed in the density pass so screens stop feeling like a
+/// showroom: `xl` now equals `lg` (16) rather than 20, and the very-large steps
+/// shrink proportionally. Where a screen wants a truly tight 12px seam it uses
+/// [md] directly.
 class UgamSpacing {
   const UgamSpacing._();
 
@@ -137,11 +152,11 @@ class UgamSpacing {
   static const double md = 12;
   static const double gutter = 14;
   static const double lg = 16;
-  static const double xl = 20;
-  static const double xxl = 24;
-  static const double huge = 32;
-  static const double huge2 = 40;
-  static const double huge3 = 56;
+  static const double xl = 16; // was 20 — section seams / card padding
+  static const double xxl = 20; // was 24
+  static const double huge = 26; // was 32
+  static const double huge2 = 32; // was 40
+  static const double huge3 = 44; // was 56
 
   /// Bottom padding for scrollables whose content scrolls under the floating
   /// dock (≈ 80px + safe-area). Use instead of hardcoded 140/120/96.

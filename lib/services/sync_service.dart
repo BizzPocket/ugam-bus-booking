@@ -88,17 +88,21 @@ class SyncService extends GetxService {
   static const int defaultRowLimit = 500;
   static const int passengersRowLimit = 2000;
 
-  /// True when the most recent [smartFetch] could not reach the server (error
-  /// or offline) — as opposed to genuinely returning zero rows. Lets callers
-  /// tell "refresh failed" apart from "no data" and keep showing what they
-  /// already have (with a warning) instead of blanking the screen.
-  bool lastReadFailed = false;
-
-  /// Fetches [table] from Supabase. Returns `[]` (and sets [lastReadFailed])
-  /// on any failure or when offline, so a read never throws into the UI — the
-  /// caller shows its own empty/error state. [cacheKey]/[select]/[maxAge] are
-  /// retained for call-site compatibility and are unused now.
-  Future<List<Map<String, dynamic>>> smartFetch({
+  /// Fetches [table] from Supabase. Returns a record of the fetched [rows]
+  /// (`[]` on any failure or when offline) plus a per-call [failed] flag, so a
+  /// read never throws into the UI and the caller can tell "refresh failed"
+  /// apart from "no data" and keep showing what it already has instead of
+  /// blanking the screen.
+  ///
+  /// [failed] is RETURNED, not stored on the service. That isolation is load-
+  /// bearing: the cold-start `tours` and `customer_memory` reads (and the money
+  /// board's four reads) run CONCURRENTLY, and a single shared flag let one
+  /// read's failure bleed into another's result — a fast `customer_memory`
+  /// PGRST205 (missing table) would flip a shared flag and blank a tours load
+  /// that had actually succeeded. A per-call result can't be clobbered.
+  /// [cacheKey]/[select]/[maxAge] are retained for call-site compatibility and
+  /// are unused now.
+  Future<({List<Map<String, dynamic>> rows, bool failed})> smartFetch({
     required String table,
     required String cacheKey,
     String? select,
@@ -106,24 +110,22 @@ class SyncService extends GetxService {
     String? orderBy,
     int maxAge = 300000,
   }) async {
-    lastReadFailed = false;
     if (!isOnline.value) {
-      lastReadFailed = true;
-      return [];
+      return (rows: const <Map<String, dynamic>>[], failed: true);
     }
     try {
       // Reads are idempotent — retry transient failures (incl. timeout) so one
       // slow moment on cellular no longer blanks the screen. Terminal errors
       // (auth/RLS/missing-table) still surface immediately via [_isRetryable].
-      return await _withRetry(
+      final rows = await _withRetry(
         () => _fetchFromSupabase(table, filters, orderBy),
         timeout: _readTimeout,
         label: '$table fetch',
       );
+      return (rows: rows, failed: false);
     } catch (e, st) {
       dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
-      lastReadFailed = true;
-      return [];
+      return (rows: const <Map<String, dynamic>>[], failed: true);
     }
   }
 

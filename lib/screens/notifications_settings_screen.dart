@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
 import '../services/push_service.dart';
+import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/settings_scaffold.dart';
 
@@ -63,8 +64,11 @@ class _NotificationsSettingsScreenState
         // ignore: unawaited_futures
         PushService.instance.unregister();
       }
+      if (!mounted) return;
       AppSnackBar.success(tr('settings_pages.saved'));
-      Get.back();
+      // Pop the nested tab stack this page lives on; a bare Get.back() pops the
+      // ROOT navigator and would leave the page open after saving.
+      AppNav.pop(context);
     } catch (_) {
       AppSnackBar.error(tr('settings_pages.save_error'));
     } finally {

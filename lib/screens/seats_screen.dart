@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
+import '../utils/app_nav.dart';
 
 import 'manage_buses_screen.dart';
 import 'tour_overview_screen.dart';
@@ -60,6 +61,16 @@ class SeatsScreen extends StatefulWidget {
 
 class _SeatsScreenState extends State<SeatsScreen> {
   late int _mode = widget.initialMode.index;
+
+  /// Whether the in-screen summary sits "behind" the grid for the back
+  /// affordance. True only when the agent LANDED on the summary cockpit and
+  /// stepped into the grid — there the grid's back steps back OUT to the
+  /// summary. False when deep-linked straight into the grid (from the chart
+  /// screen, requests, or a seating exception): the agent never saw the
+  /// summary, so the grid's back must POP the route to the real caller instead
+  /// of revealing a bus-cards screen they never visited.
+  late final bool _summaryIsBehind =
+      widget.initialMode == SeatsMode.summary;
 
   /// The bus the grid should open on. Seeded from the deep-link, then updated
   /// when the agent taps a summary bus card to "edit" that bus by hand.
@@ -167,7 +178,7 @@ class _SeatsScreenState extends State<SeatsScreen> {
       ),
       child: Row(
         children: [
-          if (_onGrid)
+          if (_onGrid && _summaryIsBehind)
             UgamIconButton(
               icon: Icons.arrow_back_rounded,
               size: 48,
@@ -175,10 +186,17 @@ class _SeatsScreenState extends State<SeatsScreen> {
               semanticLabel: tr('seats.back_to_summary'),
             )
           else
+            // Summary face, OR a grid we deep-linked straight into: pop back
+            // to wherever the agent actually came from. AppNav.pop targets the
+            // navigator this screen was pushed onto — the ROOT navigator when
+            // opened via Get.toNamed (chart / requests / seating exceptions),
+            // or a tab's NESTED navigator when opened via Navigator.push
+            // (dashboard / tours / tour detail). A bare Get.back() only ever
+            // pops the root, so it was a dead button on the nested entries.
             UgamIconButton(
               icon: Icons.arrow_back_rounded,
               size: 48,
-              onTap: () => Get.back(),
+              onTap: () => AppNav.pop(context),
             ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(

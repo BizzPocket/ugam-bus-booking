@@ -42,59 +42,56 @@ class UgamSeatChartLegend extends StatelessWidget {
   final UgamColorSet c;
   const UgamSeatChartLegend({super.key, required this.c});
 
+  /// The nine keys in a fixed 3×3 reading order, grouped by meaning so each
+  /// row is one coherent idea:
+  ///   row 1 — occupancy: free · booked · priority
+  ///   row 2 — money:     paid · owing · ½ half-fare
+  ///   row 3 — leg / hold: go · return · held
+  ///
+  /// Rendered as an aligned grid (not a ragged center-wrapped [Wrap]) so the
+  /// swatches and labels line up into tidy columns.
+  static const List<(_LegendSwatch, String)> _keys = [
+    (_LegendSwatch.dashed, 'seat_legend.free'),
+    (_LegendSwatch.filled, 'seat_legend.booked'),
+    (_LegendSwatch.warmRing, 'seat_legend.priority'),
+    (_LegendSwatch.paidDot, 'seat_legend.paid'),
+    (_LegendSwatch.owingDot, 'seat_legend.owing'),
+    (_LegendSwatch.halfFare, 'seat_legend.half'),
+    (_LegendSwatch.go, 'seat_legend.go'),
+    (_LegendSwatch.ret, 'seat_legend.ret'),
+    (_LegendSwatch.held, 'seat_legend.held'),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: UgamSpacing.md,
-      runSpacing: 6,
-      alignment: WrapAlignment.center,
-      children: [
-        _LegendItem(
-          swatch: _LegendSwatch.dashed,
-          label: tr('seat_legend.free'),
-          c: c,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var row = 0; row < _keys.length; row += 3)
+              Padding(
+                padding: EdgeInsets.only(top: row == 0 ? 0 : 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var col = 0; col < 3; col++)
+                      Expanded(
+                        child: (row + col) < _keys.length
+                            ? _LegendItem(
+                                swatch: _keys[row + col].$1,
+                                label: tr(_keys[row + col].$2),
+                                c: c,
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                  ],
+                ),
+              ),
+          ],
         ),
-        _LegendItem(
-          swatch: _LegendSwatch.filled,
-          label: tr('seat_legend.booked'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.warmRing,
-          label: tr('seat_legend.priority'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.held,
-          label: tr('seat_legend.held'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.go,
-          label: tr('seat_legend.go'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.ret,
-          label: tr('seat_legend.ret'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.halfFare,
-          label: tr('seat_legend.half'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.paidDot,
-          label: tr('seat_legend.paid'),
-          c: c,
-        ),
-        _LegendItem(
-          swatch: _LegendSwatch.owingDot,
-          label: tr('seat_legend.owing'),
-          c: c,
-        ),
-      ],
+      ),
     );
   }
 }
@@ -215,10 +212,17 @@ class _LegendItem extends StatelessWidget {
     }
     return Row(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        dot,
+        // Fixed-width swatch cell so labels start at the same x across rows,
+        // even though the swatches themselves differ in width (½ is wider).
+        SizedBox(width: 18, child: Center(child: dot)),
         const SizedBox(width: 6),
-        Text(label, style: UgamText.micro.copyWith(color: c.ink2)),
+        // Flexible so a long localized label (e.g. Gujarati "priority") wraps
+        // within its grid column instead of overflowing.
+        Flexible(
+          child: Text(label, style: UgamText.micro.copyWith(color: c.ink2)),
+        ),
       ],
     );
   }

@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ugam — Elevated Components (Charcoal Copper · Boarding Pass)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E0E10; --ticket:#1A1A1D; --elev:#242428; --bd:rgba(255,255,255,.08); --dash:#3a3a42;
+    --ink:#F2F2F4; --ink2:#A6A6AE; --ink3:#6E6E76;
+    --copper:#D08A5E; --copperDeep:#B0673C; --onCopper:#1A0E07; --copperF:rgba(208,138,94,.15);
+    --good:#34D399; --goodF:rgba(52,211,153,.14); --rose:#E06A9A; --roseF:rgba(224,106,154,.16); --danger:#FF5247;
+    --disp:'Space Grotesk',sans-serif; --mono:'Space Mono',monospace; --body:'Inter',sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#070708;color:var(--ink);font-family:var(--body);line-height:1.5}
+  .wrap{max-width:1180px;margin:0 auto;padding:34px 20px 100px}
+  h1{font-family:var(--disp);font-size:32px;letter-spacing:-.5px;margin:0 0 6px;font-weight:700}
+  .lead{color:var(--ink2);max-width:840px;font-size:15px}
+  .eyebrow{font-family:var(--mono);color:var(--copper);font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase}
+  .grp{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:2px;color:var(--ink3);
+    margin:46px 0 0;border-bottom:1px solid #1d1d20;padding-bottom:10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:18px;margin-top:18px}
+  .cell{background:#111113;border:1px solid #202024;border-radius:14px;overflow:hidden}
+  .stage{background:var(--bg);padding:22px 18px;display:flex;align-items:center;justify-content:center;min-height:104px}
+  .meta{padding:11px 14px;border-top:1px solid #202024}
+  .meta .nm{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ink)}
+  .meta .nt{font-size:11px;color:var(--ink3);margin-top:2px}
+  .span2{grid-column:span 2}
+  .micro{font-family:var(--mono);font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:var(--ink3)}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ===== HERO: the signature boarding pass ===== */
+  .hero{margin-top:26px;display:flex;justify-content:center}
+  .pass{position:relative;display:flex;width:420px;max-width:100%;background:var(--ticket);
+    border:1px solid var(--bd);border-radius:18px}
+  .pass:before{content:"";position:absolute;left:14px;right:14px;top:0;height:2px;border-radius:2px;
+    background:linear-gradient(90deg,var(--copper),rgba(208,138,94,.15) 70%,transparent)}
+  .pass-main{flex:1;padding:22px 22px 20px}
+  .pass-ey{font-family:var(--mono);font-size:10px;letter-spacing:2.5px;color:var(--copper);text-transform:uppercase;font-weight:700}
+  .pass-route{display:flex;align-items:flex-start;justify-content:space-between;margin-top:16px}
+  .pass-code{font-family:var(--disp);font-size:38px;font-weight:700;color:var(--ink);line-height:.9;letter-spacing:-1px}
+  .pass-city{font-family:var(--mono);font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;margin-top:6px}
+  .pass-mid{flex:1;padding:6px 14px 0;text-align:center}
+  .pass-mid .l{position:relative;border-top:1.5px dashed var(--dash);margin-top:14px}
+  .pass-mid .l:after{content:"\1F68C";position:absolute;left:50%;top:-12px;transform:translateX(-50%);
+    background:var(--ticket);padding:0 6px;font-size:14px}
+  .pass-mid .dep{font-family:var(--mono);font-size:10px;color:var(--ink3);letter-spacing:1.5px;margin-top:9px}
+  .pass-meta{display:flex;gap:24px;margin-top:20px}
+  .pass-meta .k{font-family:var(--mono);font-size:9.5px;letter-spacing:1.5px;color:var(--ink3);text-transform:uppercase}
+  .pass-meta .v{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--ink);margin-top:3px}
+  .pass-meta .v.cu{color:var(--copper)}
+  /* stub */
+  .pass-stub{width:92px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:20px 0}
+  .pass-stub:before{content:"";position:absolute;left:0;top:14px;bottom:14px;border-left:2px dashed var(--dash)}
+  .notch{position:absolute;left:-9px;width:18px;height:18px;border-radius:50%;background:var(--bg);border:1px solid var(--bd)}
+  .notch.t{top:-9px}.notch.b{bottom:-9px}
+  .pass-bc{width:46px;height:64px;background:repeating-linear-gradient(0deg,var(--ink) 0 2px,transparent 2px 5px);opacity:.85;border-radius:2px}
+  .pass-seat{font-family:var(--mono);font-size:9.5px;color:var(--ink3);letter-spacing:1.5px;text-transform:uppercase;text-align:center}
+  .pass-seat b{display:block;font-size:17px;color:var(--copper);margin-top:3px}
+
+  /* ===== component styles ===== */
+  .full{width:100%}
+  /* app bar */
+  .ab{display:flex;align-items:center;gap:12px;width:100%}
+  .circ{width:42px;height:42px;border-radius:999px;background:var(--elev);border:1px solid var(--bd);
+    display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:16px}
+  .circ.sm{width:38px;height:38px}.circ.lg{width:44px;height:44px}
+  .circ.cu{background:var(--copperF);border-color:transparent;color:var(--copper)}
+  .ab .t .ey{font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--copper);text-transform:uppercase}
+  .ab .t .ti{font-family:var(--disp);font-size:19px;font-weight:600;color:var(--ink);letter-spacing:-.2px}
+  .grow{flex:1}
+  /* dock */
+  .dock{display:flex;align-items:center;gap:6px;background:var(--elev);border:1px solid var(--bd);border-radius:999px;padding:5px;width:100%}
+  .dock .it{height:38px;min-width:38px;border-radius:999px;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:15px}
+  .dock .it.on{background:var(--copper);color:var(--onCopper);padding:0 14px;gap:7px;font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:1px}
+  /* stat — departure board */
+  .stat{background:var(--ticket);border:1px solid var(--bd);border-radius:14px;padding:14px 16px;min-width:96px;position:relative;overflow:hidden}
+  .stat:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--copper);opacity:.0}
+  .stat .n{font-family:var(--mono);font-size:26px;font-weight:700;color:var(--ink);line-height:1}
+  .stat .k{font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;color:var(--ink3);text-transform:uppercase;margin-top:6px}
+  .stat.hot .n{color:var(--copper)}
+  /* status stamp */
+  .stamp{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--copper);color:var(--copper);
+    font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
+    padding:6px 11px;border-radius:6px}
+  .stamp.g{border-color:var(--good);color:var(--good)} .stamp.w{border-color:var(--rose);color:var(--rose)}
+  .stamp i{width:6px;height:6px;border-radius:50%;background:currentColor}
+  /* cta / buttons */
+  .cta{width:100%;background:var(--copper);color:var(--onCopper);border-radius:12px;padding:14px;text-align:center;
+    font-weight:700;font-size:14px;letter-spacing:.2px;box-shadow:inset 0 1px 0 rgba(255,255,255,.18)}
+  .btns{display:flex;flex-wrap:wrap;gap:9px;justify-content:center}
+  .btn{border-radius:10px;padding:11px 16px;font-size:13px;font-weight:700}
+  .btn.pri{background:var(--copper);color:var(--onCopper);box-shadow:inset 0 1px 0 rgba(255,255,255,.18)}
+  .btn.ton{background:var(--copperF);color:var(--copper);border:1px solid rgba(208,138,94,.3)}
+  .btn.gho{background:transparent;color:var(--ink2);border:1px solid var(--dash)}
+  .btn.dan{background:rgba(255,82,71,.13);color:var(--danger)}
+  /* inputs */
+  .field{width:100%}
+  .field .l{font-family:var(--mono);font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--ink2);margin-bottom:7px}
+  .input{width:100%;background:var(--bg);border:1px solid var(--bd);border-bottom:2px solid var(--copper);
+    border-radius:8px 8px 0 0;padding:12px;color:var(--ink);font-family:var(--mono);font-size:14px}
+  .picker{display:flex;align-items:center;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:13px;font-size:13px;color:var(--ink)}
+  .picker .chev{margin-left:auto;color:var(--copper)}
+  .search{display:flex;align-items:center;gap:9px;background:var(--elev);border:1px solid var(--bd);border-radius:999px;padding:12px 15px;width:100%;color:var(--ink3);font-size:13px}
+  .datepill{display:inline-flex;align-items:center;gap:7px;background:var(--bg);border:1px solid var(--copper);color:var(--copper);
+    border-radius:8px;padding:8px 12px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.5px}
+  /* segmented / tabs */
+  .seg{display:flex;background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:4px;width:100%}
+  .seg>div{flex:1;text-align:center;padding:9px;font-size:12px;color:var(--ink2);border-radius:7px;font-weight:600}
+  .seg>div.on{background:var(--copper);color:var(--onCopper)}
+  .tabs{display:flex;gap:18px;width:100%;border-bottom:1px solid var(--bd);padding-bottom:0}
+  .tabs>div{padding:6px 0 12px;font-size:13px;color:var(--ink3);font-weight:600;position:relative}
+  .tabs>div.on{color:var(--ink)}
+  .tabs>div.on:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--copper)}
+  .tabs .c{font-family:var(--mono);font-size:11px;color:var(--copper)}
+  /* seat grid */
+  .sg{display:grid;grid-template-columns:repeat(4,42px);gap:9px}
+  .st{width:42px;height:42px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:9px;gap:2px}
+  .st .ico{font-size:13px;line-height:1}
+  .st.free{border:1.5px dashed var(--dash);color:var(--ink3)}
+  .st.book{background:var(--elev);border:1px solid var(--bd);color:var(--ink2)}
+  .st.sel{background:var(--copper);color:var(--onCopper);border:1px solid var(--copper)}
+  .st.paid{background:var(--elev);border:1px solid var(--good);color:var(--good)}
+  .st.block{background:#141416;color:#3a3a40}
+  /* legend */
+  .legend{display:flex;flex-wrap:wrap;gap:11px}
+  .lg{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink2)}
+  .lg i{width:13px;height:13px;border-radius:4px}
+  /* request row */
+  .rr{display:flex;align-items:center;gap:11px;background:var(--ticket);border:1px solid var(--bd);border-radius:12px;padding:12px;width:100%}
+  .rr .av{width:32px;height:32px;border-radius:8px;background:var(--bg);border:1px solid var(--bd);color:var(--ink2);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;font-weight:700}
+  .rr .nm{font-size:13px;font-weight:600;color:var(--ink)} .rr .s{font-family:var(--mono);font-size:11px;color:var(--ink2)}
+  /* route header */
+  .rh{display:flex;align-items:center;gap:10px}
+  .rh .cd{font-family:var(--disp);font-size:20px;font-weight:700;color:var(--ink)}
+  .rh .ln{width:42px;border-top:1.5px dashed var(--dash);position:relative}
+  .rh .ln:after{content:"\1F68C";position:absolute;left:50%;top:-11px;transform:translateX(-50%);background:var(--bg);padding:0 4px;font-size:12px}
+  /* chips */
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-family:var(--mono);font-size:11px;font-weight:700;border-radius:5px;padding:5px 9px;letter-spacing:.5px;text-transform:uppercase}
+  .chip.a{background:var(--copperF);color:var(--copper)} .chip.g{background:var(--goodF);color:var(--good)}
+  .chip.w{background:var(--roseF);color:var(--rose)} .chip.n{background:var(--elev);color:var(--ink2);border:1px solid var(--bd)}
+  /* empty / skeleton / snackbar */
+  .empty{text-align:center}
+  .empty .ic{font-size:30px;color:var(--ink3)}
+  .empty .t{font-family:var(--disp);font-size:15px;font-weight:600;margin-top:10px}
+  .empty .b{font-size:12px;color:var(--ink2);margin-top:4px}
+  .skel .sk{height:14px;border-radius:6px;background:linear-gradient(90deg,#1a1a1d,#242428,#1a1a1d);margin-bottom:9px}
+  .skel .sk.big{height:46px}.skel .sk.w60{width:60%}.skel .sk.w40{width:40%}
+  .snack{display:flex;align-items:center;gap:11px;background:var(--elev);border:1px solid var(--bd);border-left:3px solid var(--good);border-radius:10px;padding:13px 15px;width:100%}
+  .snack .i{color:var(--good);font-size:15px}.snack .m{font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Charcoal Copper · Boarding Pass — elevated</div>
+  <h1>Components, rebuilt with intent</h1>
+  <p class="lead">Display = <b>Space Grotesk</b>, data = <b>Space Mono</b> (the departure-board feel), body = Inter.
+  Copper is the single signal; the perforation/dashed motif and mono micro-labels (<span class="micro">dep · seats · gate</span>)
+  run through everything. The boldness lives in the boarding pass; the rest stays quiet.</p>
+
+  <!-- SIGNATURE -->
+  <div class="grp">Signature · the boarding pass</div>
+  <div class="hero">
+    <div class="pass">
+      <div class="pass-main">
+        <div class="pass-ey">Ugam Yatra · Boarding Pass</div>
+        <div class="pass-route">
+          <div><div class="pass-code">SRT</div><div class="pass-city">Surat</div></div>
+          <div class="pass-mid"><div class="l"></div><div class="dep">DEP 21:30</div></div>
+          <div style="text-align:right"><div class="pass-code">AML</div><div class="pass-city">Amreli</div></div>
+        </div>
+        <div class="pass-meta">
+          <div><div class="k">Date</div><div class="v">20 JUN</div></div>
+          <div><div class="k">Seats</div><div class="v cu">04/36</div></div>
+          <div><div class="k">Status</div><div class="v">COLLECTING</div></div>
+        </div>
+      </div>
+      <div class="pass-stub">
+        <span class="notch t"></span><span class="notch b"></span>
+        <div class="pass-seat">Gate<b>B2</b></div>
+        <div class="pass-bc"></div>
+        <div class="pass-seat">Seat<b>04</b></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grp">Chrome &amp; navigation</div>
+  <div class="grid">
+    <div class="cell span2"><div class="stage"><div class="ab"><div class="circ">‹</div><div class="t grow"><div class="ey">Finance</div><div class="ti">Tour money</div></div><div class="circ">⌕</div></div></div>
+      <div class="meta"><div class="nm">UgamAppBar</div><div class="nt">Mono eyebrow · Grotesk title</div></div></div>
+    <div class="cell span2"><div class="stage"><div class="dock"><div class="it on">⌂ HOME</div><div class="it">◉</div><div class="it">▦</div><div class="it">▢</div><div class="it">⚙</div></div></div>
+      <div class="meta"><div class="nm">UgamDockNav</div><div class="nt">Active copper pill, mono label</div></div></div>
+  </div>
+
+  <div class="grp">Surfaces &amp; data</div>
+  <div class="grid">
+    <div class="cell"><div class="stage"><div class="stat hot"><div class="n">36</div><div class="k">Seats</div></div></div>
+      <div class="meta"><div class="nm">UgamStatTile</div><div class="nt">Departure-board numeral</div></div></div>
+    <div class="cell"><div class="stage"><div class="stamp"><i></i>Collecting</div></div>
+      <div class="meta"><div class="nm">Status stamp</div><div class="nt">Ticket-stamp status (was a dot)</div></div></div>
+    <div class="cell"><div class="stage"><div class="rh"><span class="cd">SRT</span><span class="ln"></span><span class="cd">AML</span></div></div>
+      <div class="meta"><div class="nm">UgamRouteHeader</div><div class="nt">IATA codes + dashed bus line</div></div></div>
+    <div class="cell"><div class="stage"><div class="chips"><span class="chip a">accent</span><span class="chip g">paid</span><span class="chip w">ladies</span></div></div>
+      <div class="meta"><div class="nm">UgamReqChip</div><div class="nt">Mono ticket tags</div></div></div>
+  </div>
+
+  <div class="grp">Actions &amp; inputs</div>
+  <div class="grid">
+    <div class="cell span2"><div class="stage"><div class="cta">Choose handler</div></div>
+      <div class="meta"><div class="nm">UgamCTA</div><div class="nt">Copper, subtle top-light</div></div></div>
+    <div class="cell span2"><div class="stage"><div class="btns"><div class="btn pri">Primary</div><div class="btn ton">Tonal</div><div class="btn gho">Ghost</div><div class="btn dan">Danger</div></div></div>
+      <div class="meta"><div class="nm">UgamButton</div><div class="nt">Kinds</div></div></div>
+    <div class="cell span2"><div class="stage"><div class="field"><div class="l">Phone number</div><div class="input">9327148044</div></div></div>
+      <div class="meta"><div class="nm">UgamInput</div><div class="nt">Copper focus underline, mono value</div></div></div>
+    <div class="cell"><div class="stage"><div class="search">⌕ &nbsp;Search tours…</div></div>
+      <div class="meta"><div class="nm">UgamSearchField</div><div class="nt">Pill search</div></div></div>
+    <div class="cell"><div class="stage"><div class="datepill">▣ 20 JUN</div></div>
+      <div class="meta"><div class="nm">UgamDatePill</div><div class="nt">Mono ticket date</div></div></div>
+    <div class="cell span2"><div class="stage"><div class="seg"><div class="on">System</div><div>Light</div><div>Dark</div></div></div>
+      <div class="meta"><div class="nm">UgamSelectorPills</div><div class="nt">Segmented</div></div></div>
+    <div class="cell span2"><div class="stage"><div class="tabs"><div class="on">New <span class="c">0</span></div><div>Wait <span class="c">0</span></div><div>Done <span class="c">1</span></div></div></div>
+      <div class="meta"><div class="nm">UgamTabPills</div><div class="nt">Underline tabs, mono counts</div></div></div>
+  </div>
+
+  <div class="grp">Domain</div>
+  <div class="grid">
+    <div class="cell span2"><div class="stage"><div class="sg">
+      <div class="st sel"><span class="ico">▣</span>SU1</div><div class="st book"><span class="ico">▣</span>SL1</div><div class="st free"><span class="ico">▢</span>SU2</div><div class="st free"><span class="ico">▢</span>SL2</div>
+      <div class="st paid"><span class="ico">▣</span>DL1</div><div class="st book"><span class="ico">▣</span>DU1</div><div class="st block"><span class="ico">▤</span>DL2</div><div class="st free"><span class="ico">▢</span>DU2</div></div></div>
+      <div class="meta"><div class="nm">UgamSeatGrid</div><div class="nt">Seat states, mono codes</div></div></div>
+    <div class="cell span2"><div class="stage"><div class="legend">
+      <span class="lg"><i style="border:1.5px dashed var(--dash)"></i>Empty</span>
+      <span class="lg"><i style="background:var(--elev)"></i>Booked</span>
+      <span class="lg"><i style="background:var(--copper)"></i>Selected</span>
+      <span class="lg"><i style="background:var(--good)"></i>Paid</span>
+      <span class="lg"><i style="background:var(--rose)"></i>Ladies</span></div></div>
+      <div class="meta"><div class="nm">UgamSeatChartLegend</div><div class="nt">State key</div></div></div>
+    <div class="cell span2"><div class="stage"><div class="rr"><div class="av">Z</div><div class="grow"><div class="nm">zeel</div><div class="s">TEST · 3 SEATS</div></div><span class="chip a">Review</span></div></div>
+      <div class="meta"><div class="nm">UgamRequestRow</div><div class="nt">Mono meta, ticket-tag action</div></div></div>
+  </div>
+
+  <div class="grp">States</div>
+  <div class="grid">
+    <div class="cell span2"><div class="stage"><div class="empty"><div class="ic">◔</div><div class="t">No new requests</div><div class="b">They'll show here when passengers book a seat.</div></div></div>
+      <div class="meta"><div class="nm">UgamEmpty</div><div class="nt">Grotesk title, plain guidance</div></div></div>
+    <div class="cell"><div class="stage"><div class="skel full"><div class="sk big"></div><div class="sk w60"></div><div class="sk w40"></div></div></div>
+      <div class="meta"><div class="nm">UgamSkeleton</div><div class="nt">Loading</div></div></div>
+    <div class="cell"><div class="stage"><div class="snack"><span class="i">✓</span><span class="m">Tour saved</span></div></div>
+      <div class="meta"><div class="nm">UgamSnackbar</div><div class="nt">Toast</div></div></div>
+  </div>
+
+</div>
+</body>
+</html>

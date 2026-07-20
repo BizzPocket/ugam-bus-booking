@@ -97,18 +97,14 @@ class TourSeatAssignmentScreen extends StatefulWidget {
 /// Height the collapsed assignment dock reserves at the bottom of the screen.
 /// The seat-chart scroll view pads its bottom by this much (+ the safe area)
 /// so the chart legend is never hidden behind the floating dock. Sized for the
-/// taller vertical pending list (grab handle + one-line active summary + up to
-/// three 60dp `UgamPersonRow`s + the optional "See all" row + primary action).
-const double _kCollapsedDockHeight = 360;
+/// compact two-zone dock: grab handle + the "Now seating" card + a single
+/// horizontal "Up next" chip strip + the primary action. Shorter than the old
+/// stacked vertical list, so more of the chart shows.
+const double _kCollapsedDockHeight = 244;
 
 class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   String? _selectedBusId;
   String? _selectedPassengerId;
-
-  /// "Edit seats" mode. When ON, a seat tap opens the Forward/Reserved flag
-  /// sheet (instead of placing / managing an occupant), and drag-to-move is
-  /// suspended (the two modes never compete for the same long-press).
-  bool _editMode = false;
 
   /// The seat being long-press-dragged on the chart (the source seat id), and
   /// whether SOME drag is currently in flight. Non-null only mid-drag; while a
@@ -431,13 +427,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     HapticFeedback.selectionClick();
     if (cell.isEmpty || cell.seatId == null) return;
 
-    // Edit-seats mode → every real seat routes to the Forward/Reserved flag
-    // sheet; occupant management and placement are suspended.
-    if (_editMode) {
-      _showSeatFlagsSheet(cell, bus);
-      return;
-    }
-
     // Relocate mode → the tapped seat is the TARGET for the in-hand mover: a
     // free seat moves them here (after confirm), an occupied seat opens the
     // occupant menu with a "seat [mover] here" swap.
@@ -604,6 +593,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       onRelocateToBus: _beginRelocate,
       // Return phase: cancel a return seat, then offer to rebook it in place.
       onCancelReturn: _cancelReturnSeatFlow,
+      // Seat Hold/Premium flags for this seat — the tap-menu home for the old
+      // edit-seats mode (empty seats reach the same sheet via long-press).
+      onSeatFlags: () => _showSeatFlagsSheet(cell, bus),
     );
   }
 
@@ -656,10 +648,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     String fromSeatId,
   ) {
     setState(() {
-      // Starting a relocate exits edit-flags mode: the two modes can't both be
-      // active, else the in-hand mover is stranded under the relocate banner
-      // while seat taps route to the flag sheet.
-      _editMode = false;
       _selectedBusId = destination.id;
       _selectedPassengerId = mover.id;
       _relocate = (
@@ -1236,7 +1224,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   /// together onto a free seat. Any OTHER two-occupant non-double is managed
   /// per-person via the occupant sheet instead.
   bool _canDragSeat(Tour tour, Bus bus, SeatCell cell) {
-    if (_editMode) return false;
     if (cell.reserved) {
       return false; // a held seat stays put — can't drag it off
     }
@@ -2028,42 +2015,25 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
               children: [
                 Column(
                   children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _BusPills(
-                            buses: tour.buses,
-                            selectedBusId: bus.id,
-                            // Leg-aware: a berth shared by two opposite one-way
-                            // riders is ONE physical seat. Counting raw entries
-                            // made the badge read "38/37" past capacity.
-                            seatsAssignedFor: tour.occupiedBerthsFor,
-                            onTapBus: (id) {
-                              setState(() {
-                                _selectedBusId = id;
-                              });
-                            },
-                            c: c,
-                          ),
-                        ),
-                        const SizedBox(width: UgamSpacing.sm),
-                        // Edit-seats toggle: ON routes a seat tap to the
-                        // Forward/Reserved flag sheet and suspends drag-to-move;
-                        // OFF restores tap-to-place + drag. Visible in standalone
-                        // and embedded alike.
-                        _EditSeatsToggle(
-                          editMode: _editMode,
-                          onToggle: () => setState(() {
-                            _editMode = !_editMode;
-                            // Entering edit-flags cancels an active relocate so
-                            // the in-hand mover isn't stranded under a stale
-                            // banner — the two modes are mutually exclusive.
-                            if (_editMode) _relocate = null;
-                          }),
-                          c: c,
-                        ),
-                        const SizedBox(width: UgamSpacing.gutter),
-                      ],
+                    // Bus selector — now the sole occupant of this row (the
+                    // old "edit seats" chip that used to sit beside it, and
+                    // stole the width that clipped the second pill's capacity
+                    // badge, is gone; seat Premium/Held flags now live in the
+                    // seat's own tap menu — occupied via the occupant sheet,
+                    // empty via long-press).
+                    _BusPills(
+                      buses: tour.buses,
+                      selectedBusId: bus.id,
+                      // Leg-aware: a berth shared by two opposite one-way
+                      // riders is ONE physical seat. Counting raw entries
+                      // made the badge read "38/37" past capacity.
+                      seatsAssignedFor: tour.occupiedBerthsFor,
+                      onTapBus: (id) {
+                        setState(() {
+                          _selectedBusId = id;
+                        });
+                      },
+                      c: c,
                     ),
                     const SizedBox(height: UgamSpacing.md),
                     // Relocate banner eases in/out (fade + slight slide from the
@@ -2141,10 +2111,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                                   onTap: (cell) =>
                                       _onSeatTapped(cell, bus, tour),
                                   busName: bus.name,
-                                  editMode: _editMode,
-                                  // Drag-to-move is live whenever not editing
-                                  // flags.
-                                  enableDrag: !_editMode,
+                                  // Drag-to-move is always live now that the
+                                  // edit-flags mode is gone.
+                                  enableDrag: true,
                                   dragActive: _dragActive,
                                   canDragSeat: (cell) =>
                                       _canDragSeat(tour, bus, cell),
@@ -2167,6 +2136,16 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                                         fromSeatId,
                                         toSeatId,
                                       ),
+                                  // Long-press an EMPTY seat → its Hold/Premium
+                                  // flag sheet. (Booked-seat long-press stays a
+                                  // drag; booked seats reach the flag sheet from
+                                  // the occupant tap menu instead.)
+                                  onSeatLongPressForFlags: (seatId) {
+                                    final cell = _findCell(tour, bus.id, seatId);
+                                    if (cell != null) {
+                                      _showSeatFlagsSheet(cell, bus);
+                                    }
+                                  },
                                 ),
                                 // Canonical seat-colour key — the same legend
                                 // every other role sees, so admins read
@@ -2469,75 +2448,6 @@ class _SeatPassengerPicker extends StatelessWidget {
   }
 }
 
-// ─── Edit-seats toggle ─────────────────────────────────────────────────
-
-/// A compact pill that flips the workbench between PLACE mode (tap a free seat
-/// to seat the selected passenger; long-press a booked seat to drag-move) and
-/// EDIT-SEATS mode (a seat tap opens the Forward/Reserved flag sheet). Mirrors
-/// the seat-detail screen's Edit-seats affordance so the two surfaces read the
-/// same. Sits at the end of the bus-pills row, visible in both standalone and
-/// embedded modes.
-class _EditSeatsToggle extends StatelessWidget {
-  final bool editMode;
-  final VoidCallback onToggle;
-  final UgamColorSet c;
-
-  const _EditSeatsToggle({
-    required this.editMode,
-    required this.onToggle,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      toggled: editMode,
-      label: editMode
-          ? tr('tour_seat_assignment.done_editing_seats')
-          : tr('tour_seat_assignment.edit_seats'),
-      child: GestureDetector(
-        onTap: onToggle,
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: UgamMotion.tab,
-          curve: Curves.easeOutCubic,
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
-          decoration: BoxDecoration(
-            color: editMode ? c.accentFill : c.cardElev,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-            border: editMode
-                ? Border.all(color: c.accent.withValues(alpha: 0.28))
-                : null,
-          ),
-          alignment: Alignment.center,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                editMode ? Icons.check_rounded : Icons.tune_rounded,
-                size: 16,
-                color: editMode ? c.accent : c.ink,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                editMode
-                    ? tr('app.action.done')
-                    : tr('tour_seat_assignment.edit_seats'),
-                style: UgamText.caption.copyWith(
-                  color: editMode ? c.accent : c.ink,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ─── Bus pills ─────────────────────────────────────────────────────────
 
 class _BusPills extends StatelessWidget {
@@ -2716,11 +2626,7 @@ class _SeatGrid extends StatelessWidget {
   final ValueChanged<SeatCell> onTap;
   final String busName;
 
-  /// True in edit-flags mode: tiles draw the tune glyph + forward ring and a
-  /// tap routes to the flag sheet (drag is off).
-  final bool editMode;
-
-  // ── Drag-to-move hooks (off in edit-flags mode) ───────────────────────────
+  // ── Drag-to-move hooks ────────────────────────────────────────────────────
   final bool enableDrag;
   final bool dragActive;
   final bool Function(SeatCell cell) canDragSeat;
@@ -2730,6 +2636,10 @@ class _SeatGrid extends StatelessWidget {
   final VoidCallback onSeatDragEnded;
   final void Function(String fromSeatId, String toSeatId) onSeatDraggedToSeat;
 
+  /// Long-press an EMPTY seat → open its Hold/Premium flag sheet. Booked seats
+  /// keep long-press = drag; they reach the flag sheet via the occupant menu.
+  final void Function(String seatId) onSeatLongPressForFlags;
+
   const _SeatGrid({
     required this.viewportHeight,
     required this.layout,
@@ -2738,7 +2648,6 @@ class _SeatGrid extends StatelessWidget {
     required this.currentPassengerId,
     required this.onTap,
     required this.busName,
-    required this.editMode,
     required this.enableDrag,
     required this.dragActive,
     required this.canDragSeat,
@@ -2747,6 +2656,7 @@ class _SeatGrid extends StatelessWidget {
     required this.onSeatDragStarted,
     required this.onSeatDragEnded,
     required this.onSeatDraggedToSeat,
+    required this.onSeatLongPressForFlags,
   });
 
   @override
@@ -2808,6 +2718,7 @@ class _SeatGrid extends StatelessWidget {
             onSeatDragStarted: onSeatDragStarted,
             onSeatDragEnded: onSeatDragEnded,
             onSeatDraggedToSeat: onSeatDraggedToSeat,
+            onSeatLongPressForFlags: onSeatLongPressForFlags,
             tileBuilder: (ctx, cell) {
               final owners = assignmentMap[cell.seatId] ?? const <String>[];
               final occ = owners
@@ -2821,7 +2732,6 @@ class _SeatGrid extends StatelessWidget {
                 cell: cell,
                 occupants: occ,
                 groupColors: resolver,
-                editMode: editMode,
                 // [occ] is berth-accurate (one entry per assignment), so a
                 // half-taken double sofa renders split (filled + empty) instead
                 // of reading as fully booked.
@@ -3275,85 +3185,130 @@ class _AssignmentDock extends StatelessWidget {
     final p = passenger!;
     final stillNeeded = pendingLines.fold<int>(0, (s, l) => s + l.remaining);
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onToggleExpanded,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          UgamSpacing.gutter,
-          UgamSpacing.xs,
-          UgamSpacing.gutter,
-          UgamSpacing.sm,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 30,
-              height: 30,
-              alignment: Alignment.center,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.xs,
+        UgamSpacing.gutter,
+        0,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _sectionLabel(tr('tour_seat_assignment.now_seating')),
+          const SizedBox(height: UgamSpacing.xs),
+          // The active passenger sits in ONE clearly-accented card so it never
+          // reads as "just another queue row". Tapping it expands to the full
+          // request breakdown (same as the grab handle).
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onToggleExpanded,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.md,
+                vertical: UgamSpacing.sm + 2,
+              ),
               decoration: BoxDecoration(
                 color: c.accentFill,
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(UgamRadius.row),
+                border: Border.all(color: c.accent.withValues(alpha: 0.28)),
               ),
-              child: Text(
-                SeatChartTile.initials(p.displayName),
-                style: UgamText.bodyStrong.copyWith(color: c.accent, fontSize: 13),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.sm + 2),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  Text(
-                    p.displayName,
-                    style: UgamText.titleM.copyWith(color: c.ink, fontSize: 14),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Container(
+                    width: 38,
+                    height: 38,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: c.accent,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Text(
+                      SeatChartTile.initials(p.displayName),
+                      style: UgamText.bodyStrong.copyWith(
+                        color: c.onAccent,
+                        fontSize: 14,
+                      ),
+                    ),
                   ),
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          p.requestSummary,
-                          style: UgamText.caption.copyWith(color: c.ink2),
+                  const SizedBox(width: UgamSpacing.sm + 2),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          p.displayName,
+                          style: UgamText.titleM.copyWith(
+                            color: c.ink,
+                            fontSize: 15,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      if (stillNeeded > 0) ...[
-                        Text(
-                          '  ·  ',
-                          style: UgamText.caption.copyWith(color: c.ink3),
-                        ),
-                        Text(
-                          tr(
-                            'tour_seat_assignment.more_needed',
-                            namedArgs: {'count': stillNeeded.toString()},
-                          ),
-                          style: UgamText.caption.copyWith(
-                            color: c.warm,
-                            fontWeight: FontWeight.w700,
-                          ),
+                        const SizedBox(height: 1),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                p.requestSummary,
+                                style: UgamText.caption.copyWith(color: c.ink2),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (stillNeeded > 0) ...[
+                              Text(
+                                '  ·  ',
+                                style:
+                                    UgamText.caption.copyWith(color: c.ink3),
+                              ),
+                              Text(
+                                tr(
+                                  'tour_seat_assignment.more_needed',
+                                  namedArgs: {'count': stillNeeded.toString()},
+                                ),
+                                style: UgamText.caption.copyWith(
+                                  color: c.warm,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
-                    ],
+                    ),
                   ),
+                  const SizedBox(width: UgamSpacing.sm),
+                  Text(
+                    '${p.totalSeatsAssigned}/${p.totalSeatsRequested}',
+                    style: UgamText.tabular(
+                      UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 15),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.keyboard_arrow_up_rounded, size: 18, color: c.ink3),
                 ],
               ),
             ),
-            const SizedBox(width: UgamSpacing.sm),
-            Text(
-              '${p.totalSeatsAssigned}/${p.totalSeatsRequested}',
-              style: UgamText.tabular(
-                UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.keyboard_arrow_up_rounded, size: 18, color: c.ink3),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Small uppercase section label used to separate the dock's "Now seating"
+  /// card from the "Up next" queue — the visual split that ends the old
+  /// two-identical-rows confusion.
+  Widget _sectionLabel(String text) {
+    return Text(
+      text.toUpperCase(),
+      style: UgamText.caption.copyWith(
+        color: c.ink3,
+        fontWeight: FontWeight.w800,
+        fontSize: 10,
+        letterSpacing: 0.8,
       ),
     );
   }
@@ -3364,14 +3319,14 @@ class _AssignmentDock extends StatelessWidget {
   /// give each pending passenger their full name + request summary instead of
   /// the old horizontal cards that truncated names.
   Widget _queueRow(BuildContext context) {
-    const cap = 3;
+    const cap = 6;
     final visible = pending.take(cap).toList();
     final overflow = pending.length - visible.length;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         UgamSpacing.gutter,
-        UgamSpacing.xs,
+        UgamSpacing.sm,
         UgamSpacing.gutter,
         UgamSpacing.sm,
       ),
@@ -3396,65 +3351,61 @@ class _AssignmentDock extends StatelessWidget {
               ],
             )
           else ...[
-            for (final p in visible)
-              // Selecting a pending rider eases a subtle scale cue (1.0 → 1.02)
-              // alongside the row's own selected border/fill flip. Scale-only so
-              // the row's intrinsic layout/padding is untouched at steady state.
-              AnimatedScale(
-                scale: activeId == p.id ? 1.02 : 1.0,
-                duration: UgamMotion.tab,
-                curve: Curves.easeOutCubic,
-                child: UgamPersonRow(
-                  name: p.displayName,
-                  subtitle: _pendingSubtitle(p),
-                  initials: SeatChartTile.initials(p.displayName),
-                  selected: activeId == p.id,
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onTapPassenger(p.id);
-                  },
-                  trailing: Text(
-                    '${p.totalSeatsAssigned}/${p.totalSeatsRequested}',
-                    style: UgamText.tabular(
-                      UgamText.caption.copyWith(
-                        color: activeId == p.id ? c.accent : c.ink2,
-                        fontWeight: FontWeight.w700,
-                      ),
+            // "Up next" as a single COMPACT horizontal strip of passenger
+            // chips, clearly under the "Now seating" card — no more stacked
+            // near-identical full-width rows. Full names + request breakdown
+            // still live one tap away in the "See all" sheet.
+            Row(
+              children: [
+                Expanded(
+                  child: _sectionLabel(
+                    tr(
+                      'tour_seat_assignment.up_next',
+                      namedArgs: {'count': '${pending.length}'},
                     ),
                   ),
                 ),
-              ),
-            // "See all N" → the full pending sheet, so no one is stranded
-            // beyond the first three rows shown in the dock.
-            if (overflow > 0)
-              UgamPersonRow(
-                name: tr(
-                  'tour_seat_assignment.dock_see_all',
-                  namedArgs: {'count': '${pending.length}'},
-                ),
-                leading: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: c.cardElev,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    '+$overflow',
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink2,
-                      fontSize: 12,
+                if (overflow > 0)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _showAllPending(context),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          tr('tour_seat_assignment.dock_see_all_short'),
+                          style: UgamText.caption.copyWith(
+                            color: c.ink2,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 16,
+                          color: c.ink3,
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                trailing: Icon(
-                  Icons.chevron_right_rounded,
-                  size: 18,
-                  color: c.ink3,
-                ),
-                onTap: () => _showAllPending(context),
+              ],
+            ),
+            const SizedBox(height: UgamSpacing.xs + 2),
+            SizedBox(
+              height: 42,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: visible.length + (overflow > 0 ? 1 : 0),
+                separatorBuilder: (_, _) =>
+                    const SizedBox(width: UgamSpacing.sm),
+                itemBuilder: (ctx, i) {
+                  if (i >= visible.length) {
+                    return _pendingMoreChip(context, overflow);
+                  }
+                  return _pendingChip(context, visible[i]);
+                },
               ),
+            ),
           ],
           if (onLockTour != null) ...[
             const SizedBox(height: UgamSpacing.xs),
@@ -3497,18 +3448,98 @@ class _AssignmentDock extends StatelessWidget {
     );
   }
 
-  /// Subtitle for a pending row — the passenger's outstanding need (first line
-  /// + "+N" for extra lines), falling back to their full request summary when
-  /// nothing is left to place. Mirrors the old `_PendingCard` needs label so the
-  /// leg/type cue carries over to the vertical rows.
-  String _pendingSubtitle(Passenger p) {
-    final remaining = p.totalSeatsRequested - p.totalSeatsAssigned;
-    if (remaining <= 0) return p.requestSummary;
-    final firstLine = p.requestLines.isNotEmpty
-        ? p.requestLines.first.shortLabel
-        : tr('tour_seat_assignment.needs_seat', namedArgs: {'count': '$remaining'});
-    if (p.requestLines.length <= 1) return firstLine;
-    return '$firstLine +${p.requestLines.length - 1}';
+  /// One compact "Up next" chip: avatar + name + assigned/requested tally.
+  /// Tapping it makes that passenger active (same as the old vertical row). The
+  /// active passenger is accent-filled so the strip echoes the "Now seating"
+  /// card above it.
+  Widget _pendingChip(BuildContext context, Passenger p) {
+    final selected = activeId == p.id;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTapPassenger(p.id);
+      },
+      child: AnimatedContainer(
+        duration: UgamMotion.tab,
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.fromLTRB(5, 5, 12, 5),
+        decoration: BoxDecoration(
+          color: selected ? c.accentFill : c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+          border: selected
+              ? Border.all(color: c.accent.withValues(alpha: 0.35))
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? c.accent : c.card,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                SeatChartTile.initials(p.displayName),
+                style: UgamText.caption.copyWith(
+                  color: selected ? c.onAccent : c.ink2,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 108),
+              child: Text(
+                p.displayName,
+                style: UgamText.caption.copyWith(
+                  color: selected ? c.accent : c.ink,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '${p.totalSeatsAssigned}/${p.totalSeatsRequested}',
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(
+                  color: selected ? c.accent : c.ink3,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 10.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Trailing "+N" chip on the "Up next" strip → opens the full pending sheet.
+  Widget _pendingMoreChip(BuildContext context, int overflow) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _showAllPending(context),
+      child: Container(
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+          border: Border.all(color: c.border),
+        ),
+        child: Text(
+          '+$overflow',
+          style: UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 13),
+        ),
+      ),
+    );
   }
 
   /// Full sheet of every pending passenger — opened from the dock's "+N"
@@ -3580,7 +3611,7 @@ class _NoBuses extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(UgamSpacing.huge),
+        padding: const EdgeInsets.all(UgamSpacing.lg),
         child: UgamEmpty(
           icon: Icons.directions_bus_outlined,
           title: tr('tour_seat_assignment.no_buses_title'),
@@ -3603,7 +3634,7 @@ class _NoPassengers extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(UgamSpacing.huge),
+        padding: const EdgeInsets.all(UgamSpacing.lg),
         child: UgamEmpty(
           icon: Icons.people_outline_rounded,
           title: tr('tour_seat_assignment.no_passengers_title'),
@@ -3621,7 +3652,7 @@ class _NoLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.huge),
+      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
       alignment: Alignment.center,
       child: Text(
         tr('tour_seat_assignment.no_layout'),

@@ -260,14 +260,14 @@ class _PickupLocationsScreenState extends State<PickupLocationsScreen> {
   Widget _buildList(UgamColorSet c) {
     if (!_ctrl.loadedOnce.value && _ctrl.all.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.only(top: UgamSpacing.huge),
+        padding: EdgeInsets.only(top: UgamSpacing.lg),
         child: Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_ctrl.all.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.only(top: UgamSpacing.huge),
+        padding: EdgeInsets.only(top: UgamSpacing.lg),
         child: _PickupEmpty(),
       );
     }

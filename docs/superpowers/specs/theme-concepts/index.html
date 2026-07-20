@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ugam — 5 Distinct Design Languages</title>
+<style>
+  body{margin:0;background:#0d0d0f;color:#fff;
+    font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.5}
+  .wrap{max-width:1200px;margin:0 auto;padding:34px 20px 100px}
+  h1{font-size:30px;letter-spacing:-.5px;margin:0 0 6px}
+  .lead{color:#9b9ba6;max-width:840px;font-size:15px}
+  .eyebrow{color:#8aa0ff;font-size:12px;font-weight:700;letter-spacing:.7px;text-transform:uppercase}
+  .concept{display:grid;grid-template-columns:380px 1fr;gap:30px;align-items:start;
+    margin:34px 0;padding:28px;background:#141416;border:1px solid #232327;border-radius:20px}
+  .concept .info h2{margin:0 0 2px;font-size:22px}
+  .concept .info .tag{font-size:12px;color:#8aa0ff;font-weight:700;text-transform:uppercase;letter-spacing:.6px}
+  .concept .info p{color:#a0a0ab;font-size:14px;margin:12px 0}
+  .concept .info ul{margin:10px 0 0;padding-left:0;list-style:none}
+  .concept .info li{font-size:13px;color:#c7c7d1;padding:5px 0;border-top:1px solid #232327}
+  .concept .info li b{color:#fff}
+  .frame{width:340px;justify-self:center}
+  .device{border-radius:30px;overflow:hidden;border:1px solid #2a2a30;box-shadow:0 20px 50px rgba(0,0,0,.5)}
+  @media(max-width:820px){.concept{grid-template-columns:1fr}.frame{order:-1}}
+
+  /* ============ C1 · MONO LINE (dark, flat, hairline) ============ */
+  .c1{background:#0a0a0b;padding:22px 18px;font-family:Inter,sans-serif}
+  .c1 .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:22px}
+  .c1 .top .b{font-size:17px;font-weight:600;letter-spacing:-.2px;color:#fff}
+  .c1 .top .m{font-size:11px;color:#5b5b66;letter-spacing:.4px;text-transform:uppercase}
+  .c1 .lbl{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:#5b5b66;margin-bottom:6px}
+  .c1 .amt{font-size:34px;font-weight:600;letter-spacing:-1px;color:#fff;font-variant-numeric:tabular-nums}
+  .c1 .amt em{color:#6e8bff;font-style:normal}
+  .c1 .sub{font-size:13px;color:#8a8a96;margin-top:3px}
+  .c1 hr{border:0;border-top:1px solid #1c1c20;margin:18px 0}
+  .c1 .grid3{display:grid;grid-template-columns:1fr 1fr 1fr}
+  .c1 .grid3>div{padding:2px 0}
+  .c1 .grid3 .n{font-size:19px;font-weight:600;color:#fff;font-variant-numeric:tabular-nums}
+  .c1 .grid3 .k{font-size:10px;color:#5b5b66;text-transform:uppercase;letter-spacing:.6px;margin-top:2px}
+  .c1 .cta{margin-top:20px;border:1px solid #2a2a32;border-radius:8px;padding:12px;text-align:center;
+    font-size:13px;font-weight:600;color:#fff;letter-spacing:.2px}
+  .c1 .cta:after{content:" →";color:#6e8bff}
+
+  /* ============ C2 · EDITORIAL (light, serif display) ============ */
+  .c2{background:#f7f5f0;padding:26px 22px;color:#1a1a1a;font-family:Inter,sans-serif}
+  .c2 .kick{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#9a7b3f;font-weight:600}
+  .c2 .hl{font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.05;
+    letter-spacing:-.5px;margin:6px 0 4px;color:#171717}
+  .c2 .date{font-size:13px;color:#6b6b6b;font-style:italic;font-family:Georgia,serif}
+  .c2 .rule{height:1px;background:#ddd6c8;margin:18px 0}
+  .c2 .amt{font-family:Georgia,serif;font-size:30px;color:#171717;font-variant-numeric:tabular-nums}
+  .c2 .amtk{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#9a7b3f}
+  .c2 .stats{display:flex;gap:24px;margin-top:16px}
+  .c2 .stats .n{font-family:Georgia,serif;font-size:22px}.c2 .stats .k{font-size:11px;color:#7a7a7a;text-transform:uppercase;letter-spacing:1px}
+  .c2 .cta{margin-top:20px;background:#171717;color:#f7f5f0;border-radius:2px;padding:13px;
+    text-align:center;font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:600}
+
+  /* ============ C3 · BOARDING PASS (ticketed/domain) ============ */
+  .c3{background:#0f1320;padding:22px 18px;font-family:Inter,sans-serif}
+  .c3 .ticket{background:#1a2032;border-radius:16px;position:relative;overflow:hidden}
+  .c3 .tmain{padding:18px}
+  .c3 .route{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .c3 .city{font-size:24px;font-weight:700;color:#fff;letter-spacing:-.3px}
+  .c3 .line{flex:1;border-top:2px dashed #3b465f;position:relative;height:2px;margin:0 2px}
+  .c3 .line:after{content:"\2708";position:absolute;right:-2px;top:-11px;color:#39d0c8;font-size:13px}
+  .c3 .meta{font-size:12px;color:#8a93ac;margin-bottom:14px}
+  .c3 .perf{border-top:2px dashed #2c3550;position:relative;margin:4px 0}
+  .c3 .perf:before,.c3 .perf:after{content:"";position:absolute;top:-9px;width:18px;height:18px;
+    border-radius:999px;background:#0f1320}
+  .c3 .perf:before{left:-9px}.c3 .perf:after{right:-9px}
+  .c3 .stub{padding:14px 18px;display:flex;justify-content:space-between;align-items:center}
+  .c3 .stub .seat{font-family:'SF Mono',Consolas,monospace;font-size:20px;color:#39d0c8;font-weight:700;letter-spacing:1px}
+  .c3 .stub .seatk{font-size:10px;color:#8a93ac;text-transform:uppercase;letter-spacing:1px}
+  .c3 .amt{font-size:22px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums}
+  .c3 .cta{margin-top:16px;background:#39d0c8;color:#06231f;border-radius:999px;padding:13px;
+    text-align:center;font-weight:700;font-size:14px}
+
+  /* ============ C4 · AURORA GLASS (dark, gradient/glow) ============ */
+  .c4{position:relative;padding:24px 18px;font-family:Inter,sans-serif;
+    background:radial-gradient(120% 80% at 80% -10%,#3b2a6b 0%,#171430 45%,#0c0a18 100%)}
+  .c4 .glow{position:absolute;width:180px;height:180px;border-radius:50%;left:-30px;top:60px;
+    background:radial-gradient(circle,#7a5cff66,transparent 70%);filter:blur(10px)}
+  .c4 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;position:relative}
+  .c4 .top b{font-size:17px;color:#fff}
+  .c4 .glass{position:relative;background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.14);border-radius:18px;padding:16px;
+    backdrop-filter:blur(8px);box-shadow:0 8px 30px rgba(0,0,0,.3)}
+  .c4 .k{font-size:11px;color:#b9b3d6;text-transform:uppercase;letter-spacing:1px}
+  .c4 .amt{font-size:32px;font-weight:700;
+    background:linear-gradient(90deg,#c4b5ff,#8a6bff);-webkit-background-clip:text;background-clip:text;color:transparent;
+    font-variant-numeric:tabular-nums}
+  .c4 .sub{font-size:13px;color:#b9b3d6;margin-top:3px}
+  .c4 .row{display:flex;gap:10px;margin-top:12px}
+  .c4 .row .glass{flex:1;text-align:center;padding:13px 6px}
+  .c4 .row .n{font-size:19px;font-weight:700;color:#fff}.c4 .row .l{font-size:10px;color:#a59fc6;margin-top:2px}
+  .c4 .cta{margin-top:16px;border-radius:999px;padding:13px;text-align:center;font-weight:700;color:#fff;
+    background:linear-gradient(90deg,#7a5cff,#a06bff);box-shadow:0 8px 24px #7a5cff55}
+
+  /* ============ C5 · SOFT ATELIER (light, tactile shadows) ============ */
+  .c5{background:#eceef3;padding:24px 18px;font-family:Inter,sans-serif;color:#1c2230}
+  .c5 .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+  .c5 .top b{font-size:18px;color:#1c2230}
+  .c5 .av{width:34px;height:34px;border-radius:999px;background:#1f8a70;box-shadow:0 4px 10px #1f8a7055}
+  .c5 .card{background:#fff;border-radius:22px;padding:18px;box-shadow:0 10px 24px rgba(40,50,70,.10)}
+  .c5 .k{font-size:11px;color:#8a93a6;text-transform:uppercase;letter-spacing:.8px}
+  .c5 .amt{font-size:31px;font-weight:800;color:#1c2230;font-variant-numeric:tabular-nums}
+  .c5 .amt em{color:#1f8a70;font-style:normal}
+  .c5 .sub{font-size:13px;color:#6b7488;margin-top:3px}
+  .c5 .row{display:flex;gap:12px;margin-top:14px}
+  .c5 .row .card{flex:1;text-align:center;padding:15px 8px;border-radius:18px}
+  .c5 .row .n{font-size:20px;font-weight:800;color:#1c2230}.c5 .row .l{font-size:11px;color:#8a93a6;margin-top:2px}
+  .c5 .cta{margin-top:18px;background:#1f8a70;color:#fff;border-radius:999px;padding:14px;
+    text-align:center;font-weight:700;font-size:14px;box-shadow:0 8px 20px #1f8a7044}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Ugam · full rebuild — 5 distinct design languages</div>
+  <h1>Five genuinely different themes (not recolors)</h1>
+  <p class="lead">Each is its own design language — different surface treatment, typography, shape and structure —
+  all aimed at <b>premium &amp; serious</b>, and all buildable in both light &amp; dark. Same content in every mock
+  so you compare the <i>language</i>, not the data. Tell me which one to take live on your real screens.</p>
+
+  <!-- C1 -->
+  <div class="concept">
+    <div class="info">
+      <div class="tag">Concept 1</div>
+      <h2>Mono Line</h2>
+      <p>Flat, borderless surfaces separated only by <b>hairlines</b> and space. Tight grotesk type, tabular
+      numbers, one cool accent. The "serious software" look — Linear / Vercel.</p>
+      <ul>
+        <li><b>Surfaces:</b> no card fills — 1px hairlines + whitespace</li>
+        <li><b>Type:</b> tight Inter, uppercase micro-labels</li>
+        <li><b>Shape:</b> small radii (8px), rules not boxes</li>
+        <li><b>Feel:</b> precise, dense, engineered</li>
+      </ul>
+    </div>
+    <div class="frame"><div class="device"><div class="c1">
+      <div class="top"><span class="b">Ugam</span><span class="m">Mon 22 Jun</span></div>
+      <div class="lbl">This week · income</div>
+      <div class="amt">₹<em>42,500</em></div>
+      <div class="sub">Surat → Amreli · 4/36 seats</div>
+      <hr>
+      <div class="grid3">
+        <div><div class="n">1</div><div class="k">Active</div></div>
+        <div><div class="n">0</div><div class="k">Today</div></div>
+        <div><div class="n">3</div><div class="k">Waitlist</div></div>
+      </div>
+      <div class="cta">Choose handler</div>
+    </div></div></div>
+  </div>
+
+  <!-- C2 -->
+  <div class="concept">
+    <div class="info">
+      <div class="tag">Concept 2</div>
+      <h2>Editorial</h2>
+      <p>Typography-led, like a premium travel magazine. <b>Serif display headings</b>, warm paper ground,
+      thin rules, generous margins. Content feels authored, not dashboarded.</p>
+      <ul>
+        <li><b>Surfaces:</b> paper ground, no boxes — rules divide</li>
+        <li><b>Type:</b> serif display + clean sans body</li>
+        <li><b>Shape:</b> near-square corners (2px), editorial</li>
+        <li><b>Feel:</b> refined, calm, human, high-end</li>
+      </ul>
+    </div>
+    <div class="frame"><div class="device"><div class="c2">
+      <div class="kick">This week</div>
+      <div class="hl">Surat → Amreli</div>
+      <div class="date">Departs Mon, 22 June</div>
+      <div class="rule"></div>
+      <div class="amtk">Income</div>
+      <div class="amt">₹42,500</div>
+      <div class="stats">
+        <div><div class="n">1</div><div class="k">Active</div></div>
+        <div><div class="n">0</div><div class="k">Today</div></div>
+        <div><div class="n">3</div><div class="k">Waitlist</div></div>
+      </div>
+      <div class="cta">Choose handler</div>
+    </div></div></div>
+  </div>
+
+  <!-- C3 -->
+  <div class="concept">
+    <div class="info">
+      <div class="tag">Concept 3</div>
+      <h2>Boarding Pass</h2>
+      <p>The domain made literal — cards are <b>tickets</b>: route line with stops, perforated tear, a seat
+      stub, mono seat codes. Distinctive and instantly "travel," still premium.</p>
+      <ul>
+        <li><b>Surfaces:</b> ticket cards with perforations + stubs</li>
+        <li><b>Type:</b> sans + monospace for seats/codes</li>
+        <li><b>Shape:</b> 16px cards, dashed dividers, notches</li>
+        <li><b>Feel:</b> characterful, ownable, on-brand</li>
+      </ul>
+    </div>
+    <div class="frame"><div class="device"><div class="c3">
+      <div class="ticket">
+        <div class="tmain">
+          <div class="route"><span class="city">SRT</span><span class="line"></span><span class="city">AMD</span></div>
+          <div class="meta">Surat → Amreli · Mon 22 Jun</div>
+          <div class="amtk" style="font-size:11px;color:#8a93ac;text-transform:uppercase;letter-spacing:1px">Income this week</div>
+          <div class="amt">₹42,500</div>
+        </div>
+        <div class="perf"></div>
+        <div class="stub">
+          <div><div class="seatk">Seats</div><div class="seat">4/36</div></div>
+          <div><div class="seatk">Waitlist</div><div class="seat">3</div></div>
+        </div>
+      </div>
+      <div class="cta">Choose handler</div>
+    </div></div></div>
+  </div>
+
+  <!-- C4 -->
+  <div class="concept">
+    <div class="info">
+      <div class="tag">Concept 4</div>
+      <h2>Aurora Glass</h2>
+      <p>Depth through light — <b>frosted translucent layers</b>, a soft aurora glow, gradient accent. The most
+      modern/luxury option; rich without being loud.</p>
+      <ul>
+        <li><b>Surfaces:</b> translucent glass + blur over a gradient ground</li>
+        <li><b>Type:</b> clean sans, gradient numerals</li>
+        <li><b>Shape:</b> 18px soft cards, glow shadows</li>
+        <li><b>Feel:</b> premium, atmospheric, contemporary</li>
+      </ul>
+    </div>
+    <div class="frame"><div class="device"><div class="c4">
+      <div class="glow"></div>
+      <div class="top"><b>Ugam</b><span style="color:#b9b3d6;font-size:12px">Mon 22 Jun</span></div>
+      <div class="glass">
+        <div class="k">This week · income</div>
+        <div class="amt">₹42,500</div>
+        <div class="sub">Surat → Amreli · 4/36 seats</div>
+      </div>
+      <div class="row">
+        <div class="glass"><div class="n">1</div><div class="l">Active</div></div>
+        <div class="glass"><div class="n">0</div><div class="l">Today</div></div>
+        <div class="glass"><div class="n">3</div><div class="l">Waitlist</div></div>
+      </div>
+      <div class="cta">Choose handler</div>
+    </div></div></div>
+  </div>
+
+  <!-- C5 -->
+  <div class="concept">
+    <div class="info">
+      <div class="tag">Concept 5</div>
+      <h2>Soft Atelier</h2>
+      <p>Tactile and calm — white <b>plush cards</b> with soft drop shadows, large radii, pill controls on a
+      gentle gray ground. Premium but warm and approachable.</p>
+      <ul>
+        <li><b>Surfaces:</b> elevated white cards, soft shadows (real depth)</li>
+        <li><b>Type:</b> rounded-friendly sans, bold numbers</li>
+        <li><b>Shape:</b> large radii (22px), pills</li>
+        <li><b>Feel:</b> soft, trustworthy, premium-friendly</li>
+      </ul>
+    </div>
+    <div class="frame"><div class="device"><div class="c5">
+      <div class="top"><b>Ugam</b><div class="av"></div></div>
+      <div class="card">
+        <div class="k">This week · income</div>
+        <div class="amt">₹<em>42,500</em></div>
+        <div class="sub">Surat → Amreli · 4/36 seats</div>
+      </div>
+      <div class="row">
+        <div class="card"><div class="n">1</div><div class="l">Active</div></div>
+        <div class="card"><div class="n">0</div><div class="l">Today</div></div>
+        <div class="card"><div class="n">3</div><div class="l">Waitlist</div></div>
+      </div>
+      <div class="cta">Choose handler</div>
+    </div></div></div>
+  </div>
+
+</div>
+</body>
+</html>

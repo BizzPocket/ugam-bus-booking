@@ -20,8 +20,9 @@ class CustomerMemoryController extends GetxController {
   final memories = <CustomerMemory>[].obs;
 
   /// True when the last [load] could not reach the server — smartFetch swallows
-  /// its error to `[]` and trips [SyncService.lastReadFailed]. Surfaced so a
-  /// failed load is distinguishable from a genuinely-empty index. Memory is a
+  /// its error to `[]` and reports it via the read result's `failed` flag.
+  /// Surfaced so a failed load is distinguishable from a genuinely-empty index.
+  /// Memory is a
   /// best-effort enhancement, so this drives a silent self-heal on reconnect,
   /// NOT a blocking error/retry UI ("never block the app on it").
   final loadFailed = false.obs;
@@ -59,22 +60,25 @@ class CustomerMemoryController extends GetxController {
       return;
     }
     try {
-      final data = await _sync.smartFetch(
+      final result = await _sync.smartFetch(
         table: 'customer_memory',
         cacheKey: _cacheKey,
         filters: {'owner_id': adminId},
         orderBy: 'updated_at',
         maxAge: 120000,
       );
-      // smartFetch returns `[]` on any failure (and trips lastReadFailed), so a
+      // smartFetch returns `[]` on any failure (with result.failed set), so a
       // blind assignAll would wipe the returning-customer index on a transient
       // timeout. Distinguish a real load failure from a genuinely-empty result:
       // on failure KEEP whatever memories are already held and just flag it.
-      if (_sync.lastReadFailed) {
+      // (result.failed is this call's OWN outcome — a missing `customer_memory`
+      // table failing here can no longer bleed into a concurrent tours load.)
+      if (result.failed) {
         loadFailed.value = true;
         return;
       }
-      memories.assignAll(data.map((m) => CustomerMemory.fromMap(m)).toList());
+      memories
+          .assignAll(result.rows.map((m) => CustomerMemory.fromMap(m)).toList());
       _rebuildIndex();
       loadFailed.value = false;
     } catch (_) {
