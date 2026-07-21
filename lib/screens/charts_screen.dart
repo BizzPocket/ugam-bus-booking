@@ -189,10 +189,13 @@ class _ChartsScreenState extends State<ChartsScreen> {
           final sheetOccupants = occupantListForBus(tour.passengers, bus.id);
           final groupColors = tourGroupColors(tour);
           final totalSeats = layout?.totalSeats ?? 0;
-          final assignedCount = assignments.values.fold<int>(
-            0,
-            (sum, list) => sum + list.length,
-          );
+          // Leg-aware fill count (busier leg = max(GO, RET)) — NOT a raw fold
+          // of `assignments` entries. A seat shared by an outbound-only rider
+          // and a return-only rider produces two disjoint assignment entries
+          // on ONE physical berth; folding them double-counts and can read
+          // past capacity (e.g. "40/37"). `assignments` itself is untouched —
+          // it still feeds the tile grid, which needs the raw per-seat lists.
+          final assignedCount = tour.occupiedBerthsFor(bus.id);
 
           return Column(
             children: [
