@@ -6,7 +6,7 @@ import 'package:occubusbooking/design/tokens.dart';
 /// Covers the tidy grouped-grid rewrite of the shared seat-chart legend. This
 /// is a high-blast-radius component (every seat chart — charts, handler,
 /// manual assignment, bus-status — renders it), so the contract we lock in is:
-/// all nine keys render, and the grid never overflows even on a narrow phone.
+/// all ten keys render, and the grid never overflows even on a narrow phone.
 ///
 /// Localization is not initialised under `flutter test`, so `tr(...)` returns
 /// the raw key; we assert on those keys, which is enough to prove every entry
@@ -15,6 +15,7 @@ import 'package:occubusbooking/design/tokens.dart';
 const _keys = <String>[
   'seat_legend.free',
   'seat_legend.booked',
+  'seat_legend.family',
   'seat_legend.priority',
   'seat_legend.paid',
   'seat_legend.owing',
@@ -41,7 +42,7 @@ Future<void> _pump(WidgetTester tester, {double width = 360}) {
 }
 
 void main() {
-  testWidgets('renders all nine legend keys', (tester) async {
+  testWidgets('renders all ten legend keys', (tester) async {
     await _pump(tester);
     expect(tester.takeException(), isNull);
     for (final k in _keys) {

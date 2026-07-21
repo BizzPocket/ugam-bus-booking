@@ -209,28 +209,41 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
         final isLocked = tour.status == TourStatus.locked;
         if (isLocked) {
-          final seatedCount =
-              tour.passengers.where((p) => p.assignedSeats.isNotEmpty).length;
-          final pendingCount = tour.passengers
+          final seated = tour.passengers
               .where((p) => p.assignedSeats.isNotEmpty)
-              .where((p) => !_sentIds.contains(p.id))
-              .length;
+              .toList();
           // No seated riders → nothing to send at all.
-          if (seatedCount <= 0) return const SizedBox.shrink();
-          // Once the lock-time send has marked everyone as sent the CTA used to
-          // vanish, leaving no obvious way to re-broadcast the seat chart — the
-          // "notify to send the chart again" complaint. Keep a persistent
-          // re-send action instead: it re-dispatches the seat chart to EVERY
-          // seated rider (_sendSeatAllocations already targets all seated).
-          final resendAll = pendingCount <= 0;
+          if (seated.isEmpty) return const SizedBox.shrink();
+          // Riders whose CURRENT seats have NOT been notified — a fresh lock
+          // (never sent) OR an organiser edit AFTER lock. Persistent, so it
+          // survives a reload/restart (unlike the session-only _sentIds tracker),
+          // and it re-appears the moment a locked tour's seats are edited.
+          final changed =
+              seated.where((p) => p.seatsChangedSinceNotified).toList();
+          if (changed.isNotEmpty) {
+            // "Notify N" when nobody's been sent yet (fresh lock / all changed);
+            // "Re-notify N" when only a few moved after an earlier full send.
+            final firstSend = changed.length == seated.length;
+            return UgamStickyCTA(
+              child: UgamCTA(
+                label: firstSend
+                    ? tr('notify.send_all_pending')
+                    : tr('notify.resend_changed'),
+                leadingIcon: Icons.chat_rounded,
+                trailingValue: '${changed.length}',
+                onPressed: () => _sendChangedAllocations(
+                  tour,
+                  changed.map((p) => p.id).toSet(),
+                ),
+              ),
+            );
+          }
+          // Everyone's current seats have been notified — keep a full re-send
+          // available so the organiser can always re-broadcast the chart.
           return UgamStickyCTA(
             child: UgamCTA(
-              label: resendAll
-                  ? tr('notify.resend_all')
-                  : tr('notify.send_all_pending'),
-              leadingIcon:
-                  resendAll ? Icons.send_rounded : Icons.chat_rounded,
-              trailingValue: resendAll ? null : '$pendingCount',
+              label: tr('notify.resend_all'),
+              leadingIcon: Icons.send_rounded,
               onPressed: () => _sendSeatAllocations(tour),
             ),
           );
@@ -492,6 +505,26 @@ class _NotifyScreenState extends State<NotifyScreen> {
     await _dispatchSeatAllocations(t, seated.map((p) => p.id).toSet());
   }
 
+  /// Confirm + re-dispatch seat charts to a SPECIFIC set of riders (those whose
+  /// seats changed since their last notification). Mirrors [_sendSeatAllocations]
+  /// but targets [ids] instead of every seated rider.
+  Future<void> _sendChangedAllocations(Tour tour, Set<String> ids) async {
+    if (ids.isEmpty) return;
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('notify.alloc_dialog_title'),
+      message: tr(
+        'notify.alloc_dialog_body',
+        namedArgs: {'count': ids.length.toString()},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('notify.alloc_dialog_send'),
+      confirmIcon: Icons.send_rounded,
+    );
+    if (!ok) return;
+    await _dispatchSeatAllocations(tour, ids);
+  }
+
   /// Send the seat-allotment messages to [passengerIds] on [t], showing a live
   /// "preparing X of N" dialog while the charts build + upload (the slow part),
   /// then a result summary. On partial/total failure the summary offers a
@@ -539,7 +572,14 @@ class _NotifyScreenState extends State<NotifyScreen> {
             (p) => okPhones.contains(WhatsAppCloudService.graphPhone(p.phone)))
         .map((p) => p.id)
         .toSet();
-    if (justSent.isNotEmpty) setState(() => _sentIds.addAll(justSent));
+    if (justSent.isNotEmpty) {
+      setState(() => _sentIds.addAll(justSent));
+      // Persist the notified seat signature so a later post-lock edit re-flags
+      // ONLY the changed riders for re-notify (survives reload / restart).
+      unawaited(
+        Get.find<TourController>().markSeatsNotified(t.id, justSent),
+      );
+    }
 
     if (result.allSent) {
       AppSnackBar.success(

@@ -66,3 +66,45 @@ content or color changes, no behavioral changes.
   `tour_controller_test.dart`, seat-assignment tests).
 - Drive the real app: chip gone, badges intact, long-press empty seat →
   flags sheet, tap occupied → sheet has Hold/Premium, dock reads Now/Up-next.
+
+---
+
+# Part 2 — Seat chart redesign ("Clean / Readable")
+
+**Added:** 2026-07-20 (after user iteration on mockups).
+**Direction:** Uber/Zomato/Zepto restraint — flat, clean, one accent, glanceable.
+Replaces the painted "chair silhouette" tile with a flat rounded tile
+**everywhere** the shared `SeatChartTile` renders (assign, Charts, handler,
+fullscreen, customer/anonymous, PDF, past-history).
+
+## Constraints (unchanged)
+Keep name + mobile on every booked tile; keep the Go(cyan)/Return(violet)/
+priority colours; keep the dark theme; keep all render states + behavior.
+
+## Tile spec
+- **Frame:** flat rounded rect (drop `_SeatShape`/`_SeatShapePainter`/
+  `_SeatShapeClipper` chair geometry; free tile uses a flat dashed rounded rect).
+- **Size:** bump `kSeatTileW`/`kSeatTileH` so name + mobile are legible
+  (target ~72; verify the 2+2 grid still fits phone width and PDF/fullscreen).
+- **Text:** FIXED font sizes — never scale-to-invisible. Name = up to 2 lines
+  then ellipsis; mobile = its own tabular line below. (Revisit
+  `SeatOccupantLabel`'s FittedBox scale-down.)
+- **Family:** a bold group-colour **left bar** (reuses `groupColors`) so
+  families cluster visually. Solo riders get none.
+- **Leg:** quiet flat Go/Return tint + a small corner dot (no glow, no chip).
+- **Priority:** copper dot. **Being-seated:** copper treatment (assign screen).
+  **Empty:** recessed, faint outline + glyph (recedes).
+- **2-person double:** stack top/bottom (each name gets full cell width).
+- **3-4 person double (quad):** show 2 riders fully (name + mobile) + a
+  "+N more" chip; full roster on tap. (User-chosen trade-off.)
+
+## Summary header (assign + Charts)
+A clean strip above the chart: occupancy meter + `Go / Return / families /
+priority` counts — the bus is legible before scanning seats. New widget.
+May land as a fast follow after the tile.
+
+## Verification
+- `flutter analyze` clean; `seat_render` / legend / occupant / seats tests green.
+- Visually verify EVERY consumer of `SeatChartTile` still renders (assign,
+  Charts, fullscreen, handler manifest, customer anonymous, **PDF export**,
+  past-history) — the size + shape change ripples to all.

@@ -4,7 +4,7 @@ import 'package:get/get.dart';
 import 'package:occubusbooking/controllers/tour_controller.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/bus_type.dart';
-import 'package:occubusbooking/design/components/ugam_free_by_type.dart';
+import 'package:occubusbooking/design/components/ugam_free_seats.dart';
 import 'package:occubusbooking/models/passenger.dart';
 import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
@@ -122,9 +122,9 @@ Widget _harness() => GetMaterialApp(
       home: const TourOverviewScreen(tourId: 't1'),
     );
 
-/// Bus rows compose "<name>  ·  <type>" inside a single [RichText] span, so the
-/// name/type are not findable as standalone [Text] widgets. These helpers walk
-/// the rendered RichText trees and match against the flattened plain text.
+/// Bus rows compose `"<name>  ·  <type>"` inside a single [RichText] span, so
+/// the name/type are not findable as standalone [Text] widgets. These helpers
+/// walk the rendered RichText trees and match against the flattened plain text.
 String _flatten(InlineSpan span) => span.toPlainText();
 
 bool _richTextContaining(WidgetTester tester, String needle) =>
@@ -230,10 +230,10 @@ void main() {
         reason: 'the empty bus shows free capacity, matching the grid');
   });
 
-  testWidgets('a bus with mixed free types renders one pill per free type',
+  testWidgets('a bus with free seats shows the free-seats indicator',
       (tester) async {
-    // Empty bus with a single + a double, nobody assigned → both types free
-    // round-trip → two pills, and no one-way caption.
+    // Empty bus with a single + a double, nobody assigned → both types free →
+    // the typed berth-glyph indicator renders.
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([
@@ -248,13 +248,12 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    expect(find.byType(UgamTypeFreePill), findsNWidgets(2),
-        reason: 'one pill for the free single, one for the free double');
-    expect(find.byType(UgamLegCaption), findsNothing,
-        reason: 'all seats free both legs — no one-way surplus');
+    expect(find.byType(UgamFreeSeats), findsOneWidget,
+        reason: 'the bus with a free single + double shows the seat glyphs');
   });
 
-  testWidgets('a genuinely full bus renders no type pills', (tester) async {
+  testWidgets('a genuinely full bus shows no free-seats indicator',
+      (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([
@@ -281,14 +280,15 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    expect(find.byType(UgamTypeFreePill), findsNothing);
+    expect(find.byType(UgamFreeSeats), findsNothing,
+        reason: 'nothing free → the row shows a "full" flag, not seat glyphs');
   });
 
-  testWidgets('a return-only opening surfaces a pill + the leg caption',
+  testWidgets('a return-only opening still surfaces the free-seats indicator',
       (tester) async {
     // One single seat taken GOING only → it returns empty. The meter reads
-    // round-trip-full, but the type line must still surface the return-only
-    // seat (the "available for one leg" case) with the go/return colour key.
+    // round-trip-full, but the indicator must still surface the return-only
+    // seat (the "available for one leg" case) as a leg-tinted glyph.
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([
@@ -320,10 +320,8 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    expect(find.byType(UgamTypeFreePill), findsOneWidget,
+    expect(find.byType(UgamFreeSeats), findsOneWidget,
         reason: 'the return-only single is still a bookable seat');
-    expect(find.byType(UgamLegCaption), findsOneWidget,
-        reason: 'a one-way-only opening shows the go/return colour key');
   });
 
   testWidgets('shows the "need your decision" chip when the plan has exceptions',

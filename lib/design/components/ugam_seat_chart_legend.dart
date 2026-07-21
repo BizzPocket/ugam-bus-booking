@@ -42,24 +42,26 @@ class UgamSeatChartLegend extends StatelessWidget {
   final UgamColorSet c;
   const UgamSeatChartLegend({super.key, required this.c});
 
-  /// The nine keys in a fixed 3×3 reading order, grouped by meaning so each
-  /// row is one coherent idea:
-  ///   row 1 — occupancy: free · booked · priority
-  ///   row 2 — money:     paid · owing · ½ half-fare
-  ///   row 3 — leg / hold: go · return · held
+  /// The keys in a fixed 3-column reading order, grouped by meaning so each row
+  /// is one coherent idea (matching the flat/readable tile design):
+  ///   row 1 — occupancy: free · booked · family (colour bar)
+  ///   row 2 — leg / rank: go · return · priority (copper dot)
+  ///   row 3 — hold / money: held · paid · owing
+  ///   row 4 — fare: ½ half-fare
   ///
   /// Rendered as an aligned grid (not a ragged center-wrapped [Wrap]) so the
   /// swatches and labels line up into tidy columns.
   static const List<(_LegendSwatch, String)> _keys = [
     (_LegendSwatch.dashed, 'seat_legend.free'),
     (_LegendSwatch.filled, 'seat_legend.booked'),
-    (_LegendSwatch.warmRing, 'seat_legend.priority'),
+    (_LegendSwatch.familyBar, 'seat_legend.family'),
+    (_LegendSwatch.go, 'seat_legend.go'),
+    (_LegendSwatch.ret, 'seat_legend.ret'),
+    (_LegendSwatch.priorityDot, 'seat_legend.priority'),
+    (_LegendSwatch.held, 'seat_legend.held'),
     (_LegendSwatch.paidDot, 'seat_legend.paid'),
     (_LegendSwatch.owingDot, 'seat_legend.owing'),
     (_LegendSwatch.halfFare, 'seat_legend.half'),
-    (_LegendSwatch.go, 'seat_legend.go'),
-    (_LegendSwatch.ret, 'seat_legend.ret'),
-    (_LegendSwatch.held, 'seat_legend.held'),
   ];
 
   @override
@@ -99,7 +101,8 @@ class UgamSeatChartLegend extends StatelessWidget {
 enum _LegendSwatch {
   dashed,
   filled,
-  warmRing,
+  familyBar,
+  priorityDot,
   held,
   go,
   ret,
@@ -141,16 +144,27 @@ class _LegendItem extends StatelessWidget {
             border: Border.all(color: c.border),
           ),
         );
-      case _LegendSwatch.warmRing:
+      case _LegendSwatch.familyBar:
+        // A mini flat tile with a colour bar down the left edge — same colour =
+        // same booking, so families read as clusters on the chart.
         dot = Container(
-          width: 12,
+          width: 15,
           height: 12,
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: c.cardElev,
             borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: c.warm, width: 2),
+            border: Border.all(color: c.border),
+          ),
+          child: Row(
+            children: [
+              Container(width: 3.5, color: const Color(0xFF3FB0A0)),
+            ],
           ),
         );
+      case _LegendSwatch.priorityDot:
+        // Matches the tile's copper priority dot.
+        dot = _Dot(color: c.warm, size: 11);
       case _LegendSwatch.held:
         dot = Container(
           width: 12,

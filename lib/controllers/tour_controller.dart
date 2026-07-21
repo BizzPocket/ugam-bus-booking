@@ -702,17 +702,6 @@ class TourController extends GetxController {
     await updateStatus(tourId, TourStatus.completed);
   }
 
-  /// Clearing seats on a LOCKED tour un-finalizes the allocation — drop it back
-  /// to `assigning` so the agent can re-seat and the "Lock & notify" action
-  /// reappears (a locked tour otherwise only offers "Mark completed"). No-op
-  /// for any other status.
-  Future<void> _revertLockOnUnseat(String tourId) async {
-    final t = getTour(tourId);
-    if (t != null && t.status == TourStatus.locked) {
-      await updateStatus(tourId, TourStatus.assigning);
-    }
-  }
-
   /// Complete the OUTBOUND (GO) leg of a tour: every GO-only (outboundOnly)
   /// passenger has finished their only leg, so free their seats (the return
   /// chart then shows them empty) and mark them [Passenger.journeyDone] — the
@@ -1327,7 +1316,6 @@ class TourController extends GetxController {
       },
       failure: tr('errors.clear_seat_assignment'),
     );
-    await _revertLockOnUnseat(tourId);
   }
 
   /// Free every seat on [busId] across all passengers of [tourId] in one go.
@@ -1366,7 +1354,6 @@ class TourController extends GetxController {
       },
       failure: tr('errors.clear_bus'),
     );
-    await _revertLockOnUnseat(tourId);
   }
 
   /// Customer-cancels a single seat — common phone-in flow: "I booked 3
@@ -1445,7 +1432,6 @@ class TourController extends GetxController {
       },
       failure: tr('errors.cancel_seat'),
     );
-    await _revertLockOnUnseat(tourId);
   }
 
   /// Consolidate a set of source seats (typically two single sofas
@@ -2119,6 +2105,42 @@ class TourController extends GetxController {
       // The toast is best-effort feedback — never let a missing localization or
       // navigator context turn this fire-and-forget send into a crash.
     }
+  }
+
+  /// Persist that [passengerIds] have been WhatsApp-notified of their CURRENT
+  /// seats: stamps each rider's [Passenger.seatSignature] onto
+  /// `seats_notified_sig`. A later post-lock seat edit changes the live
+  /// signature, re-flagging them as "changed" for the Notify screen's targeted
+  /// re-notify. Silently skips ids that don't resolve.
+  Future<void> markSeatsNotified(
+    String tourId,
+    Iterable<String> passengerIds,
+  ) async {
+    final ids = passengerIds.toSet();
+    if (ids.isEmpty) return;
+    final changed = <Passenger>[];
+    await _write(
+      optimistic: () {
+        for (final id in ids) {
+          Passenger? updated;
+          _updatePassengerLocal(tourId, id, (p) {
+            updated = p.copyWith(seatsNotifiedSig: p.seatSignature);
+            return updated!;
+          });
+          if (updated != null) changed.add(updated!);
+        }
+      },
+      persist: () async {
+        for (final p in changed) {
+          await _sync.smartUpdate(
+            table: 'passengers',
+            entityId: p.id,
+            data: p.toMap(),
+          );
+        }
+      },
+      failure: tr('errors.save_seat_assignment'),
+    );
   }
 
   // Handler

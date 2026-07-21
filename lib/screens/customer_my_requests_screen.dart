@@ -685,22 +685,15 @@ class _RequestRow extends StatelessWidget {
     if (e.isCancelled) {
       return (tr('customer_my_requests.chip_cancelled'), UgamStatusTone.warm);
     }
-    // Once the organiser has CONFIRMED the booking, say "Confirmed" — even before
-    // the tour is locked. The seat NUMBER still stays hidden until lock (handled
-    // by seatsVisible above and the footer seat chip), but the headline status
-    // must not read "still being decided" for a rider who is already confirmed.
-    // This branch MUST precede the provisional-seat branch below: confirming +
-    // seating a rider on an unlocked ('assigning') tour is the normal state, and
-    // the Confirmed tab already counts them — the pill has to agree.
-    if (e.status == 'accepted' || e.isConfirmed) {
+    // A booking reads "Confirmed" the moment it is organiser-confirmed OR holds
+    // a provisionally-assigned seat — even before the tour is locked. The seat
+    // NUMBER still stays hidden until lock (via seatsVisible above and the footer
+    // chip), but the headline must not read "still being booked" for a rider who
+    // already has a seat. `hasSeatsAssigned` is included so this pill AGREES with
+    // the Confirmed tab's `_isConfirmedish` bucket — a seated rider was otherwise
+    // mis-labelled "being finalized" while sitting inside the Confirmed tab.
+    if (e.status == 'accepted' || e.isConfirmed || e.hasSeatsAssigned) {
       return (tr('customer_my_requests.chip_confirmed'), UgamStatusTone.good);
-    }
-    // Provisionally seated but NOT yet confirmed → genuinely being finalized.
-    if (e.hasSeatsAssigned) {
-      return (
-        tr('customer_my_requests.chip_seats_finalizing'),
-        UgamStatusTone.warm,
-      );
     }
     return (tr('customer_my_requests.chip_pending'), UgamStatusTone.warm);
   }
@@ -812,8 +805,8 @@ class _RowFooter extends StatelessWidget {
       );
     }
     // Seat NUMBERS are revealed only after the tour locks. Before that, show a
-    // neutral "being finalized" chip so the customer knows seats are coming but
-    // never sees provisional numbers that may still change.
+    // neutral "number coming soon" chip so the customer knows their seat is
+    // secured but never sees a provisional number that may still change.
     if (entry.seatsVisible) {
       widgets.add(
         UgamReqChip(
@@ -825,14 +818,12 @@ class _RowFooter extends StatelessWidget {
         ),
       );
     } else if (entry.hasSeatsAssigned) {
-      // Seated but the tour isn't locked yet, so the NUMBER stays hidden. For a
-      // confirmed rider say the number is coming (the headline already reads
-      // "Confirmed"); for a still-provisional one, that seats are being finalized.
+      // Seated but the tour isn't locked yet, so the NUMBER stays hidden. The
+      // seat is secured (headline reads "Confirmed") — tell the rider the number
+      // is coming, never that it's "still being finalized".
       widgets.add(
         UgamReqChip(
-          label: entry.isConfirmed
-              ? tr('customer_my_requests.chip_seat_after_lock')
-              : tr('customer_my_requests.chip_seats_finalizing'),
+          label: tr('customer_my_requests.chip_seat_after_lock'),
           variant: UgamChipVariant.neutral,
         ),
       );

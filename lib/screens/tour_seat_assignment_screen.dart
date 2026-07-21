@@ -7,6 +7,7 @@ import 'fullscreen_chart_screen.dart';
 import '../components/combined_seat_grid.dart';
 import '../components/seat_chart_tile.dart';
 import '../design/ugam.dart';
+import '../controllers/pickup_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
@@ -133,6 +134,11 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     super.initState();
     _selectedPassengerId = widget.initialPassengerId;
     _selectedBusId = widget.initialBusId;
+    // Warm the global pickup list so the seat-picker rows and the "now seating"
+    // card can label each rider's boarding point (code, else name snapshot).
+    if (Get.isRegistered<PickupController>()) {
+      Get.find<PickupController>().ensureLoaded();
+    }
   }
 
   TourController get _ctrl => Get.find<TourController>();
@@ -2302,6 +2308,43 @@ class _PendingLine {
 
 // ─── Seat passenger picker ───────────────────────────────────────────────
 
+/// A compact pickup-point chip: the admin-facing short CODE (from
+/// [PickupController]) when set, else the pickup NAME the booking snapshotted.
+/// Renders nothing when the rider has no pickup; wrapped in [Obx] so the code
+/// fills in once the global pickup list finishes loading.
+class _PickupCodeChip extends StatelessWidget {
+  final Passenger passenger;
+  final EdgeInsetsGeometry padding;
+  const _PickupCodeChip({
+    required this.passenger,
+    this.padding = const EdgeInsets.only(left: UgamSpacing.sm),
+  });
+
+  Widget _chip(String? label) {
+    if (label == null || label.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: padding,
+      child: UgamReqChip(label: label, variant: UgamChipVariant.neutral),
+    );
+  }
+
+  String? _label(PickupController? pk) {
+    final code = pk?.codeFor(passenger.pickupLocationId);
+    if (code != null && code.isNotEmpty) return code;
+    final name = passenger.pickupLocationName;
+    return (name != null && name.isNotEmpty) ? name : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pk = Get.isRegistered<PickupController>()
+        ? Get.find<PickupController>()
+        : null;
+    if (pk == null) return _chip(_label(null));
+    return Obx(() => _chip(_label(pk)));
+  }
+}
+
 /// Bottom-sheet list of pending passengers who can take a tapped EMPTY seat —
 /// seat-first assignment. Each row shows the name + their outstanding request;
 /// the currently-selected passenger (if any) is tagged at the top. The sheet
@@ -2437,6 +2480,10 @@ class _SeatPassengerPicker extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          _PickupCodeChip(
+            passenger: p,
+            padding: const EdgeInsets.only(right: UgamSpacing.sm),
+          ),
           if (isActive) ...[
             Icon(Icons.check_circle_rounded, size: 16, color: c.accent),
             const SizedBox(width: 4),
@@ -2909,6 +2956,7 @@ class _PassengerCard extends StatelessWidget {
                             ),
                           ),
                         ],
+                        _PickupCodeChip(passenger: passenger),
                       ],
                     ),
                     if (passenger.phone.isNotEmpty)

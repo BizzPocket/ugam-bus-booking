@@ -528,6 +528,35 @@ class CustomerRequestsStore {
         .toList();
   }
 
+  /// Occupant identity (name + phone) for every ASSIGNED seat on the request's
+  /// tour, one entry per (busId, seatId) berth, via the lock-gated
+  /// `bus_roster_for_request` RPC. Empty until the tour is locked.
+  ///
+  /// PRIVACY: this returns the FULL roster's contact details to the (anonymous)
+  /// customer — the organiser's deliberate choice so co-travellers can
+  /// coordinate boarding (see migration 041). Do not repurpose it for a context
+  /// where a rider must not see co-travellers.
+  Future<List<({String busId, String seatId, String name, String phone})>>
+  seatRosterForRequest(String requestId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'bus_roster_for_request',
+      params: {'p_id': requestId},
+    );
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map(
+          (m) => (
+            busId: (m['bus_id'] ?? '').toString(),
+            seatId: (m['seat_id'] ?? '').toString(),
+            name: (m['name'] ?? '').toString(),
+            phone: (m['phone'] ?? '').toString(),
+          ),
+        )
+        .toList();
+  }
+
   /// "Find my seat by phone": resolves every seat held under [phone] on a
   /// LOCKED/completed tour, with the bus diagram(s) to draw them — bypassing
   /// booking_requests entirely so manually-added passengers (who have no in-app

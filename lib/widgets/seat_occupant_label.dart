@@ -4,22 +4,27 @@ import '../design/ugam.dart';
 import '../utils/seat_grid_placement.dart';
 
 /// Stacked passenger identity for a seat tile: the full name (bold) above the
-/// mobile number, both auto-shrunk to fit the cell.
+/// mobile number, at FIXED readable sizes.
 ///
 /// Name and mobile are mandatory on every passenger, so this is the canonical
-/// way a booked seat reads in the grid charts — replacing the old initials-only
-/// glyph. The number is formatted with [displayPhone] (last-10 / digits-only)
-/// and only hidden in the rare case a passenger has no digits on file.
+/// way a booked seat reads in the grid charts. The name is shown at a fixed
+/// size and WRAPS up to [nameMaxLines] before ellipsis — it never shrinks to
+/// unreadable (the old FittedBox scale-down made long names vanish). The number
+/// is one tabular line, formatted with [displayPhone] (last-10 / digits-only)
+/// and only hidden when a passenger has no digits on file.
 class SeatOccupantLabel extends StatelessWidget {
   final String name;
   final String? phone;
   final Color nameColor;
   final Color phoneColor;
 
-  /// Cap font sizes; the [FittedBox] only ever scales DOWN from these, so a
-  /// short name stays crisp while a long one shrinks to fit.
+  /// FIXED font sizes — the text is never scaled below these.
   final double nameSize;
   final double phoneSize;
+
+  /// How many lines the name may wrap to before ellipsis. Two by default so a
+  /// medium name stays whole; tight split halves pass 1.
+  final int nameMaxLines;
 
   const SeatOccupantLabel({
     super.key,
@@ -27,8 +32,9 @@ class SeatOccupantLabel extends StatelessWidget {
     required this.phone,
     required this.nameColor,
     required this.phoneColor,
-    this.nameSize = 15,
-    this.phoneSize = 10,
+    this.nameSize = 13,
+    this.phoneSize = 9.5,
+    this.nameMaxLines = 2,
   });
 
   @override
@@ -38,34 +44,29 @@ class SeatOccupantLabel extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(
-            name,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            softWrap: false,
-            style: UgamText.bodyStrong.copyWith(
-              color: nameColor,
-              fontSize: nameSize,
-              fontWeight: FontWeight.w800,
-              height: 1.05,
-            ),
+        Text(
+          name,
+          textAlign: TextAlign.center,
+          maxLines: nameMaxLines,
+          overflow: TextOverflow.ellipsis,
+          style: UgamText.bodyStrong.copyWith(
+            color: nameColor,
+            fontSize: nameSize,
+            fontWeight: FontWeight.w700,
+            height: 1.12,
           ),
         ),
         if (number != null && number.isNotEmpty) ...[
-          const SizedBox(height: 1),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              number,
-              maxLines: 1,
-              softWrap: false,
-              style: UgamText.tabular(
-                UgamText.micro.copyWith(
-                  color: phoneColor,
-                  fontSize: phoneSize,
-                ),
+          const SizedBox(height: 2),
+          Text(
+            number,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: UgamText.tabular(
+              UgamText.micro.copyWith(
+                color: phoneColor,
+                fontSize: phoneSize,
               ),
             ),
           ),

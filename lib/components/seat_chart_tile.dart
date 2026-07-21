@@ -14,8 +14,12 @@ import 'seat_render.dart';
 /// Canonical tile size used by every seat chart in the app so the chart reads
 /// identically wherever it appears (auto-fill, assign, rearrange, handler,
 /// bus status, seat detail).
-const double kSeatTileW = 52;
-const double kSeatTileH = 52;
+///
+/// Sized so a booked tile can show a fixed-size name (up to two lines) above the
+/// mobile number without shrinking either to unreadable — the 2+2 sleeper grid
+/// still fits a phone width at this size.
+const double kSeatTileW = 68;
+const double kSeatTileH = 74;
 
 /// The ONE seat tile used across the whole app.
 ///
@@ -188,19 +192,11 @@ class SeatChartTile extends StatelessWidget {
   Color _fill(Color base) =>
       bandColor == null ? base : Color.alphaBlend(bandColor!, base);
 
-  /// True when this cell is a two-person berth. A double reads as a WIDER chair
-  /// (the silhouette fills the box) so a 2-person sofa is visibly bigger than a
-  /// 1-person seat, which insets its chair body — see [_SeatShapePainter].
-  bool get _isDouble => cell.seatType == SeatType.doubleSofa;
-
-  /// Horizontal inset matching the chair-body silhouette ([_SeatShape._sideInset]
-  /// — singles inset ~16%/side, doubles ~6%). Centered label content (name /
-  /// phone) must be laid out at this VISIBLE body width, not the full tile box:
-  /// otherwise [FittedBox] scales the name to the box and the surplus bleeds
-  /// under the arms and is hard-clipped by [_chairFrame]'s ClipPath (a long name
-  /// like "Vijay Mehta" reads as a meaningless middle slice "ijay Meht").
-  double get _bodyInset =>
-      _SeatShape(isDouble: _isDouble)._sideInset(Size(width, height));
+  /// Small horizontal text padding inside the now-flat rounded tile. (The old
+  /// chair silhouette needed a big body inset so text didn't bleed under the
+  /// arms; a flat rect just needs a hair of breathing room, so the name gets
+  /// nearly the full cell width.)
+  double get _bodyInset => 5;
 
   /// The ONE chair silhouette every filled state shares: an asymmetric box with
   /// a tall back (large top radius = headrest), a shorter base (small bottom
@@ -220,22 +216,22 @@ class SeatChartTile extends StatelessWidget {
     required double borderWidth,
     required Widget child,
   }) {
-    final shape = _SeatShape(isDouble: _isDouble);
-    return SizedBox(
+    // Flat, clean rounded tile (Uber/Zomato restraint) — replaces the painted
+    // chair silhouette. Fill / border / child pass through unchanged, so every
+    // seat state keeps its exact colours and content, just on a rounded rect.
+    // Content is clipped to the same radius so split halves round their corners.
+    return Container(
       width: width,
       height: height,
-      child: CustomPaint(
-        painter: _SeatShapePainter(
-          shape: shape,
-          fill: fill,
-          borderColor: borderColor,
-          borderWidth: borderWidth,
-        ),
-        child: ClipPath(
-          clipper: _SeatShapeClipper(shape),
-          child: child,
-        ),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(UgamRadius.seat),
+        border: borderWidth > 0
+            ? Border.all(color: borderColor, width: borderWidth)
+            : null,
       ),
+      child: child,
     );
   }
 
@@ -290,7 +286,7 @@ class SeatChartTile extends StatelessWidget {
         tile = _heldTile(c);
         onTap = onTapFree;
       case SeatRenderKind.quad:
-        tile = _quadTile(c, r.quadGo, r.quadRet, r.extra);
+        tile = _quadTile(c);
         onTap = onTapBooked;
       case SeatRenderKind.anonymous:
       case SeatRenderKind.free:
@@ -313,22 +309,22 @@ class SeatChartTile extends StatelessWidget {
     final showForwardRing = !_isBooked && cell.forward;
     return Stack(
       children: [
+        tile,
         if (showForwardRing)
           Positioned.fill(
-            // Warm forward ring follows the chair silhouette, not a square.
-            child: CustomPaint(
-              painter: _SeatShapePainter(
-                shape: _SeatShape(isDouble: _isDouble),
-                fill: Colors.transparent,
-                borderColor: c.warm,
-                borderWidth: 2,
+            // Warm forward ring on the flat rounded tile.
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(UgamRadius.seat),
+                  border: Border.all(color: c.warm, width: 2),
+                ),
               ),
             ),
           ),
-        tile,
         Positioned(
-          bottom: 3,
-          right: 3,
+          bottom: 4,
+          right: 4,
           child: Icon(Icons.tune_rounded, size: 11, color: c.ink3),
         ),
       ],
@@ -339,13 +335,13 @@ class SeatChartTile extends StatelessWidget {
   // the row is in a price band, a faint band stripe sits behind the dashed
   // border so even empty seats read their price tier.
   Widget _freeTile(UgamColorSet c) {
+    // Flat dashed rounded tile that RECEDES — a faint outline + faint glyph so
+    // booked seats visibly sit "above" empty ones and occupancy reads at a
+    // glance. (Was a dashed chair silhouette; now matches the flat booked tile.)
     final content = CustomPaint(
-      // Dashed CHAIR silhouette (single/seater slim, double wider) so an empty
-      // seat reads as the same chair outline as a filled one.
       painter: SeatDashedBorderPainter(
-        color: c.ink3.withValues(alpha: 0.55),
+        color: c.ink3.withValues(alpha: 0.4),
         radius: UgamRadius.seat,
-        chairIsDouble: _isDouble,
       ),
       child: SizedBox(
         width: width,
@@ -353,8 +349,8 @@ class SeatChartTile extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.event_seat_outlined, size: 16, color: c.ink3),
-            const SizedBox(height: 3),
+            Icon(Icons.event_seat_outlined, size: 17, color: c.ink3),
+            const SizedBox(height: 4),
             Text(
               cell.seatId ?? '',
               style: UgamText.tabular(
@@ -366,13 +362,13 @@ class SeatChartTile extends StatelessWidget {
       ),
     );
     if (bandColor == null) return content;
-    // Band wash sits behind the dashed chair, clipped to the same silhouette so
-    // the price stripe reads inside the chair body, not a square behind it.
+    // Band wash clipped to the tile's rounded rect so the price stripe reads
+    // inside the tile, not a square behind it.
     return Stack(
       children: [
         Positioned.fill(
-          child: ClipPath(
-            clipper: _SeatShapeClipper(_SeatShape(isDouble: _isDouble)),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(UgamRadius.seat),
             child: Container(color: Color.alphaBlend(bandColor!, c.bg)),
           ),
         ),
@@ -406,41 +402,34 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
-  // BOOKED — initials on card fill; group ring + warm priority ring/badge.
+  // BOOKED — flat tile: family colour on a LEFT BAR (so families cluster
+  // visually), leg by the quiet background tint, a copper priority dot, and the
+  // name (fixed size, up to 2 lines) over the mobile.
   Widget _bookedTile(UgamColorSet c, Passenger p) {
     final priority = p.isPriorityApproved || cell.forward;
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
     final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
 
-    final Color ringColor;
-    final double ringWidth;
-    if (priority) {
-      ringColor = c.warm;
-      ringWidth = 2;
-    } else if (gColor != null) {
-      ringColor = gColor;
-      ringWidth = 2;
-    } else {
-      ringColor = c.border;
-      ringWidth = 1;
-    }
-
     return _chairFrame(
       c: c,
       // One-way legs are marked by the tile COLOUR alone (GO cyan / RET violet);
-      // round-trip stays the plain card fill. No "GO"/"RET" text chip — the
-      // colour already says the leg, and the chip just cluttered tiles that also
-      // carry a name + mobile.
+      // round-trip stays the plain card fill.
       fill: _fill(_legBgFill(c, _seatLeg(p)) ?? c.cardElev),
-      borderColor: ringColor,
-      borderWidth: ringWidth,
+      borderColor: priority ? c.warm : c.border,
+      borderWidth: priority ? 1.5 : 1,
       child: Stack(
         children: [
+          if (gColor != null) _familyBar(gColor),
           Center(
-            // Inset to the chair body so a long name shrinks to fit WITHIN the
-            // silhouette instead of bleeding under the arms and being clipped.
             child: Padding(
-              padding: EdgeInsets.fromLTRB(_bodyInset, 12, _bodyInset, 6),
+              // Clear the seat code (top) + the family bar (left) so the name
+              // never sits under either; a hair of side padding otherwise.
+              padding: EdgeInsets.fromLTRB(
+                _bodyInset + (gColor != null ? 5 : 0),
+                15,
+                _bodyInset,
+                8,
+              ),
               child: SeatOccupantLabel(
                 name: p.displayName,
                 phone: p.phone,
@@ -449,42 +438,37 @@ class SeatChartTile extends StatelessWidget {
               ),
             ),
           ),
-          Positioned(
-            top: 4,
-            left: 5,
-            child: Text(
-              cell.seatId ?? '',
-              style: UgamText.tabular(
-                UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
-              ),
-            ),
-          ),
+          _seatCodeTag(c, gColor != null),
           if (priority)
-            Positioned(
-              top: 3,
-              right: 3,
-              child: Icon(Icons.star_rounded, size: 12, color: c.warm),
-            ),
-          if (priority && gColor != null)
-            Positioned(
-              top: 4,
-              right: 4,
-              child: Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(top: 12),
-                decoration: BoxDecoration(
-                  color: gColor,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
+            Positioned(top: 5, right: 6, child: _dot(c.warm, 7)),
           if (moneyDotColor != null)
-            Positioned(bottom: 4, right: 4, child: _dot(moneyDotColor!, 8)),
+            Positioned(bottom: 5, right: 6, child: _dot(moneyDotColor!, 8)),
         ],
       ),
     );
   }
+
+  /// The family colour as a rounded left bar — same colour = same booking, so
+  /// families read as clusters without opening anyone. Clipped to the tile's
+  /// rounded corners by [_chairFrame].
+  Widget _familyBar(Color color) => Positioned(
+    left: 0,
+    top: 0,
+    bottom: 0,
+    child: Container(width: 5, color: color),
+  );
+
+  /// The seat id, top-left, nudged right when a family bar occupies the edge.
+  Widget _seatCodeTag(UgamColorSet c, bool hasFamilyBar) => Positioned(
+    top: 5,
+    left: hasFamilyBar ? 10 : 6,
+    child: Text(
+      cell.seatId ?? '',
+      style: UgamText.tabular(
+        UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
+      ),
+    ),
+  );
 
   // ANONYMOUS — privacy tile for the customer chart: a seat with the seat id
   // only, no occupant identity. Neutral card fill for OTHER seats; accent fill
@@ -701,8 +685,9 @@ class SeatChartTile extends StatelessWidget {
                   phone: p.phone,
                   nameColor: c.ink,
                   phoneColor: c.ink2,
-                  nameSize: 12.5,
+                  nameSize: 11.5,
                   phoneSize: 8,
+                  nameMaxLines: 1,
                 ),
               ),
               if (gColor != null) ...[
@@ -721,7 +706,8 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
-  // SHARED double — split left/right, both (distinct) occupants.
+  // SHARED double — two distinct occupants STACKED top/bottom, so each gets the
+  // FULL cell width for their name + mobile (far more legible than side-by-side).
   Widget _sharedTile(UgamColorSet c) {
     final a = _occ[0];
     final b = _occ[1];
@@ -729,84 +715,59 @@ class SeatChartTile extends StatelessWidget {
         a.isPriorityApproved || b.isPriorityApproved || cell.forward;
     return _chairFrame(
       c: c,
-      // Transparent body — the two leg-tinted halves below fill it.
-      fill: Colors.transparent,
+      fill: c.cardElev,
       borderColor: priority ? c.warm : c.border,
-      borderWidth: priority ? 2 : 1,
+      borderWidth: priority ? 1.5 : 1,
       child: Stack(
         children: [
-          Row(
+          Column(
             children: [
-              Expanded(child: _half(c, a)),
-              Container(width: 1, color: c.border),
-              Expanded(child: _half(c, b)),
+              Expanded(child: _stackedHalf(c, a)),
+              Container(height: 1, color: c.border),
+              Expanded(child: _stackedHalf(c, b)),
             ],
           ),
-          Positioned(
-            top: 4,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Text(
-                cell.seatId ?? '',
-                style: UgamText.tabular(
-                  UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
-                ),
-              ),
-            ),
-          ),
-          if (priority)
-            Positioned(
-              top: 3,
-              right: 3,
-              child: Icon(Icons.star_rounded, size: 12, color: c.warm),
-            ),
+          _seatCodeTag(c, false),
+          if (priority) Positioned(top: 5, right: 6, child: _dot(c.warm, 7)),
           if (moneyDotColor != null)
-            Positioned(bottom: 4, right: 4, child: _dot(moneyDotColor!, 8)),
+            Positioned(bottom: 5, right: 6, child: _dot(moneyDotColor!, 8)),
           if (_extraOccupants > 0) _extraBadge(c, _extraOccupants),
         ],
       ),
     );
   }
 
-  Widget _half(UgamColorSet c, Passenger p) {
+  /// One occupant of a STACKED double — full cell width, the leg tint as fill, a
+  /// thin family bar, and the name (one line) over the mobile.
+  Widget _stackedHalf(UgamColorSet c, Passenger p) {
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
     final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
     return Container(
-      // A one-way occupant's half is tinted by leg (GO cyan / RET violet) — the
-      // colour alone marks the leg, no text chip. Round-trip stays plain fill.
       color: _fill(_legBgFill(c, _seatLeg(p)) ?? c.cardElev),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(2, 12, 2, 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Shared / half-taken sofa: show the mobile under the name just like
-            // every other tile. The half is only half-WIDTH but full-HEIGHT, and
-            // SeatOccupantLabel wraps both lines in a FittedBox(scaleDown), so the
-            // number shrinks to fit instead of being dropped — same as [_legHalf].
-            SeatOccupantLabel(
-              name: p.displayName,
-              phone: p.phone,
-              nameColor: c.ink,
-              phoneColor: c.ink2,
-              nameSize: 13,
-              phoneSize: 8,
+      child: Stack(
+        children: [
+          if (gColor != null)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Container(width: 4, color: gColor),
             ),
-            if (gColor != null) ...[
-              const SizedBox(height: 3),
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  color: gColor,
-                  shape: BoxShape.circle,
-                ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(gColor != null ? 8 : 4, 2, 4, 2),
+            child: Center(
+              child: SeatOccupantLabel(
+                name: p.displayName,
+                phone: p.phone,
+                nameColor: c.ink,
+                phoneColor: c.ink2,
+                nameSize: 11.5,
+                phoneSize: 8.5,
+                nameMaxLines: 1,
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -816,58 +777,28 @@ class SeatChartTile extends StatelessWidget {
   // visibly reads "half taken, half free" instead of fully booked.
   Widget _halfDoubleTile(UgamColorSet c, Passenger p) {
     final priority = p.isPriorityApproved || cell.forward;
-    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
-
-    final Color ringColor;
-    final double ringWidth;
-    if (priority) {
-      ringColor = c.warm;
-      ringWidth = 2;
-    } else if (gColor != null) {
-      ringColor = gColor;
-      ringWidth = 2;
-    } else {
-      ringColor = c.border;
-      ringWidth = 1;
-    }
+    final priorityBorder = priority ? c.warm : c.border;
 
     return _chairFrame(
       c: c,
-      // Transparent body — the filled left half + empty right half fill it.
-      fill: Colors.transparent,
-      borderColor: ringColor,
-      borderWidth: ringWidth,
+      fill: c.cardElev,
+      borderColor: priorityBorder,
+      borderWidth: priority ? 1.5 : 1,
       child: Stack(
         children: [
-          Row(
+          // Occupant on top (full width, readable), the free berth beneath it —
+          // the seat reads "half taken, half free" while the name gets full room.
+          Column(
             children: [
-              Expanded(child: _half(c, p)),
-              Container(width: 1, color: c.border),
+              Expanded(child: _stackedHalf(c, p)),
+              Container(height: 1, color: c.border),
               Expanded(child: _emptyHalf(c)),
             ],
           ),
-          Positioned(
-            top: 4,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Text(
-                cell.seatId ?? '',
-                style: UgamText.tabular(
-                  UgamText.micro.copyWith(color: c.ink3, fontSize: 8),
-                ),
-              ),
-            ),
-          ),
-          if (priority)
-            Positioned(
-              top: 3,
-              right: 3,
-              child: Icon(Icons.star_rounded, size: 12, color: c.warm),
-            ),
+          _seatCodeTag(c, false),
+          if (priority) Positioned(top: 5, right: 6, child: _dot(c.warm, 7)),
           if (moneyDotColor != null)
-            Positioned(bottom: 4, right: 4, child: _dot(moneyDotColor!, 8)),
+            Positioned(bottom: 5, right: 6, child: _dot(moneyDotColor!, 8)),
         ],
       ),
     );
@@ -883,102 +814,33 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
-  // QUAD — a Double Sofa shared by THREE or FOUR distinct riders (two berths,
-  // each reusable across disjoint legs). A GO row (cyan) over a RET row (violet),
-  // each holding up to two riders and padded with an empty placeholder when a
-  // berth's leg is free. A round-trip rider holds both legs of their berth, so
-  // they appear in BOTH rows. Replaces the old "two names + a +N badge" that hid
-  // the extra riders and read as a bug.
-  Widget _quadTile(
-      UgamColorSet c, List<Passenger> goRow, List<Passenger> retRow, int extra) {
-    final priority = cell.forward ||
-        goRow.any((p) => p.isPriorityApproved) ||
-        retRow.any((p) => p.isPriorityApproved);
+  // QUAD — a Double Sofa shared by 3-4 riders. Chosen trade-off: show TWO
+  // riders fully (name + mobile, stacked) and flag the rest with a "+N" badge;
+  // the full roster is one tap away in the occupant sheet.
+  Widget _quadTile(UgamColorSet c) {
+    final shown = _occ.take(2).toList();
+    final more = _occ.length - shown.length;
+    final priority = cell.forward || _occ.any((p) => p.isPriorityApproved);
     return _chairFrame(
       c: c,
-      // Transparent body — the GO row over the RET row carry the leg tints.
-      fill: Colors.transparent,
+      fill: c.cardElev,
       borderColor: priority ? c.warm : c.border,
-      borderWidth: priority ? 2 : 1,
+      borderWidth: priority ? 1.5 : 1,
       child: Stack(
         children: [
           Column(
             children: [
-              Expanded(child: _quadRow(c, goRow, TripType.outboundOnly)),
-              Container(height: 1, color: c.border),
-              Expanded(child: _quadRow(c, retRow, TripType.returnOnly)),
+              for (var i = 0; i < shown.length; i++) ...[
+                if (i > 0) Container(height: 1, color: c.border),
+                Expanded(child: _stackedHalf(c, shown[i])),
+              ],
             ],
           ),
-          Positioned(
-            top: 2,
-            left: 4,
-            child: Text(
-              cell.seatId ?? '',
-              style: UgamText.tabular(
-                UgamText.micro.copyWith(color: c.ink3, fontSize: 7),
-              ),
-            ),
-          ),
-          if (priority)
-            Positioned(
-              top: 2,
-              right: 3,
-              child: Icon(Icons.star_rounded, size: 10, color: c.warm),
-            ),
+          _seatCodeTag(c, false),
+          if (priority) Positioned(top: 5, right: 6, child: _dot(c.warm, 7)),
           if (moneyDotColor != null)
-            Positioned(bottom: 2, right: 3, child: _dot(moneyDotColor!, 6)),
-          if (extra > 0) _extraBadge(c, extra),
-        ],
-      ),
-    );
-  }
-
-  // One leg row of a [_quadTile]: up to two rider cells tinted by [rowLeg],
-  // padded to two with an empty placeholder so the 2×2 grid stays square.
-  Widget _quadRow(UgamColorSet c, List<Passenger> riders, TripType rowLeg) {
-    final cells = <Widget>[];
-    for (var i = 0; i < 2; i++) {
-      if (i > 0) cells.add(Container(width: 1, color: c.border));
-      final p = i < riders.length ? riders[i] : null;
-      cells.add(Expanded(
-        child: p == null ? _emptyHalf(c) : _quadCell(c, p, rowLeg),
-      ));
-    }
-    return Row(children: cells);
-  }
-
-  // One rider cell in a [_quadTile]: initials on the row's leg tint (GO cyan /
-  // RET violet) plus a group dot. The full name + phone are one tap away.
-  Widget _quadCell(UgamColorSet c, Passenger p, TripType rowLeg) {
-    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
-    return Container(
-      color: _fill(_legBgFill(c, rowLeg) ?? c.cardElev),
-      alignment: Alignment.center,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            child: Text(
-              initials(p.displayName),
-              maxLines: 1,
-              overflow: TextOverflow.clip,
-              style: UgamText.micro.copyWith(
-                color: c.ink,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          if (gColor != null) ...[
-            const SizedBox(width: 2),
-            Container(
-              width: 5,
-              height: 5,
-              decoration: BoxDecoration(color: gColor, shape: BoxShape.circle),
-            ),
-          ],
+            Positioned(bottom: 5, right: 6, child: _dot(moneyDotColor!, 8)),
+          if (more > 0) _extraBadge(c, more),
         ],
       ),
     );
@@ -986,7 +848,7 @@ class SeatChartTile extends StatelessWidget {
 
   /// A small "+N" pill (bottom-left) flagging riders the tile can't draw — see
   /// [_extraOccupants]. Bottom-left keeps it clear of the seat id (top-left),
-  /// the priority star (top-right) and the money dot (bottom-right).
+  /// the priority dot (top-right) and the money dot (bottom-right).
   Widget _extraBadge(UgamColorSet c, int n) => Positioned(
     bottom: 3,
     left: 4,
@@ -1309,59 +1171,6 @@ class _SeatShape {
         bottomRight: botR,
       ));
   }
-}
-
-/// Clips a tile's content to the [_SeatShape] body so leg-tint halves and fills
-/// stay within the chair silhouette (no bleed past the body corners).
-class _SeatShapeClipper extends CustomClipper<Path> {
-  final _SeatShape shape;
-  const _SeatShapeClipper(this.shape);
-
-  @override
-  Path getClip(Size size) => shape.bodyPath(size);
-
-  @override
-  bool shouldReclip(covariant _SeatShapeClipper old) =>
-      old.shape.isDouble != shape.isDouble;
-}
-
-/// Paints the shared chair silhouette behind a tile's content: the [fill] body
-/// and its [borderColor]/[borderWidth] outline. One painter for every filled
-/// state, so the chair reads identically app-wide.
-class _SeatShapePainter extends CustomPainter {
-  final _SeatShape shape;
-  final Color fill;
-  final Color borderColor;
-  final double borderWidth;
-
-  _SeatShapePainter({
-    required this.shape,
-    required this.fill,
-    required this.borderColor,
-    required this.borderWidth,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final body = shape.bodyPath(size);
-    canvas.drawPath(body, Paint()..color = fill);
-    if (borderWidth > 0) {
-      canvas.drawPath(
-        body,
-        Paint()
-          ..color = borderColor
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = borderWidth,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SeatShapePainter old) =>
-      old.fill != fill ||
-      old.borderColor != borderColor ||
-      old.borderWidth != borderWidth ||
-      old.shape.isDouble != shape.isDouble;
 }
 
 /// Paints a dashed rounded-rectangle border for the FREE tile. Public so the

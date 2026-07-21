@@ -4,7 +4,7 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/components/ugam_capacity_meter.dart';
-import '../design/components/ugam_free_by_type.dart';
+import '../design/components/ugam_free_seats.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/seat_type.dart';
@@ -764,23 +764,13 @@ class _BusRow extends StatelessWidget {
     final clean = full && !hasExceptions;
     final tone = clean ? c.good : c.warm;
 
-    // Free-by-type breakdown from ACTUAL seats: one pill per seat type this bus
-    // still has openings on — so "4 ખાલી" berths reads as real seats (a Double
-    // Sofa is ONE tile worth two berths). Ordered single · double · seater;
-    // types with nothing free are skipped, so a full bus shows no line (the
-    // meter already says "full"). Cyan → / violet ← badges carry the one-way
-    // surplus; the leg caption shows only when some type has a one-way opening.
+    // Free seats as typed berth glyphs (actual seats): the meter's ambiguous
+    // "{n} free" berth text is suppressed and this shows what's actually open —
+    // a single-berth vs double-berth icon so "double = 2 berths" reads at a
+    // glance, with leg colour for any one-way surplus. A bus with nothing free
+    // shows a plain "full" instead.
     final fbt = freeByType;
-    final typePills = <(String, SeatTypeFree)>[
-      if (fbt != null)
-        for (final st in const [
-          SeatType.singleSofa,
-          SeatType.doubleSofa,
-          SeatType.seater,
-        ])
-          if ((fbt[st]?.total ?? 0) > 0) (st.displayName, fbt[st]!),
-    ];
-    final anyOneWay = typePills.any((p) => p.$2.hasOneWay);
+    final hasFree = fbt != null && fbt.values.any((f) => f.total > 0);
 
     return GestureDetector(
       onTap: onTap,
@@ -832,7 +822,8 @@ class _BusRow extends StatelessWidget {
               ],
             ),
             const SizedBox(height: UgamSpacing.sm),
-            // Shared per-bus meter owns the leg-split count + "{n} free" + bar.
+            // Per-bus meter shows just "placed/cap" over the bar — the free
+            // indicator moves below as typed seat icons (showFreeLabel: false).
             UgamCapacityMeter.bus(
               busCap ??
                   BusCapacity(
@@ -841,22 +832,21 @@ class _BusRow extends StatelessWidget {
                     goOccupied: 0,
                     retOccupied: 0,
                   ),
+              showFreeLabel: false,
             ),
-            // Compact free-by-type line beneath the meter (actual seats).
-            if (typePills.isNotEmpty) ...[
+            // Free seats: typed berth glyphs when any are open, else a plain
+            // "full". Only when a capacity snapshot exists (fbt != null).
+            if (fbt != null) ...[
               const SizedBox(height: UgamSpacing.sm),
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final (label, free) in typePills)
-                    UgamTypeFreePill(c: c, label: label, free: free),
-                ],
-              ),
-              if (anyOneWay) ...[
-                const SizedBox(height: 6),
-                const UgamLegCaption(),
-              ],
+              if (hasFree)
+                UgamFreeSeats(freeByType: fbt, c: c)
+              else
+                Text(
+                  tr('capacity.full'),
+                  style: UgamText.tabular(
+                    UgamText.caption.copyWith(color: c.ink3),
+                  ),
+                ),
             ],
           ],
         ),

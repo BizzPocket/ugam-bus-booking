@@ -95,6 +95,14 @@ class Passenger {
 
   bool get isCancelRequested => cancelRequestedAt != null;
 
+  /// Stable signature of the seat-set most recently WhatsApp-notified to this
+  /// rider (see [seatSignature]). Null until the first seat allocation is sent.
+  /// When it differs from the current seats — a fresh lock, or an organiser edit
+  /// AFTER lock — [seatsChangedSinceNotified] is true and the Notify screen
+  /// offers a targeted re-notify. Persisted (migration 040) so "changed" survives
+  /// an app restart.
+  final String? seatsNotifiedSig;
+
   final DateTime createdAt;
 
   Passenger({
@@ -120,6 +128,7 @@ class Passenger {
     this.pickupLocationName,
     this.cancelledAt,
     this.cancelRequestedAt,
+    this.seatsNotifiedSig,
     DateTime? createdAt,
   }) : id = id ?? const Uuid().v4(),
        createdAt = createdAt ?? DateTime.now();
@@ -265,6 +274,22 @@ class Passenger {
   /// Whether at least one seat is assigned but not all.
   bool get isPartiallyAssigned => totalSeatsAssigned > 0 && !isFullyAssigned;
 
+  /// Deterministic signature of the CURRENT seat allocation — sorted
+  /// "busId:seatId" pairs joined — so it changes iff the held seats change.
+  /// Empty when the rider holds no seat.
+  String get seatSignature {
+    if (assignedSeats.isEmpty) return '';
+    final parts = assignedSeats.map((a) => '${a.busId}:${a.seatId}').toList()
+      ..sort();
+    return parts.join('|');
+  }
+
+  /// True when this rider holds a seat whose CURRENT allocation has not been
+  /// notified — never sent, or changed since the last send. Drives the Notify
+  /// screen's "re-notify changed" action after a post-lock seat edit.
+  bool get seatsChangedSinceNotified =>
+      assignedSeats.isNotEmpty && seatsNotifiedSig != seatSignature;
+
   /// Short summary of request lines for chips, e.g. "1 DL + 1 SU + 2 ST".
   String get requestSummary {
     if (requestLines.isEmpty) return 'No seats';
@@ -311,6 +336,7 @@ class Passenger {
       'pickup_location_name': pickupLocationName,
       'cancelled_at': cancelledAt?.toIso8601String(),
       'cancel_requested_at': cancelRequestedAt?.toIso8601String(),
+      'seats_notified_sig': seatsNotifiedSig,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -350,6 +376,7 @@ class Passenger {
       cancelRequestedAt: map['cancel_requested_at'] != null
           ? DateTime.tryParse(map['cancel_requested_at'].toString())
           : null,
+      seatsNotifiedSig: map['seats_notified_sig'] as String?,
       createdAt: _parseDate(map['created_at']),
     );
   }
@@ -416,6 +443,7 @@ class Passenger {
     String? pickupLocationName,
     DateTime? cancelledAt,
     DateTime? cancelRequestedAt,
+    String? seatsNotifiedSig,
     bool clearCancelRequested = false,
   }) {
     return Passenger(
@@ -445,6 +473,7 @@ class Passenger {
       cancelRequestedAt: clearCancelRequested
           ? null
           : (cancelRequestedAt ?? this.cancelRequestedAt),
+      seatsNotifiedSig: seatsNotifiedSig ?? this.seatsNotifiedSig,
       createdAt: createdAt,
     );
   }

@@ -1,11 +1,13 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:get/get.dart';
 
 import '../components/bus_message_composer_field.dart';
 import '../components/combined_seat_grid.dart';
 import '../components/pickup_grouped_list.dart';
 import '../components/seat_chart_tile.dart';
+import '../controllers/pickup_controller.dart';
 import '../design/group_color.dart';
 import '../design/price_band_color.dart';
 import '../design/ugam.dart';
@@ -31,10 +33,9 @@ import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
 import 'fullscreen_chart_screen.dart';
 
-/// The ways the handler reads the chart: the visual seat [grid], the
-/// call-first [list] (a roster of full name + mobile per seat), or the
+/// The ways the handler reads the chart: the visual seat [grid], or the
 /// [attendance] boarding tally (who's present / left behind per leg).
-enum _ViewMode { grid, list, attendance }
+enum _ViewMode { grid, attendance }
 
 /// Read-only full bus chart for a tour "handler" (group coordinator).
 ///
@@ -65,10 +66,9 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   HandlerManifest? _manifest;
   String? _selectedBusId;
 
-  /// Chart vs roster. The handler most often needs full names + mobiles to
-  /// call people, so the call-first List (roster) is the default view; the
-  /// visual Grid sits alongside it.
-  _ViewMode _viewMode = _ViewMode.list;
+  /// The visual seat Grid is the default view (a seat tap opens the collect
+  /// sheet, where money is entered); the Attendance tally sits alongside it.
+  _ViewMode _viewMode = _ViewMode.grid;
 
   /// Local, mutable collection cache keyed by '"$passengerId|$busId"'.
   /// Seeded from the manifest once loaded; updated in-place after each save so
@@ -240,6 +240,11 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   void initState() {
     super.initState();
     _load();
+    // Warm the global pickup list so each attendance row can label its rider's
+    // boarding point. Registered lazily app-wide; absent under `flutter test`.
+    if (Get.isRegistered<PickupController>()) {
+      Get.find<PickupController>().ensureLoaded();
+    }
   }
 
   Future<void> _load() async {
@@ -726,7 +731,6 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     final fullOccupantsBySeat = occupantListForBus(manifest.passengers, bus.id);
 
     final grid = _viewMode == _ViewMode.grid;
-    final attendance = _viewMode == _ViewMode.attendance;
 
     // Boarding tallies for the header chips (both legs, current bus).
     final goCounts = _attendanceCounts(manifest, bus, AttendanceLeg.go);
@@ -754,10 +758,6 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           child: UgamTabPills(
             items: [
               UgamTabItem(
-                label: tr('handler_chart.view_list'),
-                icon: Icons.format_list_bulleted_rounded,
-              ),
-              UgamTabItem(
                 label: tr('handler_chart.view_grid'),
                 icon: Icons.grid_view_rounded,
               ),
@@ -766,17 +766,10 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                 icon: Icons.how_to_reg_rounded,
               ),
             ],
-            currentIndex: _viewMode == _ViewMode.list
-                ? 0
-                : _viewMode == _ViewMode.grid
-                ? 1
-                : 2,
+            currentIndex: _viewMode == _ViewMode.grid ? 0 : 1,
             onChanged: (i) => setState(
-              () => _viewMode = i == 0
-                  ? _ViewMode.list
-                  : i == 1
-                  ? _ViewMode.grid
-                  : _ViewMode.attendance,
+              () => _viewMode =
+                  i == 0 ? _ViewMode.grid : _ViewMode.attendance,
             ),
           ),
         ),
@@ -833,7 +826,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                     onEdit: (i) => _showIncomeSheet(bus, existing: i),
                     onDelete: (i) => _deleteIncome(i),
                   ),
-                ] else if (attendance)
+                ] else
                   _AttendanceView(
                     bus: bus,
                     leg: _attLeg,
@@ -847,34 +840,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                     onToggleLeg: (leg) => setState(() => _attLeg = leg),
                     onTogglePresent: (p, present) =>
                         _togglePresent(bus, p, _attLeg, present),
-                  )
-                else ...[
-                  _SeatRoster(
-                    bus: bus,
-                    fullOccupantsBySeat: fullOccupantsBySeat,
-                    collectionFor: (pId, seatId) =>
-                        _collectionFor(pId, bus.id, seatId),
-                    onTapSeat: (seatId, occupants) =>
-                        _onSeatTapped(bus, seatId, occupants),
                   ),
-                  _PriceBandKey(bus: bus),
-                  const SizedBox(height: UgamSpacing.xl),
-                  _ExpensesSection(
-                    busName: bus.name,
-                    expenses: _expensesForBus(bus.id),
-                    onAdd: () => _showExpenseSheet(bus),
-                    onEdit: (e) => _showExpenseSheet(bus, existing: e),
-                    onDelete: (e) => _deleteExpense(e),
-                  ),
-                  const SizedBox(height: UgamSpacing.xl),
-                  _IncomeSection(
-                    busName: bus.name,
-                    incomes: _incomesForBus(bus.id),
-                    onAdd: () => _showIncomeSheet(bus),
-                    onEdit: (i) => _showIncomeSheet(bus, existing: i),
-                    onDelete: (i) => _deleteIncome(i),
-                  ),
-                ],
               ],
             ),
           ),
@@ -1215,229 +1181,6 @@ class _PriceBandRow extends StatelessWidget {
           style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
         ),
       ],
-    );
-  }
-}
-
-// ─── Seat roster (List view) ────────────────────────────────────────────
-
-/// The call-first roster: one row per booked berth in seat order, showing the
-/// seat id, the occupant's FULL name + mobile (tap to call), a trip badge
-/// (round-trip / GO / RET), a group dot, and the per-seat collection status.
-/// A leg-shared seat emits TWO rows (the GO occupant and the RETURN occupant).
-/// Read-only + collect: tapping the row (or the money chip) opens the same
-/// collect sheet the grid uses.
-class _SeatRoster extends StatelessWidget {
-  final Bus bus;
-
-  /// EVERY distinct rider per seat — a row is emitted per rider, so a Double
-  /// Sofa shared by three or four one-way passengers lists all of them.
-  final Map<String, List<Passenger>> fullOccupantsBySeat;
-  final Collection? Function(String passengerId, String seatId) collectionFor;
-  final void Function(String seatId, List<Passenger> occupants) onTapSeat;
-
-  const _SeatRoster({
-    required this.bus,
-    required this.fullOccupantsBySeat,
-    required this.collectionFor,
-    required this.onTapSeat,
-  });
-
-  SeatMoneyState _moneyState(Passenger passenger, String seatId) =>
-      riderMoneyStateOf(
-        bus.amountDueForSeat(passenger, seatId),
-        collectionFor(passenger.id, seatId),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    final layout = bus.layout;
-    if (layout == null || layout.totalCells == 0) {
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
-        alignment: Alignment.center,
-        child: Text(
-          tr('handler_chart.no_seat_layout'),
-          textAlign: TextAlign.center,
-          style: UgamText.caption.copyWith(color: c.ink2),
-        ),
-      );
-    }
-
-    // Walk every seat cell in placement order; emit an entry per distinct
-    // occupant, then group the roster by pickup location. Seat order is
-    // preserved WITHIN each pickup group. `grid` is the flat seat list (only
-    // [hasSeat] cells stored).
-    final entries = <({String seatId, Passenger passenger})>[];
-    for (final cell in layout.grid) {
-      final seatId = cell.seatId;
-      if (seatId == null) continue;
-      final occupants = fullOccupantsBySeat[seatId] ?? const <Passenger>[];
-      if (occupants.isEmpty) continue;
-      for (final p in occupants) {
-        entries.add((seatId: seatId, passenger: p));
-      }
-    }
-
-    if (entries.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
-        alignment: Alignment.center,
-        child: Text(
-          tr(
-            'handler_chart.no_passengers_on_bus',
-            namedArgs: {'bus': bus.name},
-          ),
-          textAlign: TextAlign.center,
-          style: UgamText.caption.copyWith(color: c.ink2),
-        ),
-      );
-    }
-
-    return PickupGroupedList<({String seatId, Passenger passenger})>(
-      groups: groupByPickup<({String seatId, Passenger passenger})>(
-        entries,
-        idOf: (e) => e.passenger.pickupLocationId,
-        nameOf: (e) => e.passenger.pickupLocationName,
-      ),
-      rowBuilder: (e) => _RosterRow(
-        seatId: e.seatId,
-        passenger: e.passenger,
-        money: _moneyState(e.passenger, e.seatId),
-        // A roster row is one specific rider — go straight to their sheet
-        // (single-element list skips the chooser).
-        onTap: () => onTapSeat(e.seatId, <Passenger>[e.passenger]),
-        c: c,
-      ),
-      unassignedLabel: tr('handler_chart.pickup_none'),
-      c: c,
-    );
-  }
-}
-
-/// One roster line: seat id chip, full name + mobile + group dot + trip badge,
-/// and a tap-to-call action plus the collection-status chip.
-class _RosterRow extends StatelessWidget {
-  final String seatId;
-  final Passenger passenger;
-  final SeatMoneyState money;
-  final VoidCallback onTap;
-  final UgamColorSet c;
-
-  const _RosterRow({
-    required this.seatId,
-    required this.passenger,
-    required this.money,
-    required this.onTap,
-    required this.c,
-  });
-
-  String get _moneyLabel {
-    switch (money) {
-      case SeatMoneyState.paid:
-        return tr('handler_chart.money_paid');
-      case SeatMoneyState.owing:
-        return tr('handler_chart.money_owing');
-      case SeatMoneyState.returnDue:
-        return tr('handler_chart.money_return_due');
-      case SeatMoneyState.uncollected:
-        return tr('handler_chart.money_not_collected');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = passenger;
-    final hasPhone = p.phone.trim().isNotEmpty;
-    final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
-    final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm + 2,
-        ),
-        child: Row(
-          children: [
-            // Seat id chip.
-            Container(
-              width: 40,
-              height: 40,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.input),
-              ),
-              child: Text(
-                seatId,
-                style: UgamText.tabular(
-                  UgamText.caption.copyWith(
-                    color: c.ink,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            // Name + mobile + badges.
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          p.displayName,
-                          style: UgamText.bodyStrong.copyWith(color: c.ink),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      if (groupColor != null) ...[
-                        const SizedBox(width: 6),
-                        _Dot(color: groupColor, size: 8),
-                      ],
-                      const SizedBox(width: 6),
-                      _TripBadge(tripType: p.tripType, c: c),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    hasPhone ? p.phone : tr('handler_chart.no_mobile'),
-                    style: UgamText.tabular(
-                      UgamText.micro.copyWith(
-                        color: hasPhone ? c.ink2 : c.ink3,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      _Dot(color: money.dotColor(c), size: 7),
-                      const SizedBox(width: 5),
-                      Text(
-                        _moneyLabel,
-                        style: UgamText.micro.copyWith(color: c.ink2),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            // Tap-to-call.
-            if (hasPhone) ...[
-              const SizedBox(width: UgamSpacing.sm),
-              _CallButton(phone: p.phone, c: c),
-            ],
-          ],
-        ),
-      ),
     );
   }
 }
@@ -3304,9 +3047,44 @@ class _AttendanceView extends StatelessWidget {
   }
 }
 
+/// A compact pickup-point chip for a passenger row: the admin-facing short CODE
+/// (from [PickupController]) when set, else the pickup NAME the booking
+/// snapshotted. Renders nothing when the rider has no pickup. Wrapped in [Obx]
+/// when the controller is live so the code fills in once the pickup list loads.
+class _PickupChip extends StatelessWidget {
+  final Passenger passenger;
+  const _PickupChip({required this.passenger});
+
+  Widget _chip(String? label) {
+    if (label == null || label.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: UgamSpacing.sm),
+      child: UgamReqChip(label: label, variant: UgamChipVariant.neutral),
+    );
+  }
+
+  String? _label(PickupController? pk) {
+    final code = pk?.codeFor(passenger.pickupLocationId);
+    if (code != null && code.isNotEmpty) return code;
+    final name = passenger.pickupLocationName;
+    return (name != null && name.isNotEmpty) ? name : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pk = Get.isRegistered<PickupController>()
+        ? Get.find<PickupController>()
+        : null;
+    // Obx repaints once the async pickup list arrives; with no live controller
+    // (e.g. under `flutter test`) fall back to the booking's name snapshot.
+    if (pk == null) return _chip(_label(null));
+    return Obx(() => _chip(_label(pk)));
+  }
+}
+
 /// One attendance line: the passenger's seat id chip(s) on this bus, their name
-/// + mobile, and a present / left-behind toggle. Mirrors [_RosterRow]'s left
-/// side; the trailing control is a [Switch] instead of a call button.
+/// + mobile, and a present / left-behind toggle. The trailing control is a
+/// [Switch] instead of a call button.
 class _AttendanceRow extends StatelessWidget {
   final Bus bus;
   final Passenger passenger;
@@ -3387,6 +3165,7 @@ class _AttendanceRow extends StatelessWidget {
                       const SizedBox(width: 6),
                       _Dot(color: groupColor, size: 8),
                     ],
+                    _PickupChip(passenger: p),
                   ],
                 ),
                 const SizedBox(height: 2),

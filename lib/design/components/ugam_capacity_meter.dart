@@ -34,12 +34,19 @@ class UgamCapacityMeter extends StatelessWidget {
   final int retOccupied;
   final UgamMeterDensity density;
 
+  /// Bus density only: whether to render the trailing "{n} free" / "full" text.
+  /// The tour Summary sets this false and shows a typed seat-icon free indicator
+  /// instead (a Double Sofa reads as ONE double-berth glyph, not an ambiguous
+  /// berth count), so the meter line stays just "placed/cap" over the bar.
+  final bool showFreeLabel;
+
   const UgamCapacityMeter._({
     super.key,
     required this.capacity,
     required this.goOccupied,
     required this.retOccupied,
     required this.density,
+    this.showFreeLabel = true,
   });
 
   /// Tour-wide meter from the engine snapshot.
@@ -80,14 +87,21 @@ class UgamCapacityMeter extends StatelessWidget {
         density: UgamMeterDensity.hero,
       );
 
-  /// One bus's meter from its [BusCapacity] slice.
-  factory UgamCapacityMeter.bus(BusCapacity cap, {Key? key}) =>
+  /// One bus's meter from its [BusCapacity] slice. Set [showFreeLabel] false to
+  /// drop the trailing "{n} free" text (the Summary renders typed seat icons in
+  /// its place); a full bus is then flagged by the caller, not this text.
+  factory UgamCapacityMeter.bus(
+    BusCapacity cap, {
+    Key? key,
+    bool showFreeLabel = true,
+  }) =>
       UgamCapacityMeter._(
         key: key,
         capacity: cap.capacity,
         goOccupied: cap.goOccupied,
         retOccupied: cap.retOccupied,
         density: UgamMeterDensity.bus,
+        showFreeLabel: showFreeLabel,
       );
 
   @override
@@ -208,15 +222,17 @@ class UgamCapacityMeter extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: UgamSpacing.sm),
-            Text(
-              full
-                  ? tr('capacity.full')
-                  : tr('capacity.free_n', namedArgs: {'n': '$free'}),
-              style: UgamText.tabular(
-                UgamText.caption.copyWith(color: full ? c.ink3 : c.good),
+            if (showFreeLabel) ...[
+              const SizedBox(width: UgamSpacing.sm),
+              Text(
+                full
+                    ? tr('capacity.full')
+                    : tr('capacity.free_n', namedArgs: {'n': '$free'}),
+                style: UgamText.tabular(
+                  UgamText.caption.copyWith(color: full ? c.ink3 : c.good),
+                ),
               ),
-            ),
+            ],
           ],
         ),
         const SizedBox(height: 6),
