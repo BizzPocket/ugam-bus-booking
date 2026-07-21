@@ -20,8 +20,9 @@ class Formatters {
   /// One place for the whole app — replaces the per-screen `_money()` helpers
   /// that diverged on sign and grouping.
   static String formatMoneyInr(num amount) {
-    final n = NumberFormat.decimalPattern('en_IN').format(amount.round().abs());
-    final sign = amount < 0 ? '-' : '';
+    final rounded = amount.round();
+    final n = NumberFormat.decimalPattern('en_IN').format(rounded.abs());
+    final sign = rounded < 0 ? '-' : '';
     return '$sign₹$n';
   }
 
