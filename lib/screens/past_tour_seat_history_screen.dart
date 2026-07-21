@@ -1,3 +1,5 @@
+import 'dart:developer' as dev;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -59,12 +61,17 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
   }
 
   Future<void> _load() async {
-    final snaps = await _ctrl.loadSeatSnapshots(widget.tourId);
-    if (!mounted) return;
-    setState(() {
-      _snapshots = snaps;
-      _loading = false;
-    });
+    try {
+      final snaps = await _ctrl.loadSeatSnapshots(widget.tourId);
+      if (!mounted) return;
+      setState(() => _snapshots = snaps);
+    } catch (e, st) {
+      dev.log('past-tour snapshot load failed: $e\n$st',
+          name: 'PastTourSeatHistory');
+      // Fall through to the live/empty fallback in _body with an empty list.
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   TourSeatSnapshot? _snapshotFor(SnapshotLeg leg) {
