@@ -24,8 +24,14 @@ InsertConflictAction resolveInsertConflict({
 }
 
 /// Classifies whether [e] is a transient failure worth retrying. Retry only
-/// network/transport/5xx failures (and, when [retryOnTimeout], timeouts); every
-/// constraint, permission, auth, and missing-function error is terminal.
+/// known network/transport/5xx failures (and, when [retryOnTimeout],
+/// timeouts); every constraint, permission, auth, and missing-function error
+/// is terminal.
+///
+/// X-4: classification is by exception TYPE and known codes only — never by
+/// message-substring sniffing (fragile, locale/SDK-dependent). An unknown
+/// exception type, or a `PostgrestException` with an unknown/null code, is
+/// therefore terminal rather than guessed from its message.
 bool isRetryable(Object e, {required bool retryOnTimeout}) {
   if (e is RpcUnavailableException) return false; // deploy issue — never helps
   if (e is TimeoutException) return retryOnTimeout; // only idempotent callers
@@ -50,30 +56,14 @@ bool isRetryable(Object e, {required bool retryOnTimeout}) {
       if (status >= 500) return true;
       if (status >= 400) return false;
     }
-    return looksLikeTransport(e.message);
+    // Unknown / null code ⇒ terminal (no message sniffing).
+    return false;
   }
 
   if (e is SocketException) return true;
   if (e is HttpException) return true;
-  return looksLikeTransport(e.toString());
-}
-
-/// True when [message] carries a network/transport failure signature.
-bool looksLikeTransport(String message) {
-  final m = message.toLowerCase();
-  return m.contains('socketexception') ||
-      m.contains('clientexception') ||
-      m.contains('httpexception') ||
-      m.contains('connection closed') ||
-      m.contains('connection reset') ||
-      m.contains('connection refused') ||
-      m.contains('connection terminated') ||
-      m.contains('failed host lookup') ||
-      m.contains('network is unreachable') ||
-      m.contains('no route to host') ||
-      m.contains('timed out') ||
-      m.contains('timeout') ||
-      m.contains('network');
+  // Unknown exception type ⇒ terminal (no message sniffing).
+  return false;
 }
 
 /// Certain the request never left the device: DNS failure, no route, or

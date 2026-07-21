@@ -46,28 +46,48 @@ void main() {
           isRetryable(const PostgrestException(message: 'x', code: '400'),
               retryOnTimeout: true),
           isFalse); // status 4xx terminal
+      expect(
+          isRetryable(const PostgrestException(message: 'x', code: 'PGRST001'),
+              retryOnTimeout: true),
+          isTrue); // explicit DB-unreachable code
     });
 
-    test('null-code postgrest falls back to transport signature of message',
+    // X-4: classification is typed (exception type + known codes), never a
+    // message-substring guess. A null/unknown Postgrest code — even one whose
+    // *message* reads like a network failure — is terminal.
+    test('unknown/null-code postgrest is non-retryable (no message sniffing)',
         () {
       expect(
           isRetryable(
               const PostgrestException(message: 'Failed host lookup: db'),
               retryOnTimeout: true),
-          isTrue);
+          isFalse);
+      expect(
+          isRetryable(
+              const PostgrestException(message: 'connection reset by peer'),
+              retryOnTimeout: true),
+          isFalse);
       expect(
           isRetryable(const PostgrestException(message: 'permission denied'),
               retryOnTimeout: true),
           isFalse);
     });
 
-    test('dart:io transport failures are transient; unknown errors are not',
-        () {
+    test('dart:io transport failures are transient', () {
       expect(isRetryable(const SocketException('boom'), retryOnTimeout: true),
           isTrue);
       expect(isRetryable(const HttpException('boom'), retryOnTimeout: true),
           isTrue);
+    });
+
+    // X-4: an unknown exception type is terminal even when its message
+    // contains a transport-sounding word — no message sniffing.
+    test('unknown exception types are non-retryable regardless of message',
+        () {
       expect(isRetryable(Exception('totally unknown'), retryOnTimeout: true),
+          isFalse);
+      expect(
+          isRetryable(Exception('some network glitch'), retryOnTimeout: true),
           isFalse);
     });
   });
