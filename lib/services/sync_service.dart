@@ -58,9 +58,13 @@ class RpcUnavailableException implements Exception {
 }
 
 class SyncService extends GetxService {
-  // Per-attempt read timeout. Raised from 8s to 12s: a single slow moment on
-  // cellular used to blow the 8s budget and blank the whole screen. 12s per
-  // attempt, combined with the retry loop below, tolerates transient jank.
+  // Read timeout budget. Raised from 8s to 12s: a single slow moment on
+  // cellular used to blow the 8s budget and blank the whole screen. Applied
+  // PER PAGE (X-5) — each individual .range() round trip inside a paginated
+  // read gets its own 12s, rather than one aggregate cap over the whole
+  // multi-page read (see smartFetch below). That way a large roster that
+  // needs several round trips isn't killed by a budget sized for one, while
+  // each round trip is still bounded.
   static const _readTimeout = Duration(seconds: 12);
   // Per-attempt write timeout. Writes are idempotent (keyed by entity id) so a
   // timeout that actually landed converges on retry — no need to inflate this.
@@ -145,9 +149,16 @@ class SyncService extends GetxService {
       // Reads are idempotent — retry transient failures (incl. timeout) so one
       // slow moment on cellular no longer blanks the screen. Terminal errors
       // (auth/RLS/missing-table) still surface immediately via [_isRetryable].
+      //
+      // timeout: null — a paginated read can be several sequential round
+      // trips (X-5); each one already carries its own _readTimeout budget
+      // (applied inside the .range() closures in _fetchFromSupabase /
+      // _fetchToursWithRelations), so wrapping the WHOLE multi-page read in
+      // one more _readTimeout here would let a genuinely large roster time
+      // out in full even though every individual round trip was healthy.
       final rows = await _withRetry(
         () => _fetchFromSupabase(table, filters, orderBy),
-        timeout: _readTimeout,
+        timeout: null,
         label: '$table fetch',
       );
       return (rows: rows, failed: false);
@@ -172,10 +183,20 @@ class SyncService extends GetxService {
       });
     }
     return paginateRows<Map<String, dynamic>>((from, to) async {
+      // X-5: pagination pages via repeated .range() round trips, which needs
+      // a deterministic ORDER BY — without one, Postgres does not guarantee
+      // row order between separate requests and a multi-page read can
+      // silently drop or duplicate rows at a page boundary. When the caller
+      // gave no orderBy, fall back to the primary key ('id') purely for a
+      // stable (arbitrary) order; callers re-sort for display so this
+      // doesn't need to match any display order.
       final transform = orderBy != null
           ? filtered.order(orderBy, ascending: false).range(from, to)
-          : filtered.range(from, to);
-      final rows = await transform;
+          : filtered.order('id').range(from, to);
+      // Per-page timeout, not an aggregate one over the whole multi-page
+      // read — see the comment on smartFetch's _withRetry call.
+      final rows =
+          await _withTimeout(transform, _readTimeout, '$table page fetch');
       return List<Map<String, dynamic>>.from(
         (rows as List).map((r) => Map<String, dynamic>.from(r)),
       );
@@ -194,10 +215,13 @@ class SyncService extends GetxService {
       });
     }
     final tours = await paginateRows<Map<String, dynamic>>((from, to) async {
+      // X-5: same stable-order requirement as the generic read above — order
+      // by 'id' (tours' PK, migrations/001_initial_schema.sql) when the
+      // caller supplied no orderBy.
       final transform = orderBy != null
           ? tourQuery.order(orderBy, ascending: false).range(from, to)
-          : tourQuery.range(from, to);
-      final rows = await transform;
+          : tourQuery.order('id').range(from, to);
+      final rows = await _withTimeout(transform, _readTimeout, 'tours page fetch');
       return List<Map<String, dynamic>>.from(
         (rows as List).map((r) => Map<String, dynamic>.from(r)),
       );
@@ -212,13 +236,26 @@ class SyncService extends GetxService {
     // (passenger response gates the bus request for no reason). Each is
     // now fully paginated (X-5) rather than capped, so a large roster or
     // fleet never gets silently truncated.
+    // X-5: order by 'id' (each table's PK — passengers/passenger_groups
+    // confirmed in supabase/migrations/001_initial_schema.sql and
+    // 006_seat_groups_priority.sql; buses' `id` PK is confirmed indirectly —
+    // every generic write in this file addresses buses rows by `.eq('id',
+    // entityId)`) so repeated .range() round trips see a stable row order
+    // instead of an unordered one that can drop/duplicate rows at a page
+    // boundary. Each page fetch also gets its own timeout budget (not an
+    // aggregate one over the whole multi-page read) — see smartFetch.
     final passengersFuture = paginateRows<Map<String, dynamic>>(
       (from, to) async {
-        final rows = await _client
-            .from('passengers')
-            .select()
-            .inFilter('tour_id', tourIds)
-            .range(from, to);
+        final rows = await _withTimeout(
+          _client
+              .from('passengers')
+              .select()
+              .inFilter('tour_id', tourIds)
+              .order('id')
+              .range(from, to),
+          _readTimeout,
+          'passengers page fetch',
+        );
         return List<Map<String, dynamic>>.from(
           (rows as List).map((r) => Map<String, dynamic>.from(r)),
         );
@@ -228,11 +265,16 @@ class SyncService extends GetxService {
     // multiple buses; the legacy single tours.bus_id is no longer used.
     final busesFuture = paginateRows<Map<String, dynamic>>(
       (from, to) async {
-        final rows = await _client
-            .from('buses')
-            .select()
-            .inFilter('tour_id', tourIds)
-            .range(from, to);
+        final rows = await _withTimeout(
+          _client
+              .from('buses')
+              .select()
+              .inFilter('tour_id', tourIds)
+              .order('id')
+              .range(from, to),
+          _readTimeout,
+          'buses page fetch',
+        );
         return List<Map<String, dynamic>>.from(
           (rows as List).map((r) => Map<String, dynamic>.from(r)),
         );
@@ -241,11 +283,16 @@ class SyncService extends GetxService {
     // Passenger groups (cross-booking groups) are also keyed by tour_id.
     final groupsFuture = paginateRows<Map<String, dynamic>>(
       (from, to) async {
-        final rows = await _client
-            .from('passenger_groups')
-            .select()
-            .inFilter('tour_id', tourIds)
-            .range(from, to);
+        final rows = await _withTimeout(
+          _client
+              .from('passenger_groups')
+              .select()
+              .inFilter('tour_id', tourIds)
+              .order('id')
+              .range(from, to),
+          _readTimeout,
+          'passenger_groups page fetch',
+        );
         return List<Map<String, dynamic>>.from(
           (rows as List).map((r) => Map<String, dynamic>.from(r)),
         );
@@ -541,9 +588,15 @@ class SyncService extends GetxService {
   /// [_isRetryable] (which honours [retryOnTimeout]). Idempotent callers pass
   /// nothing (retry transient incl. timeout); the non-idempotent swap RPC
   /// passes a pre-send-only predicate so a timeout never triggers a re-swap.
+  ///
+  /// [timeout] bounds each ATTEMPT of [action] as a whole. Pass `null` when
+  /// [action] already bounds its own latency internally (X-5: a paginated
+  /// read applies [_readTimeout] to each individual page round trip) — that
+  /// avoids double-bounding a multi-page read with one more aggregate
+  /// timeout on top of its own per-page ones.
   Future<T> _withRetry<T>(
     Future<T> Function() action, {
-    required Duration timeout,
+    required Duration? timeout,
     required String label,
     int maxAttempts = 3,
     bool retryOnTimeout = true,
@@ -555,7 +608,9 @@ class SyncService extends GetxService {
     StackTrace? lastStack;
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
-        return await _withTimeout(action(), timeout, label);
+        return timeout != null
+            ? await _withTimeout(action(), timeout, label)
+            : await action();
       } catch (e, st) {
         lastError = e;
         lastStack = st;
