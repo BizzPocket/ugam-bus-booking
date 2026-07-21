@@ -95,10 +95,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
           }
 
           final totalSeats = layout.totalSeats;
-          final assignedCount = assignments.values.fold<int>(
-            0,
-            (sum, list) => sum + list.length,
-          );
+          final assignedCount = tour.occupiedBerthsFor(bus.id);
 
           return Column(
             children: [
