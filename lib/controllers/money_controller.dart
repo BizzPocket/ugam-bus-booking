@@ -72,6 +72,20 @@ class MoneyController extends GetxController {
     // read failures still preserve last-known rows (see below), the intended
     // resilience behaviour.
     final isSwitch = tourId != _loadedTourId;
+    // Before the OUTGOING tour's rows are cleared below, snapshot its
+    // outstanding handover into [settlementByTour] via the same
+    // [tourSummary] → [TourMoneySummary.compute] path [outstandingHandoverFor]
+    // uses for the live tour — no extra network call, no divergence. Without
+    // this, a tour that WAS the loaded tour has no cached snapshot the moment
+    // it stops being loaded (loadSettlementSnapshots explicitly skips
+    // _loadedTourId), so its genuine outstanding handover would silently drop
+    // out of the dashboard's "needs attention" list until some unrelated
+    // event re-ran the snapshot pass. Gated on [loadedOnce] so a tour that was
+    // never actually fetched (still holding empty/initial lists) isn't cached
+    // as a false "settled" (0) — that must stay "unknown" (null).
+    if (isSwitch && _loadedTourId != null && loadedOnce.value) {
+      settlementByTour[_loadedTourId!] = tourSummary().totalOutstandingHandover;
+    }
     if (isSwitch) {
       collections.clear();
       expenses.clear();
