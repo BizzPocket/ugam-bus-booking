@@ -10,7 +10,6 @@ import '../models/tour.dart';
 import '../utils/formatters.dart';
 import '../widgets/money_loading_skeleton.dart';
 
-
 /// Per-trip Profit & Loss — the breakdown the agent lands on when they open a
 /// trip's money and want "did this trip make money, and where".
 ///
@@ -121,63 +120,67 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                 return RefreshIndicator(
                   onRefresh: () => _money.refreshForTour(widget.tourId),
                   child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    UgamSpacing.gutter,
-                    UgamSpacing.sm,
-                    UgamSpacing.gutter,
-                    UgamSpacing.xxl,
-                  ),
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  children: [
-                    _TripTotalCard(total: total, c: c),
-                    const SizedBox(height: UgamSpacing.xl),
-                    if (handlers.isNotEmpty) ...[
-                      _SectionLabel(tr('trip_pnl.by_handler'), c: c),
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.gutter,
+                      UgamSpacing.sm,
+                      UgamSpacing.gutter,
+                      UgamSpacing.xxl,
+                    ),
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    children: [
+                      _TripTotalCard(total: total, c: c),
+                      const SizedBox(height: UgamSpacing.xl),
+                      if (handlers.isNotEmpty) ...[
+                        _SectionLabel(tr('trip_pnl.by_handler'), c: c),
+                        const SizedBox(height: UgamSpacing.md),
+                        for (final h in handlers)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: UgamSpacing.md,
+                            ),
+                            child: _PnlCard(
+                              title: _handlerName(tour, h.handlerPassengerId),
+                              subtitle: _busCount(h.busIds.length),
+                              revenueBilled: h.revenueBilled,
+                              collected: h.collected,
+                              costs: h.expensesTotal,
+                              income: h.income,
+                              netBilled: h.netBilled,
+                              netCollected: h.netCollected,
+                              c: c,
+                            ),
+                          ),
+                        const SizedBox(height: UgamSpacing.lg),
+                      ],
+                      _SectionLabel(tr('trip_pnl.by_bus'), c: c),
                       const SizedBox(height: UgamSpacing.md),
-                      for (final h in handlers)
+                      for (final s in busSummaries)
                         Padding(
                           padding: const EdgeInsets.only(
                             bottom: UgamSpacing.md,
                           ),
                           child: _PnlCard(
-                            title: _handlerName(tour, h.handlerPassengerId),
-                            subtitle: _busCount(h.busIds.length),
-                            revenueBilled: h.revenueBilled,
-                            collected: h.collected,
-                            costs: h.expensesTotal,
-                            income: h.income,
-                            netBilled: h.netBilled,
-                            netCollected: h.netCollected,
+                            title: busById[s.busId]?.name ?? '',
+                            subtitle: tr(
+                              'trip_pnl.rent',
+                              namedArgs: {
+                                'n': Formatters.formatMoneyInr(
+                                  busById[s.busId]?.busPrice ?? 0,
+                                ),
+                              },
+                            ),
+                            revenueBilled: s.revenueBilled,
+                            collected: s.collected,
+                            costs: s.expensesTotal,
+                            income: s.income,
+                            netBilled: s.netBilled,
+                            netCollected: s.netCollected,
                             c: c,
                           ),
                         ),
-                      const SizedBox(height: UgamSpacing.lg),
                     ],
-                    _SectionLabel(tr('trip_pnl.by_bus'), c: c),
-                    const SizedBox(height: UgamSpacing.md),
-                    for (final s in busSummaries)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: UgamSpacing.md),
-                        child: _PnlCard(
-                          title: busById[s.busId]?.name ?? '',
-                          subtitle: tr(
-                            'trip_pnl.rent',
-                            namedArgs: {
-                              'n': Formatters.formatMoneyInr(
-                                busById[s.busId]?.busPrice ?? 0,
-                              ),
-                            },
-                          ),
-                          revenueBilled: s.revenueBilled,
-                          collected: s.collected,
-                          costs: s.expensesTotal,
-                          income: s.income,
-                          netBilled: s.netBilled,
-                          netCollected: s.netCollected,
-                          c: c,
-                        ),
-                      ),
-                  ],
                   ),
                 );
               }),
@@ -469,10 +472,10 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(left: UgamSpacing.xs),
-        child: Text(
-          text,
-          style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
-        ),
-      );
+    padding: const EdgeInsets.only(left: UgamSpacing.xs),
+    child: Text(
+      text,
+      style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
+    ),
+  );
 }

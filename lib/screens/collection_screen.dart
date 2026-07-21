@@ -124,7 +124,8 @@ class _CollectionScreenState extends State<CollectionScreen> {
             ),
             Expanded(
               child: Obx(() {
-                if (controller.isLoading.value && !controller.loadedOnce.value) {
+                if (controller.isLoading.value &&
+                    !controller.loadedOnce.value) {
                   return const MoneyLoadingSkeleton();
                 }
                 // A failed load leaves the collections empty; show the shared
@@ -168,9 +169,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
                         onChanged: (i) => setState(() => _filter = i),
                         items: [
                           UgamTabItem(label: tr('collection.filter_all')),
-                          UgamTabItem(
-                            label: tr('collection.filter_to_return'),
-                          ),
+                          UgamTabItem(label: tr('collection.filter_to_return')),
                           UgamTabItem(
                             label: tr('collection.filter_to_collect'),
                           ),
@@ -187,7 +186,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
                               onRefresh: () =>
                                   controller.refreshForTour(widget.tour.id),
                               child: ListView.separated(
-                                physics: const AlwaysScrollableScrollPhysics(),
+                                physics: const AlwaysScrollableScrollPhysics(
+                                  parent: BouncingScrollPhysics(),
+                                ),
                                 padding: const EdgeInsets.fromLTRB(
                                   UgamSpacing.gutter,
                                   0,
@@ -303,9 +304,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
           UgamInput(
             label: tr('collection.returned_to_customer'),
             controller: returnedCtrl,
-            keyboardType: const TextInputType.numberWithOptions(
-              decimal: true,
-            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
             ],
@@ -316,10 +315,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
             controller: collectedByCtrl,
           ),
           const SizedBox(height: UgamSpacing.md),
-          UgamInput(
-            label: tr('collection.note'),
-            controller: noteCtrl,
-          ),
+          UgamInput(label: tr('collection.note'), controller: noteCtrl),
         ],
       ),
     );
@@ -509,8 +505,10 @@ class _SummaryHeader extends StatelessWidget {
                     Text(
                       Formatters.formatMoneyInr(toCollect),
                       style: UgamText.tabular(
-                        UgamText.numLg
-                            .copyWith(color: figureColor, fontSize: 30),
+                        UgamText.numLg.copyWith(
+                          color: figureColor,
+                          fontSize: 30,
+                        ),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -819,4 +817,3 @@ class _MetricCol extends StatelessWidget {
     );
   }
 }
-

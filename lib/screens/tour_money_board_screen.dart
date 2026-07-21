@@ -140,41 +140,45 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                 return RefreshIndicator(
                   onRefresh: () => _money.refreshForTour(widget.tourId),
                   child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    UgamSpacing.gutter,
-                    UgamSpacing.sm,
-                    UgamSpacing.gutter,
-                    UgamSpacing.xl,
-                  ),
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  children: [
-                    _PnlEntryCard(
-                      summary: _money.tourSummary(),
-                      onTap: _openPnl,
-                      c: c,
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.gutter,
+                      UgamSpacing.sm,
+                      UgamSpacing.gutter,
+                      UgamSpacing.xl,
                     ),
-                    const SizedBox(height: UgamSpacing.md),
-                    Text(
-                      tr('tour_money_board.per_bus'),
-                      style: UgamText.micro.copyWith(
-                        color: c.ink3,
-                        letterSpacing: 1.4,
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    children: [
+                      _PnlEntryCard(
+                        summary: _money.tourSummary(),
+                        onTap: _openPnl,
+                        c: c,
                       ),
-                    ),
-                    const SizedBox(height: UgamSpacing.md),
-                    for (var i = 0; i < buses.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: UgamSpacing.md),
-                        child: _BusMoneyRow(
-                          bus: buses[i],
-                          summary: summaries[i],
-                          state: _money.stateForBusSummary(summaries[i]),
-                          onTap: () => _openBus(tour, buses[i]),
-                          onCollect: () => _collectForBus(tour, buses[i]),
-                          c: c,
+                      const SizedBox(height: UgamSpacing.md),
+                      Text(
+                        tr('tour_money_board.per_bus'),
+                        style: UgamText.micro.copyWith(
+                          color: c.ink3,
+                          letterSpacing: 1.4,
                         ),
                       ),
-                  ],
+                      const SizedBox(height: UgamSpacing.md),
+                      for (var i = 0; i < buses.length; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: UgamSpacing.md,
+                          ),
+                          child: _BusMoneyRow(
+                            bus: buses[i],
+                            summary: summaries[i],
+                            state: _money.stateForBusSummary(summaries[i]),
+                            onTap: () => _openBus(tour, buses[i]),
+                            onCollect: () => _collectForBus(tour, buses[i]),
+                            c: c,
+                          ),
+                        ),
+                    ],
                   ),
                 );
               }),
@@ -373,7 +377,8 @@ class _BusMoneyRow extends StatelessWidget {
     // Collected / handover only carry information once cash has changed hands —
     // until then they are ₹0 filler, so the strip is hidden and the card
     // collapses to identity + action figure + collect.
-    final hasMoved = summary.collected > 0.005 ||
+    final hasMoved =
+        summary.collected > 0.005 ||
         summary.handedOver > 0.005 ||
         summary.income > 0.005;
 
@@ -540,11 +545,7 @@ class _MoneyPill extends StatelessWidget {
   final String value;
   final UgamColorSet c;
 
-  const _MoneyPill({
-    required this.label,
-    required this.value,
-    required this.c,
-  });
+  const _MoneyPill({required this.label, required this.value, required this.c});
 
   @override
   Widget build(BuildContext context) {
@@ -610,8 +611,9 @@ class _TotalsCapsule extends StatelessWidget {
                     children: [
                       Flexible(
                         child: Text(
-                          tr('tour_money_board.outstanding_handover')
-                              .toUpperCase(),
+                          tr(
+                            'tour_money_board.outstanding_handover',
+                          ).toUpperCase(),
                           style: UgamText.micro.copyWith(color: c.ink3),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -622,8 +624,9 @@ class _TotalsCapsule extends StatelessWidget {
                         label: settled
                             ? tr('tour_money_board.all_settled')
                             : tr('tour_money_board.open'),
-                        tone:
-                            settled ? UgamStatusTone.good : UgamStatusTone.warm,
+                        tone: settled
+                            ? UgamStatusTone.good
+                            : UgamStatusTone.warm,
                       ),
                     ],
                   ),

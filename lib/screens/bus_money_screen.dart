@@ -68,7 +68,8 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
             ),
             Expanded(
               child: Obx(() {
-                if (controller.isLoading.value && !controller.loadedOnce.value) {
+                if (controller.isLoading.value &&
+                    !controller.loadedOnce.value) {
                   return const MoneyLoadingSkeleton();
                 }
                 // A failed load leaves the money lists empty; show the shared
@@ -94,247 +95,261 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                 return Stack(
                   children: [
                     RefreshIndicator(
-                      onRefresh: () => controller.refreshForTour(widget.tour.id),
+                      onRefresh: () =>
+                          controller.refreshForTour(widget.tour.id),
                       child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(
-                    UgamSpacing.gutter,
-                    UgamSpacing.lg,
-                    UgamSpacing.gutter,
-                    UgamSpacing.dockClearance,
-                  ),
-                  children: [
-                    // ── Hero figure: the ONE action number ─────────────
-                    // Outstanding handover leads as a large tabular figure —
-                    // it's what the agent must act on. Everything else is
-                    // demoted to a quiet supporting row below.
-                    _OutstandingHero(
-                      // Clamp the *displayed* settlement figure at 0: before
-                      // collections cover the bus rent the net can be
-                      // negative, but a handler never pays rent out of pocket
-                      // before collecting, so "-30000 owed" is nonsense to
-                      // show. Underlying net math is untouched.
-                      amount: s.outstandingHandover < 0
-                          ? 0.0
-                          : s.outstandingHandover,
-                      expected: s.expectedHandover < 0
-                          ? 0.0
-                          : s.expectedHandover,
-                    ),
-                    const SizedBox(height: UgamSpacing.xl),
-                    // ── Supporting stat grid (demoted) ─────────────────
-                    // Income only earns a tile once there IS extra income —
-                    // otherwise it's a ₹0 filler tile (§A3). Compact (₹1.2L)
-                    // values so large INR figures never blow out tile height.
-                    Builder(
-                      builder: (_) {
-                        final tiles = <Widget>[
-                          Expanded(
-                            child: UgamStatTile(
-                              icon: Icons.payments_rounded,
-                              value: Formatters.formatMoneyInrCompact(
-                                s.collected,
-                              ),
-                              label: tr('bus_money.stat_collected'),
-                              variant: UgamStatVariant.good,
-                            ),
+                        physics: const AlwaysScrollableScrollPhysics(
+                          parent: BouncingScrollPhysics(),
+                        ),
+                        padding: const EdgeInsets.fromLTRB(
+                          UgamSpacing.gutter,
+                          UgamSpacing.lg,
+                          UgamSpacing.gutter,
+                          UgamSpacing.dockClearance,
+                        ),
+                        children: [
+                          // ── Hero figure: the ONE action number ─────────────
+                          // Outstanding handover leads as a large tabular figure —
+                          // it's what the agent must act on. Everything else is
+                          // demoted to a quiet supporting row below.
+                          _OutstandingHero(
+                            // Clamp the *displayed* settlement figure at 0: before
+                            // collections cover the bus rent the net can be
+                            // negative, but a handler never pays rent out of pocket
+                            // before collecting, so "-30000 owed" is nonsense to
+                            // show. Underlying net math is untouched.
+                            amount: s.outstandingHandover < 0
+                                ? 0.0
+                                : s.outstandingHandover,
+                            expected: s.expectedHandover < 0
+                                ? 0.0
+                                : s.expectedHandover,
                           ),
-                          if (s.income > 0.005)
-                            Expanded(
-                              child: UgamStatTile(
-                                icon: Icons.savings_rounded,
-                                value: Formatters.formatMoneyInrCompact(
-                                  s.income,
+                          const SizedBox(height: UgamSpacing.xl),
+                          // ── Supporting stat grid (demoted) ─────────────────
+                          // Income only earns a tile once there IS extra income —
+                          // otherwise it's a ₹0 filler tile (§A3). Compact (₹1.2L)
+                          // values so large INR figures never blow out tile height.
+                          Builder(
+                            builder: (_) {
+                              final tiles = <Widget>[
+                                Expanded(
+                                  child: UgamStatTile(
+                                    icon: Icons.payments_rounded,
+                                    value: Formatters.formatMoneyInrCompact(
+                                      s.collected,
+                                    ),
+                                    label: tr('bus_money.stat_collected'),
+                                    variant: UgamStatVariant.good,
+                                  ),
                                 ),
-                                label: tr('bus_money.stat_income'),
-                                variant: UgamStatVariant.good,
-                              ),
-                            ),
-                          Expanded(
-                            child: UgamStatTile(
-                              icon: Icons.receipt_long_rounded,
-                              value: Formatters.formatMoneyInrCompact(
-                                s.expensesTotal,
-                              ),
-                              label: tr('bus_money.stat_expenses'),
-                              variant: UgamStatVariant.warm,
-                            ),
+                                if (s.income > 0.005)
+                                  Expanded(
+                                    child: UgamStatTile(
+                                      icon: Icons.savings_rounded,
+                                      value: Formatters.formatMoneyInrCompact(
+                                        s.income,
+                                      ),
+                                      label: tr('bus_money.stat_income'),
+                                      variant: UgamStatVariant.good,
+                                    ),
+                                  ),
+                                Expanded(
+                                  child: UgamStatTile(
+                                    icon: Icons.receipt_long_rounded,
+                                    value: Formatters.formatMoneyInrCompact(
+                                      s.expensesTotal,
+                                    ),
+                                    label: tr('bus_money.stat_expenses'),
+                                    variant: UgamStatVariant.warm,
+                                  ),
+                                ),
+                              ];
+                              return Row(
+                                children: [
+                                  for (var i = 0; i < tiles.length; i++) ...[
+                                    if (i > 0)
+                                      const SizedBox(width: UgamSpacing.md),
+                                    tiles[i],
+                                  ],
+                                ],
+                              );
+                            },
                           ),
-                        ];
-                        return Row(
-                          children: [
-                            for (var i = 0; i < tiles.length; i++) ...[
-                              if (i > 0) const SizedBox(width: UgamSpacing.md),
-                              tiles[i],
-                            ],
+                          const SizedBox(height: UgamSpacing.xl),
+
+                          // The "Collect from passengers" jump now lives in the
+                          // sticky bottom CTA (thumb-zone); the ledger scrolls under
+                          // it thanks to the dockClearance bottom padding above.
+
+                          // ── Expenses ───────────────────────────────────────
+                          _SectionHeader(
+                            title: tr('bus_money.section_expenses'),
+                            actionLabel: tr('app.action.add'),
+                            onAction: () => _openExpenseSheet(context),
+                          ),
+                          const SizedBox(height: UgamSpacing.sm),
+                          // The auto bus-owner rent is derived from the bus (the
+                          // single source of truth, already inside expensesTotal) —
+                          // so it counts as content for the empty check.
+                          if (widget.bus.busPrice <= 0 && expenses.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: UgamSpacing.lg,
+                              ),
+                              child: UgamEmpty(
+                                icon: Icons.receipt_long_rounded,
+                                title: tr('bus_money.expenses_empty'),
+                              ),
+                            )
+                          else ...[
+                            // Fixed, non-deletable rent row at the top: derived from
+                            // the bus, not a DB row, so it has no delete icon.
+                            if (widget.bus.busPrice > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: UgamSpacing.sm,
+                                ),
+                                child: _BusOwnerRentRow(
+                                  busPrice: widget.bus.busPrice,
+                                ),
+                              ),
+                            ...expenses.map(
+                              (e) => Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: UgamSpacing.sm,
+                                ),
+                                // Swipe-left to delete; tap still opens the edit
+                                // sheet. Money records are irreversible, so the
+                                // destructive swipe is gated by a confirm.
+                                child: UgamSwipeAction(
+                                  key: ValueKey('expense-${e.id}'),
+                                  confirmDelete: () => UgamDialog.confirm(
+                                    context,
+                                    title: tr('bus_money.delete_expense_title'),
+                                    message: tr(
+                                      'bus_money.delete_expense_body',
+                                    ),
+                                    cancelLabel: tr('app.action.cancel'),
+                                    confirmLabel: tr(
+                                      'bus_money.delete_confirm',
+                                    ),
+                                    destructive: true,
+                                    confirmIcon: Icons.delete_outline_rounded,
+                                  ),
+                                  // await + swallow: the controller already rolls
+                                  // back and shows an error toast on failure;
+                                  // without this the rethrow becomes an uncaught
+                                  // async exception.
+                                  onDelete: () async {
+                                    try {
+                                      await controller.deleteExpense(e.id);
+                                    } catch (_) {}
+                                  },
+                                  child: _ExpenseRow(
+                                    expense: e,
+                                    onTap: () =>
+                                        _openExpenseSheet(context, existing: e),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ],
-                        );
-                      },
-                    ),
-                    const SizedBox(height: UgamSpacing.xl),
+                          const SizedBox(height: UgamSpacing.xl),
 
-                    // The "Collect from passengers" jump now lives in the
-                    // sticky bottom CTA (thumb-zone); the ledger scrolls under
-                    // it thanks to the dockClearance bottom padding above.
-
-                    // ── Expenses ───────────────────────────────────────
-                    _SectionHeader(
-                      title: tr('bus_money.section_expenses'),
-                      actionLabel: tr('app.action.add'),
-                      onAction: () => _openExpenseSheet(context),
-                    ),
-                    const SizedBox(height: UgamSpacing.sm),
-                    // The auto bus-owner rent is derived from the bus (the
-                    // single source of truth, already inside expensesTotal) —
-                    // so it counts as content for the empty check.
-                    if (widget.bus.busPrice <= 0 && expenses.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: UgamSpacing.lg,
-                        ),
-                        child: UgamEmpty(
-                          icon: Icons.receipt_long_rounded,
-                          title: tr('bus_money.expenses_empty'),
-                        ),
-                      )
-                    else ...[
-                      // Fixed, non-deletable rent row at the top: derived from
-                      // the bus, not a DB row, so it has no delete icon.
-                      if (widget.bus.busPrice > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: UgamSpacing.sm,
+                          // ── Extra income (read-only) ───────────────────────
+                          // Handler logs Cabin/Gallery/Other extra cash on the
+                          // ground; the admin only views it here (no add/edit).
+                          Text(
+                            tr('bus_money.section_income'),
+                            style: UgamText.titleM.copyWith(color: c.ink),
                           ),
-                          child: _BusOwnerRentRow(
-                            busPrice: widget.bus.busPrice,
-                          ),
-                        ),
-                      ...expenses.map(
-                        (e) => Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: UgamSpacing.sm,
-                          ),
-                          // Swipe-left to delete; tap still opens the edit
-                          // sheet. Money records are irreversible, so the
-                          // destructive swipe is gated by a confirm.
-                          child: UgamSwipeAction(
-                            key: ValueKey('expense-${e.id}'),
-                            confirmDelete: () => UgamDialog.confirm(
-                              context,
-                              title: tr('bus_money.delete_expense_title'),
-                              message: tr('bus_money.delete_expense_body'),
-                              cancelLabel: tr('app.action.cancel'),
-                              confirmLabel: tr('bus_money.delete_confirm'),
-                              destructive: true,
-                              confirmIcon: Icons.delete_outline_rounded,
-                            ),
-                            // await + swallow: the controller already rolls
-                            // back and shows an error toast on failure;
-                            // without this the rethrow becomes an uncaught
-                            // async exception.
-                            onDelete: () async {
-                              try {
-                                await controller.deleteExpense(e.id);
-                              } catch (_) {}
-                            },
-                            child: _ExpenseRow(
-                              expense: e,
-                              onTap: () =>
-                                  _openExpenseSheet(context, existing: e),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: UgamSpacing.xl),
-
-                    // ── Extra income (read-only) ───────────────────────
-                    // Handler logs Cabin/Gallery/Other extra cash on the
-                    // ground; the admin only views it here (no add/edit).
-                    Text(
-                      tr('bus_money.section_income'),
-                      style: UgamText.titleM.copyWith(color: c.ink),
-                    ),
-                    const SizedBox(height: UgamSpacing.sm),
-                    if (incomes.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: UgamSpacing.lg,
-                        ),
-                        child: UgamEmpty(
-                          icon: Icons.savings_outlined,
-                          title: tr('bus_money.income_empty'),
-                        ),
-                      )
-                    else
-                      ...incomes.map(
-                        (i) => Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: UgamSpacing.sm,
-                          ),
-                          child: _IncomeRow(income: i),
-                        ),
-                      ),
-                    const SizedBox(height: UgamSpacing.xl),
-
-                    // ── Handover ───────────────────────────────────────
-                    _SectionHeader(
-                      title: tr('bus_money.section_handover_to_admin'),
-                      actionLabel: tr('bus_money.action_record'),
-                      onAction: () =>
-                          _openHandoverSheet(context, s.expectedHandover),
-                    ),
-                    const SizedBox(height: UgamSpacing.sm),
-                    if (handovers.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: UgamSpacing.lg,
-                        ),
-                        child: UgamEmpty(
-                          icon: Icons.account_balance_rounded,
-                          title: tr('bus_money.handover_empty'),
-                        ),
-                      )
-                    else
-                      ...handovers.map(
-                        (h) => Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: UgamSpacing.sm,
-                          ),
-                          // Swipe-left to delete; tap still opens the edit
-                          // sheet. Irreversible record — gated by a confirm.
-                          child: UgamSwipeAction(
-                            key: ValueKey('handover-${h.id}'),
-                            confirmDelete: () => UgamDialog.confirm(
-                              context,
-                              title: tr('bus_money.delete_handover_title'),
-                              message: tr('bus_money.delete_handover_body'),
-                              cancelLabel: tr('app.action.cancel'),
-                              confirmLabel: tr('bus_money.delete_confirm'),
-                              destructive: true,
-                              confirmIcon: Icons.delete_outline_rounded,
-                            ),
-                            onDelete: () async {
-                              try {
-                                await controller.deleteHandover(h.id);
-                              } catch (_) {}
-                            },
-                            child: _HandoverRow(
-                              handover: h,
-                              onTap: () => _openHandoverSheet(
-                                context,
-                                h.expectedAmount,
-                                existing: h,
+                          const SizedBox(height: UgamSpacing.sm),
+                          if (incomes.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: UgamSpacing.lg,
+                              ),
+                              child: UgamEmpty(
+                                icon: Icons.savings_outlined,
+                                title: tr('bus_money.income_empty'),
+                              ),
+                            )
+                          else
+                            ...incomes.map(
+                              (i) => Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: UgamSpacing.sm,
+                                ),
+                                child: _IncomeRow(income: i),
                               ),
                             ),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: UgamSpacing.xl),
+                          const SizedBox(height: UgamSpacing.xl),
 
-                    // ── Tour rollup ────────────────────────────────────
-                    _TourRollupCard(summary: t),
-                  ],
+                          // ── Handover ───────────────────────────────────────
+                          _SectionHeader(
+                            title: tr('bus_money.section_handover_to_admin'),
+                            actionLabel: tr('bus_money.action_record'),
+                            onAction: () =>
+                                _openHandoverSheet(context, s.expectedHandover),
+                          ),
+                          const SizedBox(height: UgamSpacing.sm),
+                          if (handovers.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: UgamSpacing.lg,
+                              ),
+                              child: UgamEmpty(
+                                icon: Icons.account_balance_rounded,
+                                title: tr('bus_money.handover_empty'),
+                              ),
+                            )
+                          else
+                            ...handovers.map(
+                              (h) => Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: UgamSpacing.sm,
+                                ),
+                                // Swipe-left to delete; tap still opens the edit
+                                // sheet. Irreversible record — gated by a confirm.
+                                child: UgamSwipeAction(
+                                  key: ValueKey('handover-${h.id}'),
+                                  confirmDelete: () => UgamDialog.confirm(
+                                    context,
+                                    title: tr(
+                                      'bus_money.delete_handover_title',
+                                    ),
+                                    message: tr(
+                                      'bus_money.delete_handover_body',
+                                    ),
+                                    cancelLabel: tr('app.action.cancel'),
+                                    confirmLabel: tr(
+                                      'bus_money.delete_confirm',
+                                    ),
+                                    destructive: true,
+                                    confirmIcon: Icons.delete_outline_rounded,
+                                  ),
+                                  onDelete: () async {
+                                    try {
+                                      await controller.deleteHandover(h.id);
+                                    } catch (_) {}
+                                  },
+                                  child: _HandoverRow(
+                                    handover: h,
+                                    onTap: () => _openHandoverSheet(
+                                      context,
+                                      h.expectedAmount,
+                                      existing: h,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: UgamSpacing.xl),
+
+                          // ── Tour rollup ────────────────────────────────────
+                          _TourRollupCard(summary: t),
+                        ],
                       ),
                     ),
                     // ── Sticky thumb-zone CTA ──────────────────────────
@@ -429,9 +444,7 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
     // negative figure (i.e. pays the owner's rent out of pocket) before
     // collecting.
     final seed = existing?.handedOverAmount ?? (expected < 0 ? 0.0 : expected);
-    final handedCtrl = TextEditingController(
-      text: seed.round().toString(),
-    );
+    final handedCtrl = TextEditingController(text: seed.round().toString());
     final noteCtrl = TextEditingController(text: existing?.note ?? '');
 
     UgamSheet.show<void>(
@@ -691,8 +704,10 @@ class _OutstandingHero extends StatelessWidget {
                     child: Text(
                       Formatters.formatMoneyInr(amount),
                       style: UgamText.tabular(
-                        UgamText.hero
-                            .copyWith(color: figureColor, fontSize: 38),
+                        UgamText.hero.copyWith(
+                          color: figureColor,
+                          fontSize: 38,
+                        ),
                       ),
                       maxLines: 1,
                     ),
@@ -710,9 +725,7 @@ class _OutstandingHero extends StatelessWidget {
           const SizedBox(height: UgamSpacing.xs),
           Text(
             Formatters.formatMoneyInr(expected),
-            style: UgamText.tabular(
-              UgamText.numLg.copyWith(color: c.ink2),
-            ),
+            style: UgamText.tabular(UgamText.numLg.copyWith(color: c.ink2)),
           ),
         ],
       ),
@@ -763,10 +776,7 @@ class _ExpenseRow extends StatelessWidget {
   final Expense expense;
   final VoidCallback onTap;
 
-  const _ExpenseRow({
-    required this.expense,
-    required this.onTap,
-  });
+  const _ExpenseRow({required this.expense, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -944,10 +954,7 @@ class _HandoverRow extends StatelessWidget {
   final BusHandover handover;
   final VoidCallback onTap;
 
-  const _HandoverRow({
-    required this.handover,
-    required this.onTap,
-  });
+  const _HandoverRow({required this.handover, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1074,9 +1081,7 @@ class _ReadOnlyLine extends StatelessWidget {
           Flexible(
             child: Text(
               value,
-              style: UgamText.tabular(
-                UgamText.numLg.copyWith(color: c.accent),
-              ),
+              style: UgamText.tabular(UgamText.numLg.copyWith(color: c.accent)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,

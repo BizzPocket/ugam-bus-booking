@@ -92,6 +92,41 @@ void main() {
     expect(find.text('Bus 1'), findsNothing);
   });
 
+  testWidgets(
+      'a same-tour refresh (loadedOnce true) keeps the P&L, no skeleton',
+      (tester) async {
+    useTallSurface(tester);
+    final tours = _FakeTourController();
+    final money = _FakeMoneyController();
+    Get.put<TourController>(tours);
+    Get.put<MoneyController>(money);
+    tours.tours.assignAll([_fakeTour()]);
+    // Seed real data and mark the tour as already loaded once...
+    money.collections.assignAll([
+      Collection(
+        tourId: 't1',
+        busId: 'b1',
+        passengerId: 'p1',
+        seatId: 'A1',
+        amountDue: 1000,
+        amountReceived: 1000,
+      ),
+    ]);
+    money.loadedOnce.value = true;
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    // ...then start a background refresh: isLoading flips true again, but
+    // loadedOnce is still true, so the `&& !loadedOnce` clause must suppress
+    // the skeleton and keep the existing content on screen.
+    money.isLoading.value = true;
+    await tester.pump();
+
+    expect(find.byType(MoneyLoadingSkeleton), findsNothing);
+    expect(find.text('Bus 1'), findsOneWidget);
+  });
+
   testWidgets('renders the trip total once loaded', (tester) async {
     useTallSurface(tester);
     final tours = _FakeTourController();
