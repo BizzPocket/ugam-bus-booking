@@ -62,10 +62,14 @@ android {
 
     buildTypes {
         release {
+            // A real upload keystore is REQUIRED to sign a release artifact. When
+            // key.properties is absent we still assign the debug config here as a
+            // configuration-time placeholder so DEBUG builds keep configuring, but
+            // the taskGraph guard below ABORTS the build before any release
+            // artifact is produced — we never silently debug-sign a store upload.
             signingConfig = if (hasKeystore) {
                 signingConfigs.getByName("release")
             } else {
-                // Fallback so local --release builds work without the upload key.
                 signingConfigs.getByName("debug")
             }
             // Shrink + obfuscate the Java/Kotlin (plugin/engine) layer and
@@ -79,6 +83,26 @@ android {
                 "proguard-rules.pro",
             )
         }
+    }
+}
+
+// Fail loudly instead of debug-signing a release. If a release artifact
+// (assembleRelease / bundleRelease) is in the resolved task graph but no upload
+// keystore is configured, abort the build: a debug-signed AAB/APK is rejected by
+// the Play Store, and nothing else here fails on its own. DEBUG builds have no
+// release task in the graph, so they are unaffected.
+gradle.taskGraph.whenReady {
+    val assemblingRelease = allTasks.any { task ->
+        task.name.contains("Release") &&
+            (task.name.startsWith("assemble") || task.name.startsWith("bundle"))
+    }
+    if (assemblingRelease && !hasKeystore) {
+        throw GradleException(
+            "Release build aborted: android/key.properties and the upload keystore " +
+                "are missing, so this artifact would be debug-signed and rejected by " +
+                "the Play Store. Provide key.properties + the keystore, or build a " +
+                "debug variant instead."
+        )
     }
 }
 
