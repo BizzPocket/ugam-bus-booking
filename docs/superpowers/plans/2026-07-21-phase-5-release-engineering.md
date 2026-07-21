@@ -242,6 +242,14 @@ Build a release-signed AAB and stage it through internal testing before producti
 - **Phases 2-4 are merged and green** on the release branch: `flutter analyze` has 0 errors and `flutter test` is all-green at the commit being tagged.
 - **`store_assets/` holds** the icon set + feature graphic + 4 screenshots (verified present); there is **no** fastlane/metadata tooling, so listing + release notes are manual (Task 4 Step 4 establishes `store_assets/release_notes/<locale>.txt`).
 
+## Addenda from Phase 0 execution (2026-07-21)
+
+These were discovered/relocated while executing Phase 0; fold them into this phase.
+
+- **A1 — Relocated: iOS `aps-environment` → `production` (REL-4).** Deferred from Phase 0 (flipping early breaks active on-device APNs-sandbox push testing, and the iOS archive needs a Mac anyway). Do it here, on the Mac, as the first step of Task 5 (iOS build): edit `ios/Runner/Runner.entitlements:10` `development` → `production`, and confirm the APNs `.p8` is uploaded to the Firebase project (see Open Question 3). Verify the archived build registers against the production APNs gateway.
+- **A2 — CI release pipeline currently ships debug-signed APKs.** `.github/workflows/release.yml:54` runs `flutter build apk --release` with **no** step that writes `android/key.properties` or restores a keystore secret — so tagged releases are debug-signed today (the live X-8 bug). After the Phase 0 signing guard (`d67fe53`), the next `v*` tag push will **fail loudly** instead. Before the release tag: either (a) add a CI step that materializes `key.properties` + the keystore from GitHub Actions secrets, or (b) disable/gate that workflow and build+upload the AAB from a keyed machine (Task 4). Decide which; do not push the release tag until the pipeline either signs correctly or is intentionally bypassed.
+- **A3 — Minor (guard predicate breadth).** The Phase 0 guard matches any task whose name contains `Release` and starts with `assemble`/`bundle`, which also matches `assembleReleaseUnitTest`. Harmless today (no CI runs `gradlew check`/`test`), but if release-variant unit tests are ever added to CI on a keyless runner, tighten the predicate to the exact artifact tasks. Tracking only.
+
 ## Open questions (need a human decision / credential / environment)
 
 1. **macOS + Xcode availability.** The current dev box is Windows; Task 5 (iOS build + upload) cannot run here. Who/what machine builds the iOS archive on team `LZKBLPJ282`? If none is available, the Android release can ship independently but "dual store" is blocked.
