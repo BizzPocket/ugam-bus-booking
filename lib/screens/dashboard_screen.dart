@@ -72,6 +72,20 @@ class DashboardScreen extends StatelessWidget {
             );
           }
 
+          // Fire the AL-3 settlement-snapshot pass once the tour list is
+          // known, so non-loaded tours' outstanding handovers get cached
+          // (see MoneyController.loadSettlementSnapshots). Post-frame to
+          // avoid mutating controller state during build. This Obx only
+          // reads tourCtrl state (isLoading/hasError/tours) above, never
+          // money.settlementByTour, so the snapshot writes below can't
+          // retrigger this same callback — no reactive feedback loop. The
+          // controller-side "already cached" guard keeps repeat calls (e.g.
+          // when tours mutate for unrelated reasons) a cheap no-op.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            Get.find<MoneyController>()
+                .loadSettlementSnapshots(tourCtrl.tours.map((t) => t.id));
+          });
+
           return RefreshIndicator(
             onRefresh: tourCtrl.refreshTours,
             color: c.accent,
@@ -217,31 +231,31 @@ class DashboardScreen extends StatelessWidget {
         continue;
       }
       // Money settlement: a handler still owing cash to the admin is a sharp,
-      // money-on-the-line blocker. MoneyController holds rows for ONE tour at
-      // a time, so we can only assert this for the tour whose money is loaded
-      // (the hero-selected tour); for others the branch is skipped, not wrong.
-      if (money.loadedTourId == tour.id) {
-        final m = money.tourSummary();
-        if (m.totalOutstandingHandover > 0.005) {
-          final amount = Formatters.formatMoneyInr(m.totalOutstandingHandover);
-          final handler = tour.handler?.displayName;
-          items.add(AttentionItem(
-            tour: tour,
-            reason: handler != null && handler.isNotEmpty
-                ? tr('dashboard.settle_from_handler',
-                    namedArgs: {'amount': amount, 'handler': handler})
-                : tr('dashboard.settle_amount', namedArgs: {'amount': amount}),
-            ctaLabel: tr('dashboard.qa_money'),
-            ctaIcon: Icons.account_balance_wallet_rounded,
-            tone: UgamStatusTone.warm,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => TourMoneyBoardScreen(tourId: tour.id),
-              ),
+      // money-on-the-line blocker. Reads the SAME TourMoneySummary math the
+      // money board uses — the exact live figure when this is the loaded
+      // tour, else a cached per-tour snapshot (AL-3) — so tours OTHER than
+      // the hero-selected one surface too, not just the loaded one. Null
+      // (snapshot not yet loaded) is treated as "unknown", never "settled".
+      final outstanding = money.outstandingHandoverFor(tour.id);
+      if (outstanding != null && outstanding > 0.005) {
+        final amount = Formatters.formatMoneyInr(outstanding);
+        final handler = tour.handler?.displayName;
+        items.add(AttentionItem(
+          tour: tour,
+          reason: handler != null && handler.isNotEmpty
+              ? tr('dashboard.settle_from_handler',
+                  namedArgs: {'amount': amount, 'handler': handler})
+              : tr('dashboard.settle_amount', namedArgs: {'amount': amount}),
+          ctaLabel: tr('dashboard.qa_money'),
+          ctaIcon: Icons.account_balance_wallet_rounded,
+          tone: UgamStatusTone.warm,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => TourMoneyBoardScreen(tourId: tour.id),
             ),
-          ));
-          continue;
-        }
+          ),
+        ));
+        continue;
       }
       if (tour.passengers.isNotEmpty && tour.buses.isEmpty) {
         items.add(AttentionItem(

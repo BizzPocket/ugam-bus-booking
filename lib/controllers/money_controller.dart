@@ -150,6 +150,86 @@ class MoneyController extends GetxController {
     await loadForTour(tourId);
   }
 
+  // ── Settlement snapshots (AL-3) ───────────────────────────
+
+  /// Per-tour outstanding-handover totals for the dashboard's settlement alerts
+  /// (AL-3), so tours OTHER than the currently-loaded one still surface. Filled
+  /// by [loadSettlementSnapshots]; read via [outstandingHandoverFor].
+  final settlementByTour = <String, double>{}.obs;
+
+  /// Outstanding handover for [tourId]: the exact live value when it's the
+  /// loaded tour, else the cached snapshot (null when not yet computed — the
+  /// caller must treat null as "unknown", not "settled").
+  double? outstandingHandoverFor(String tourId) {
+    if (tourId == _loadedTourId) return tourSummary().totalOutstandingHandover;
+    return settlementByTour[tourId];
+  }
+
+  /// Lightweight settlement pass for [tourIds]: fetch each tour's four money
+  /// tables and cache its outstanding handover via the SAME
+  /// [TourMoneySummary.compute] the board uses. Never touches the live obs
+  /// lists; skips the loaded tour (already exact, read live), any tour whose
+  /// snapshot is already cached (the dashboard's trigger re-runs whenever the
+  /// tours list changes for ANY reason, so this keeps repeat calls a no-op
+  /// instead of re-fetching four tables per tour on every unrelated update),
+  /// and any failed read (left uncached so a later call can retry it).
+  Future<void> loadSettlementSnapshots(Iterable<String> tourIds) async {
+    final tourCtrl =
+        Get.isRegistered<TourController>() ? Get.find<TourController>() : null;
+    var changed = false;
+    for (final id in tourIds) {
+      if (id == _loadedTourId) continue;
+      if (settlementByTour.containsKey(id)) continue;
+      final results = await Future.wait([
+        _sync.smartFetch(
+          table: 'collections',
+          cacheKey: _collectionsKey(id),
+          filters: {'tour_id': id},
+          orderBy: 'created_at',
+        ),
+        _sync.smartFetch(
+          table: 'expenses',
+          cacheKey: _expensesKey(id),
+          filters: {'tour_id': id},
+          orderBy: 'created_at',
+        ),
+        _sync.smartFetch(
+          table: 'bus_handovers',
+          cacheKey: _handoversKey(id),
+          filters: {'tour_id': id},
+          orderBy: 'created_at',
+        ),
+        _sync.smartFetch(
+          table: 'incomes',
+          cacheKey: _incomesKey(id),
+          filters: {'tour_id': id},
+          orderBy: 'created_at',
+        ),
+      ]);
+      if (results.any((r) => r.failed)) continue;
+      final tour = tourCtrl?.getTour(id);
+      final busRentsTotal =
+          tour == null ? 0.0 : tour.buses.fold<double>(0, (s, b) => s + b.busPrice);
+      final totalRevenueBilled = tour == null
+          ? 0.0
+          : tour.buses.fold<double>(
+              0,
+              (s, b) => s + tour.passengers.fold<double>(0, (ps, p) => ps + b.amountDueFor(p)),
+            );
+      final summary = TourMoneySummary.compute(
+        collections: results[0].rows.map(Collection.fromMap).toList(),
+        expenses: results[1].rows.map(Expense.fromMap).toList(),
+        handovers: results[2].rows.map(BusHandover.fromMap).toList(),
+        incomes: results[3].rows.map(IncomeEntry.fromMap).toList(),
+        busRentsTotal: busRentsTotal,
+        totalRevenueBilled: totalRevenueBilled,
+      );
+      settlementByTour[id] = summary.totalOutstandingHandover;
+      changed = true;
+    }
+    if (changed) settlementByTour.refresh();
+  }
+
   // ── Collections ───────────────────────────────────────────
 
   Collection? collectionFor(String passengerId, String busId, String seatId) =>
