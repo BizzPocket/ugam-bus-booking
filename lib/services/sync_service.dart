@@ -3,11 +3,40 @@ import 'dart:developer' as dev;
 import 'dart:math' as math;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_service.dart';
 import 'sync_retry_policy.dart' as retry;
+
+/// Fetch every row by paging through [fetchPage] (a Supabase `.range(from,to)`
+/// closure) until a page shorter than [pageSize] returns (X-5). Replaces the
+/// silent `.limit(cap)` truncation so roster/capacity/money never compute on a
+/// partial read.
+///
+/// Termination: each iteration requests exactly [pageSize] rows starting at
+/// [from]. Any page whose length is less than [pageSize] — including an empty
+/// page — ends the loop immediately, so a backend that eventually runs out of
+/// rows always produces a short (or empty) final page and the loop exits. The
+/// only way this would not terminate is a page-fetcher that always returns
+/// exactly [pageSize] rows forever, which is not possible against a finite
+/// table.
+@visibleForTesting
+Future<List<T>> paginateRows<T>(
+  Future<List<T>> Function(int from, int to) fetchPage, {
+  int pageSize = SyncService.pageSize,
+}) async {
+  final all = <T>[];
+  var from = 0;
+  while (true) {
+    final page = await fetchPage(from, from + pageSize - 1);
+    all.addAll(page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
 
 /// Online-only Supabase access layer.
 ///
@@ -82,11 +111,10 @@ class SyncService extends GetxService {
 
   // ── Reads (live) ────────────────────────────────────────────────────
 
-  /// Row caps. Reads are not paginated, so a result that hits the cap is
-  /// SILENTLY truncated — we log a loud warning when that happens so an
-  /// operator who has outgrown the cap is at least visible in logs.
-  static const int defaultRowLimit = 500;
-  static const int passengersRowLimit = 2000;
+  /// Page size for range-paginated reads (X-5). Supabase's default max
+  /// range window, used as the per-request chunk so every table read pages
+  /// through ALL rows instead of silently truncating at a fixed cap.
+  static const int pageSize = 1000;
 
   /// Fetches [table] from Supabase. Returns a record of the fetched [rows]
   /// (`[]` on any failure or when offline) plus a per-call [failed] flag, so a
@@ -129,18 +157,6 @@ class SyncService extends GetxService {
     }
   }
 
-  /// Logs a loud warning when a fetch returned exactly its row cap, which
-  /// means the result was almost certainly truncated.
-  void _warnIfCapped(String table, int count, int limit) {
-    if (count >= limit) {
-      dev.log(
-        'ROW CAP HIT: "$table" returned $count rows (limit $limit) — results '
-        'may be TRUNCATED. Add pagination before this operator grows further.',
-        name: 'SyncService',
-      );
-    }
-  }
-
   Future<List<Map<String, dynamic>>> _fetchFromSupabase(
     String table,
     Map<String, String>? filters,
@@ -148,40 +164,44 @@ class SyncService extends GetxService {
   ) async {
     if (table == 'tours') return _fetchToursWithRelations(filters, orderBy);
 
-    var query = _client.from(table).select();
+    final base = _client.from(table).select();
+    var filtered = base;
     if (filters != null) {
       filters.forEach((k, v) {
-        query = query.eq(k, v);
+        filtered = filtered.eq(k, v);
       });
     }
-    final transform = orderBy != null
-        ? query.order(orderBy, ascending: false).limit(defaultRowLimit)
-        : query.limit(defaultRowLimit);
-    final rows = await transform;
-    final list = List<Map<String, dynamic>>.from(
-      (rows as List).map((r) => Map<String, dynamic>.from(r)),
-    );
-    _warnIfCapped(table, list.length, defaultRowLimit);
-    return list;
+    return paginateRows<Map<String, dynamic>>((from, to) async {
+      final transform = orderBy != null
+          ? filtered.order(orderBy, ascending: false).range(from, to)
+          : filtered.range(from, to);
+      final rows = await transform;
+      return List<Map<String, dynamic>>.from(
+        (rows as List).map((r) => Map<String, dynamic>.from(r)),
+      );
+    });
   }
 
   Future<List<Map<String, dynamic>>> _fetchToursWithRelations(
     Map<String, String>? filters,
     String? orderBy,
   ) async {
-    var tourQuery = _client.from('tours').select();
+    final tourBase = _client.from('tours').select();
+    var tourQuery = tourBase;
     if (filters != null) {
       filters.forEach((k, v) {
         tourQuery = tourQuery.eq(k, v);
       });
     }
-    final transform = orderBy != null
-        ? tourQuery.order(orderBy, ascending: false).limit(defaultRowLimit)
-        : tourQuery.limit(defaultRowLimit);
-    final tours = List<Map<String, dynamic>>.from(
-      (await transform as List).map((r) => Map<String, dynamic>.from(r)),
-    );
-    _warnIfCapped('tours', tours.length, defaultRowLimit);
+    final tours = await paginateRows<Map<String, dynamic>>((from, to) async {
+      final transform = orderBy != null
+          ? tourQuery.order(orderBy, ascending: false).range(from, to)
+          : tourQuery.range(from, to);
+      final rows = await transform;
+      return List<Map<String, dynamic>>.from(
+        (rows as List).map((r) => Map<String, dynamic>.from(r)),
+      );
+    });
     if (tours.isEmpty) return [];
 
     final tourIds = tours.map((t) => t['id'] as String).toList();
@@ -189,25 +209,48 @@ class SyncService extends GetxService {
     // Passengers + buses are independent once we know tour ids — fetch
     // them in parallel. Previously these awaits ran sequentially, which
     // cost one full extra round-trip per tour load on cellular networks
-    // (passenger response gates the bus request for no reason).
-    final passengersFuture = _client
-        .from('passengers')
-        .select()
-        .inFilter('tour_id', tourIds)
-        .limit(passengersRowLimit);
+    // (passenger response gates the bus request for no reason). Each is
+    // now fully paginated (X-5) rather than capped, so a large roster or
+    // fleet never gets silently truncated.
+    final passengersFuture = paginateRows<Map<String, dynamic>>(
+      (from, to) async {
+        final rows = await _client
+            .from('passengers')
+            .select()
+            .inFilter('tour_id', tourIds)
+            .range(from, to);
+        return List<Map<String, dynamic>>.from(
+          (rows as List).map((r) => Map<String, dynamic>.from(r)),
+        );
+      },
+    );
     // Buses are joined by buses.tour_id (one-to-many). A tour can have
     // multiple buses; the legacy single tours.bus_id is no longer used.
-    final busesFuture = _client
-        .from('buses')
-        .select()
-        .inFilter('tour_id', tourIds)
-        .limit(defaultRowLimit);
+    final busesFuture = paginateRows<Map<String, dynamic>>(
+      (from, to) async {
+        final rows = await _client
+            .from('buses')
+            .select()
+            .inFilter('tour_id', tourIds)
+            .range(from, to);
+        return List<Map<String, dynamic>>.from(
+          (rows as List).map((r) => Map<String, dynamic>.from(r)),
+        );
+      },
+    );
     // Passenger groups (cross-booking groups) are also keyed by tour_id.
-    final groupsFuture = _client
-        .from('passenger_groups')
-        .select()
-        .inFilter('tour_id', tourIds)
-        .limit(defaultRowLimit);
+    final groupsFuture = paginateRows<Map<String, dynamic>>(
+      (from, to) async {
+        final rows = await _client
+            .from('passenger_groups')
+            .select()
+            .inFilter('tour_id', tourIds)
+            .range(from, to);
+        return List<Map<String, dynamic>>.from(
+          (rows as List).map((r) => Map<String, dynamic>.from(r)),
+        );
+      },
+    );
 
     // passengers + buses are the core relations and MUST load. passenger_groups
     // is new (migration 006) and OPTIONAL — if that table isn't present yet (or
@@ -216,11 +259,9 @@ class SyncService extends GetxService {
     final coreResults = await Future.wait([passengersFuture, busesFuture]);
     final passengersRaw = coreResults[0];
     final busesRaw = coreResults[1];
-    _warnIfCapped('passengers', passengersRaw.length, passengersRowLimit);
-    _warnIfCapped('buses', busesRaw.length, defaultRowLimit);
-    List<dynamic> groupsRaw;
+    List<Map<String, dynamic>> groupsRaw;
     try {
-      groupsRaw = await groupsFuture as List;
+      groupsRaw = await groupsFuture;
     } catch (_) {
       groupsRaw = const [];
     }
