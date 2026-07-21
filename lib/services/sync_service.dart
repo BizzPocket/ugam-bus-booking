@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:developer' as dev;
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -8,6 +7,7 @@ import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_service.dart';
+import 'sync_retry_policy.dart' as retry;
 
 /// Online-only Supabase access layer.
 ///
@@ -367,7 +367,7 @@ class SyncService extends GetxService {
       }),
       timeout: _writeTimeout,
       label: 'swap seats',
-      isRetryable: _isPreSendConnectionError,
+      isRetryable: retry.isPreSendConnectionError,
     );
   }
 
@@ -451,19 +451,22 @@ class SyncService extends GetxService {
           // 23505 = unique_violation. Usually the conflict is on a non-id
           // column (e.g. (tour_id, phone) on passengers). Only fall back
           // to UPDATE when a row with this exact id already exists.
-          if (e.code == '23505') {
-            final existing = await _client
-                .from(table)
-                .select('id')
-                .eq('id', entityId)
-                .maybeSingle();
-            if (existing == null) {
+          final existing = e.code == '23505'
+              ? await _client
+                  .from(table)
+                  .select('id')
+                  .eq('id', entityId)
+                  .maybeSingle()
+              : null;
+          switch (retry.resolveInsertConflict(
+            code: e.code,
+            rowWithIdExists: existing != null,
+          )) {
+            case retry.InsertConflictAction.updateById:
+              final updateData = Map<String, dynamic>.from(clean)..remove('id');
+              await _client.from(table).update(updateData).eq('id', entityId);
+            case retry.InsertConflictAction.rethrowError:
               rethrow;
-            }
-            final updateData = Map<String, dynamic>.from(clean)..remove('id');
-            await _client.from(table).update(updateData).eq('id', entityId);
-          } else {
-            rethrow;
           }
         }
         break;
@@ -506,7 +509,7 @@ class SyncService extends GetxService {
     bool Function(Object error)? isRetryable,
   }) async {
     final predicate = isRetryable ??
-        ((Object e) => _isRetryable(e, retryOnTimeout: retryOnTimeout));
+        ((Object e) => retry.isRetryable(e, retryOnTimeout: retryOnTimeout));
     Object? lastError;
     StackTrace? lastStack;
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
@@ -528,91 +531,6 @@ class SyncService extends GetxService {
     }
     // Loop always returns or rethrows; this satisfies the analyzer.
     Error.throwWithStackTrace(lastError!, lastStack ?? StackTrace.current);
-  }
-
-  /// Classifies whether [e] is a transient failure worth retrying. Retry only
-  /// network/transport/5xx failures (and, when [retryOnTimeout], timeouts);
-  /// every constraint, permission, auth, and missing-function error is
-  /// terminal and must surface immediately.
-  bool _isRetryable(Object e, {required bool retryOnTimeout}) {
-    // Missing function (deploy issue) — retrying never helps.
-    if (e is RpcUnavailableException) return false;
-
-    // Timeout — retryable only for idempotent operations.
-    if (e is TimeoutException) return retryOnTimeout;
-
-    // Invalid / expired session — terminal.
-    if (e is AuthException) return false;
-
-    if (e is PostgrestException) {
-      final code = e.code;
-      // Terminal constraint / permission / deploy codes.
-      const terminal = {
-        '42501', // insufficient_privilege (RLS denial)
-        '23505', // unique_violation (already has insert->update fallback)
-        '23503', // foreign_key_violation
-        '23514', // check_violation
-        '23502', // not_null_violation
-        '22P02', // invalid_text_representation
-        'PGRST202', // function not found
-        '42883', // function does not exist
-      };
-      if (code != null && terminal.contains(code)) return false;
-
-      // Explicit DB-unreachable signals — transient.
-      if (code == '503' || code == 'PGRST001') return true;
-
-      // Some transports carry the HTTP status in `code`. 5xx => transient,
-      // any 4xx (incl. 401/403 auth) => terminal.
-      final status = int.tryParse(code ?? '');
-      if (status != null) {
-        if (status >= 500) return true;
-        if (status >= 400) return false;
-      }
-
-      // Null/unknown code with a network-style message — transient.
-      return _looksLikeTransport(e.message);
-    }
-
-    // dart:io transport failures.
-    if (e is SocketException) return true;
-    if (e is HttpException) return true;
-
-    // package:http ClientException and friends carry their signature in
-    // toString() (avoids importing the transitive http dependency directly).
-    return _looksLikeTransport(e.toString());
-  }
-
-  /// True when [message] carries a network/transport failure signature.
-  bool _looksLikeTransport(String message) {
-    final m = message.toLowerCase();
-    return m.contains('socketexception') ||
-        m.contains('clientexception') ||
-        m.contains('httpexception') ||
-        m.contains('connection closed') ||
-        m.contains('connection reset') ||
-        m.contains('connection refused') ||
-        m.contains('connection terminated') ||
-        m.contains('failed host lookup') ||
-        m.contains('network is unreachable') ||
-        m.contains('no route to host') ||
-        m.contains('timed out') ||
-        m.contains('timeout') ||
-        m.contains('network');
-  }
-
-  /// Certain the request never left the device: DNS failure, no route, or
-  /// connection refused BEFORE any bytes were sent. Excludes connection
-  /// reset/closed (which can happen mid-flight after a write may already have
-  /// landed) and timeouts — used only for the non-idempotent swap RPC, where
-  /// re-running an already-sent request would corrupt the seat arrangement.
-  bool _isPreSendConnectionError(Object e) {
-    if (e is! SocketException) return false;
-    final m = e.toString().toLowerCase();
-    return m.contains('failed host lookup') ||
-        m.contains('connection refused') ||
-        m.contains('network is unreachable') ||
-        m.contains('no route to host');
   }
 
   Future<T> _withTimeout<T>(
