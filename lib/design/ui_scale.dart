@@ -15,9 +15,16 @@ import 'package:flutter/widgets.dart';
 ///     an unreadable/untappable size.
 ///
 /// Text is scaled once, app-wide, by feeding this factor into
-/// `MediaQuery.textScaler` at the app root (see `MyApp.build`). Fixed-pixel
-/// dimensions inside the shared design components multiply by [of] so they track
-/// the same curve — call `final s = UgamScale.of(context);` and use `54 * s`.
+/// `MediaQuery.textScaler` at the app root (see `MyApp.build`). That is the
+/// ONLY place the factor is applied automatically — it scales text everywhere.
+///
+/// Fixed-pixel chrome does NOT scale automatically. A shared component MAY opt
+/// in for its own fixed dimensions by multiplying by [of] —
+/// `final s = UgamScale.of(context);` then `54 * s` — as `UgamInput` does.
+/// This is deliberately opt-in: most components rely on the app-wide text
+/// scaling plus the `_min` floor rather than per-dimension scaling. Do not
+/// assume a given widget's paddings/heights track this curve unless it calls
+/// [of] itself.
 class UgamScale {
   const UgamScale._();
 
