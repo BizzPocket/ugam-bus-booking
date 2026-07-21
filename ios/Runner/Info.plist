@@ -40,6 +40,8 @@
 	<string>Ugam Booking matches your saved contacts to incoming bookings so you instantly see who booked.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Ugam Booking uses Face ID to sign you in quickly and securely.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ugam Booking needs access to your photo library so you can pick a cover image for a tour.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
