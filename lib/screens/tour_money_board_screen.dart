@@ -9,6 +9,7 @@ import '../models/bus_details.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
 import '../utils/formatters.dart';
+import '../widgets/money_loading_skeleton.dart';
 import 'bus_money_screen.dart';
 import 'collection_screen.dart';
 import 'trip_pnl_screen.dart';
@@ -110,6 +111,10 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                   );
                 }
 
+                if (_money.isLoading.value && !_money.loadedOnce.value) {
+                  return const MoneyLoadingSkeleton();
+                }
+
                 // A failed money load leaves the obs lists empty; without this
                 // the board would render every bus at ₹0 as if the trip had no
                 // money. Swap in the shared retry only when nothing is held.
@@ -132,14 +137,16 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                   );
                 }
 
-                return ListView(
+                return RefreshIndicator(
+                  onRefresh: () => _money.refreshForTour(widget.tourId),
+                  child: ListView(
                   padding: const EdgeInsets.fromLTRB(
                     UgamSpacing.gutter,
                     UgamSpacing.sm,
                     UgamSpacing.gutter,
                     UgamSpacing.xl,
                   ),
-                  physics: const BouncingScrollPhysics(),
+                  physics: const AlwaysScrollableScrollPhysics(),
                   children: [
                     _PnlEntryCard(
                       summary: _money.tourSummary(),
@@ -168,6 +175,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                         ),
                       ),
                   ],
+                  ),
                 );
               }),
             ),

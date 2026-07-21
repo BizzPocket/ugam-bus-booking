@@ -8,6 +8,7 @@ import '../design/ugam.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
 import '../utils/formatters.dart';
+import '../widgets/money_loading_skeleton.dart';
 
 
 /// Per-trip Profit & Loss — the breakdown the agent lands on when they open a
@@ -89,6 +90,10 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                     title: tr('tour_money_board.tour_not_found'),
                   );
                 }
+                if (_money.isLoading.value && !_money.loadedOnce.value) {
+                  return const MoneyLoadingSkeleton();
+                }
+
                 final buses = tour.buses;
                 if (buses.isEmpty) {
                   return UgamEmpty(
@@ -113,14 +118,16 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                 );
                 final busById = {for (final b in buses) b.id: b};
 
-                return ListView(
+                return RefreshIndicator(
+                  onRefresh: () => _money.refreshForTour(widget.tourId),
+                  child: ListView(
                   padding: const EdgeInsets.fromLTRB(
                     UgamSpacing.gutter,
                     UgamSpacing.sm,
                     UgamSpacing.gutter,
                     UgamSpacing.xxl,
                   ),
-                  physics: const BouncingScrollPhysics(),
+                  physics: const AlwaysScrollableScrollPhysics(),
                   children: [
                     _TripTotalCard(total: total, c: c),
                     const SizedBox(height: UgamSpacing.xl),
@@ -171,6 +178,7 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                         ),
                       ),
                   ],
+                  ),
                 );
               }),
             ),

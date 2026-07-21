@@ -12,6 +12,7 @@ import '../models/income_entry.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
 import '../utils/formatters.dart';
+import '../widgets/money_loading_skeleton.dart';
 import 'collection_screen.dart';
 
 /// Per-bus money cockpit: collection summary, expense ledger, and the
@@ -67,6 +68,9 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
             ),
             Expanded(
               child: Obx(() {
+                if (controller.isLoading.value && !controller.loadedOnce.value) {
+                  return const MoneyLoadingSkeleton();
+                }
                 // A failed load leaves the money lists empty; show the shared
                 // retry rather than a ₹0 cockpit that reads as a settled bus.
                 if (_showLoadError) {
@@ -89,7 +93,10 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
 
                 return Stack(
                   children: [
-                    ListView(
+                    RefreshIndicator(
+                      onRefresh: () => controller.refreshForTour(widget.tour.id),
+                      child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(
                     UgamSpacing.gutter,
                     UgamSpacing.lg,
@@ -328,6 +335,7 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                     // ── Tour rollup ────────────────────────────────────
                     _TourRollupCard(summary: t),
                   ],
+                      ),
                     ),
                     // ── Sticky thumb-zone CTA ──────────────────────────
                     // The screen's single solid-copper focal action: jump to

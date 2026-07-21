@@ -12,6 +12,7 @@ import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/design/components/ugam_card.dart';
 import 'package:occubusbooking/screens/tour_money_board_screen.dart';
+import 'package:occubusbooking/widgets/money_loading_skeleton.dart';
 
 /// Test double for [TourController] — skips the real network load + realtime
 /// wiring so the board can read `tours` without a live Supabase graph.
@@ -28,9 +29,21 @@ class _FakeTourController extends TourController {
 /// Aggregation helpers are inherited unchanged and operate on the seeded
 /// `collections` / `expenses` / `handovers` obs lists.
 class _FakeMoneyController extends MoneyController {
+  bool refreshedCalled = false;
+  String? refreshedTourId;
+
   @override
   Future<void> loadForTour(String tourId) async {
     // No-op: the test seeds the obs lists directly.
+  }
+
+  // Overridden (rather than left to the real implementation, which calls
+  // `Get.find<SyncService>()`) so pull-to-refresh wiring can be asserted
+  // without standing up a fake SyncService.
+  @override
+  Future<void> refreshForTour(String tourId) async {
+    refreshedCalled = true;
+    refreshedTourId = tourId;
   }
 }
 
@@ -239,5 +252,45 @@ void main() {
         ? 'tour_money_board.trip_in_profit'
         : 'tour_money_board.trip_at_loss';
     expect(find.text(key), findsOneWidget);
+  });
+
+  testWidgets('shows the loading skeleton on first load, not an all-₹0 board',
+      (tester) async {
+    useTallSurface(tester);
+    final tours = _FakeTourController();
+    final money = _FakeMoneyController();
+    Get.put<TourController>(tours);
+    Get.put<MoneyController>(money);
+    tours.tours.assignAll([_fakeTour()]);
+    // isLoading true + loadedOnce still false (its default) is the exact
+    // first-fetch state the gate targets — before any row has ever landed.
+    money.isLoading.value = true;
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    expect(find.byType(MoneyLoadingSkeleton), findsOneWidget);
+    // The real board rows must not render underneath the skeleton.
+    expect(find.text('Bus 1'), findsNothing);
+  });
+
+  testWidgets('pull-to-refresh calls refreshForTour for this tour',
+      (tester) async {
+    useTallSurface(tester);
+    final tours = _FakeTourController();
+    final money = _FakeMoneyController();
+    Get.put<TourController>(tours);
+    Get.put<MoneyController>(money);
+    tours.tours.assignAll([_fakeTour()]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    final indicator =
+        tester.widget<RefreshIndicator>(find.byType(RefreshIndicator));
+    await indicator.onRefresh();
+
+    expect(money.refreshedCalled, isTrue);
+    expect(money.refreshedTourId, 't1');
   });
 }

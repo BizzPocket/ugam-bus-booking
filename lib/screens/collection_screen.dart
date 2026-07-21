@@ -14,6 +14,7 @@ import '../models/trip_type.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_money_state.dart';
+import '../widgets/money_loading_skeleton.dart';
 
 String? _tripLabel(TripType t) {
   switch (t) {
@@ -123,6 +124,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
             ),
             Expanded(
               child: Obx(() {
+                if (controller.isLoading.value && !controller.loadedOnce.value) {
+                  return const MoneyLoadingSkeleton();
+                }
                 // A failed load leaves the collections empty; show the shared
                 // retry rather than a roster where every seat falsely reads as
                 // "not collected".
@@ -179,25 +183,31 @@ class _CollectionScreenState extends State<CollectionScreen> {
                               icon: Icons.account_balance_wallet_rounded,
                               title: tr('collection.empty_no_match'),
                             )
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(
-                                UgamSpacing.gutter,
-                                0,
-                                UgamSpacing.gutter,
-                                UgamSpacing.huge,
+                          : RefreshIndicator(
+                              onRefresh: () =>
+                                  controller.refreshForTour(widget.tour.id),
+                              child: ListView.separated(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                padding: const EdgeInsets.fromLTRB(
+                                  UgamSpacing.gutter,
+                                  0,
+                                  UgamSpacing.gutter,
+                                  UgamSpacing.huge,
+                                ),
+                                itemCount: lines.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: UgamSpacing.md),
+                                itemBuilder: (_, i) {
+                                  final line = lines[i];
+                                  return _PassengerRow(
+                                    line: line,
+                                    bus: widget.bus,
+                                    onTap: () =>
+                                        _openCollectSheet(context, line),
+                                    onMarkPaid: () => _markPaid(line),
+                                  );
+                                },
                               ),
-                              itemCount: lines.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: UgamSpacing.md),
-                              itemBuilder: (_, i) {
-                                final line = lines[i];
-                                return _PassengerRow(
-                                  line: line,
-                                  bus: widget.bus,
-                                  onTap: () => _openCollectSheet(context, line),
-                                  onMarkPaid: () => _markPaid(line),
-                                );
-                              },
                             ),
                     ),
                   ],

@@ -5,16 +5,16 @@ import 'package:occubusbooking/controllers/money_controller.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/bus_type.dart';
 import 'package:occubusbooking/models/collection.dart';
-import 'package:occubusbooking/models/income_entry.dart';
+import 'package:occubusbooking/models/passenger.dart';
+import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/tour.dart';
-import 'package:occubusbooking/screens/bus_money_screen.dart';
+import 'package:occubusbooking/screens/collection_screen.dart';
 import 'package:occubusbooking/widgets/money_loading_skeleton.dart';
 
 /// No-op load so the screen's post-frame init never touches SyncService; the
-/// test seeds the money obs lists directly and the inherited aggregation
-/// helpers (summaryForBus) read them. [refreshForTour] is likewise overridden
-/// (rather than left to the real implementation, which calls
+/// test seeds the money obs lists directly. [refreshForTour] is likewise
+/// overridden (rather than left to the real implementation, which calls
 /// `Get.find<SyncService>()`) so pull-to-refresh wiring can be asserted
 /// without standing up a fake SyncService.
 class _FakeMoneyController extends MoneyController {
@@ -38,6 +38,13 @@ Bus _bus() => Bus(
       layout: BusLayout.generate(busType: BusType.sleeper, totalSeats: 30),
     );
 
+Passenger _passenger() => Passenger(
+      tourId: 't1',
+      name: 'Riya Shah',
+      phone: '9876543210',
+      assignedSeats: const [SeatAssignment(busId: 'b1', seatId: 'A1')],
+    );
+
 Tour _tour() => Tour(
       id: 't1',
       title: 'Dwarka Yatra',
@@ -46,81 +53,25 @@ Tour _tour() => Tour(
       departureDate: DateTime(2026, 7, 1),
       pricePerSeat: 1200,
       buses: [_bus()],
+      passengers: [_passenger()],
     );
 
 Widget _harness() => GetMaterialApp(
       theme: ThemeData(brightness: Brightness.dark),
-      home: BusMoneyScreen(tour: _tour(), bus: _bus()),
+      home: CollectionScreen(tour: _tour(), bus: _bus()),
     );
 
 void main() {
   tearDown(Get.reset);
 
-  // EasyLocalization is not initialised in tests, so tr() renders raw keys —
-  // we assert those. Grow the surface so the whole cockpit lays out.
+  // EasyLocalization is not initialised in tests, so tr() renders raw keys.
   void useTallSurface(WidgetTester tester) {
     tester.view.physicalSize = const Size(1200, 4000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
   }
 
-  testWidgets('income stat is hidden when there is no extra income',
-      (tester) async {
-    useTallSurface(tester);
-    final money = _FakeMoneyController();
-    Get.put<MoneyController>(money);
-    money.collections.assignAll([
-      Collection(
-        tourId: 't1',
-        busId: 'b1',
-        passengerId: 'p1',
-        seatId: 'A1',
-        amountDue: 1000,
-        amountReceived: 1000,
-      ),
-    ]);
-
-    await tester.pumpWidget(_harness());
-    await tester.pump();
-
-    // No income seeded → the Income stat label key must not render.
-    expect(find.text('bus_money.stat_income'), findsNothing);
-    // Collected + expenses stats still render.
-    expect(find.text('bus_money.stat_collected'), findsOneWidget);
-    expect(find.text('bus_money.stat_expenses'), findsOneWidget);
-  });
-
-  testWidgets('income stat appears once there is income', (tester) async {
-    useTallSurface(tester);
-    final money = _FakeMoneyController();
-    Get.put<MoneyController>(money);
-    money.collections.assignAll([
-      Collection(
-        tourId: 't1',
-        busId: 'b1',
-        passengerId: 'p1',
-        seatId: 'A1',
-        amountDue: 1000,
-        amountReceived: 1000,
-      ),
-    ]);
-    money.incomes.assignAll([
-      IncomeEntry(
-        tourId: 't1',
-        busId: 'b1',
-        category: IncomeCategory.other,
-        label: 'Cabin',
-        amount: 500,
-      ),
-    ]);
-
-    await tester.pumpWidget(_harness());
-    await tester.pump();
-
-    expect(find.text('bus_money.stat_income'), findsOneWidget);
-  });
-
-  testWidgets('shows the loading skeleton on first load, not a ₹0 cockpit',
+  testWidgets('shows the loading skeleton on first load, not the roster',
       (tester) async {
     useTallSurface(tester);
     final money = _FakeMoneyController();
@@ -133,8 +84,19 @@ void main() {
     await tester.pump();
 
     expect(find.byType(MoneyLoadingSkeleton), findsOneWidget);
-    // The real cockpit content must not render underneath the skeleton.
-    expect(find.text('bus_money.stat_collected'), findsNothing);
+    // The real passenger roster must not render underneath the skeleton.
+    expect(find.text('Riya Shah'), findsNothing);
+  });
+
+  testWidgets('renders the passenger roster once loaded', (tester) async {
+    useTallSurface(tester);
+    final money = _FakeMoneyController();
+    Get.put<MoneyController>(money);
+
+    await tester.pumpWidget(_harness());
+    await tester.pump();
+
+    expect(find.text('Riya Shah'), findsOneWidget);
   });
 
   testWidgets('pull-to-refresh calls refreshForTour for this tour',
@@ -142,6 +104,16 @@ void main() {
     useTallSurface(tester);
     final money = _FakeMoneyController();
     Get.put<MoneyController>(money);
+    money.collections.assignAll([
+      Collection(
+        tourId: 't1',
+        busId: 'b1',
+        passengerId: 'p1',
+        seatId: 'A1',
+        amountDue: 1000,
+        amountReceived: 1000,
+      ),
+    ]);
 
     await tester.pumpWidget(_harness());
     await tester.pump();
