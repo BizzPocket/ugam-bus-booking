@@ -98,12 +98,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
   }
 
   bool _passesFilter(_SeatCollectionLine line) {
-    final col = line.col;
     switch (_filter) {
       case 1: // To return
-        return col != null && col.isReturnDue;
+        return line.isReturnDue;
       case 2: // To collect
-        return col == null || col.balance < 0;
+        return line.isShortfall;
       default:
         return true;
     }
@@ -257,21 +256,12 @@ class _CollectionScreenState extends State<CollectionScreen> {
     final due = line.due;
     final col = line.col;
 
-    // Only pre-seed the "returned" field with a GENUINE manual return. When the
-    // stored refund is merely the auto-recorded change (== max(0, received −
-    // due)), leave it BLANK so re-opening the sheet re-derives the change from
-    // the freshly typed received amount instead of freezing the stale refund —
-    // otherwise correcting an overpaid collection keeps the rider's money.
-    final storedRefund = col?.amountRefunded ?? 0;
-    final autoChange = col == null
-        ? 0.0
-        : (col.amountReceived - col.amountDue > 0
-              ? col.amountReceived - col.amountDue
-              : 0.0);
-    final isManualReturn =
-        storedRefund > 0 && (storedRefund - autoChange).abs() > 0.005;
+    // Only pre-seed the "returned" field with a GENUINE manual return; the
+    // auto-recorded change stays blank so a re-open re-derives it from the
+    // freshly typed received amount (shared helper — handler sheet uses it too).
+    final seedReturn = manualReturnToSeed(col);
     final returnedCtrl = TextEditingController(
-      text: isManualReturn ? storedRefund.toStringAsFixed(0) : '',
+      text: seedReturn == null ? '' : seedReturn.toStringAsFixed(0),
     );
     final collectedByCtrl = TextEditingController(text: col?.collectedBy ?? '');
     final noteCtrl = TextEditingController(text: col?.note ?? '');
@@ -382,10 +372,17 @@ class _ChangeStatusPill extends StatelessWidget {
     final shortfall = due - (amount - refund);
     final IconData icon;
     final Color tone;
+    // The matching tonal SURFACE token for `tone`. A hand-mixed
+    // `tone.withValues(alpha: 0.12)` sat weaker than every other tonal fill in
+    // the app (warm was off by a third vs warmFill), so the pill the handler
+    // stares at while counting cash read washed out next to the sheet's
+    // tonal buttons.
+    final Color fill;
     final String label;
     if (shortfall > 0.005) {
       icon = Icons.south_west_rounded;
       tone = c.accent;
+      fill = c.accentFill;
       label = tr(
         'collection.still_to_collect',
         namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
@@ -393,6 +390,7 @@ class _ChangeStatusPill extends StatelessWidget {
     } else if (refund > 0.005) {
       icon = Icons.undo_rounded;
       tone = c.warm;
+      fill = c.warmFill;
       label = tr(
         'collection.change_to_return',
         namedArgs: {'amount': Formatters.formatMoneyInr(refund)},
@@ -400,6 +398,7 @@ class _ChangeStatusPill extends StatelessWidget {
     } else {
       icon = Icons.check_circle_rounded;
       tone = c.good;
+      fill = c.goodFill;
       label = tr('collection.settled');
     }
     return Container(
@@ -408,7 +407,7 @@ class _ChangeStatusPill extends StatelessWidget {
         vertical: UgamSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.12),
+        color: fill,
         borderRadius: BorderRadius.circular(UgamRadius.chip),
       ),
       child: Row(
@@ -433,7 +432,10 @@ class _ChangeStatusPill extends StatelessWidget {
 class _SeatCollectionLine {
   final Passenger passenger;
   final String seatId;
+
+  /// LIVE fare for this seat on THIS bus, from `Bus.amountDueForSeat`.
   final double due;
+
   final Collection? col;
 
   const _SeatCollectionLine({
@@ -442,6 +444,20 @@ class _SeatCollectionLine {
     required this.due,
     required this.col,
   });
+
+  /// Cash actually held for this seat (`received − refunded`).
+  double get net => netCollectedOf(col);
+
+  /// Paid-vs-owed against the LIVE fare rather than the stored `amount_due`
+  /// snapshot — see [liveBalanceOf], which the handler's seat dots share, so
+  /// the two surfaces can never disagree about who still owes.
+  double get liveBalance => liveBalanceOf(due, col);
+
+  bool get isReturnDue => liveBalance > Collection.kMoneyEpsilon;
+  bool get isShortfall => liveBalance < -Collection.kMoneyEpsilon;
+
+  double get changeToReturn => isReturnDue ? liveBalance : 0;
+  double get stillToCollect => isShortfall ? -liveBalance : 0;
 }
 
 class _SummaryHeader extends StatelessWidget {
@@ -473,9 +489,12 @@ class _SummaryHeader extends StatelessWidget {
         children: [
           Row(
             children: [
+              // Decorative leading glyph tile — [UgamScale.px], so it tracks
+              // the label text beside it instead of staying chunky at full
+              // size while that text shrinks on a narrow phone.
               Container(
-                width: 42,
-                height: 42,
+                width: UgamScale.px(context, 42),
+                height: UgamScale.px(context, 42),
                 decoration: BoxDecoration(
                   color: settled ? c.goodFill : c.accentFill,
                   shape: BoxShape.circle,
@@ -483,7 +502,7 @@ class _SummaryHeader extends StatelessWidget {
                 alignment: Alignment.center,
                 child: Icon(
                   Icons.account_balance_wallet_rounded,
-                  size: 20,
+                  size: UgamScale.px(context, 20),
                   color: figureColor,
                 ),
               ),
@@ -626,10 +645,12 @@ class _PassengerRow extends StatelessWidget {
     final col = line.col;
     final received = col?.amountReceived ?? 0;
     final returned = col?.amountRefunded ?? 0;
-    final balance = col == null ? -due : col.balance;
     final trip = _tripLabel(passenger.tripType);
-    final shortfall = due - received;
-    final isShortfall = balance < 0;
+    // Everything below reads the LIVE balance (see _SeatCollectionLine), so a
+    // rider carried in from another bus shows the DIFFERENCE at this bus's
+    // band — not the full fare over again, and not a stale "settled".
+    final isShortfall = line.isShortfall;
+    final shortfall = line.stillToCollect;
 
     // Status chip resolution. UgamReqChip carries the tone via variant; the
     // shortfall ("due") state maps to the accent attention variant since the
@@ -637,10 +658,10 @@ class _PassengerRow extends StatelessWidget {
     // already flag the owed amount).
     late final String chipLabel;
     late final UgamChipVariant chipVariant;
-    if (col != null && col.isReturnDue) {
+    if (line.isReturnDue) {
       chipLabel = tr(
         'collection.chip_return',
-        namedArgs: {'amount': Formatters.formatMoneyInr(col.changeToReturn)},
+        namedArgs: {'amount': Formatters.formatMoneyInr(line.changeToReturn)},
       );
       chipVariant = UgamChipVariant.warm;
     } else if (isShortfall) {
@@ -649,7 +670,7 @@ class _PassengerRow extends StatelessWidget {
         namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
       );
       chipVariant = UgamChipVariant.accent;
-    } else if (col != null && col.isSquare && received > 0) {
+    } else if (received > 0) {
       chipLabel = tr('collection.chip_paid');
       chipVariant = UgamChipVariant.good;
     } else {
@@ -670,8 +691,10 @@ class _PassengerRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Name stays flexible + ellipsised so a long name can never
-                    // overflow; the pickup-CODE tag is a fixed trailing chip.
+                    // Name stays flexible so it can never overflow, but wraps to
+                    // 2 lines before it ellipsises (app-wide rule — see
+                    // UgamRequestRow); the pickup-CODE tag is a fixed trailing
+                    // chip that baseline-aligns to the name's first line.
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.baseline,
                       textBaseline: TextBaseline.alphabetic,
@@ -680,7 +703,7 @@ class _PassengerRow extends StatelessWidget {
                           child: Text(
                             passenger.displayName,
                             style: UgamText.titleS.copyWith(color: c.ink),
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),

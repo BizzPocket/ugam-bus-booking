@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
-import '../design/components/ugam_capacity_meter.dart';
-import '../design/components/ugam_free_seats.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/seat_type.dart';
@@ -109,11 +107,24 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
   /// agent can edit/shrink/waitlist any request — the cockpit itself is
   /// read-only, so this is the door to changing what was asked for.
   void _onEditRequests() {
-    Get.to(() => RequestsScreen(initialTourId: widget.tourId));
+    // NESTED push (not `Get.to`, which lands on the ROOT navigator and covers
+    // the dock) so reaching Requests from the seats cockpit behaves exactly
+    // like reaching it from the tour Overview tool row
+    // (tour_detail_screen.dart:2132). Same destination, same chrome.
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => RequestsScreen(initialTourId: widget.tourId),
+      ),
+    );
   }
 
   void _onAddBus() {
-    Get.to(() => ManageBusesScreen(tourId: widget.tourId));
+    // Nested for the same reason — mirrors tour_detail_screen.dart:1959.
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ManageBusesScreen(tourId: widget.tourId),
+      ),
+    );
   }
 
   /// Tapping a bus card opens the manual seat grid pre-selected to that bus.
@@ -140,11 +151,12 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
           child: Obx(() {
             final tour = _ctrl.getTour(widget.tourId);
             if (tour == null) {
-              return Center(
-                child: Text(
-                  tr('tour_overview.tour_not_found'),
-                  style: UgamText.body.copyWith(color: c.ink2),
-                ),
+              // Shared empty state, matching how tour_detail_screen.dart:66-77
+              // handles the identical "tour vanished mid-session" condition —
+              // a bare centred string read as a broken screen.
+              return UgamEmpty(
+                icon: Icons.search_off_rounded,
+                title: tr('tour_overview.tour_not_found'),
               );
             }
 
@@ -262,14 +274,16 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                 // dividers between), so several fit without the old
                 // card-per-bus gaps.
                 if (tour.buses.isEmpty)
-                  _NoBuses(c: c)
+                  UgamEmpty(
+                    icon: Icons.directions_bus_outlined,
+                    title: tr('tour_overview.no_buses'),
+                  )
                 else
-                  Container(
-                    decoration: BoxDecoration(
-                      color: c.card,
-                      borderRadius: BorderRadius.circular(UgamRadius.card),
-                      border: Border.all(color: c.border),
-                    ),
+                  // Shared card chrome. `padding: zero` is load-bearing —
+                  // UgamCard.plain defaults to `gutter` all round, and the rows
+                  // below carry their own `md` padding + full-bleed dividers.
+                  UgamCard.plain(
+                    padding: EdgeInsets.zero,
                     child: Column(
                       children: [
                         for (var i = 0; i < tour.buses.length; i++) ...[
@@ -392,13 +406,8 @@ class _SummaryCard extends StatelessWidget {
       if (seaters > 0) '$seaters ${tr('tour_overview.seater')}',
     ].join('  ·  ');
 
-    return Container(
+    return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.md),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(color: c.border),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -427,43 +436,66 @@ class _SummaryCard extends StatelessWidget {
             ),
           const SizedBox(height: UgamSpacing.md),
           Container(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.md),
           // Bus requirements — eyebrow + Edit, then the chips + total.
+          //
+          // The 16 px above this row and the 4 px below it used to be plain
+          // SizedBox spacers OUTSIDE the row, which left "Edit" — the only
+          // inline door from the seats cockpit to the Requests editor — a
+          // ~14 px-tall text link that users kept missing. The identical 16/4
+          // now lives as PADDING on both row children instead, so the tap box
+          // swallows the whitespace it was already sitting in and the card's
+          // overall height is unchanged to within half a pixel.
+          //
+          // Honest cap: this buys a ~34 px target, not 44. Reaching a true 44
+          // needs +10 px of real card height, and this card's doc comment
+          // declares it compact and on the 8 pt grid — a visible resize is the
+          // user's call, not something to smuggle in behind a tap-target fix.
           Row(
             children: [
-              Text(
-                tr('tour_overview.bus_requirements'),
-                style: UgamText.micro.copyWith(color: c.ink3),
+              Padding(
+                padding: const EdgeInsets.only(
+                  top: UgamSpacing.md,
+                  bottom: UgamSpacing.xs,
+                ),
+                child: Text(
+                  tr('tour_overview.bus_requirements'),
+                  style: UgamText.micro.copyWith(color: c.ink3),
+                ),
               ),
               const Spacer(),
               GestureDetector(
                 onTap: onEditRequests,
                 behavior: HitTestBehavior.opaque,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tr('app.action.edit'),
-                      style: UgamText.micro.copyWith(color: c.accent),
-                    ),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 14,
-                      color: c.accent,
-                    ),
-                  ],
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    top: UgamSpacing.md,
+                    bottom: UgamSpacing.xs,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        tr('app.action.edit'),
+                        style: UgamText.micro.copyWith(color: c.accent),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 14,
+                        color: c.accent,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: UgamSpacing.xs),
           Text(
             chips,
             style: UgamText.caption.copyWith(color: c.ink),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: UgamSpacing.xs),
           Text(
             tr('tour_overview.total_to_book', namedArgs: {'n': '$units'}),
             style: UgamText.micro.copyWith(color: c.ink3),
@@ -495,9 +527,16 @@ class _DecisionChip extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
+        // The single entry to the seating-conflict resolver was a 38 px
+        // target. `minHeight: 44` floors it; `centerLeft` is MANDATORY beside
+        // it — without an alignment the Row would top-align inside the taller
+        // box, and `center` would re-centre it horizontally too (the parent is
+        // a full-width ListView). Matches charts_screen.dart:463.
+        constraints: const BoxConstraints(minHeight: 44),
+        alignment: Alignment.centerLeft,
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm + 2,
+          vertical: UgamSpacing.tight,
         ),
         decoration: BoxDecoration(
           color: c.warmFill,
@@ -510,7 +549,7 @@ class _DecisionChip extends StatelessWidget {
             const SizedBox(width: UgamSpacing.sm),
             Text(
               tr('tour_overview.need_decision', namedArgs: {'n': '$count'}),
-              style: UgamText.bodyStrong.copyWith(color: c.warm, fontSize: 13),
+              style: UgamText.bodyStrong.copyWith(color: c.warm),
             ),
             const SizedBox(width: UgamSpacing.xs),
             Icon(Icons.chevron_right_rounded, size: 18, color: c.warm),
@@ -594,11 +633,15 @@ class _CapacityBanner extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 34,
-                height: 34,
+                // DECORATIVE badge (nothing taps it) -> px, not tap. Radius 10
+                // was off the UgamRadius scale entirely; `input` (14) is what
+                // every other icon chip in the tours cluster uses
+                // (tour_detail_screen.dart:643, :2256).
+                width: UgamScale.px(context, 34),
+                height: UgamScale.px(context, 34),
                 decoration: BoxDecoration(
                   color: c.warm.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 alignment: Alignment.center,
                 child: Icon(Icons.event_busy_rounded, size: 18, color: c.warm),
@@ -610,7 +653,7 @@ class _CapacityBanner extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(title, style: UgamText.titleS.copyWith(color: c.ink)),
-                    const SizedBox(height: 3),
+                    const SizedBox(height: UgamSpacing.xs),
                     Text(
                       message,
                       style: UgamText.caption.copyWith(color: c.ink2),
@@ -687,7 +730,13 @@ class _BannerAction extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        height: 48,
+        // The comment above says this mirrors UgamButton's tonal geometry at
+        // "50-h" but the code wrote 48, so these two were the only buttons in
+        // the app 2 px short of every other one. `tap` (never `px` — this is a
+        // finger target) corrects the value AND puts it on the scale factor,
+        // so it tracks the text inside it on a small phone: 50 at 390 pt,
+        // floored at the 44 pt minimum below that.
+        height: UgamScale.tap(context, 50),
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
         decoration: BoxDecoration(
@@ -699,7 +748,9 @@ class _BannerAction extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, size: 16, color: c.warm),
-            const SizedBox(width: 6),
+            // `sm`, matching the icon->label gap UgamButton uses at
+            // ugam_button.dart:132 — the component this row mirrors.
+            const SizedBox(width: UgamSpacing.sm),
             Flexible(
               child: Text(
                 label,
@@ -794,10 +845,7 @@ class _BusRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     text: TextSpan(
-                      style: UgamText.bodyStrong.copyWith(
-                        color: c.ink,
-                        fontSize: 14,
-                      ),
+                      style: UgamText.bodyStrong.copyWith(color: c.ink),
                       children: [
                         TextSpan(text: bus.name),
                         TextSpan(
@@ -809,15 +857,21 @@ class _BusRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: UgamSpacing.sm),
+                // 6 px, the size UgamStatusDot renders
+                // (ugam_status_dot.dart:35-36), so this bus row's status
+                // indicator matches every other status indicator in the app.
+                // Deliberately NOT the component itself — UgamStatusDot always
+                // emits a label, and this row shows the state by colour alone.
+                // See the agent report: swapping it in would mean `label: ''`.
                 Container(
-                  width: 7,
-                  height: 7,
+                  width: 6,
+                  height: 6,
                   decoration: BoxDecoration(
                     color: tone,
                     shape: BoxShape.circle,
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: UgamSpacing.sm),
                 Icon(Icons.chevron_right_rounded, size: 16, color: c.ink3),
               ],
             ),
@@ -856,30 +910,8 @@ class _BusRow extends StatelessWidget {
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────────
-
-class _NoBuses extends StatelessWidget {
-  final UgamColorSet c;
-
-  const _NoBuses({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.directions_bus_outlined, size: 40, color: c.ink3),
-            const SizedBox(height: UgamSpacing.md),
-            Text(
-              tr('tour_overview.no_buses'),
-              style: UgamText.body.copyWith(color: c.ink2),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+//
+// The "no buses yet" state is now the shared [UgamEmpty] (see the build method
+// above), matching tour_detail_screen.dart:1422-1435 — the same tour's Buses
+// tab. The old hand-rolled `_NoBuses` (40 px icon, body/ink2 label) rendered
+// the same condition as a visibly different, plainer empty state.

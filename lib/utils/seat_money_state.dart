@@ -30,20 +30,61 @@ double refundToRecord({
   return change > 0 ? change : 0;
 }
 
+/// The value to PRE-SEED the collect sheet's "returned" field with when
+/// re-opening a saved [collection], or `null` to leave it BLANK.
+///
+/// Only a GENUINE manual return is pre-seeded. When the stored refund is merely
+/// the auto-recorded change (== `max(0, received − due)`), this returns `null`
+/// so re-opening re-derives the change from the freshly typed received amount
+/// via [refundToRecord]. Otherwise correcting an over-collected seat would
+/// re-freeze the stale change as a manual return and store a phantom shortfall
+/// (inflating the bus summary's to-collect). Shared by BOTH the admin
+/// (collection_screen) and handler (handler_bus_chart_screen) collect sheets so
+/// their re-open behaviour can never drift apart.
+double? manualReturnToSeed(Collection? collection) {
+  final col = collection;
+  if (col == null || col.amountRefunded <= 0) return null;
+  final autoChange = col.amountReceived - col.amountDue > 0
+      ? col.amountReceived - col.amountDue
+      : 0.0;
+  final isManualReturn = (col.amountRefunded - autoChange).abs() > 0.005;
+  return isManualReturn ? col.amountRefunded : null;
+}
+
+/// Cash a collection row actually holds (`received − refunded`), or 0 when
+/// nothing has been collected for that seat yet.
+double netCollectedOf(Collection? collection) =>
+    collection == null ? 0 : collection.amountReceived - collection.amountRefunded;
+
+/// Paid-vs-owed for one rider, measured against the LIVE [due] rather than the
+/// `amount_due` snapshotted when the money was taken. +ve = hand money back,
+/// −ve = still owed.
+///
+/// It has to be the live fare, because fares are per-BUS: carrying a rider from
+/// a ₹1,500 band into a ₹2,000 one re-prices them the instant they land, so
+/// someone who paid in full on bus 1 owes ₹500 on bus 2. Reading
+/// [Collection.balance] instead would keep showing the OLD bus's expectation
+/// and report them as settled until the row happened to be re-saved — the
+/// stored value is a snapshot, not the current price.
+///
+/// Refunds count, so a partly-refunded row can never read as fully paid.
+double liveBalanceOf(double due, Collection? collection) =>
+    netCollectedOf(collection) - due;
+
 /// Per-RIDER money state from their resolved [due] and [collection].
 ///
 /// Kept pure (no Bus/Passenger) so the rule is testable and shared by every
 /// surface that paints a collection dot/chip — the handler grid, the roster,
 /// and the collect sheet all read the same truth.
 SeatMoneyState riderMoneyStateOf(double due, Collection? collection) {
-  final col = collection;
-  if (col == null) {
-    return due > 0 ? SeatMoneyState.owing : SeatMoneyState.uncollected;
-  }
-  if (col.isReturnDue) return SeatMoneyState.returnDue;
-  if (col.balance < 0) return SeatMoneyState.owing;
-  if (col.isSquare && col.amountReceived > 0) return SeatMoneyState.paid;
-  return SeatMoneyState.uncollected;
+  final balance = liveBalanceOf(due, collection);
+  if (balance > Collection.kMoneyEpsilon) return SeatMoneyState.returnDue;
+  if (balance < -Collection.kMoneyEpsilon) return SeatMoneyState.owing;
+  // Square. Cash in means settled; nothing in means a free/zero-fare seat that
+  // was never collected on.
+  return netCollectedOf(collection) > 0
+      ? SeatMoneyState.paid
+      : SeatMoneyState.uncollected;
 }
 
 /// Seat-level money state across EVERY rider sharing the berth (a Double Sofa

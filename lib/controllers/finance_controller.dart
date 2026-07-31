@@ -42,12 +42,45 @@ class FinanceController extends GetxController {
 
   /// Loads once. Safe to call from every screen that needs finance data —
   /// it no-ops while already loading or after a first successful load.
+  ///
+  /// [markStale] re-arms it, so a money write elsewhere in the app makes the
+  /// NEXT visit refetch instead of showing a frozen number.
   Future<void> ensureLoaded() async {
     if (loadedOnce.value || isLoading.value) return;
     await load();
   }
 
   Future<void> reload() => load();
+
+  /// Invalidates the cached totals WITHOUT refetching.
+  ///
+  /// The cross-tour P&L is derived from the same `collections` / `expenses` /
+  /// `incomes` rows [MoneyController] writes, but the two controllers hold
+  /// independent copies. Without this, [ensureLoaded] permanently no-ops after
+  /// its first success and the Settings card keeps showing a pre-write figure
+  /// for the rest of the session while the per-tour money board moves — the
+  /// two surfaces silently disagree about the same money.
+  ///
+  /// Deliberately does NOT clear the held maps: the stale-but-close figure is a
+  /// far better thing to show than a flash of ₹0 while the refetch is in
+  /// flight. [loadedOnce] stays true for the same reason — it only gates the
+  /// first-load skeleton.
+  void markStale() {
+    if (!loadedOnce.value && !isLoading.value) return;
+    _stale = true;
+  }
+
+  /// Set by [markStale]; consumed by [refreshIfStale].
+  bool _stale = false;
+
+  /// Refetches only when a money write has happened since the last load.
+  /// Screens call this on entry instead of [ensureLoaded] when they want to
+  /// stay current without paying for a fetch on every visit.
+  Future<void> refreshIfStale() async {
+    if (!loadedOnce.value) return ensureLoaded();
+    if (!_stale || isLoading.value) return;
+    await load();
+  }
 
   Future<void> load() async {
     if (isLoading.value) return;
@@ -117,6 +150,7 @@ class FinanceController extends GetxController {
         ..clear()
         ..addAll(income);
       loadedOnce.value = true;
+      _stale = false;
     } catch (e, st) {
       dev.log('finance load failed: $e\n$st', name: 'FinanceController');
       loadFailed.value = true;
@@ -125,8 +159,17 @@ class FinanceController extends GetxController {
     }
   }
 
-  /// Pages through [table] in [_pageSize] chunks (ordered by id for a stable
-  /// window) until a short page signals the end, invoking [onRow] per row.
+  /// Pages through [table] (ordered by id for a stable window across the
+  /// separate round trips) until a page comes back EMPTY, invoking [onRow] per
+  /// row.
+  ///
+  /// Advances the cursor by the number of rows actually returned rather than by
+  /// [_pageSize], and stops only on an empty page. PostgREST caps every
+  /// response at the project's `db-max-rows`; if that cap is below [_pageSize],
+  /// the old "short page means the end" rule fired on the very FIRST page and
+  /// every finance total silently truncated to one page — an under-reported
+  /// profit with no error anywhere. Counting what arrived is correct for any
+  /// server cap, including one that changes between deploys.
   Future<void> _pageThrough({
     required String table,
     required String columns,
@@ -142,22 +185,27 @@ class FinanceController extends GetxController {
                   .order('id', ascending: true)
                   .range(from, from + _pageSize - 1)
               as List;
+      if (rows.isEmpty) break;
       for (final r in rows) {
         onRow(Map<String, dynamic>.from(r as Map));
       }
-      if (rows.length < _pageSize) break;
-      from += _pageSize;
+      from += rows.length;
     }
   }
 
   // ── Reports ───────────────────────────────────────────────
 
-  /// Per-tour P&L for [period], newest trip first. [completedOnly] limits the
-  /// report to finished tours (realised P&L); pass false to include in-progress
-  /// tours' running figures too.
+  /// Per-tour P&L for [period], newest trip first.
+  ///
+  /// Counts EVERY tour by default — a running trip's figures are real money
+  /// that has already moved, and gating the report on the manual "Mark
+  /// completed" tap meant an agent mid-season saw a ₹0 card and an empty report
+  /// no matter how much they had collected. [TourFinance.isCompleted] carries
+  /// the distinction so the UI can still separate realised from running P&L.
+  /// Pass [completedOnly] to get the realised-only view.
   List<TourFinance> financesFor(
     FinancePeriod period, {
-    bool completedOnly = true,
+    bool completedOnly = false,
   }) {
     final now = DateTime.now();
     final out = <TourFinance>[];
@@ -176,11 +224,18 @@ class FinanceController extends GetxController {
     return out;
   }
 
-  FinanceTotals totalsFor(FinancePeriod period, {bool completedOnly = true}) =>
+  FinanceTotals totalsFor(FinancePeriod period, {bool completedOnly = false}) =>
       FinanceTotals.from(financesFor(period, completedOnly: completedOnly));
 
-  /// Lifetime realised net across all completed tours — for the Settings card.
+  /// Lifetime net across EVERY tour that has money on it — for the Settings
+  /// card. Includes running trips (see [financesFor]); the card is the agent's
+  /// "how am I doing" number, and it has to move as the season does.
   double get lifetimeNet => totalsFor(FinancePeriod.allTime).net;
+
+  /// Lifetime net across COMPLETED tours only — realised P&L, for surfaces that
+  /// specifically mean "trips that are finished and settled".
+  double get lifetimeRealisedNet =>
+      totalsFor(FinancePeriod.allTime, completedOnly: true).net;
 
   bool _inPeriod(DateTime date, FinancePeriod period, DateTime now) {
     switch (period) {

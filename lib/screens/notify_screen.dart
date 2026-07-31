@@ -12,10 +12,12 @@ import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../services/wa_template_params.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_outbound.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
+import '../utils/wa_param_error_text.dart';
 
 /// Notify tab — lock gate + post-lock notification tracker.
 ///
@@ -156,16 +158,26 @@ class _NotifyScreenState extends State<NotifyScreen> {
                   duration: UgamMotion.tab,
                   curve: UgamMotion.easeOut,
                   child: _searchVisible
-                      ? _SearchField(
-                          c: c,
-                          controller: _searchCtrl,
-                          onChanged: (v) => setState(() => _query = v.trim()),
+                      ? Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            UgamSpacing.gutter,
+                            0,
+                            UgamSpacing.gutter,
+                            UgamSpacing.md,
+                          ),
+                          child: UgamSearchField(
+                            controller: _searchCtrl,
+                            hint: tr('notify.search_hint'),
+                            autofocus: true,
+                            onChanged: (v) =>
+                                setState(() => _query = v.trim()),
+                            onClear: () => setState(() => _query = ''),
+                          ),
                         )
                       : const SizedBox.shrink(),
                 ),
               if (!_scoped && activeTours.length > 1)
                 _TourSelector(
-                  c: c,
                   tours: activeTours,
                   selectedId: tour.id,
                   onSelect: (id) => setState(() {
@@ -296,7 +308,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
         UgamSpacing.gutter,
         0,
         UgamSpacing.gutter,
-        24,
+        UgamSpacing.huge,
       ),
       children: [
         _HeroSummaryCard(tour: tour, busInfo: busInfo, c: c),
@@ -344,7 +356,7 @@ class _NotifyScreenState extends State<NotifyScreen> {
               onSend: () => _dispatchSeatAllocations(tour, {filtered[i].id}),
             ),
             if (i != filtered.length - 1)
-              const SizedBox(height: UgamSpacing.sm + 2),
+              const SizedBox(height: UgamSpacing.tight),
           ],
       ],
     );
@@ -355,6 +367,11 @@ class _NotifyScreenState extends State<NotifyScreen> {
     final allAssigned = tour.allSeatsAssigned;
     final hasHandler = tour.handlerId != null;
     final hasPassengers = tour.passengers.isNotEmpty;
+    // Whole-bus announcements don't need lock — the recipient set (riders
+    // seated on a bus) already exists during the assigning phase. Surface the
+    // SAME composer here, but only once someone is actually seated so the card
+    // is never a dead-end (the composer disables Send for a 0-rider bus anyway).
+    final anySeated = tour.passengers.any((p) => p.assignedSeats.isNotEmpty);
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
@@ -364,10 +381,14 @@ class _NotifyScreenState extends State<NotifyScreen> {
         UgamSpacing.gutter,
         0,
         UgamSpacing.gutter,
-        24,
+        UgamSpacing.huge,
       ),
       children: [
         _HeroSummaryCard(tour: tour, busInfo: _resolveBusInfo(tour), c: c),
+        if (tour.buses.isNotEmpty && anySeated) ...[
+          const SizedBox(height: UgamSpacing.md),
+          _BusMessageCard(c: c, onTap: () => _openBusMessageComposer(tour)),
+        ],
         const SizedBox(height: UgamSpacing.lg),
         UgamCard.plain(
           padding: const EdgeInsets.fromLTRB(
@@ -383,16 +404,16 @@ class _NotifyScreenState extends State<NotifyScreen> {
               Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: UgamScale.px(context, 40),
+                    height: UgamScale.px(context, 40),
                     decoration: BoxDecoration(
                       color: c.accentFill,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(UgamRadius.input),
                     ),
                     alignment: Alignment.center,
                     child: Icon(
                       Icons.lock_outline_rounded,
-                      size: 19,
+                      size: UgamScale.px(context, 19),
                       color: c.accent,
                     ),
                   ),
@@ -404,18 +425,12 @@ class _NotifyScreenState extends State<NotifyScreen> {
                       children: [
                         Text(
                           tr('notify.lock_gate_ready'),
-                          style: UgamText.titleM.copyWith(
-                            color: c.ink,
-                            fontSize: 17,
-                          ),
+                          style: UgamText.titleM.copyWith(color: c.ink),
                         ),
                         const SizedBox(height: 2),
                         Text(
                           tr('notify.lock_gate_body'),
-                          style: UgamText.caption.copyWith(
-                            color: c.ink2,
-                            fontSize: 12,
-                          ),
+                          style: UgamText.caption.copyWith(color: c.ink2),
                         ),
                       ],
                     ),
@@ -448,20 +463,28 @@ class _NotifyScreenState extends State<NotifyScreen> {
   }
 
   Future<void> _lockTour(Tour tour) async {
-    debugPrint('[WA] _lockTour tapped: tour=${tour.id} '
-        'passengers=${tour.passengers.length}');
+    // "Lock & notify" is ONE mental action for the organiser, so the flow
+    // auto-chains lock → send. It used to also cost TWO back-to-back confirms
+    // ("Lock this tour?" then a fresh "Send seat allocations?" after a silent
+    // gap). Collapse those into a SINGLE confirm that covers both actions;
+    // count the riders who will actually receive an allocation so the message
+    // is honest. (The independent post-lock "Re-send to all" path keeps its
+    // own confirm — see [_sendSeatAllocations].)
+    final t = Get.find<TourController>().getTour(tour.id) ?? tour;
+    final seatedCount =
+        t.passengers.where((p) => p.assignedSeats.isNotEmpty).length;
+
     final confirmed = await UgamDialog.confirm(
       context,
-      title: tr('notify.lock_dialog_title'),
+      title: tr('notify.lock_send_dialog_title'),
       message: tr(
-        'notify.lock_dialog_body',
-        namedArgs: {'count': tour.passengers.length.toString()},
+        'notify.lock_send_dialog_body',
+        namedArgs: {'count': seatedCount.toString()},
       ),
       cancelLabel: tr('app.action.cancel'),
-      confirmLabel: tr('notify.lock_dialog_lock'),
+      confirmLabel: tr('notify.lock_send_dialog_confirm'),
       confirmIcon: Icons.lock_rounded,
     );
-    debugPrint('[WA] _lockTour confirm dialog => $confirmed');
     if (!confirmed) return;
     await Get.find<TourController>().lockTour(tour.id);
     if (!mounted) return;
@@ -469,38 +492,44 @@ class _NotifyScreenState extends State<NotifyScreen> {
     // already make the new state obvious, so the toast was redundant noise.
 
     // Phase 8 — push each seated passenger their seat allocation via the Cloud
-    // API (seat_allotment template).
-    debugPrint('[WA] _lockTour: locked, now calling _sendSeatAllocations');
-    await _sendSeatAllocations(tour);
+    // API (seat_allotment template). The combined confirm above already covered
+    // this send, so skip the (now redundant) second "Send seat allocations?".
+    await _sendSeatAllocations(tour, skipConfirm: true);
   }
 
-  Future<void> _sendSeatAllocations(Tour tour) async {
+  /// Confirm + send seat charts to every seated rider on [tour].
+  ///
+  /// [skipConfirm] is set only on the lock→send auto-chain (see [_lockTour]),
+  /// where a single combined "Lock tour & send seat allocations?" confirm has
+  /// already covered this send — so this path must NOT raise a second,
+  /// redundant "Send seat allocations?" dialog. Every independent entry point
+  /// (the post-lock "Re-send to all" CTA) leaves it false and keeps its confirm.
+  Future<void> _sendSeatAllocations(Tour tour, {bool skipConfirm = false}) async {
     // Use the FRESHEST tour from the controller — the passed snapshot can be
     // stale (captured before the seat plan was applied/persisted), which would
     // make the send think nobody is seated and bail out silently.
     final t = Get.find<TourController>().getTour(tour.id) ?? tour;
     final seated =
         t.passengers.where((p) => p.assignedSeats.isNotEmpty).toList();
-    debugPrint('[WA] _sendSeatAllocations: tour=${t.id} '
-        'passengers=${t.passengers.length} seated=${seated.length}');
     if (seated.isEmpty) {
       AppSnackBar.error(tr('notify.no_seated_passengers'));
       return;
     }
 
-    final ok = await UgamDialog.confirm(
-      context,
-      title: tr('notify.alloc_dialog_title'),
-      message: tr(
-        'notify.alloc_dialog_body',
-        namedArgs: {'count': seated.length.toString()},
-      ),
-      cancelLabel: tr('app.action.cancel'),
-      confirmLabel: tr('notify.alloc_dialog_send'),
-      confirmIcon: Icons.send_rounded,
-    );
-    debugPrint('[WA] _sendSeatAllocations confirm dialog => $ok');
-    if (!ok) return;
+    if (!skipConfirm) {
+      final ok = await UgamDialog.confirm(
+        context,
+        title: tr('notify.alloc_dialog_title'),
+        message: tr(
+          'notify.alloc_dialog_body',
+          namedArgs: {'count': seated.length.toString()},
+        ),
+        cancelLabel: tr('app.action.cancel'),
+        confirmLabel: tr('notify.alloc_dialog_send'),
+        confirmIcon: Icons.send_rounded,
+      );
+      if (!ok) return;
+    }
 
     await _dispatchSeatAllocations(t, seated.map((p) => p.id).toSet());
   }
@@ -558,10 +587,6 @@ class _NotifyScreenState extends State<NotifyScreen> {
     progress.dispose();
     if (!mounted) return;
 
-    debugPrint('[WA] _dispatchSeatAllocations result: '
-        'sent=${result.sent} failed=${result.failed} '
-        'results=${result.results.map((r) => '${r.to}:${r.ok ? 'ok' : r.error}').toList()}');
-
     // Mark the successfully-notified passengers so the tracker + pending count
     // update and the "Send to all pending" CTA hides once everyone's done.
     final okPhones = result.results.where((r) => r.ok).map((r) => r.to).toSet();
@@ -602,8 +627,8 @@ class _NotifyScreenState extends State<NotifyScreen> {
           ? '${tr('notify.alloc_partial_body', namedArgs: {
               'sent': '${result.sent}',
               'failed': '${failedIds.length}',
-            })}${_firstError(result)}'
-          : '${tr('notify.alloc_failed_body')}${_firstError(result)}',
+            })}${firstWaError(result)}'
+          : '${tr('notify.alloc_failed_body')}${firstWaError(result)}',
       cancelLabel: tr('app.action.cancel'),
       confirmLabel:
           tr('notify.alloc_retry', namedArgs: {'count': '${failedIds.length}'}),
@@ -645,30 +670,20 @@ class _NotifyScreenState extends State<NotifyScreen> {
               '${tr('bus_message.partial_body', namedArgs: {
                 'sent': '${result.sent}',
                 'failed': '${result.failed}',
-              })}${_firstError(result)}',
+              })}${firstWaError(result)}',
               title: tr('bus_message.partial_title'),
             );
           } else if (result.results.isEmpty && result.sent == 0) {
             AppSnackBar.warning(tr('bus_message.no_recipients'));
           } else {
             AppSnackBar.error(
-              '${tr('bus_message.failed_body')}${_firstError(result)}',
+              '${tr('bus_message.failed_body')}${firstWaError(result)}',
               title: tr('bus_message.failed_title'),
             );
           }
         },
       ),
     );
-  }
-
-  /// First Meta error reason across the batch (e.g. "(#131030) Recipient phone
-  /// number not in allowed list"), prefixed with a newline — or empty if none.
-  /// Surfaces the exact cause in the snackbar instead of a generic failure.
-  String _firstError(WaSendResult result) {
-    for (final r in result.results) {
-      if (!r.ok && (r.error ?? '').isNotEmpty) return '\n${r.error}';
-    }
-    return '';
   }
 
   _BusInfo _resolveBusInfo(Tour tour) {
@@ -698,75 +713,19 @@ class _BusInfo {
   });
 }
 
-// ─── Search field ─────────────────────────────────────────────────────
-
-class _SearchField extends StatelessWidget {
-  final UgamColorSet c;
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-
-  const _SearchField({
-    required this.c,
-    required this.controller,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        0,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search_rounded, size: 18, color: c.ink2),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                autofocus: true,
-                onChanged: onChanged,
-                style: UgamText.body.copyWith(color: c.ink, fontSize: 14),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  hintText: tr('notify.search_hint'),
-                  hintStyle: UgamText.body.copyWith(
-                    color: c.ink3,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// The search pill is the shared [UgamSearchField]. The private `_SearchField`
+// that used to live here was a line-for-line copy of it minus the clear (×)
+// button, so Notify was the one search bar in the app the user had to
+// backspace out by hand.
 
 // ─── Tour selector ────────────────────────────────────────────────────
 
 class _TourSelector extends StatelessWidget {
-  final UgamColorSet c;
   final List<Tour> tours;
   final String selectedId;
   final ValueChanged<String> onSelect;
 
   const _TourSelector({
-    required this.c,
     required this.tours,
     required this.selectedId,
     required this.onSelect,
@@ -778,48 +737,16 @@ class _TourSelector extends StatelessWidget {
     final currentIndex = selectedIndex < 0 ? 0 : selectedIndex;
 
     // UgamTabPills is a fixed segmented control built for 2–4 segments. When
-    // there are more active tours than that, fall back to a horizontally
-    // scrollable pill row so we never trip the component's assert.
+    // there are more active tours than that, fall back to the shared scrolling
+    // pill strip. This used to be a hand-rolled copy of [UgamSelectorPills]
+    // that painted its ACTIVE pill flat `c.card` instead of the component's
+    // tonal accentFill + accent ink + hairline — so past four tours the
+    // selected tour lost its copper tint and stopped reading as selected.
     if (tours.length > 4) {
-      return SizedBox(
-        height: 38,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-          itemCount: tours.length,
-          separatorBuilder: (_, _) => const SizedBox(width: UgamSpacing.sm),
-          itemBuilder: (_, i) {
-            final t = tours[i];
-            final isActive = t.id == selectedId;
-            return GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                onSelect(t.id);
-              },
-              behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: UgamMotion.tab,
-                curve: UgamMotion.easeOut,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.lg,
-                  vertical: UgamSpacing.sm,
-                ),
-                decoration: BoxDecoration(
-                  color: isActive ? c.card : c.cardElev,
-                  borderRadius: BorderRadius.circular(UgamRadius.chip),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  t.title,
-                  style: UgamText.bodyStrong.copyWith(
-                    color: isActive ? c.ink : c.ink2,
-                    fontSize: 12.5,
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
+      return UgamSelectorPills(
+        items: [for (final t in tours) UgamSelectorItem(label: t.title)],
+        currentIndex: currentIndex,
+        onChanged: (i) => onSelect(tours[i].id),
       );
     }
 
@@ -866,7 +793,7 @@ class _HeroSummaryCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   tour.title,
-                  style: UgamText.titleL.copyWith(color: c.ink, fontSize: 19),
+                  style: UgamText.titleM.copyWith(color: c.ink),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -880,7 +807,7 @@ class _HeroSummaryCard extends StatelessWidget {
           const SizedBox(height: UgamSpacing.xs),
           Text(
             '${tour.fromCity} → ${tour.toCity}',
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+            style: UgamText.caption.copyWith(color: c.ink2),
           ),
           const SizedBox(height: UgamSpacing.md),
           Row(
@@ -950,7 +877,7 @@ class _InfoCell extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm + 2,
+        vertical: UgamSpacing.tight,
       ),
       decoration: BoxDecoration(
         color: c.cardElev,
@@ -966,14 +893,14 @@ class _InfoCell extends StatelessWidget {
               const SizedBox(width: 4),
               Text(
                 label.toUpperCase(),
-                style: UgamText.micro.copyWith(color: c.ink3, fontSize: 9.5),
+                style: UgamText.micro.copyWith(color: c.ink3),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Text(
             value,
-            style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+            style: UgamText.bodyStrong.copyWith(color: c.ink),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
@@ -1013,18 +940,18 @@ class _ProgressCard extends StatelessWidget {
                 done
                     ? tr('notify.progress_all_notified')
                     : tr('notify.progress_label'),
-                style: UgamText.micro.copyWith(color: color, fontSize: 10),
+                style: UgamText.micro.copyWith(color: color),
               ),
               const Spacer(),
               Text(
                 '$sent / $total',
                 style: UgamText.tabular(
-                  UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+                  UgamText.bodyStrong.copyWith(color: c.ink),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: UgamSpacing.sm + 2),
+          const SizedBox(height: UgamSpacing.tight),
           Text(
             done
                 ? tr('notify.progress_done_body')
@@ -1032,7 +959,7 @@ class _ProgressCard extends StatelessWidget {
                     'notify.progress_count_body',
                     namedArgs: {'sent': '$sent', 'total': '$total'},
                   ),
-            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
+            style: UgamText.titleM.copyWith(color: c.ink),
           ),
           const SizedBox(height: UgamSpacing.md),
           ClipRRect(
@@ -1083,9 +1010,11 @@ class _NotifyRow extends StatelessWidget {
       radius: UgamRadius.row,
       child: Row(
         children: [
+          // Decorative avatar — scales, so ~30 rows stop reading as a wall of
+          // full-size circles while their names shrink on a small phone.
           Container(
-            width: 40,
-            height: 40,
+            width: UgamScale.px(context, 40),
+            height: UgamScale.px(context, 40),
             decoration: BoxDecoration(
               color: c.cardElev,
               shape: BoxShape.circle,
@@ -1093,10 +1022,13 @@ class _NotifyRow extends StatelessWidget {
             alignment: Alignment.center,
             child: Text(
               _initials(passenger.name),
-              style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
+              style: UgamText.caption.copyWith(
+                color: c.ink,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
-          const SizedBox(width: UgamSpacing.md - 2),
+          const SizedBox(width: UgamSpacing.tight),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1104,14 +1036,13 @@ class _NotifyRow extends StatelessWidget {
               children: [
                 Row(
                   children: [
+                    // 2 lines before ellipsis — app-wide name rule, see
+                    // UgamRequestRow.
                     Expanded(
                       child: Text(
                         passenger.displayName,
-                        style: UgamText.bodyStrong.copyWith(
-                          color: c.ink,
-                          fontSize: 13.5,
-                        ),
-                        maxLines: 1,
+                        style: UgamText.bodyStrong.copyWith(color: c.ink),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -1135,10 +1066,7 @@ class _NotifyRow extends StatelessWidget {
                             ? '—'
                             : tr('notify.seat_label', namedArgs: {'seats': seats}),
                         style: UgamText.tabular(
-                          UgamText.caption.copyWith(
-                            color: c.ink2,
-                            fontSize: 11.5,
-                          ),
+                          UgamText.caption.copyWith(color: c.ink2),
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1150,26 +1078,21 @@ class _NotifyRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          // Tonal per-row send (accentFill + coloured ink), never solid gold —
-          // solid champagne is reserved for the sticky send-all CTA so ~30 rows
-          // don't flood the accent. 44px hit area for comfortable tapping.
-          GestureDetector(
+          // Tonal per-row send, never solid gold — solid champagne is reserved
+          // for the sticky send-all CTA so ~30 rows don't flood the accent.
+          // The `good`/`accent` TONES on the shared [UgamIconButton] resolve to
+          // exactly the goodFill/accentFill + coloured-ink pair this row used
+          // to hand-roll, so the treatment is preserved and the 44pt box now
+          // rides UgamScale like every other round action in the app.
+          UgamIconButton(
+            icon: Icons.chat_rounded,
             onTap: onSend,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: isSent ? c.goodFill : c.accentFill,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Icons.chat_rounded,
-                size: 18,
-                color: isSent ? c.good : c.accent,
-              ),
-            ),
+            tone: isSent
+                ? UgamIconButtonTone.good
+                : UgamIconButtonTone.accent,
+            semanticLabel: isSent
+                ? tr('notify.row_sent')
+                : tr('notify.row_pending'),
           ),
         ],
       ),
@@ -1214,7 +1137,7 @@ class _LockStickyCTA extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
               child: Text(
                 reason,
-                style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                style: UgamText.caption.copyWith(color: c.ink2),
               ),
             ),
           UgamCTA(
@@ -1255,14 +1178,11 @@ class _Check extends StatelessWidget {
             color: done ? c.good : c.ink3,
           ),
         ),
-        const SizedBox(width: UgamSpacing.md - 2),
+        const SizedBox(width: UgamSpacing.tight),
         Expanded(
           child: Text(
             label,
-            style: UgamText.body.copyWith(
-              color: done ? c.ink : c.ink2,
-              fontSize: 13.5,
-            ),
+            style: UgamText.body.copyWith(color: done ? c.ink : c.ink2),
           ),
         ),
       ],
@@ -1283,47 +1203,47 @@ class _BusMessageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    // `onTap` goes THROUGH the card so it gives press feedback like the
+    // equivalent card on Settings; the outer GestureDetector swallowed it.
+    return UgamCard.plain(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: UgamCard.plain(
-        padding: const EdgeInsets.all(UgamSpacing.md),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: c.accentFill,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.campaign_rounded, size: 19, color: c.accent),
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      child: Row(
+        children: [
+          Container(
+            width: UgamScale.px(context, 40),
+            height: UgamScale.px(context, 40),
+            decoration: BoxDecoration(
+              color: c.accentFill,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
             ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    tr('bus_message.card_title'),
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    tr('bus_message.card_subtitle'),
-                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-                  ),
-                ],
-              ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.campaign_rounded,
+              size: UgamScale.px(context, 19),
+              color: c.accent,
             ),
-            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-          ],
-        ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr('bus_message.card_title'),
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tr('bus_message.card_subtitle'),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+        ],
       ),
     );
   }
@@ -1349,14 +1269,19 @@ class _BusMessageComposer extends StatefulWidget {
 }
 
 class _BusMessageComposerState extends State<_BusMessageComposer> {
-  late String _busId;
+  /// Null until the agent explicitly picks a bus. Deliberately NOT defaulted to
+  /// `buses.first` when the tour has several: that default silently addressed a
+  /// whole announcement to bus #1 whenever the agent typed one bus's text and
+  /// forgot the pill, so riders on the wrong bus got the wrong bus's message.
+  /// A single-bus tour has nothing to choose, so it stays auto-selected.
+  String? _busId;
   final TextEditingController _textCtrl = TextEditingController();
   bool _sending = false;
 
   @override
   void initState() {
     super.initState();
-    _busId = widget.buses.first.id;
+    _busId = widget.buses.length == 1 ? widget.buses.first.id : null;
   }
 
   @override
@@ -1369,14 +1294,64 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
 
   Future<void> _send() async {
     if (_sending) return;
+    final busId = _busId;
+    if (busId == null) {
+      AppSnackBar.error(tr('bus_message.pick_bus_first'));
+      return;
+    }
     final text = _textCtrl.text.trim();
     if (text.isEmpty) {
       AppSnackBar.error(tr('bus_message.empty_text'));
       return;
     }
+
+    // Meta refuses a template variable holding a line break, a tab or 5+
+    // spaces — the rule that silently killed every multi-paragraph
+    // announcement. Refuse it HERE, name the reason, and offer the repair,
+    // rather than fanning a doomed batch out to every recipient.
+    final violations = WaTemplateParams.validateOne(text);
+    if (violations.isNotEmpty) {
+      final fixable = WaTemplateParams.canAutoFix(text);
+      final fix = await UgamDialog.confirm(
+        context,
+        title: tr('bus_message.invalid_title'),
+        message: waViolationsText(violations),
+        cancelLabel: tr('app.action.cancel'),
+        confirmLabel: fixable
+            ? tr('bus_message.fix_auto')
+            : tr('bus_message.invalid_edit'),
+        confirmIcon: fixable ? Icons.auto_fix_high_rounded : Icons.edit_rounded,
+      );
+      if (fix && fixable && mounted) {
+        final fixed = WaTemplateParams.sanitize(text);
+        _textCtrl.value = TextEditingValue(
+          text: fixed,
+          selection: TextSelection.collapsed(offset: fixed.length),
+        );
+      }
+      return;
+    }
+
+    // Name the destination bus one last time before anything leaves. The text
+    // the agent types usually names a bus too, and the two can disagree — this
+    // is the only place that mismatch is still recoverable.
+    final busName = _busLabel(widget.buses.firstWhere((b) => b.id == busId));
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('bus_message.confirm_title', namedArgs: {'bus': busName}),
+      message: tr('bus_message.confirm_body', namedArgs: {
+        'bus': busName,
+        'count': '${widget.recipientCountFor(busId)}',
+      }),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('bus_message.send_btn'),
+      confirmIcon: Icons.send_rounded,
+    );
+    if (!ok || !mounted) return;
+
     setState(() => _sending = true);
     try {
-      await widget.onSend(_busId, text);
+      await widget.onSend(busId, text);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) setState(() => _sending = false);
@@ -1388,7 +1363,8 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final multiBus = widget.buses.length > 1;
-    final count = widget.recipientCountFor(_busId);
+    final busId = _busId;
+    final count = busId == null ? 0 : widget.recipientCountFor(busId);
     return SingleChildScrollView(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1405,33 +1381,19 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
               style: UgamText.micro.copyWith(color: c.ink2),
             ),
             const SizedBox(height: UgamSpacing.sm),
-            Wrap(
-              spacing: UgamSpacing.sm,
-              runSpacing: UgamSpacing.sm,
-              children: [
+            // The shared pill strip — this was a THIRD hand-rolled selector in
+            // one file, and its "selected" state was a faint tint with no
+            // border, so on a dark screen the agent could not reliably tell
+            // which bus the announcement was about to go to.
+            UgamSelectorPills(
+              padding: EdgeInsets.zero,
+              items: [
                 for (final b in widget.buses)
-                  GestureDetector(
-                    onTap: () => setState(() => _busId = b.id),
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: UgamSpacing.lg,
-                        vertical: UgamSpacing.sm + 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _busId == b.id ? c.accentFill : c.cardElev,
-                        borderRadius: BorderRadius.circular(UgamRadius.chip),
-                      ),
-                      child: Text(
-                        _busLabel(b),
-                        style: UgamText.caption.copyWith(
-                          color: _busId == b.id ? c.accent : c.ink2,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
+                  UgamSelectorItem(label: _busLabel(b)),
               ],
+              currentIndex: widget.buses.indexWhere((b) => b.id == _busId),
+              onChanged: (i) =>
+                  setState(() => _busId = widget.buses[i].id),
             ),
             const SizedBox(height: UgamSpacing.lg),
           ],
@@ -1447,14 +1409,27 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
             ),
             child: Row(
               children: [
-                Icon(Icons.group_rounded, size: 15, color: c.accent),
+                Icon(
+                  busId == null
+                      ? Icons.info_outline_rounded
+                      : Icons.group_rounded,
+                  size: 15,
+                  color: c.accent,
+                ),
                 const SizedBox(width: 6),
                 Expanded(
+                  // Spell out WHICH bus is about to be messaged, not just how
+                  // many riders: the count alone never revealed that the typed
+                  // text and the selected bus disagreed.
                   child: Text(
-                    tr(
-                      'bus_message.recipient_count',
-                      namedArgs: {'count': '$count'},
-                    ),
+                    busId == null
+                        ? tr('bus_message.pick_bus_first')
+                        : tr('bus_message.recipient_count_named', namedArgs: {
+                            'bus': _busLabel(
+                              widget.buses.firstWhere((b) => b.id == busId),
+                            ),
+                            'count': '$count',
+                          }),
                     style: UgamText.caption.copyWith(color: c.accent),
                   ),
                 ),
@@ -1503,7 +1478,7 @@ class _SendProgressDialog extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: UgamSpacing.xxl,
-            vertical: UgamSpacing.xxl + UgamSpacing.sm,
+            vertical: UgamSpacing.huge,
           ),
           child: ValueListenableBuilder<int>(
             valueListenable: progress,
@@ -1514,8 +1489,8 @@ class _SendProgressDialog extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   SizedBox(
-                    height: 52,
-                    width: 52,
+                    height: UgamScale.px(context, 52),
+                    width: UgamScale.px(context, 52),
                     child: CircularProgressIndicator(
                       value: ready ? null : pct,
                       color: c.accent,

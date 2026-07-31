@@ -135,3 +135,10 @@ dist/
 
 # Local agent session/memory state (machine-specific)
 .claude/projects/
+
+# Node tooling deps (reticle dev plugin) — the manifest is tracked, the tree is not
+node_modules/
+.reticle/
+
+# Stray media dropped in the repo root (never part of the app bundle)
+/*.mp4

@@ -265,11 +265,6 @@ class SeatChartTile extends StatelessWidget {
     final Widget tile;
     final VoidCallback? onTap;
     switch (r.kind) {
-      case SeatRenderKind.legShareHalf:
-        // A GO+RET leg-share on a DOUBLE only consumes one berth's worth of
-        // capacity (max(GO,RET) == 1), so the other berth is drawn empty.
-        tile = _legShareHalfTile(c, r.go!, r.ret!);
-        onTap = onTapBooked;
       case SeatRenderKind.legShare:
         tile = _legShareTile(c, r.go!, r.ret!);
         onTap = onTapBooked;
@@ -286,7 +281,7 @@ class SeatChartTile extends StatelessWidget {
         tile = _heldTile(c);
         onTap = onTapFree;
       case SeatRenderKind.quad:
-        tile = _quadTile(c);
+        tile = _quadTile(c, r);
         onTap = onTapBooked;
       case SeatRenderKind.anonymous:
       case SeatRenderKind.free:
@@ -608,61 +603,6 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
-  // LEG-SHARED on a DOUBLE that still has a free berth — the GO/RET reuse
-  // occupies ONE berth (stacked GO over RET on the left), the other berth shows
-  // an EMPTY placeholder on the right so the sofa reads "half taken, half free"
-  // rather than fully booked. Mirrors [_halfDoubleTile]'s split, but the filled
-  // half is the leg-reuse pair instead of a single occupant.
-  Widget _legShareHalfTile(UgamColorSet c, Passenger go, Passenger ret) {
-    final priority =
-        go.isPriorityApproved || ret.isPriorityApproved || cell.forward;
-    return _chairFrame(
-      c: c,
-      // Transparent body — the left GO/RET stack + right empty half fill it.
-      fill: Colors.transparent,
-      borderColor: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
-      borderWidth: priority ? 2 : 1.5,
-      child: Stack(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    Expanded(child: _legHalf(c, go)),
-                    Container(height: 1, color: c.border),
-                    Expanded(child: _legHalf(c, ret)),
-                  ],
-                ),
-              ),
-              Container(width: 1, color: c.border),
-              Expanded(child: _emptyHalf(c)),
-            ],
-          ),
-          Positioned(
-            top: 3,
-            left: 4,
-            child: Text(
-              cell.seatId ?? '',
-              style: UgamText.tabular(
-                UgamText.micro.copyWith(color: c.ink3, fontSize: 7.5),
-              ),
-            ),
-          ),
-          if (priority)
-            Positioned(
-              top: 3,
-              right: 3,
-              child: Icon(Icons.star_rounded, size: 11, color: c.warm),
-            ),
-          if (moneyDotColor != null)
-            Positioned(bottom: 3, right: 4, child: _dot(moneyDotColor!, 7)),
-          if (_extraOccupants > 0) _extraBadge(c, _extraOccupants),
-        ],
-      ),
-    );
-  }
-
   Widget _legHalf(UgamColorSet c, Passenger p) {
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
     final gColor = hasGroup ? groupColors.colorFor(p.groupId!) : null;
@@ -781,7 +721,11 @@ class SeatChartTile extends StatelessWidget {
 
     return _chairFrame(
       c: c,
-      fill: c.cardElev,
+      // Tint the WHOLE tile by the sole occupant's leg (GO cyan / RET violet),
+      // exactly like _bookedTile — a one-leg double held by one rider must read
+      // its single-leg colour, not the neutral round-trip fill. The empty berth
+      // below keeps its own dimmed overlay so it still reads as free.
+      fill: _fill(_legBgFill(c, _seatLeg(p)) ?? c.cardElev),
       borderColor: priorityBorder,
       borderWidth: priority ? 1.5 : 1,
       child: Stack(
@@ -814,33 +758,53 @@ class SeatChartTile extends StatelessWidget {
     );
   }
 
-  // QUAD — a Double Sofa shared by 3-4 riders. Chosen trade-off: show TWO
-  // riders fully (name + mobile, stacked) and flag the rest with a "+N" badge;
-  // the full roster is one tap away in the occupant sheet.
-  Widget _quadTile(UgamColorSet c) {
-    final shown = _occ.take(2).toList();
-    final more = _occ.length - shown.length;
+  // QUAD — the leg grid, and the ONE tile for any Double Sofa whose two legs
+  // carry different riders (1 to 4 of them). Two berths × two legs = four
+  // berth-legs, so up to FOUR one-way riders fit. Draw the model's
+  // GO-row-over-RET-row split ([SeatRender.quadGo] / [quadRet], each up to 2
+  // side-by-side, tinted by its own leg via [_legHalf]) so ALL riders are
+  // visible — instead of the old "first two names + a +N badge" that hid riders
+  // 3-4 and could drop an entire leg. The "+N" badge now flags only a genuinely
+  // OVER-booked leg (3+ on one leg → [SeatRender.extra]).
+  //
+  // A leg row with ONE rider gives them its FULL width — the sofa's spare berth
+  // on that leg is not carved out beside them. An entirely free leg row is what
+  // shows remaining capacity, via [_emptyHalf]. Splitting a row per berth is
+  // what made a rider on a half-empty sofa look like they held a quarter of it.
+  Widget _quadTile(UgamColorSet c, SeatRender r) {
     final priority = cell.forward || _occ.any((p) => p.isPriorityApproved);
+    Widget legRow(List<Passenger> riders) {
+      if (riders.isEmpty) return _emptyHalf(c);
+      return Row(
+        children: [
+          for (var i = 0; i < riders.length; i++) ...[
+            if (i > 0) Container(width: 1, color: c.border),
+            Expanded(child: _legHalf(c, riders[i])),
+          ],
+        ],
+      );
+    }
+
     return _chairFrame(
       c: c,
-      fill: c.cardElev,
-      borderColor: priority ? c.warm : c.border,
-      borderWidth: priority ? 1.5 : 1,
+      // Transparent body — the GO/RET rows below carry the leg tint.
+      fill: Colors.transparent,
+      borderColor: priority ? c.warm : kOneWayTint.withValues(alpha: 0.7),
+      borderWidth: priority ? 2 : 1.5,
       child: Stack(
         children: [
           Column(
             children: [
-              for (var i = 0; i < shown.length; i++) ...[
-                if (i > 0) Container(height: 1, color: c.border),
-                Expanded(child: _stackedHalf(c, shown[i])),
-              ],
+              Expanded(child: legRow(r.quadGo)), // GO riders (top)
+              Container(height: 1, color: c.border),
+              Expanded(child: legRow(r.quadRet)), // RET riders (bottom)
             ],
           ),
           _seatCodeTag(c, false),
           if (priority) Positioned(top: 5, right: 6, child: _dot(c.warm, 7)),
           if (moneyDotColor != null)
             Positioned(bottom: 5, right: 6, child: _dot(moneyDotColor!, 8)),
-          if (more > 0) _extraBadge(c, more),
+          if (r.extra > 0) _extraBadge(c, r.extra),
         ],
       ),
     );
@@ -925,6 +889,15 @@ class SeatDragData {
   const SeatDragData(this.fromSeatId);
 }
 
+/// The payload carried when a PENDING (unseated) rider is dragged from the
+/// assignment dock onto a seat. Distinct from [SeatDragData] so a seat's two
+/// drop targets never cross wires — Flutter routes each drag to the target that
+/// matches its payload type.
+class PendingRiderDragData {
+  final String passengerId;
+  const PendingRiderDragData(this.passengerId);
+}
+
 /// Wraps a rendered seat [child] with long-press DRAG (when [draggable]) and
 /// DROP-target behaviour, so any chart can become move/swap capable without the
 /// tile itself knowing about gestures. The wrapper is deliberately *dumb*: it
@@ -972,6 +945,11 @@ class SeatDragWrapper extends StatelessWidget {
   /// from the two seat ids and calls the group-safe controller.
   final void Function(String fromSeatId, String toSeatId)? onSeatDropped;
 
+  /// Fired when a PENDING rider dragged from the dock is dropped onto this seat.
+  /// Null disables the pending-rider drop target, so seat→seat-only and
+  /// read-only charts are unchanged. The caller validates and places-or-rejects.
+  final void Function(String passengerId)? onPendingRiderDropped;
+
   const SeatDragWrapper({
     super.key,
     required this.child,
@@ -984,12 +962,13 @@ class SeatDragWrapper extends StatelessWidget {
     this.onDragStarted,
     this.onDragEnd,
     this.onSeatDropped,
+    this.onPendingRiderDropped,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return DragTarget<SeatDragData>(
+    final Widget seatTarget = DragTarget<SeatDragData>(
       onWillAcceptWithDetails: (d) =>
           d.data.fromSeatId != seatId && (acceptForReason || _isValid),
       onAcceptWithDetails: (d) =>
@@ -1016,6 +995,17 @@ class SeatDragWrapper extends StatelessWidget {
         final hovering = candidate.isNotEmpty && _isValid;
         return _decorate(c, content, hovering);
       },
+    );
+
+    if (onPendingRiderDropped == null) return seatTarget;
+    // A second, distinctly-typed drop target: a PENDING rider dragged from the
+    // dock lands here regardless of whether this seat is itself draggable. The
+    // caller's dragActive/highlight painting already flags which seats fit, so
+    // this target only needs to receive the drop and let the caller validate.
+    return DragTarget<PendingRiderDragData>(
+      onWillAcceptWithDetails: (_) => true,
+      onAcceptWithDetails: (d) => onPendingRiderDropped!(d.data.passengerId),
+      builder: (ctx, candidate, rejected) => seatTarget,
     );
   }
 

@@ -77,10 +77,20 @@ class _UgamInputState extends State<UgamInput> {
         child: Semantics(
           button: true,
           label: tr(_obscured ? 'login.show_password' : 'login.hide_password'),
-          child: Icon(
-            _obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-            size: 20,
-            color: c.ink3,
+          // 44×44 hit box around the UNCHANGED 20pt glyph. The decoration
+          // slot centres it, so the field's painted height is untouched.
+          child: SizedBox(
+            width: 44,
+            height: 44,
+            child: Center(
+              child: Icon(
+                _obscured
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
+                size: 20,
+                color: c.ink3,
+              ),
+            ),
           ),
         ),
       );
@@ -91,8 +101,10 @@ class _UgamInputState extends State<UgamInput> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (widget.label != null) ...[
-          Text(widget.label!.toUpperCase(),
-              style: UgamText.micro.copyWith(color: c.ink2)),
+          Text(
+            widget.label!.toUpperCase(),
+            style: UgamText.micro.copyWith(color: c.ink2),
+          ),
           const SizedBox(height: UgamSpacing.sm),
         ],
         TextField(
@@ -136,7 +148,9 @@ class IndianMobileFormatter extends TextInputFormatter {
 
   @override
   TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
     final normalised = normalisePhone(newValue.text);
     if (normalised == newValue.text) return newValue;
     return TextEditingValue(
@@ -178,8 +192,10 @@ class UgamPhoneInput extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (label != null) ...[
-          Text(label!.toUpperCase(),
-              style: UgamText.micro.copyWith(color: c.ink2)),
+          Text(
+            label!.toUpperCase(),
+            style: UgamText.micro.copyWith(color: c.ink2),
+          ),
           const SizedBox(height: UgamSpacing.sm),
         ],
         Row(
@@ -196,9 +212,10 @@ class UgamPhoneInput extends StatelessWidget {
                 children: [
                   const Text('🇮🇳', style: TextStyle(fontSize: 18)),
                   const SizedBox(width: 6),
-                  Text('+91',
-                      style: UgamText.body
-                          .copyWith(color: c.ink, fontSize: 15)),
+                  Text(
+                    '+91',
+                    style: UgamText.body.copyWith(color: c.ink, fontSize: 15),
+                  ),
                 ],
               ),
             ),
@@ -214,8 +231,7 @@ class UgamPhoneInput extends StatelessWidget {
                   autofillHints: autofillHints,
                   onChanged: onChanged,
                   onSubmitted: onSubmitted,
-                  style:
-                      UgamText.body.copyWith(color: c.ink, fontSize: 16),
+                  style: UgamText.body.copyWith(color: c.ink, fontSize: 16),
                   decoration: InputDecoration(
                     counterText: '',
                     hintText: '98765 43210',

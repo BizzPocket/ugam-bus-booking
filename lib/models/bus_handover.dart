@@ -15,6 +15,15 @@ class BusHandover {
   final DateTime settledAt;
   final DateTime createdAt;
 
+  /// Who logged this row — `'admin'` (the organiser's money screen) or
+  /// `'handler'` (the handler's own bus chart). READ-ONLY on the client: it is
+  /// stamped server-side by `handler_upsert_handover` and defaults to `'admin'`
+  /// in Postgres, and it is deliberately absent from [toMap] so the admin's
+  /// direct table write never sends a column the live schema might not have yet
+  /// (PostgREST rejects the WHOLE payload on one unknown key). The handler UI
+  /// reads it to keep admin-recorded settlements read-only.
+  final String source;
+
   BusHandover({
     String? id,
     required this.tourId,
@@ -22,6 +31,7 @@ class BusHandover {
     this.expectedAmount = 0,
     this.handedOverAmount = 0,
     this.note,
+    this.source = 'admin',
     DateTime? settledAt,
     DateTime? createdAt,
   })  : id = id ?? const Uuid().v4(),
@@ -30,6 +40,10 @@ class BusHandover {
 
   /// +ve = handler still owes admin.
   double get shortfall => expectedAmount - handedOverAmount;
+
+  /// Whether the handler logged this row themselves (and may therefore edit or
+  /// delete it). Admin-recorded settlements stay read-only on the handler side.
+  bool get byHandler => source == 'handler';
 
   // ── Postgres serialization ────────────────────────────────
 
@@ -54,6 +68,9 @@ class BusHandover {
       expectedAmount: (map['expected_amount'] as num?)?.toDouble() ?? 0,
       handedOverAmount: (map['handed_over_amount'] as num?)?.toDouble() ?? 0,
       note: map['note'] as String?,
+      source: (map['source'] as String?)?.isNotEmpty == true
+          ? map['source'] as String
+          : 'admin',
       settledAt: _parseDate(map['settled_at']),
       createdAt: _parseDate(map['created_at']),
     );
@@ -80,6 +97,7 @@ class BusHandover {
       expectedAmount: expectedAmount ?? this.expectedAmount,
       handedOverAmount: handedOverAmount ?? this.handedOverAmount,
       note: note ?? this.note,
+      source: source,
       settledAt: settledAt ?? this.settledAt,
       createdAt: createdAt,
     );

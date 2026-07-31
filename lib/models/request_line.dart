@@ -1,3 +1,4 @@
+import '../utils/json_coerce.dart';
 import 'seat_type.dart';
 import 'trip_type.dart';
 
@@ -76,12 +77,20 @@ class RequestLine {
     Map<String, dynamic> map, {
     TripType fallbackLeg = TripType.roundTrip,
   }) {
+    // Coerced, not cast: this parses an element of the `request_lines` JSONB
+    // array, and Postgres type-checks nothing inside jsonb. A throw here would
+    // propagate out of Passenger.fromMap and fail the entire roster load.
+    //
+    // An unparseable qty becomes 0 rather than a guess: the line stays visible
+    // on the roster but contributes no demand, so a corrupt row can never
+    // silently inflate capacity. Negatives are clamped for the same reason.
+    final qty = coerceInt(map['qty']);
     return RequestLine(
-      seatType: SeatType.fromString(map['seatType'] as String),
-      position: SeatPosition.fromString(map['position'] as String?),
-      qty: (map['qty'] as num).toInt(),
+      seatType: SeatType.fromString(coerceString(map['seatType']) ?? ''),
+      position: SeatPosition.fromString(coerceString(map['position'])),
+      qty: qty < 0 ? 0 : qty,
       leg: map.containsKey('leg')
-          ? TripType.fromString(map['leg'] as String?)
+          ? TripType.fromString(coerceString(map['leg']))
           : fallbackLeg,
     );
   }

@@ -236,6 +236,13 @@ class BookingCaptureForm extends StatefulWidget {
   /// departed, so only [TripType.returnOnly] makes sense.
   final TripType? forcedLeg;
 
+  /// Require a pickup point before submit. ON by default: every request —
+  /// customer-submitted OR added/edited by hand by the organiser — must carry a
+  /// pickup point, so the roster and the driver's chart are never missing one.
+  /// Only enforced when a non-empty pickup list actually exists — a tour with
+  /// no configured pickups never blocks booking (the field is hidden too).
+  final bool requirePickup;
+
   const BookingCaptureForm({
     super.key,
     required this.fromCity,
@@ -247,6 +254,7 @@ class BookingCaptureForm extends StatefulWidget {
     this.maxPerType = 10,
     this.onChanged,
     this.forcedLeg,
+    this.requirePickup = true,
   });
 
   @override
@@ -285,6 +293,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   String? _nameError;
   String? _phoneError;
   String? _seatsError;
+  String? _pickupError;
 
   // Contact autocomplete (admin only).
   UserController? _userCtrl;
@@ -454,11 +463,27 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       seatsError = tr('booking_form.err_no_seats');
     }
 
-    if (nameError != null || phoneError != null || seatsError != null) {
+    // Pickup is required on every surface (admin add / edit / return-ticket and
+    // the customer form alike), but only when a real pickup list exists — a
+    // tour with no configured pickups (the field is hidden) must never be
+    // blocked from booking.
+    String? pickupError;
+    final pickupRequired = widget.requirePickup &&
+        _pickup != null &&
+        _pickup!.active.isNotEmpty;
+    if (pickupRequired && (_pickupId == null || _pickupId!.isEmpty)) {
+      pickupError = tr('booking_form.err_pickup_required');
+    }
+
+    if (nameError != null ||
+        phoneError != null ||
+        seatsError != null ||
+        pickupError != null) {
       setState(() {
         _nameError = nameError;
         _phoneError = phoneError;
         _seatsError = seatsError;
+        _pickupError = pickupError;
       });
       return null;
     }
@@ -590,11 +615,12 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
-  // ─── PICKUP POINT (optional, global list) ─────────────────────────────────
+  // ─── PICKUP POINT (required, global list) ─────────────────────────────────
 
-  /// Open the single-select pickup sheet: a top "clear" row plus every ACTIVE
-  /// point. Pops the chosen id, [_kPickupClear] for the clear row, or null on
-  /// dismiss (leaving the current selection untouched). Never blocks submit.
+  /// Open the single-select pickup sheet: every ACTIVE point, plus a top
+  /// "clear" row only while [BookingCaptureForm.requirePickup] is off. Pops the
+  /// chosen id, [_kPickupClear] for the clear row, or null on dismiss (leaving
+  /// the current selection untouched).
   Future<void> _openPickupSheet() async {
     final pickup = _pickup;
     if (pickup == null) return;
@@ -603,8 +629,13 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     final result = await UgamSheet.show<String>(
       context,
       title: tr('pickup.sheet_title'),
-      builder: (_) =>
-          _PickupPickerSheet(options: options, selectedId: _pickupId),
+      builder: (_) => _PickupPickerSheet(
+        options: options,
+        selectedId: _pickupId,
+        // When pickup is mandatory, drop the "No pickup point" clear row so the
+        // customer can't re-empty a required field.
+        allowClear: !widget.requirePickup,
+      ),
     );
     if (result == null || !mounted) return;
     HapticFeedback.selectionClick();
@@ -623,6 +654,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
         if (loc != null) {
           _pickupId = loc.id;
           _pickupName = loc.name;
+          _pickupError = null;
         }
       }
     });
@@ -993,10 +1025,11 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     );
   }
 
-  /// Optional pickup-point selector. Hidden entirely when the controller isn't
+  /// Pickup-point selector. Hidden entirely when the controller isn't
   /// registered or the active list is empty; wrapped in an [Obx] so it appears
   /// on its own once [PickupController.ensureLoaded] resolves. Tapping opens
-  /// [_openPickupSheet]. Never required — submit ignores it.
+  /// [_openPickupSheet]. Required only when [BookingCaptureForm.requirePickup]
+  /// is set AND a non-empty list exists (see [collect]).
   Widget _buildPickupField(UgamColorSet c) {
     final pickup = _pickup;
     if (pickup == null) return const SizedBox.shrink();
@@ -1012,10 +1045,22 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
           UgamPickerField(
             label: tr('pickup.form_label'),
             value: _pickupName ?? '',
-            placeholder: tr('pickup.form_placeholder'),
+            placeholder: widget.requirePickup
+                ? tr('pickup.form_placeholder_required')
+                : tr('pickup.form_placeholder'),
             icon: Icons.place_rounded,
             onTap: _openPickupSheet,
           ),
+          if (_pickupError != null) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                _pickupError!,
+                style: UgamText.caption.copyWith(color: c.danger),
+              ),
+            ),
+          ],
           const SizedBox(height: UgamSpacing.lg),
         ],
       );
@@ -1655,7 +1700,15 @@ class _PickupPickerSheet extends StatelessWidget {
   final List<PickupLocation> options;
   final String? selectedId;
 
-  const _PickupPickerSheet({required this.options, required this.selectedId});
+  /// Whether to show the top "No pickup point" clear row. Off when pickup is
+  /// mandatory so the customer can't re-empty a required field.
+  final bool allowClear;
+
+  const _PickupPickerSheet({
+    required this.options,
+    required this.selectedId,
+    this.allowClear = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1665,9 +1718,9 @@ class _PickupPickerSheet extends StatelessWidget {
       child: ListView.builder(
         shrinkWrap: true,
         padding: EdgeInsets.zero,
-        itemCount: options.length + 1,
+        itemCount: options.length + (allowClear ? 1 : 0),
         itemBuilder: (_, i) {
-          if (i == 0) {
+          if (allowClear && i == 0) {
             return _PickupOptionRow(
               c: c,
               icon: Icons.not_interested_rounded,
@@ -1676,7 +1729,7 @@ class _PickupPickerSheet extends StatelessWidget {
               onTap: () => Navigator.of(context).pop(_kPickupClear),
             );
           }
-          final p = options[i - 1];
+          final p = options[allowClear ? i - 1 : i];
           return _PickupOptionRow(
             c: c,
             icon: Icons.place_rounded,

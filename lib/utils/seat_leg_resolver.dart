@@ -15,8 +15,12 @@ import '../models/trip_type.dart';
 /// Stamp each assigned seat with the trip leg of the request line it satisfies.
 /// Type-matched in request order; a doubleSofa cell cross-fills from leftover
 /// singleSofa legs (two singles satisfy a double); any seat with no matching
-/// line falls back to the coarse derived leg. Pure + order-stable. Mirrors the
-/// engine's _LockedLegResolver so plan-time and persist-time legs agree.
+/// line falls back to the coarse derived leg. An assignment that ALREADY carries
+/// a leg (a survivor of a partial removal, or a moved berth) is preserved as-is
+/// and NEVER re-derived — re-stamping survivors in request order silently
+/// reshuffles their legs and makes the wrong leg's seat look vacated. Pure +
+/// order-stable. Mirrors the engine's _LockedLegResolver so plan-time and
+/// persist-time legs agree.
 List<SeatAssignment> resolveAssignmentLegs({
   required List<RequestLine> requestLines,
   required List<SeatAssignment> assigned,
@@ -41,6 +45,16 @@ List<SeatAssignment> resolveAssignmentLegs({
   final out = <SeatAssignment>[];
   for (final a in assigned) {
     final type = cellTypeAt(a.busId, a.seatId);
+    // Already stamped — keep its leg untouched and consume one matching queue
+    // entry so any still-unstamped berths of this type stay correctly aligned.
+    // This is what makes "free ONE seat of a mixed one-way booking" empty the
+    // TAPPED seat instead of relabelling (and appearing to vacate) the survivor.
+    if (a.leg != null) {
+      final q = type != null ? byType[type] : null;
+      q?.remove(a.leg);
+      out.add(a);
+      continue;
+    }
     TripType chosen = fallback;
     if (type != null) {
       final q = byType[type];

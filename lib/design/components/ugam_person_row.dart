@@ -86,10 +86,12 @@ class UgamPersonRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                // 2 lines before ellipsis — app-wide name rule, see
+                // UgamRequestRow. The row's 60 minHeight just grows with it.
                 Text(
                   name,
                   style: UgamText.bodyStrong.copyWith(color: c.ink),
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
                 if (subtitle != null) ...[

@@ -4,7 +4,6 @@ import 'package:get/get.dart';
 
 import '../../controllers/money_controller.dart';
 import '../../controllers/tour_controller.dart';
-import '../../design/components/ugam_capacity_meter.dart';
 import '../../design/ugam.dart';
 import '../../models/money_summary.dart';
 import '../../models/tour.dart';
@@ -144,9 +143,15 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
                   child: Semantics(
                     label: tr('dashboard.choose_trip'),
                     button: true,
+                    // Invisible 44 hit box around an unchanged 20pt glyph. Was
+                    // 40, so a near-miss fell through to the card's own onTap
+                    // and opened the tour workspace instead of the picker.
+                    // Deliberately NOT UgamIconButton: its neutral tone paints
+                    // a `cardElev` disc, which would add a visible chrome
+                    // element to the hero that does not exist today.
                     child: SizedBox(
-                      width: 40,
-                      height: 40,
+                      width: 44,
+                      height: 44,
                       child: Icon(Icons.unfold_more_rounded,
                           size: 20, color: c.ink2),
                     ),
@@ -184,6 +189,14 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
                 style: UgamText.caption.copyWith(color: c.ink2),
               ),
               const Spacer(),
+              // Name the tap's destination — the same card opens the full P&L
+              // screen in P&L mode and the tour workspace otherwise, so the
+              // footer says which before the finger commits.
+              Text(
+                pnl ? tr('dashboard.view_pnl') : tr('dashboard.open_trip'),
+                style: UgamText.caption.copyWith(color: c.ink2),
+              ),
+              const SizedBox(width: UgamSpacing.xs),
               Icon(Icons.chevron_right_rounded, size: 20, color: c.ink2),
             ],
           ),

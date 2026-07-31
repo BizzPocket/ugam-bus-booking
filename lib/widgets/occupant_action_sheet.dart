@@ -289,11 +289,13 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
                       crossAxisAlignment: CrossAxisAlignment.baseline,
                       textBaseline: TextBaseline.alphabetic,
                       children: [
+                        // 2 lines before ellipsis — app-wide name rule, see
+                        // UgamRequestRow.
                         Flexible(
                           child: Text(
                             occ.displayName,
                             style: UgamText.titleM.copyWith(color: c.ink),
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),

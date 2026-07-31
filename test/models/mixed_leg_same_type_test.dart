@@ -67,6 +67,41 @@ void main() {
       expect(resolved[0].leg, TripType.outboundOnly);
       expect(resolved[1].leg, TripType.returnOnly);
     });
+
+    test('preserves an already-stamped survivor leg (freeing ONE seat of a '
+        'mixed booking)', () {
+      // After the GO seat is freed, the RET seat is the sole survivor and
+      // ALREADY carries returnOnly. Re-deriving it from request order would
+      // relabel it GO and make the RETURN seat look vacated instead — the exact
+      // "clear empties the wrong leg first" bug. It must keep returnOnly.
+      final resolved = resolveAssignmentLegs(
+        requestLines: matrixLines,
+        assigned: const [
+          SeatAssignment(busId: 'b1', seatId: 'ST2', leg: TripType.returnOnly),
+        ],
+        cellTypeAt: (busId, seatId) => SeatType.seater,
+      );
+      expect(resolved.single.leg, TripType.returnOnly,
+          reason: 'a stamped survivor is preserved, never reshuffled');
+    });
+
+    test('stamped survivor + fresh berth: survivor kept, fresh takes leftover',
+        () {
+      // ST2 already RET (survivor); ST1 is a fresh berth (no leg). The RET slot
+      // is consumed by the survivor, so the fresh ST1 takes the leftover GO.
+      final resolved = resolveAssignmentLegs(
+        requestLines: matrixLines,
+        assigned: const [
+          SeatAssignment(busId: 'b1', seatId: 'ST2', leg: TripType.returnOnly),
+          SeatAssignment(busId: 'b1', seatId: 'ST1'),
+        ],
+        cellTypeAt: (busId, seatId) => SeatType.seater,
+      );
+      final byId = {for (final a in resolved) a.seatId: a.leg};
+      expect(byId['ST2'], TripType.returnOnly, reason: 'survivor kept');
+      expect(byId['ST1'], TripType.outboundOnly,
+          reason: 'fresh berth takes the leftover GO after RET was consumed');
+    });
   });
 
   group('Passenger.legForSeat — drives the per-seat GO/RET tint', () {

@@ -7,6 +7,7 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../utils/formatters.dart';
 import 'create_tour_screen.dart';
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
@@ -96,10 +97,20 @@ class _ToursScreenState extends State<ToursScreen> {
               duration: UgamMotion.tab,
               curve: UgamMotion.easeOut,
               child: _searchVisible
-                  ? _SearchField(
-                      c: c,
-                      controller: _searchCtrl,
-                      onChanged: (v) => setState(() => _query = v.trim()),
+                  ? Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        UgamSpacing.gutter,
+                        0,
+                        UgamSpacing.gutter,
+                        UgamSpacing.md,
+                      ),
+                      child: UgamSearchField(
+                        controller: _searchCtrl,
+                        hint: tr('tours.search_hint'),
+                        autofocus: true,
+                        onChanged: (v) => setState(() => _query = v.trim()),
+                        onClear: () => setState(() => _query = ''),
+                      ),
                     )
                   : const SizedBox.shrink(),
             ),
@@ -194,7 +205,7 @@ class _ToursScreenState extends State<ToursScreen> {
                                 ),
                               ),
                               if (j != g.tours.length - 1)
-                                const SizedBox(height: UgamSpacing.sm + 2),
+                                const SizedBox(height: UgamSpacing.md),
                             ],
                           ],
                         ),
@@ -281,63 +292,6 @@ class _Group {
 
 // ─── widget pieces ────────────────────────────────────────────────────
 
-class _SearchField extends StatelessWidget {
-  final UgamColorSet c;
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-
-  const _SearchField({
-    required this.c,
-    required this.controller,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        0,
-        UgamSpacing.gutter,
-        UgamSpacing.md,
-      ),
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search_rounded, size: 18, color: c.ink2),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                autofocus: true,
-                onChanged: onChanged,
-                style: UgamText.body.copyWith(color: c.ink, fontSize: 14),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  hintText: tr('tours.search_hint'),
-                  hintStyle: UgamText.body.copyWith(
-                    color: c.ink3,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _GroupHeader extends StatelessWidget {
   final String label;
   final int count;
@@ -353,22 +307,20 @@ class _GroupHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(
-          label,
-          style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
-        ),
+        Text(label, style: UgamText.titleS.copyWith(color: c.ink)),
         const SizedBox(width: UgamSpacing.sm),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.badgeH,
+            vertical: UgamSpacing.badgeV,
+          ),
           decoration: BoxDecoration(
             color: c.cardElev,
             borderRadius: BorderRadius.circular(UgamRadius.chip),
           ),
           child: Text(
             '$count',
-            style: UgamText.tabular(
-              UgamText.micro.copyWith(color: c.ink2, fontSize: 10),
-            ),
+            style: UgamText.tabular(UgamText.micro.copyWith(color: c.ink2)),
           ),
         ),
       ],
@@ -403,7 +355,7 @@ class _TourRow extends StatelessWidget {
     final card = UgamCard.plain(
       onTap: onTap,
       radius: UgamRadius.card,
-      padding: const EdgeInsets.all(UgamSpacing.md - 2),
+      padding: const EdgeInsets.all(UgamSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -413,8 +365,11 @@ class _TourRow extends StatelessWidget {
               ClipRRect(
                 borderRadius: BorderRadius.circular(UgamRadius.photo),
                 child: SizedBox(
-                  width: 72,
-                  height: 72,
+                  // Decorative thumbnail — follows the same scale factor the
+                  // title/route text beside it already rides, so it stops
+                  // dominating the row on a sub-390pt phone.
+                  width: UgamScale.px(context, 72),
+                  height: UgamScale.px(context, 72),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -424,22 +379,27 @@ class _TourRow extends StatelessWidget {
                         top: 6,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
+                            horizontal: UgamSpacing.badgeH,
+                            vertical: UgamSpacing.badgeV,
                           ),
                           // Graphite-on-graphite chip reads cleanly over the
                           // backdrop instead of a stray black box.
                           decoration: BoxDecoration(
                             color: c.cardElev,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(UgamRadius.chip),
                           ),
                           child: Text(
-                            _formatDate(tour.departureDate),
+                            Formatters.formatDateShort(
+                              tour.departureDate,
+                              // Localizations.localeOf (not easy_localization's
+                              // context.locale) so the date pill never hard-
+                              // crashes if the l10n provider isn't mounted yet;
+                              // app.dart feeds context.locale into the app's
+                              // Localizations, so this is the SAME locale in app.
+                              locale: Localizations.localeOf(context).toString(),
+                            ).toUpperCase(),
                             style: UgamText.tabular(
-                              UgamText.micro.copyWith(
-                                color: c.ink,
-                                fontSize: 9.5,
-                              ),
+                              UgamText.micro.copyWith(color: c.ink),
                             ),
                           ),
                         ),
@@ -456,24 +416,18 @@ class _TourRow extends StatelessWidget {
                   children: [
                     Text(
                       tour.title,
-                      style: UgamText.titleS.copyWith(
-                        color: c.ink,
-                        fontSize: 15,
-                      ),
+                      style: UgamText.titleS.copyWith(color: c.ink),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       '${tour.fromCity} → ${tour.toCity}',
-                      style: UgamText.caption.copyWith(
-                        color: c.ink2,
-                        fontSize: 12,
-                      ),
+                      style: UgamText.caption.copyWith(color: c.ink2),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: UgamSpacing.sm + 2),
+                    const SizedBox(height: UgamSpacing.md),
                     Row(
                       children: [
                         Flexible(
@@ -501,11 +455,11 @@ class _TourRow extends StatelessWidget {
                         if (capacity > 0)
                           Text(
                             '$assigned/$capacity',
+                            // Same style as the pax fallback below (only the
+                            // ink differs) so the two branches of this slot
+                            // stop rendering at two weights.
                             style: UgamText.tabular(
-                              UgamText.bodyStrong.copyWith(
-                                color: c.ink,
-                                fontSize: 12,
-                              ),
+                              UgamText.caption.copyWith(color: c.ink),
                             ),
                           )
                         else
@@ -526,9 +480,9 @@ class _TourRow extends StatelessWidget {
             ],
           ),
           if (capacity > 0) ...[
-            const SizedBox(height: UgamSpacing.md - 2),
+            const SizedBox(height: UgamSpacing.tight),
             ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
               child: LinearProgressIndicator(
                 value: pct,
                 minHeight: 5,
@@ -561,24 +515,6 @@ class _TourRow extends StatelessWidget {
           );
 
     return Opacity(opacity: dimAlpha, child: swipeable);
-  }
-
-  static String _formatDate(DateTime d) {
-    const months = [
-      'JAN',
-      'FEB',
-      'MAR',
-      'APR',
-      'MAY',
-      'JUN',
-      'JUL',
-      'AUG',
-      'SEP',
-      'OCT',
-      'NOV',
-      'DEC',
-    ];
-    return '${d.day.toString().padLeft(2, '0')} ${months[d.month - 1]}';
   }
 
   /// Short route monogram for the backdrop, e.g. "S→M" from the from/to
@@ -694,13 +630,13 @@ class _LoadingShimmer extends StatelessWidget {
       padding: const EdgeInsets.all(UgamSpacing.gutter),
       physics: const NeverScrollableScrollPhysics(),
       children: const [
-        UgamSkeleton(height: 28, width: 120, radius: 8),
+        UgamSkeleton(height: 28, width: 120),
         SizedBox(height: UgamSpacing.md),
         UgamSkeleton(height: 120, radius: UgamRadius.card),
         SizedBox(height: UgamSpacing.sm),
         UgamSkeleton(height: 120, radius: UgamRadius.card),
         SizedBox(height: UgamSpacing.xl),
-        UgamSkeleton(height: 28, width: 120, radius: 8),
+        UgamSkeleton(height: 28, width: 120),
         SizedBox(height: UgamSpacing.md),
         UgamSkeleton(height: 120, radius: UgamRadius.card),
       ],

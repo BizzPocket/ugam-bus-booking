@@ -92,7 +92,8 @@ class PickupSectionHeader extends StatelessWidget {
 /// When NO item carries a pickup location (an older tour with no pickup data),
 /// the headers are skipped and the whole roster falls back to a single flat
 /// card — the pre-grouping look. Section order is whatever [groupByPickup]
-/// produced (named pickups A→Z, the no-pickup bucket last).
+/// produced (its `rankOf` serial when the caller supplies one, else A→Z; the
+/// no-pickup bucket last either way).
 class PickupGroupedList<T> extends StatelessWidget {
   final List<PickupGroup<T>> groups;
   final Widget Function(T item) rowBuilder;

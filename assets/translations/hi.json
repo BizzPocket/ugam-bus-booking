@@ -5,6 +5,7 @@
   "pickup": {
     "form_label": "पिकअप स्थान",
     "form_placeholder": "पिकअप स्थान चुनें (वैकल्पिक)",
+    "form_placeholder_required": "पिकअप स्थान चुनें",
     "sheet_title": "पिकअप स्थान चुनें",
     "clear": "कोई पिकअप स्थान नहीं",
     "reflect_label": "पिकअप",
@@ -250,6 +251,7 @@
     "greeting_evening": "शुभ संध्या",
     "welcome_fallback": "स्वागत है",
     "section_overview": "संक्षिप्त अवलोकन",
+    "error_title": "आपकी यात्राएँ लोड नहीं हो सकीं",
     "section_upcoming": "आगामी यात्राएँ",
     "see_all": "सभी देखें",
     "stat_active_tours": "सक्रिय यात्राएँ",
@@ -303,6 +305,7 @@
     "departs": "प्रस्थान · {date}",
     "departs_short": "प्रस्थान {date}",
     "open_trip": "ट्रिप खोलें",
+    "view_pnl": "P&L देखें",
     "choose_trip": "ट्रिप चुनें",
     "leg_go": "जाना",
     "leg_return": "वापसी",
@@ -407,13 +410,18 @@
       "confirm_and_seat": "पुष्ट कर सीट दें",
       "add_to_group": "ग्रुप में जोड़ें",
       "change_group": "ग्रुप बदलें",
-      "approve_cancel": "कैंसलेशन मंज़ूर करें",
+      "approve_cancel": "रद्द मंज़ूर करें",
       "dismiss_cancel": "बुकिंग रखें"
     },
     "decline_dialog": {
       "title": "अनुरोध अस्वीकार करें?",
       "body": "इस यात्रा से {name} का अनुरोध हटाएं? यदि आप मन बदलते हैं तो उन्हें दोबारा सबमिट करना होगा।",
       "confirm": "अस्वीकार करें"
+    },
+    "discard_dialog": {
+      "title": "यह बुकिंग छोड़ दें?",
+      "body": "आपने इस अनुरोध के लिए सीटें दर्ज की हैं। अभी बंद करने पर आपका लिखा सब कुछ मिट जाएगा।",
+      "confirm": "छोड़ें"
     },
     "empty_no_tours": {
       "title": "कोई सक्रिय यात्रा नहीं",
@@ -475,13 +483,15 @@
       "promoted_to_new": "{name} को वापस नए में लाया गया।",
       "declined_title": "अस्वीकृत",
       "declined_body": "{name} को इस यात्रा से हटाया गया।",
+      "declined_wa_failed": "अस्वीकृत हुआ, पर सूचना के लिए WhatsApp नहीं खुल सका।",
       "bulk_waitlisted": "{n} को वेटलिस्ट में ले गए",
       "bulk_wa_opened": "{n} WhatsApp चैट खोलीं",
       "cancel_approved_title": "कैंसलेशन मंज़ूर हुआ",
       "cancel_approved_body": "{name} को हटाया और सीट खाली हुई।",
       "cancel_approved_wa_failed": "मंज़ूर हुआ, पर सूचना के लिए WhatsApp नहीं खुल सका।",
       "cancel_dismissed_title": "विनती खारिज",
-      "cancel_dismissed_body": "{name} इस यात्रा में रखे गए।"
+      "cancel_dismissed_body": "{name} इस यात्रा में रखे गए।",
+      "confirm_wa_failed": "कन्फर्म हो गया, पर WhatsApp कन्फर्मेशन नहीं भेजा जा सका।"
     },
     "empty_search": {
       "title": "कोई मेल नहीं",
@@ -500,6 +510,7 @@
       "decline_confirm": "अस्वीकार",
       "decline_title": "इन अनुरोधों को अस्वीकार करें?",
       "declined": "{n} अनुरोध अस्वीकृत",
+      "declined_wa_partial": "{n} अस्वीकृत · {sent} को संदेश, {failed} विफल",
       "promote": "प्रमोट",
       "promoted": "{n} को नया में वापस लाया",
       "send_wa": "WA भेजें",
@@ -717,12 +728,14 @@
     "resize_confirm_title": "सीटें बदलें?",
     "resize_confirm_msg": "इससे इस बस में बैठे {count} यात्री अनअसाइन हो जाएंगे. वे अनअसाइन सूची में वापस चले जाएंगे और दोबारा बैठाए जा सकते हैं. जारी रखें?",
     "resize_confirm_cta": "सीटें बदलें",
-    "regenerate_label": "लेआउट दोबारा बनाएं",
-    "regenerate_subtitle": "इन सेटिंग्स से मौजूदा इंजन का उपयोग कर सीट लेआउट दोबारा बनाएं.",
-    "regenerate_confirm_title": "लेआउट दोबारा बनाएं?",
-    "regenerate_confirm_msg": "इससे मौजूदा सेटिंग्स के अनुसार सीट लेआउट दोबारा बनता है और हर बर्थ फिर से नंबर होती है. इस बस में बैठे {count} यात्री अनअसाइन हो जाएंगे और दोबारा बैठाने होंगे. जारी रखें?",
-    "regenerate_confirm_msg_empty": "इससे मौजूदा सेटिंग्स के अनुसार सीट लेआउट दोबारा बनता है और हर बर्थ फिर से नंबर होती है. इस बस में कोई यात्री नहीं बैठा है, इसलिए कुछ भी अनअसाइन नहीं होगा. जारी रखें?",
-    "regenerate_confirm_cta": "लेआउट दोबारा बनाएं",
+    "regenerate_label": "लेआउट फिर से बनाएं और सहेजें",
+    "regenerate_confirm_title": "लेआउट फिर से बनाकर सहेजें?",
+    "regenerate_confirm_msg": "यह मौजूदा सेटिंग्स से सीट लेआउट फिर से बनाता है और हर बर्थ को नया नंबर देता है। इस बस में बैठे {count} यात्रियों की सीट छूट जाएगी और दोबारा देनी होगी। इस स्क्रीन पर किए आपके बाकी बदलाव भी साथ ही सहेजे जाएंगे और बस बंद हो जाएगी। जारी रखें?",
+    "regenerate_confirm_msg_empty": "यह मौजूदा सेटिंग्स से सीट लेआउट फिर से बनाता है और हर बर्थ को नया नंबर देता है। इस बस में कोई यात्री नहीं बैठा है, इसलिए कुछ नहीं छूटेगा। इस स्क्रीन पर किए आपके बाकी बदलाव भी साथ ही सहेजे जाएंगे और बस बंद हो जाएगी। जारी रखें?",
+    "regenerate_confirm_cta": "फिर बनाएं और सहेजें",
+    "exit_confirm_title": "बिना सहेजे बाहर निकलें?",
+    "exit_confirm_msg": "इस स्क्रीन पर किए आपके बदलाव सहेजे नहीं गए हैं। फिर भी बाहर निकलें?",
+    "exit_confirm_cta": "छोड़ दें",
     "step_progress": "चरण {current} / {total}",
     "step1": {
       "eyebrow": "पहचान",
@@ -761,6 +774,7 @@
       "title": "मूल्य बैंड",
       "subtitle": "प्रीमियम आगे की पंक्तियाँ या छूट वाली पिछली रेंज — मूल्य प्रति व्यक्ति सेट.",
       "add": "मूल्य बैंड जोड़ें",
+      "remove_semantic": "मूल्य बैंड हटाएँ",
       "rows_clamped_note": "बस बनने पर पंक्तियाँ बस के अनुसार सीमित हो जाती हैं."
     },
     "band_sheet": {
@@ -801,6 +815,7 @@
   },
   "admin_setup": {
     "title": "व्यवस्थापक सेटअप",
+    "mail_subject": "एडमिन एक्सेस अनुरोध",
     "heading": "पहला व्यवस्थापक खाता बनाएँ।",
     "subtitle": "ये क्रेडेंशियल आपके Appwrite admins कलेक्शन में संग्रहित हैं। इस फ़ोन नंबर और सही पासवर्ड का उपयोग करने वाले किसी भी व्यक्ति को ऐप में पूरी व्यवस्थापक पहुँच मिलेगी।",
     "label_name": "नाम",
@@ -878,11 +893,15 @@
     },
     "validation": {
       "invalid_amount": "अमान्य राशि",
-      "select_start_date": "कृपया प्रस्थान तिथि चुनें"
+      "select_start_date": "कृपया प्रस्थान तिथि चुनें",
+      "name_required": "कृपया टूर का नाम दर्ज करें",
+      "from_required": "कृपया प्रस्थान शहर दर्ज करें",
+      "to_required": "कृपया गंतव्य शहर दर्ज करें"
     },
     "action": {
       "create_broadcast": "बनाएं और प्रसारित करें",
-      "creating": "यात्रा बन रही है…"
+      "creating": "यात्रा बन रही है…",
+      "create_tour": "टूर बनाएं"
     },
     "snackbar": {
       "created_title": "यात्रा बनाई गई!",
@@ -953,6 +972,10 @@
     "warn_duplicate_body": "इसी जैसा — वही नाम और सीटें — एक अनुरोध पहले से लंबित है। फिर भी एक और भेजें?",
     "warn_duplicate_submit": "फिर भी भेजें",
     "warn_duplicate_cancel": "रद्द करें",
+    "combine_title": "राउंड ट्रिप में मिलाएँ?",
+    "combine_body": "आपने वही सीट जाने के लिए और आने के लिए अलग-अलग जोड़ी है। असल में यह पूरे दौरे के लिए एक ही सीट है (राउंड ट्रिप)। इसे एक राउंड-ट्रिप सीट में मिला दें, या दो अलग वन-वे सीटें रखें?",
+    "combine_yes": "मिलाएँ (राउंड ट्रिप)",
+    "combine_no": "अलग रखें",
     "err_too_fast": "दोबारा भेजने से पहले कुछ सेकंड प्रतीक्षा करें।",
     "cta_seat_count": "{n} सीटें",
     "cta_seat_count_one": "1 सीट",
@@ -994,6 +1017,7 @@
     "err_phone_invalid": "कृपया 10 अंकों का फ़ोन नंबर दर्ज करें",
     "err_phone_fake": "कृपया सही 10-अंकों का मोबाइल नंबर दर्ज करें।",
     "err_no_seats": "कम से कम एक सीट चुनें",
+    "err_pickup_required": "कृपया पिकअप स्थान चुनें",
     "add_seat_row": "सीट पंक्ति जोड़ें",
     "remove_row": "हटाएँ",
     "leg_full": "पूरी यात्रा",
@@ -1100,9 +1124,13 @@
       "title": "यह टूर हटाएँ?",
       "message": "इससे {detail} और इससे जुड़ी हर बुकिंग अनुरोध स्थायी रूप से हट जाएँगे. इसे पूर्ववत नहीं किया जा सकता.",
       "deleted": "टूर \"{title}\" हटाया गया."
-    }
+    },
+    "error_name_required": "कृपया टूर का नाम दर्ज करें",
+    "error_from_required": "कृपया प्रस्थान शहर दर्ज करें",
+    "error_to_required": "कृपया गंतव्य शहर दर्ज करें"
   },
   "login": {
+    "brand_name": "UGAM",
     "tagline": "टूर बुकिंग एजेंट",
     "hero": "वापसी\nपर स्वागत है।",
     "description": "असाधारण यात्राएं जारी रखने के लिए अपने फ़ोन नंबर से साइन इन करें।",
@@ -1116,6 +1144,7 @@
     "btn_sign_in": "साइन इन",
     "btn_different_number": "कोई अलग नंबर उपयोग करें",
     "btn_setup": "पहली बार सेटअप — एडमिन अकाउंट बनाएं",
+    "btn_admin_access": "एडमिन एक्सेस चाहिए?",
     "btn_ping": "पिंग भेजें",
     "terms": "जारी रखकर आप हमारी सेवा की शर्तों\nऔर गोपनीयता नीति से सहमत होते हैं।",
     "ping_success_title": "पिंग सफल",
@@ -1147,9 +1176,6 @@
     "tab_tour": "टूर",
     "tab_charts": "चार्ट",
     "tab_requests": "अनुरोध",
-    "tab_assign": "आवंटन",
-    "tab_notify": "सूचना",
-    "tab_messages": "संदेश",
     "tab_settings": "सेटिंग"
   },
   "inbox": {
@@ -1230,6 +1256,10 @@
     "message_bus": "इस बस को संदेश",
     "pick_bus": "बस चुनें",
     "recipient_count": "इस बस में {count} यात्री",
+    "recipient_count_named": "{bus} को भेजा जाएगा · {count} यात्री",
+    "pick_bus_first": "पहले बस चुनें — यह संदेश केवल उसी बस को जाएगा।",
+    "confirm_title": "{bus} को भेजें?",
+    "confirm_body": "यह घोषणा {bus} में बैठे {count} यात्रियों को जाएगी। अपने संदेश में लिखा बस का नाम मेल खाता है या नहीं जाँच लें।",
     "field_message": "संदेश",
     "field_message_hint": "अपनी घोषणा लिखें…",
     "frame_note": "अभिवादन और समापन आशीर्वाद अपने आप जुड़ जाते हैं — बस अपना संदेश लिखें।",
@@ -1243,7 +1273,15 @@
     "failed_title": "भेजना असफल",
     "failed_body": "संदेश नहीं भेजा जा सका। WhatsApp सेटअप जांचें।",
     "no_recipients": "इस बस में संदेश भेजने के लिए कोई बैठा यात्री नहीं है।",
-    "handler_intro": "{bus} के हर यात्री को WhatsApp संदेश भेजें।"
+    "handler_intro": "{bus} के हर यात्री को WhatsApp संदेश भेजें।",
+    "invalid_title": "यह संदेश व्हाट्सएप स्वीकार नहीं करेगा",
+    "invalid_edit": "संदेश बदलें",
+    "fix_auto": "अपने आप ठीक करें",
+    "invalid_empty": "पहले संदेश लिखें.",
+    "invalid_newline": "टेम्पलेट संदेश में व्हाट्सएप नई लाइन स्वीकार नहीं करता. {count} लाइन ब्रेक हटाएँ — या पैराग्राफ़ जोड़ने के लिए “अपने आप ठीक करें” दबाएँ.",
+    "invalid_tab": "टेम्पलेट संदेश में व्हाट्सएप टैब स्वीकार नहीं करता.",
+    "invalid_spaces": "टेम्पलेट संदेश में लगातार 4 से ज़्यादा स्पेस व्हाट्सएप स्वीकार नहीं करता.",
+    "invalid_too_long": "बहुत लंबा: {count} अक्षर. व्हाट्सएप अधिकतम {max} अक्षर स्वीकार करता है. संदेश छोटा करें."
   },
   "seat": {
     "group_locked_msg": "ग्रुप के सदस्य एक ही बस में रहने चाहिए। इसके बजाय पूरा ग्रुप ले जाएँ।",
@@ -1283,7 +1321,8 @@
     "subtitle_buses": "{count} बसें",
     "subtitle_seats": "{assigned}/{capacity} सीटें",
     "subtitle_seats_free": "{capacity} में से {free} खाली",
-    "menu_call_driver": "ड्राइवर को कॉल करें"
+    "menu_call_driver": "ड्राइवर को कॉल करें",
+    "menu_duplicate": "बस की कॉपी बनाएँ"
   },
   "notify": {
     "no_active_tours_title": "कोई सक्रिय टूर नहीं",
@@ -1365,7 +1404,10 @@
     "lock_reason_unassigned": "कुछ सीटें अभी भी नहीं लगाई गई हैं",
     "lock_reason_no_handler": "लॉक करने से पहले हैंडलर चुनें",
     "reset_sent": "भेजे गए रीसेट करें",
-    "no_seated_passengers": "सूचित करने के लिए अभी कोई सीट वाले यात्री नहीं हैं. पहले सीटें असाइन करें."
+    "no_seated_passengers": "सूचित करने के लिए अभी कोई सीट वाले यात्री नहीं हैं. पहले सीटें असाइन करें.",
+    "lock_send_dialog_title": "टूर लॉक करें और सीटें भेजें?",
+    "lock_send_dialog_body": "एक बार लॉक होने पर अनलॉक किए बिना सीट बदलाव नहीं होगा। लॉक करते ही {count} बैठे यात्री(यों) को उनकी सीट संख्या और बस चार्ट WhatsApp पर भेज दिया जाएगा।",
+    "lock_send_dialog_confirm": "लॉक करें और भेजें"
   },
   "seat_assignment": {
     "title": "सीट आवंटन",
@@ -1456,7 +1498,9 @@
   },
   "splash": {
     "brand_name": "Ugam Booking",
-    "tagline": "उगम फौज बस बुकिंग"
+    "tagline": "उगम फौज बस बुकिंग",
+    "restore_timeout_title": "धीमा कनेक्शन",
+    "restore_timeout_message": "सामान्य से अधिक समय लग रहा है। जारी है — ऑनलाइन होने पर कुछ जानकारी लोड होगी।"
   },
   "tour_detail": {
     "duration_day_one": "1 दिन",
@@ -1499,6 +1543,7 @@
     "stat_assigned": "असाइन किया",
     "stat_revenue": "आय",
     "per_seat": "/ सीट",
+    "chip_ac": "AC",
     "broadcast_this_tour": "यह टूर ब्रॉडकास्ट करें",
     "broadcast_copy_hint": "पेस्ट करने के लिए तैयार WhatsApp मैसेज कॉपी करें",
     "copy_broadcast_message": "ब्रॉडकास्ट मैसेज कॉपी करें",
@@ -1616,7 +1661,8 @@
     "action_done_title_completed": "ट्रिप पूर्ण",
     "action_done_title_ready": "प्रस्थान के लिए सब तैयार",
     "action_done_subtitle_completed": "यह टूर आर्काइव में है।",
-    "action_done_subtitle_ready": "कुछ नहीं रोक रहा — प्रस्थान तक निश्चिंत रहें।"
+    "action_done_subtitle_ready": "कुछ नहीं रोक रहा — प्रस्थान तक निश्चिंत रहें।",
+    "action_add_bus_subtitle_empty": "यात्रियों को बैठाना शुरू करने के लिए अपनी पहली बस जोड़ें।"
   },
   "tour_seat_assignment": {
     "tooltip_manage_buses": "बस प्रबंधन",
@@ -1666,6 +1712,7 @@
     "no_buses_title": "इस टूर पर अभी कोई बस नहीं",
     "no_buses_body": "सीटें असाइन करने से पहले कम से कम एक बस जोड़ें।",
     "btn_add_bus": "बस जोड़ें",
+    "btn_view_requests": "अनुरोध देखें",
     "no_passengers_title": "अभी कोई यात्री नहीं",
     "no_passengers_body": "जब ग्राहक इस टूर के लिए अनुरोध सबमिट करेंगे, तो वे यहाँ दिखेंगे।",
     "no_layout": "इस बस में कोई सीट लेआउट नहीं है — जोड़ने के लिए बस खोलें।",
@@ -1676,6 +1723,8 @@
     "err_type_mismatch": "{passengerName} ने {seatType} का अनुरोध नहीं किया था। पहले उनका अनुरोध संपादित करें।",
     "snack_fully_assigned_title": "सभी सीटें लगाई गईं",
     "snack_fully_assigned_body": "{passengerName} को पूरी तरह असाइन कर दिया गया।",
+    "over_allocate_title": "बहुत ज़्यादा सीटें",
+    "over_allocate_body": "{passengerName} को सिर्फ़ {remaining} और चाहिए — यह सीट माँगी गई संख्या से ज़्यादा हो जाएगी।",
     "snack_all_done_title": "लॉक करने के लिए तैयार",
     "snack_all_done_body": "सभी यात्री असाइन हो गए। पुष्टि और सूचना के लिए \"टूर लॉक करें\" टैप करें।",
     "snack_no_handler": "सभी यात्री असाइन हो गए — लॉक करने से पहले हैंडलर चुनें।",
@@ -1763,6 +1812,8 @@
     "col_upper": "ऊपर",
     "col_lower": "नीचे",
     "aisle": "A C",
+    "leg_go": "जाने की यात्रा",
+    "leg_ret": "वापसी",
     "gaadi_number": "गाड़ी नंबर",
     "place": "स्थान",
     "date": "तारीख",
@@ -1781,8 +1832,11 @@
     "context_date_label": "तारीख",
     "context_handler_label": "हैंडलर",
     "contact": "संपर्क",
-    "leg_go": "जाने की यात्रा",
-    "leg_return": "वापसी की यात्रा"
+    "leg_return": "वापसी की यात्रा",
+    "scope_label": "किसका चार्ट",
+    "scope_full": "पूरी यात्रा",
+    "scope_go": "जाना",
+    "scope_return": "वापसी"
   },
   "fullscreen_chart": {
     "empty": "दिखाने के लिए कोई सीट चार्ट नहीं है।",
@@ -1854,7 +1908,17 @@
     "delete_expense_body": "यह खर्च रिकॉर्ड स्थायी रूप से हटा दिया जाएगा. इसे वापस नहीं लाया जा सकता.",
     "delete_handover_title": "यह सौंपना हटाएँ?",
     "delete_handover_body": "यह सौंपने का रिकॉर्ड स्थायी रूप से हटा दिया जाएगा. इसे वापस नहीं लाया जा सकता.",
-    "delete_confirm": "हटाएँ"
+    "delete_confirm": "हटाएँ",
+    "detached_cash_title": "सीट के बिना रोकड़",
+    "detached_cash_body": "इस बस पर उन यात्रियों से लिए गए पैसे जिनकी अब यहाँ सीट नहीं है — वे दूसरी बस में चले गए या उनकी सीट हटा दी गई. पैसे अब भी हाथ में हैं; उन्हें ले जाना, लौटाना या रखना तय करें.",
+    "detached_unknown_rider": "हटाया गया यात्री",
+    "add_income": "आय जोड़ें",
+    "edit_income": "आय बदलें",
+    "save_income": "आय सहेजें",
+    "income_details": "विवरण",
+    "field_received_by": "द्वारा प्राप्त",
+    "delete_income_title": "यह आय हटाएँ?",
+    "delete_income_body": "यह आय रिकॉर्ड स्थायी रूप से हटा दिया जाएगा. इसे वापस नहीं लाया जा सकता."
   },
   "collection": {
     "eyebrow": "वित्त",
@@ -1929,6 +1993,7 @@
     "no_phone": "फ़ोन नंबर नहीं",
     "call": "कॉल",
     "call_semantic": "{phone} पर कॉल करें",
+    "whatsapp_semantic": "{phone} को WhatsApp पर संदेश भेजें",
     "seat_shared_title": "सीट {seat} · साझा",
     "leg_shared_intro": "दो यात्री इस सीट को अलग-अलग लेग में साझा करते हैं। देखने या वसूलने के लिए एक चुनें।",
     "collect_title": "वसूल करें",
@@ -1961,7 +2026,7 @@
     "stat_to_return": "लौटाने हैं",
     "stat_to_collect": "वसूलने हैं",
     "stat_spent": "खर्च हुए",
-    "stat_rent": "बस किराया",
+    "stat_to_admin": "एडमिन को सौंपने हैं",
     "stat_in_hand": "हाथ में",
     "bus_expenses": "बस खर्च",
     "bus_expenses_total": "{bus} · {amount} खर्च",
@@ -1995,7 +2060,31 @@
     "error_save_income": "आय सहेजी नहीं जा सकी। पुनः प्रयास करें।",
     "error_delete_income": "आय हटाई नहीं जा सकी। पुनः प्रयास करें।",
     "received_by": "{name} ने प्राप्त किया",
-    "field_received_by": "किसने प्राप्त किया"
+    "field_received_by": "किसने प्राप्त किया",
+    "stat_settled": "सौंप दिया",
+    "stat_handed_over": "सौंपा",
+    "stat_outstanding": "अभी सौंपना बाकी",
+    "handed_secondary": "{total} में से {handed} सौंपा",
+    "settle_title": "एडमिन को सौंपें",
+    "settle_hint": "आपने आयोजक को जो नकद दिया वह दर्ज करें ताकि यह बस सेटल दिखे।",
+    "settle_done": "यह बस सेटल हो गई — अब कुछ सौंपना बाकी नहीं।",
+    "settle_cta": "सौंपना दर्ज करें",
+    "handover_title": "सौंपना दर्ज करें",
+    "handover_intro": "इस बस के लिए {amount} अभी सौंपना बाकी है।",
+    "handover_amount": "सौंपी गई राशि",
+    "handover_note": "टिप्पणी (वैकल्पिक)",
+    "handover_save": "सौंपना सहेजें",
+    "handover_failed": "सौंपना सहेजा नहीं जा सका। फिर कोशिश करें।",
+    "handover_delete_title": "यह सौंपना हटाएं?",
+    "handover_delete_body": "{amount} अब सौंपा हुआ नहीं गिना जाएगा।",
+    "leg_title": "आगे की यात्रा",
+    "leg_pending": "{count} वन-वे यात्री यहीं उतरते हैं। लेग बंद करें ताकि उनकी सीट रिटर्न चार्ट के लिए खाली हो।",
+    "leg_done_state": "GO लेग बंद — वे सीटें रिटर्न के लिए खाली हैं।",
+    "leg_done_title": "GO लेग बंद करें?",
+    "leg_done_body": "{bus} पर {count} वन-वे यात्री यहीं उतरते हैं। उनकी सीटें रिटर्न चार्ट के लिए खाली होंगी। राउंड-ट्रिप यात्रियों पर असर नहीं होगा।",
+    "leg_done_confirm": "GO लेग बंद करें",
+    "leg_done_ok": "GO लेग बंद — {count} यात्रियों की सीट खाली हुई।",
+    "leg_done_failed": "लेग बंद नहीं हो सका। फिर कोशिश करें।"
   },
   "seat_legend": {
     "free": "खाली",
@@ -2198,7 +2287,12 @@
     "collect": "वसूली करें",
     "more_detail": "अधिक विवरण",
     "trip_in_profit": "ट्रिप मुनाफ़े में है",
-    "trip_at_loss": "ट्रिप घाटे में है"
+    "trip_at_loss": "ट्रिप घाटे में है",
+    "orphan_title": "हटाई गई बस का पैसा",
+    "orphan_body": "यह टूर के कुल में गिना गया है, पर यह उस बस का है जो अब इस टूर में नहीं है — इसलिए ऊपर किसी बस में नहीं दिखता।",
+    "orphan_expenses": "खर्च {n}",
+    "orphan_collected": "इकट्ठा {n}",
+    "orphan_income": "आय {n}"
   },
   "tour_overview": {
     "tour_not_found": "टूर नहीं मिला.",
@@ -2288,7 +2382,9 @@
     "dialer_open_failed": "{phone} के लिए डायलर नहीं खोल सके।",
     "dialer_open_failed_generic": "डायलर नहीं खोल सके।",
     "duplicate": "पहले से मौजूद है — डुप्लिकेट लगता है (जैसे इस टूर में वही बस नंबर)।",
-    "dismiss_cancel": "कैंसलेशन विनती खारिज नहीं की जा सकी।"
+    "dismiss_cancel": "कैंसलेशन विनती खारिज नहीं की जा सकी।",
+    "save_income": "आय सहेजी नहीं जा सकी. {e}",
+    "delete_income": "आय हटाई नहीं जा सकी. {e}"
   },
   "enums": {
     "seat_type": {
@@ -2490,13 +2586,17 @@
     "row_revenue_value": "आय {n}",
     "row_expenses": "खर्च",
     "row_margin": "मार्जिन",
-    "empty_title": "अभी तक कोई पूरा हुआ टूर नहीं",
-    "empty_body": "जब कोई टूर पूरा होता है, तो उसका लाभ या हानि यहाँ दिखेगा — आपके हर टूर के लिए।",
+    "empty_title": "अभी तक किसी टूर में पैसा नहीं",
+    "empty_body": "किसी टूर में नकद इकट्ठा करें या खर्च दर्ज करें, फिर उसका लाभ या हानि यहाँ दिखेगा — आपके हर टूर के लिए।",
     "error_title": "वित्त लोड नहीं हो सका",
     "error_retry": "फिर से कोशिश करें",
     "card_eyebrow": "लाभ और हानि",
     "card_loading": "गणना हो रही है…",
-    "card_lifetime": "कुल · पूरी रिपोर्ट देखने के लिए टैप करें"
+    "card_lifetime": "कुल · पूरी रिपोर्ट देखने के लिए टैप करें",
+    "card_failed": "लोड नहीं हो सका",
+    "card_failed_hint": "फिर कोशिश करने के लिए टैप करें",
+    "row_state_completed": "पूरा हुआ",
+    "row_state_running": "चालू"
   },
   "trip_pnl": {
     "eyebrow": "पैसा",
@@ -2517,6 +2617,18 @@
     "profit": "लाभ",
     "loss": "हानि",
     "cash_net": "नकद शुद्ध",
-    "entry_sub": "बस और हैंडलर अनुसार"
+    "entry_sub": "बस और हैंडलर अनुसार",
+    "detached_cash_bus": "इसमें से {n} उन यात्रियों का है जो अब इस बस में नहीं बैठे (दूसरी बस में गए या सीट हटा दी गई), इसलिए यहाँ की उगाही से रोकड़ ज़्यादा दिख रही है.",
+    "detached_cash_handler": "इसमें से {n} उन यात्रियों का है जो अब उनकी किसी भी बस में नहीं हैं, इसलिए यहाँ की उगाही से रोकड़ ज़्यादा दिख रही है.",
+    "detached_cash_trip": "इसमें से {n} उन यात्रियों का है जिनकी इस यात्रा में अब कोई सीट नहीं है."
+  },
+  "seat_move_money": {
+    "title": "बस बदलने पर किराया बदला",
+    "subtitle": "वसूला गया पैसा यात्री के साथ नई बस में चला गया है। नई बस के भाव पर बाकी रकम नीचे है।",
+    "line_collect": "अंतर वसूलें — {from} पर {paid} जमा, अब {to} पर {due}।",
+    "line_return": "अंतर लौटाएँ — {from} पर {paid} जमा, अब {to} पर {due}।",
+    "toast_collect": "सीट बदली: नए किराए पर {amount} वसूलना बाकी।",
+    "toast_return": "सीट बदली: नए किराए पर {amount} लौटाना है।",
+    "toast_both": "सीट बदली: {collect} वसूलना, {give} लौटाना।"
   }
 }

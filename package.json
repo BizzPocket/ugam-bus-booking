@@ -1,0 +1,6 @@
+{
+  "devDependencies": {
+    "@reticlehq/react": "^2.2.1",
+    "@reticlehq/vite-plugin": "^2.2.1"
+  }
+}

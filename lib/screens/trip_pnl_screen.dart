@@ -5,10 +5,12 @@ import 'package:get/get.dart';
 import '../controllers/money_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
+import '../models/bus_details.dart';
 import '../models/money_summary.dart';
 import '../models/tour.dart';
 import '../utils/formatters.dart';
 import '../widgets/money_loading_skeleton.dart';
+import 'bus_money_screen.dart';
 
 /// Per-trip Profit & Loss — the breakdown the agent lands on when they open a
 /// trip's money and want "did this trip make money, and where".
@@ -63,6 +65,16 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
   String _busCount(int n) => n == 1
       ? tr('trip_pnl.bus_one')
       : tr('trip_pnl.bus_many', namedArgs: {'n': '$n'});
+
+  /// Drill from "this bus lost money" into that bus's ledger — the same
+  /// destination, entry style and transition the board one screen back uses
+  /// (tour_money_board_screen.dart:61-66).
+  void _openBus(Tour tour, Bus bus) {
+    Get.to(
+      () => BusMoneyScreen(tour: tour, bus: bus),
+      transition: Transition.cupertino,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +145,7 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                       _TripTotalCard(total: total, c: c),
                       const SizedBox(height: UgamSpacing.xl),
                       if (handlers.isNotEmpty) ...[
-                        _SectionLabel(tr('trip_pnl.by_handler'), c: c),
+                        UgamSectionLabel(tr('trip_pnl.by_handler')),
                         const SizedBox(height: UgamSpacing.md),
                         for (final h in handlers)
                           Padding(
@@ -147,6 +159,8 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                               collected: h.collected,
                               costs: h.expensesTotal,
                               income: h.income,
+                              detachedCash: h.detachedCash,
+                              detachedCashKey: 'trip_pnl.detached_cash_handler',
                               netBilled: h.netBilled,
                               netCollected: h.netCollected,
                               c: c,
@@ -154,7 +168,7 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                           ),
                         const SizedBox(height: UgamSpacing.lg),
                       ],
-                      _SectionLabel(tr('trip_pnl.by_bus'), c: c),
+                      UgamSectionLabel(tr('trip_pnl.by_bus')),
                       const SizedBox(height: UgamSpacing.md),
                       for (final s in busSummaries)
                         Padding(
@@ -162,6 +176,12 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                             bottom: UgamSpacing.md,
                           ),
                           child: _PnlCard(
+                            // Null only if the summary outlives its bus; the
+                            // card then stays inert rather than pushing a
+                            // screen with no bus to render.
+                            onTap: busById[s.busId] == null
+                                ? null
+                                : () => _openBus(tour, busById[s.busId]!),
                             title: busById[s.busId]?.name ?? '',
                             subtitle: tr(
                               'trip_pnl.rent',
@@ -175,6 +195,8 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                             collected: s.collected,
                             costs: s.expensesTotal,
                             income: s.income,
+                            detachedCash: s.detachedCash,
+                            detachedCashKey: 'trip_pnl.detached_cash_bus',
                             netBilled: s.netBilled,
                             netCollected: s.netCollected,
                             c: c,
@@ -242,8 +264,24 @@ class _TripTotalCard extends StatelessWidget {
               c: c,
             ),
           ],
+          if (total.totalDetachedCash.abs() > 0.005) ...[
+            const SizedBox(height: UgamSpacing.md),
+            _DetachedCashNote(
+              amount: total.totalDetachedCash,
+              // Trip level, so the wording is "not on this trip": a rider merely
+              // moved between two buses is NOT counted here (see
+              // TourMoneySummary.totalDetachedCash).
+              message: tr(
+                'trip_pnl.detached_cash_trip',
+                namedArgs: {
+                  'n': Formatters.formatMoneyInr(total.totalDetachedCash),
+                },
+              ),
+              c: c,
+            ),
+          ],
           const SizedBox(height: UgamSpacing.lg),
-          Container(height: 1, color: c.border),
+          Divider(height: 1, thickness: 1, color: c.border),
           const SizedBox(height: UgamSpacing.lg),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -289,9 +327,26 @@ class _PnlCard extends StatelessWidget {
   final double collected;
   final double costs;
   final double income;
+
+  /// Cash inside [collected] paid by riders who no longer sit here (see
+  /// [BusMoneySummary.detachedCash]). Rendered as its own explanatory line
+  /// whenever it's non-zero — it is the ONLY reason cash-net can exceed what
+  /// this bus/handler billed, and without it that gap reads as a wrong number.
+  final double detachedCash;
+
+  /// Translation key for [detachedCash]'s wording. A bus card says "no longer
+  /// on this bus", a handler card "no longer on their buses" — same figure,
+  /// different scope (see [MoneyController.handlerSummaries]).
+  final String detachedCashKey;
+
   final double netBilled;
   final double netCollected;
   final UgamColorSet c;
+
+  /// Set only on the per-BUS cards, which drill into that bus's ledger. The
+  /// per-handler cards leave this null — there is no per-handler destination,
+  /// and a card that looks tappable but isn't is the defect this closes.
+  final VoidCallback? onTap;
 
   const _PnlCard({
     required this.title,
@@ -300,9 +355,12 @@ class _PnlCard extends StatelessWidget {
     required this.collected,
     required this.costs,
     required this.income,
+    required this.detachedCash,
+    required this.detachedCashKey,
     required this.netBilled,
     required this.netCollected,
     required this.c,
+    this.onTap,
   });
 
   @override
@@ -310,6 +368,7 @@ class _PnlCard extends StatelessWidget {
     final tone = netBilled >= 0 ? c.good : c.danger;
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.lg),
+      onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -358,7 +417,7 @@ class _PnlCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: UgamSpacing.md),
-          Container(height: 1, color: c.border),
+          Divider(height: 1, thickness: 1, color: c.border),
           const SizedBox(height: UgamSpacing.md),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -393,6 +452,62 @@ class _PnlCard extends StatelessWidget {
             const SizedBox(height: UgamSpacing.md),
             _NetLine(label: tr('bus_money.stat_income'), value: income, c: c),
           ],
+          if (detachedCash.abs() > 0.005) ...[
+            const SizedBox(height: UgamSpacing.md),
+            _DetachedCashNote(
+              amount: detachedCash,
+              message: tr(
+                detachedCashKey,
+                namedArgs: {'n': Formatters.formatMoneyInr(detachedCash)},
+              ),
+              c: c,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The quiet footnote that explains a cash figure larger than the revenue above
+/// it: "₹5,700 of this is from riders who are no longer on this bus".
+///
+/// Deliberately a note, not a stat — the amount is already counted inside the
+/// cash figures and changes no net, so promoting it to its own tile would read
+/// as another number to reconcile. It only exists so the gap is never a mystery.
+class _DetachedCashNote extends StatelessWidget {
+  final double amount;
+  final String message;
+  final UgamColorSet c;
+
+  const _DetachedCashNote({
+    required this.amount,
+    required this.message,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: c.warmFill,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline_rounded, size: 15, color: c.warm),
+          const SizedBox(width: UgamSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style: UgamText.micro.copyWith(color: c.ink2),
+            ),
+          ),
         ],
       ),
     );
@@ -463,19 +578,4 @@ class _MiniStat extends StatelessWidget {
       ],
     );
   }
-}
-
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  final UgamColorSet c;
-  const _SectionLabel(this.text, {required this.c});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(left: UgamSpacing.xs),
-    child: Text(
-      text,
-      style: UgamText.titleM.copyWith(color: c.ink, fontSize: 16),
-    ),
-  );
 }

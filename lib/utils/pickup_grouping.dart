@@ -30,8 +30,13 @@ class PickupGroup<T> {
 
 /// Splits [items] into pickup-location sections.
 ///
-/// - Named pickups are sorted case-insensitively A→Z by name; the unassigned
-///   bucket (name null or blank) is ALWAYS last.
+/// - Section order follows [rankOf] — the admin's manual serial for the pickup
+///   list, so the handler reads the points in the SAME order the manager screen
+///   and the customer picker show them (the route order, not the alphabet).
+///   Points [rankOf] can't place (unknown id, or no pickup list loaded) fall in
+///   after the ranked ones, sorted case-insensitively A→Z by name. With no
+///   [rankOf] at all every named group is A→Z.
+/// - The unassigned bucket (name null or blank) is ALWAYS last.
 /// - Two snapshots with the same name — even in different letter case — merge
 ///   into one group; the first-seen id + original-cased name are kept.
 /// - Order WITHIN each group preserves input order, so a name-sorted or
@@ -40,6 +45,7 @@ List<PickupGroup<T>> groupByPickup<T>(
   Iterable<T> items, {
   required String? Function(T) idOf,
   required String? Function(T) nameOf,
+  int? Function(String? locationId, String locationName)? rankOf,
 }) {
   final named = <String, _GroupBuilder<T>>{};
   final unassigned = <T>[];
@@ -57,8 +63,20 @@ List<PickupGroup<T>> groupByPickup<T>(
         .add(item);
   }
 
-  final ordered = named.values.toList()
-    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  // Rank once per group (the lookup walks the pickup list, so it must not run
+  // inside the comparator), then sort: ranked by serial, unranked A→Z after.
+  final ordered = named.values.toList();
+  final ranks = <_GroupBuilder<T>, int?>{
+    for (final b in ordered) b: rankOf?.call(b.id, b.name),
+  };
+  ordered.sort((a, b) {
+    final ra = ranks[a];
+    final rb = ranks[b];
+    if (ra != null && rb != null && ra != rb) return ra.compareTo(rb);
+    if (ra != null && rb == null) return -1;
+    if (ra == null && rb != null) return 1;
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  });
 
   final groups = <PickupGroup<T>>[
     for (final b in ordered)

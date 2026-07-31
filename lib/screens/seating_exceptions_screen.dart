@@ -21,12 +21,16 @@ import '../widgets/edit_request_sheet.dart';
 ///   * seatTypeUnavailable            → "Seat type"
 ///   * overflowWaitlist               → "Waitlist"
 ///
-/// Each section has a header with a tabular count; each exception is a
-/// warm/danger-toned [UgamCard] showing the engine's message, the affected
-/// passenger name (resolved from the tour via [passengerId]), and the group
-/// label when [groupId] is set. Tapping a card routes into the unified seat
-/// grid — pre-selected to the affected passenger so the agent lands exactly
-/// where the fix is made.
+/// Each section has a header with a count badge ([UgamReqChip] — the app's one
+/// badge); each exception is a warm/danger-toned [UgamCard] showing the
+/// engine's message, the affected passenger name (resolved from the tour via
+/// [passengerId]) and, when [groupId] is set, that group's human label —
+/// resolved through the roster, never the raw id.
+///
+/// A card that resolves to a passenger routes into the unified seat grid,
+/// pre-selected to them, so the agent lands exactly where the fix is made. A
+/// bus-level exception resolves to nobody, so it renders WITHOUT a tap or a
+/// chevron rather than promising a destination it cannot reach.
 ///
 /// When there are NO exceptions the screen shows a calm "All clear"
 /// [UgamEmpty] — never an attention tone, because an empty state is not an
@@ -97,6 +101,9 @@ class SeatingExceptionsScreen extends StatelessWidget {
       return;
     }
 
+    // Defensive only. The card is now wired with `onTap` at all only when
+    // [_isTappable] proved a passenger resolves, so this is reachable just if
+    // the roster changed between the frame that built the card and the tap.
     AppSnackBar.info(
       tr('seating_exceptions.nothing_placed_body'),
       title: tr('seating_exceptions.nothing_placed_title'),
@@ -136,6 +143,43 @@ class SeatingExceptionsScreen extends StatelessWidget {
       }
     }
     return null;
+  }
+
+  /// Resolve a group id to the human label the agent typed.
+  ///
+  /// [SeatingException.groupId] carries a [PassengerGroup.id] (a v4 UUID), not
+  /// the `label` field — rendering it raw leaked "Group 3f2a1c9e-…" onto the
+  /// card. Resolved exactly as `requests_screen.dart` already does, so both
+  /// screens name the same group identically.
+  String? _groupLabel(String? groupId) {
+    if (groupId == null) return null;
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return null;
+    final g = tour.groups.firstWhereOrNull((g) => g.id == groupId);
+    final label = g?.label;
+    return (label == null || label.isEmpty) ? null : label;
+  }
+
+  /// True when tapping this exception will actually navigate.
+  ///
+  /// Mirrors [_onExceptionTap]'s candidate resolution exactly (the named
+  /// passenger, else any member of the exception's group), so the card's
+  /// chevron is shown if and only if there is somewhere to go. A bus-level
+  /// exception ([SeatingException.passengerId] is documented null for those)
+  /// resolves to nothing and therefore renders as a flat, un-tappable note
+  /// instead of advertising a destination it can't reach.
+  bool _isTappable(SeatingException ex) {
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return false;
+    if (ex.passengerId != null &&
+        tour.passengers.any((p) => p.id == ex.passengerId)) {
+      return true;
+    }
+    if (ex.groupId != null &&
+        tour.passengers.any((p) => p.groupId == ex.groupId)) {
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -196,6 +240,10 @@ class SeatingExceptionsScreen extends StatelessWidget {
                           padding:
                               const EdgeInsets.only(bottom: UgamSpacing.md),
                           child: _ExceptionCard(
+                            // A bus-level exception resolves to no passenger,
+                            // so it gets neither the tap nor the chevron that
+                            // used to promise a destination and deliver a toast.
+                            tappable: _isTappable(ex),
                             // Priority-no-lower-berth gets explicit alert copy
                             // (title + message) so the consequence is legible
                             // even without reading the engine's raw message.
@@ -208,7 +256,7 @@ class SeatingExceptionsScreen extends StatelessWidget {
                                 ? tr('priority.no_lower_title')
                                 : null,
                             passengerName: _passengerName(ex.passengerId),
-                            groupLabel: ex.groupId,
+                            groupLabel: _groupLabel(ex.groupId),
                             // Priority misses are an ALERT, not a soft warm
                             // note — render the card in danger tones, pinned by
                             // the category order at the top of the list.
@@ -335,26 +383,22 @@ class _SectionHeader extends StatelessWidget {
       child: Row(
         children: [
           if (alert) ...[
-            Icon(Icons.priority_high_rounded, size: 13, color: c.danger),
+            Icon(
+              Icons.priority_high_rounded,
+              size: UgamScale.px(context, 13),
+              color: c.danger,
+            ),
             const SizedBox(width: UgamSpacing.xs),
           ],
-          Text(
-            label.toUpperCase(),
-            style: UgamText.micro.copyWith(color: labelColor),
-          ),
+          UgamSectionLabel(label, color: labelColor),
           const SizedBox(width: UgamSpacing.sm),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: alert ? c.danger.withValues(alpha: 0.14) : c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.chip),
-            ),
-            child: Text(
-              '$count',
-              style: UgamText.tabular(
-                UgamText.micro.copyWith(color: alert ? c.danger : c.ink2),
-              ),
-            ),
+          // THE app badge — the count no longer renders as a private
+          // 999-radius lozenge while the identical count on Requests uses a
+          // 6-radius chip.
+          UgamReqChip(
+            label: '$count',
+            variant:
+                alert ? UgamChipVariant.danger : UgamChipVariant.neutral,
           ),
         ],
       ),
@@ -369,6 +413,12 @@ class _ExceptionCard extends StatelessWidget {
   final String? passengerName;
   final String? groupLabel;
   final VoidCallback onTap;
+
+  /// Whether [onTap] actually leads somewhere. False for a bus-level
+  /// exception, which resolves to no passenger — the card then drops BOTH the
+  /// tap and the chevron rather than advertising a destination and answering
+  /// with a toast.
+  final bool tappable;
 
   /// Explicit alert headline shown ABOVE the passenger name (e.g. the priority
   /// "could not get a lower berth" title). Null on ordinary exceptions, which
@@ -391,6 +441,7 @@ class _ExceptionCard extends StatelessWidget {
     required this.passengerName,
     required this.groupLabel,
     required this.onTap,
+    required this.tappable,
     required this.c,
     this.title,
     this.alert = false,
@@ -407,7 +458,9 @@ class _ExceptionCard extends StatelessWidget {
         alert ? c.danger.withValues(alpha: 0.14) : c.warmFill;
 
     return UgamCard.plain(
-      onTap: onTap,
+      // UgamCard.plain accepts a null onTap and then skips the press
+      // animation, so an unresolvable card reads as a flat note.
+      onTap: tappable ? onTap : null,
       tone: alert ? UgamCardTone.danger : UgamCardTone.warm,
       radius: UgamRadius.row,
       padding: const EdgeInsets.all(UgamSpacing.lg),
@@ -415,8 +468,8 @@ class _ExceptionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: UgamScale.px(context, 38),
+            height: UgamScale.px(context, 38),
             decoration: BoxDecoration(
               color: toneFill,
               borderRadius: BorderRadius.circular(UgamRadius.input),
@@ -426,7 +479,7 @@ class _ExceptionCard extends StatelessWidget {
               alert
                   ? Icons.report_problem_rounded
                   : Icons.error_outline_rounded,
-              size: 18,
+              size: UgamScale.px(context, 18),
               color: toneInk,
             ),
           ),
@@ -443,7 +496,7 @@ class _ExceptionCard extends StatelessWidget {
                       color: alert ? c.danger : c.ink,
                     ),
                   ),
-                  const SizedBox(height: UgamSpacing.xs - 1),
+                  const SizedBox(height: UgamSpacing.xs),
                 ],
                 if (passengerName != null) ...[
                   Text(
@@ -452,7 +505,7 @@ class _ExceptionCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: UgamSpacing.xs - 1),
+                  const SizedBox(height: UgamSpacing.xs),
                 ],
                 Text(
                   message,
@@ -464,7 +517,16 @@ class _ExceptionCard extends StatelessWidget {
                 ),
                 if (groupLabel != null && groupLabel!.isNotEmpty) ...[
                   const SizedBox(height: UgamSpacing.sm),
-                  _GroupChip(label: groupLabel!, c: c),
+                  // Same chip the Requests card uses for the same concept, so
+                  // the group tag stops changing size between the two screens.
+                  UgamReqChip(
+                    label: tr(
+                      'seating_exceptions.group_label',
+                      namedArgs: {'label': groupLabel!},
+                    ),
+                    variant: UgamChipVariant.neutral,
+                    leading: Icons.group_rounded,
+                  ),
                 ],
                 if (onEdit != null || onHold != null) ...[
                   const SizedBox(height: UgamSpacing.md),
@@ -496,48 +558,14 @@ class _ExceptionCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: 20,
-            color: c.ink3,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GroupChip extends StatelessWidget {
-  final String label;
-  final UgamColorSet c;
-
-  const _GroupChip({required this.label, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.sm + 2,
-        vertical: UgamSpacing.xs,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.group_rounded, size: 13, color: c.ink3),
-          const SizedBox(width: UgamSpacing.xs + 1),
-          Flexible(
-            child: Text(
-              tr('seating_exceptions.group_label', namedArgs: {'label': label}),
-              style: UgamText.micro.copyWith(color: c.ink2, letterSpacing: 0.2),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          if (tappable) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: UgamScale.px(context, 20),
+              color: c.ink3,
             ),
-          ),
+          ],
         ],
       ),
     );

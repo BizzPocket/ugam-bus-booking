@@ -29,8 +29,10 @@ import '../utils/phone_normalize.dart';
 import '../utils/seat_leg_resolver.dart';
 import '../utils/seat_occupants.dart';
 import '../utils/tour_capacity.dart';
+import '../widgets/seat_move_money_notice.dart';
 import 'auth_controller.dart';
 import 'customer_memory_controller.dart';
+import 'money_controller.dart';
 
 class TourController extends GetxController {
   final tours = <Tour>[].obs;
@@ -97,7 +99,12 @@ class TourController extends GetxController {
     for (final b in t.buses) {
       h = Object.hash(h, b.id);
       for (final cell in b.layout?.grid ?? const []) {
-        h = Object.hash(h, cell.seatId, cell.seatType);
+        // cell.reserved is folded because computeTourCapacity subtracts held
+        // berths and skips reserved cells — without it, toggling a seat to
+        // reserved/held left the memoized capacity (dashboard hero meter + the
+        // "needs decision" badge) stale until some unrelated change bumped the
+        // signature. position is already encoded in seatId (DL vs DU).
+        h = Object.hash(h, cell.seatId, cell.seatType, cell.reserved);
       }
     }
     for (final p in t.passengers) {
@@ -108,7 +115,10 @@ class TourController extends GetxController {
       // folded: the engine never reads it, so a reason edit shouldn't recompute.
       h = Object.hash(h, p.id, p.isWaitlisted, p.journeyDone, p.priorityStatus);
       for (final a in p.assignedSeats) {
-        h = Object.hash(h, a.busId, a.seatId);
+        // a.leg is folded because capacity counts per seat via a.leg ?? the
+        // coarse leg; a leg change (e.g. a request-leg edit re-stamp) with the
+        // same seatId must invalidate the memoized capacity.
+        h = Object.hash(h, a.busId, a.seatId, a.leg);
       }
       for (final l in p.requestLines) {
         h = Object.hash(h, l.seatType, l.leg, l.qty);
@@ -143,6 +153,18 @@ class TourController extends GetxController {
   }
 
   StreamSubscription<DataChangedEvent>? _realtimeSub;
+
+  /// Tours whose passengers/buses/groups are actually loaded.
+  ///
+  /// Cold start hydrates RUNNING tours only — an archived tour's roster is
+  /// fetched the moment it is opened ([ensureTourHydrated]). Without this set
+  /// an un-hydrated archived tour is indistinguishable from an empty one, and
+  /// the UI would render "0 passengers" for a tour that has fifty.
+  final _hydratedTourIds = <String>{};
+
+  /// In-flight hydrations, so two widgets opening the same tour at once
+  /// share one request instead of racing two down a 2G link.
+  final _hydrationsInFlight = <String, Future<void>>{};
   Timer? _refreshDebounce;
 
   /// Microtask flag for coalescing burst notifications. Without this, a
@@ -431,6 +453,16 @@ class TourController extends GetxController {
           .toList();
 
       tours.assignAll([...loaded, ...preserved]);
+
+      // Cold start hydrates rosters for RUNNING tours only (SyncService
+      // scopes the relation fetch — it is what makes launch viable on 2G).
+      // Record which tours actually came back hydrated, so opening an
+      // archived one can tell "not loaded yet" from "genuinely empty".
+      _hydratedTourIds
+        ..clear()
+        ..addAll(
+          tours.where((t) => t.status != TourStatus.completed).map((t) => t.id),
+        );
 
       // Archive (not delete) tours whose trip ended more than a day ago.
       await _archiveExpiredTours();
@@ -954,6 +986,37 @@ class TourController extends GetxController {
     failure: tr('errors.update_passenger'),
   );
 
+  /// Persist a passenger whose REQUEST LINES were just edited (e.g. a trip-leg
+  /// change on the edit-request sheet). A leg edit must repropagate to money,
+  /// capacity and tint — all of which read the per-seat [SeatAssignment.leg] —
+  /// so re-derive every held seat's leg from the NEW request lines. The stored
+  /// legs are NULLED first so the preserve-branch in [resolveAssignmentLegs]
+  /// (which keeps an already-stamped leg) can't pin the STALE one; they are then
+  /// re-stamped in request order. Without this, editing a rider's leg after
+  /// their seats were assigned left the seats on their old leg and money/
+  /// capacity read that stale leg (regression from the per-seat-leg pricing).
+  Future<void> updatePassengerFromRequestEdit(
+    String tourId,
+    Passenger passenger,
+  ) {
+    final tour = getTour(tourId);
+    var restamped = passenger;
+    if (tour != null && passenger.assignedSeats.isNotEmpty) {
+      final bare = [
+        for (final a in passenger.assignedSeats)
+          SeatAssignment(busId: a.busId, seatId: a.seatId, locked: a.locked),
+      ];
+      restamped = passenger.copyWith(
+        assignedSeats: resolveAssignmentLegs(
+          requestLines: passenger.requestLines,
+          assigned: bare,
+          cellTypeAt: _cellTypeLookup(tour),
+        ),
+      );
+    }
+    return updatePassenger(tourId, restamped);
+  }
+
   /// Organiser DISMISSES a customer's cancellation request (migration 036) —
   /// keeps the passenger on the tour and clears the `cancel_requested_at` marker
   /// on BOTH the passenger row (this roster's badge/CTA) and the linked
@@ -1177,6 +1240,9 @@ class TourController extends GetxController {
     // A group move can seat a previously-unseated sibling: confirm + notify any
     // moved rider who was never confirmed, same as a single-seat placement.
     await _confirmAndNotifyOnSeat(tourId, plan.keys);
+    // Every member just changed bus, so each one's paid-vs-due gap is re-priced
+    // at the destination's bands.
+    await _reconcileMoneyAfterMove(tourId, plan.keys, crossedBus: true);
     return true;
   }
 
@@ -1515,6 +1581,48 @@ class TourController extends GetxController {
   /// holds on [fromSeatId] (the default — a whole-double crosses intact). Pass
   /// 1 to PEEL a single berth off a substitute whole-double (a split): one berth
   /// lands on [toSeatId] and the remainder stays on the source cell.
+  /// Carry the money with the people who just moved.
+  ///
+  /// Collections are keyed `(passenger_id, bus_id, seat_id)` and every fare is
+  /// resolved from the bus the rider currently sits on, so a seat move that is
+  /// not mirrored onto the collection rows leaves a rider who ALREADY PAID
+  /// billed the full fare again on the destination bus while their cash sits
+  /// stranded on the old one. [MoneyController.reconcileAfterSeatMove] re-homes
+  /// the row and re-prices it to the destination bus's band; the deltas it
+  /// returns are what is left to collect (or hand back) at the new price.
+  ///
+  /// Best-effort on purpose. The seat move is already persisted and on screen
+  /// by the time this runs, so a money failure must not unwind it — the money
+  /// controller surfaces its own error and refetches.
+  Future<void> _reconcileMoneyAfterMove(
+    String tourId,
+    Iterable<String> passengerIds, {
+    required bool crossedBus,
+  }) async {
+    if (!Get.isRegistered<MoneyController>()) return;
+    final tour = getTour(tourId);
+    if (tour == null) return;
+    try {
+      final deltas = await Get.find<MoneyController>().reconcileAfterSeatMove(
+        tour: tour,
+        passengerIds: passengerIds,
+        crossedBus: crossedBus,
+      );
+      await SeatMoveMoneyNotice.show(deltas);
+    } catch (e, st) {
+      // Best-effort really is best-effort: the seat move is already persisted
+      // and drawn, so nothing here may propagate and unwind it. The money
+      // controller raises its own toast for write failures; anything reaching
+      // this point (a missing dependency, no overlay to draw the notice into)
+      // is logged and dropped. The rows stay orphaned and reconcile on the
+      // next move or collection-screen visit.
+      dev.log(
+        'money reconcile after seat move failed — $e\n$st',
+        name: 'TourController',
+      );
+    }
+  }
+
   Future<void> moveSeat({
     required String tourId,
     required String passengerId,
@@ -1592,6 +1700,14 @@ class TourController extends GetxController {
         );
       },
       failure: tr('errors.move_seat'),
+    );
+
+    // Only reached when the seat write actually landed (_write rethrows), so
+    // the money is never carried for a move that snapped back.
+    await _reconcileMoneyAfterMove(
+      tourId,
+      [passengerId],
+      crossedBus: targetBusId != busId,
     );
   }
 
@@ -1983,6 +2099,15 @@ class TourController extends GetxController {
       );
       rethrow;
     }
+
+    // Both sides of a cross-bus swap change price band, and a bumped occupant
+    // loses berths — re-price all three groups so nobody keeps a fare from a
+    // bus they no longer sit on.
+    await _reconcileMoneyAfterMove(
+      tourId,
+      [passengerAId, passengerBId, for (final u in updatedBumped) u.id],
+      crossedBus: busAId != bBusId,
+    );
   }
 
   /// Toggles a passenger's waitlist flag. Moving onto the waitlist
@@ -2514,6 +2639,62 @@ class TourController extends GetxController {
     }
   }
 
+  /// True once [tourId]'s roster has actually been fetched. A screen can use
+  /// this to show a loading state instead of an empty roster.
+  bool isTourHydrated(String tourId) => _hydratedTourIds.contains(tourId);
+
+  /// Loads passengers/buses/groups for [tourId] if cold start skipped them.
+  ///
+  /// Cold start deliberately fetches rosters only for RUNNING tours, because
+  /// pulling every archived tour's roster on every launch is what breaks 2G
+  /// (measured: 105 kB → 10.7s on EDGE, vs 10 kB → 1.0s when scoped). Opening
+  /// an archived tour pays its own small cost, once, at the moment the user
+  /// actually asks for it.
+  ///
+  /// Idempotent and race-safe: already-hydrated tours return immediately, and
+  /// concurrent callers share a single in-flight request. On failure the tour
+  /// is NOT marked hydrated, so a later open retries rather than showing an
+  /// empty roster forever.
+  Future<void> ensureTourHydrated(String tourId) {
+    if (tourId.isEmpty || _hydratedTourIds.contains(tourId)) {
+      return Future<void>.value();
+    }
+    final existing = _hydrationsInFlight[tourId];
+    if (existing != null) return existing;
+
+    final future = _hydrateTour(tourId).whenComplete(() {
+      _hydrationsInFlight.remove(tourId);
+    });
+    _hydrationsInFlight[tourId] = future;
+    return future;
+  }
+
+  Future<void> _hydrateTour(String tourId) async {
+    // ignore: invalid_use_of_protected_member
+    final raw = tours.value;
+    final idx = raw.indexWhere((t) => t.id == tourId);
+    if (idx < 0) return;
+
+    final rel = await _sync.fetchRelationsForTours([tourId]);
+
+    // Mirror the cold-start read: a customer-cancelled passenger stays in the
+    // DB for history but must never enter the active roster.
+    final passengers = rel.passengers
+        .where((m) => m['cancelled_at'] == null)
+        .map(Passenger.fromMap)
+        .toList();
+    final buses = rel.buses.map(Bus.fromMap).toList();
+    final groups = rel.groups.map(PassengerGroup.fromMap).toList();
+
+    raw[idx] = raw[idx].copyWith(
+      passengers: passengers,
+      buses: buses,
+      groups: groups,
+    );
+    _hydratedTourIds.add(tourId);
+    _scheduleNotify();
+  }
+
   List<Tour> get activeTours =>
       tours.where((t) => t.status != TourStatus.completed).toList();
 
@@ -2696,35 +2877,19 @@ class TourController extends GetxController {
   );
 
   // Internals
-  /// Rebuild [Passenger] with an explicit (possibly null) group id. Needed
-  /// because [Passenger.copyWith] can't clear a field back to null.
-  Passenger _passengerWithGroup(Passenger p, String? groupId) {
-    return Passenger(
-      id: p.id,
-      tourId: p.tourId,
-      userId: p.userId,
-      name: p.name,
-      phone: p.phone,
-      ageGroup: p.ageGroup,
-      requestLines: p.requestLines,
-      assignedSeats: p.assignedSeats,
-      paymentStatus: p.paymentStatus,
-      isHandler: p.isHandler,
-      isWaitlisted: p.isWaitlisted,
-      // Preserve isConfirmed / journeyDone: a full-constructor rebuild that
-      // omits them would silently reset a confirmed passenger to unconfirmed
-      // and resurrect a GO-leg-completed passenger onto the active roster the
-      // moment they're (un)grouped.
-      isConfirmed: p.isConfirmed,
-      note: p.note,
-      tripType: p.tripType,
-      groupId: groupId,
-      priorityStatus: p.priorityStatus,
-      priorityReason: p.priorityReason,
-      journeyDone: p.journeyDone,
-      createdAt: p.createdAt,
-    );
-  }
+  /// Rebuild [Passenger] with an explicit (possibly null) group id.
+  ///
+  /// Routed through [Passenger.copyWith] + its `clearGroup` escape, NOT a
+  /// hand-rolled full constructor. The old rebuild listed every field by hand
+  /// and so silently dropped each one added after it was written — pickup
+  /// location, cancelledAt, cancelRequestedAt and seatsNotifiedSig were all
+  /// being nulled. Since the result is persisted via `toMap()`, that wasn't a
+  /// local-only glitch: (un)grouping a passenger WIPED those columns on the
+  /// server (resurrecting cancelled riders, losing their pickup point, and
+  /// falsely flagging seats as changed-since-notified). copyWith can never
+  /// drop a field, so this cannot rot again.
+  Passenger _passengerWithGroup(Passenger p, String? groupId) =>
+      p.copyWith(groupId: groupId, clearGroup: groupId == null);
 
   /// Rebuild [Bus] with an explicit (possibly null) handler passenger id.
   /// Needed because [Bus.copyWith] uses `??`, so it can't clear
@@ -2967,8 +3132,17 @@ Passenger? cancelReturnSeatTransform(Passenger p) {
 
 /// Pure builder: freeze the [leg] seat chart for a tour. Returns null when no
 /// seat on any bus is occupied for this leg (e.g. a one-way tour has no return
-/// riders) — callers skip storing an empty snapshot. Outbound takes each seat's
-/// `.go` rider, return its `.ret` (via [seatOccupantsForBus]).
+/// riders) — callers skip storing an empty snapshot.
+///
+/// Captures EVERY rider on each seat for [leg], not one. It used to read
+/// `seatOccupantsForBus(...).go / .ret`, which keeps a single holder per leg —
+/// so a Double Sofa whose two berths were taken by two DIFFERENT same-leg
+/// riders archived only the first, and this snapshot is written at GO-leg
+/// completion and never rebuilt. The loss was permanent.
+///
+/// The leg comes from the SEAT ([Passenger.legForSeat]), not the rider's overall
+/// tripType: a round-trip rider whose GO berth and RET berth are different seats
+/// would otherwise be frozen onto both seats on both legs.
 TourSeatSnapshot? buildSeatSnapshot({
   required String tourId,
   required SnapshotLeg leg,
@@ -2980,16 +3154,21 @@ TourSeatSnapshot? buildSeatSnapshot({
   final snapshotBuses = <SnapshotBus>[];
   var seatCount = 0;
   for (final bus in buses) {
-    final occupants = seatOccupantsForBus(passengers, bus.id);
+    final occupants = occupantListForBus(passengers, bus.id);
     final seats = <SnapshotSeat>[];
-    occupants.forEach((seatId, occ) {
-      final p = leg == SnapshotLeg.outbound ? occ.go : occ.ret;
-      if (p == null) return;
-      seats.add(SnapshotSeat(
-        seatId: seatId,
-        name: p.displayName,
-        phone: p.phone,
-      ));
+    occupants.forEach((seatId, riders) {
+      for (final p in riders) {
+        final rideLeg = p.legForSeat(seatId, busId: bus.id);
+        final onThisLeg = leg == SnapshotLeg.outbound
+            ? rideLeg.usesOutbound
+            : rideLeg.usesReturn;
+        if (!onThisLeg) continue;
+        seats.add(SnapshotSeat(
+          seatId: seatId,
+          name: p.displayName,
+          phone: p.phone,
+        ));
+      }
     });
     if (seats.isEmpty) continue;
     seatCount += seats.length;

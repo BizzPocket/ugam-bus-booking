@@ -173,8 +173,11 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
         CombinedSeatGrid(
           layout: layout,
           tileBuilder: (context, cell) {
-            final occ = snapBus.occupant(cell.seatId ?? '');
-            return _SnapshotSeatTile(cell: cell, name: occ?.name);
+            final occ = snapBus.occupantsAt(cell.seatId ?? '');
+            return _SnapshotSeatTile(
+              cell: cell,
+              names: [for (final s in occ) s.name],
+            );
           },
         ),
       );
@@ -189,8 +192,10 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
   }
 
   /// Read-only render of the LIVE seating when no snapshot was captured. Builds
-  /// per-seat occupants from the live passengers via [seatOccupantsForBus] and
-  /// shows the GO (or RET) holder. A thin caption notes this is current data.
+  /// per-seat occupants via the full-roster [occupantListForBus] so a Double
+  /// Sofa held by two riders shows BOTH — the older `seatOccupantsForBus` kept
+  /// one holder per leg and printed only the first. A thin caption notes this is
+  /// current data.
   Widget _fallbackLiveChart(UgamColorSet c, Tour tour) {
     final buses = tour.buses.where((b) => b.layout != null).toList();
     if (buses.isEmpty || tour.passengers.isEmpty) {
@@ -213,15 +218,15 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
           const SizedBox(height: UgamSpacing.md),
           Builder(
             builder: (context) {
-              final occupants = seatOccupantsForBus(tour.passengers, bus.id);
+              final occupants = occupantListForBus(tour.passengers, bus.id);
               return CombinedSeatGrid(
                 layout: bus.layout!,
                 tileBuilder: (context, cell) {
-                  final seatId = cell.seatId ?? '';
-                  final o = occupants[seatId];
-                  // Live fallback shows the GO holder, else the RET holder.
-                  final p = o?.go ?? o?.ret;
-                  return _SnapshotSeatTile(cell: cell, name: p?.displayName);
+                  final riders = occupants[cell.seatId ?? ''] ?? const [];
+                  return _SnapshotSeatTile(
+                    cell: cell,
+                    names: [for (final p in riders) p.displayName],
+                  );
                 },
               );
             },
@@ -327,20 +332,29 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
 class _SnapshotSeatTile extends StatelessWidget {
   final SeatCell cell;
 
-  /// Occupant name when the seat was taken on this leg; null when it was empty.
-  final String? name;
+  /// Every occupant of this seat on the shown leg; empty when it was free.
+  ///
+  /// A LIST, not one name: a Double Sofa is two berths and can be held by two
+  /// DIFFERENT riders on the same leg, so a single-name tile silently dropped
+  /// one of them — the same assumption that blanked the printed chart.
+  final List<String> names;
 
-  const _SnapshotSeatTile({required this.cell, this.name});
+  const _SnapshotSeatTile({required this.cell, this.names = const []});
 
-  bool get _occupied => (name ?? '').trim().isNotEmpty;
+  List<String> get _shown =>
+      [for (final n in names) if (n.trim().isNotEmpty) n.trim()];
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return _occupied ? _bookedTile(c) : _freeTile(c);
+    return _shown.isEmpty ? _freeTile(c) : _bookedTile(c);
   }
 
   Widget _bookedTile(UgamColorSet c) {
+    final shown = _shown;
+    // Two riders share one tile — shrink and give each a single line so both
+    // stay readable instead of one being ellipsed away.
+    final shared = shown.length > 1;
     return Container(
       width: _kSeatTileW,
       height: _kSeatTileH,
@@ -354,16 +368,23 @@ class _SnapshotSeatTile extends StatelessWidget {
           Center(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(3, 12, 3, 6),
-              child: Text(
-                name!.trim(),
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: UgamText.caption.copyWith(
-                  color: c.ink,
-                  fontWeight: FontWeight.w600,
-                  height: 1.1,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final n in shown)
+                    Text(
+                      n,
+                      textAlign: TextAlign.center,
+                      maxLines: shared ? 1 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: UgamText.caption.copyWith(
+                        color: c.ink,
+                        fontWeight: FontWeight.w600,
+                        height: 1.1,
+                        fontSize: shared ? 9 : null,
+                      ),
+                    ),
+                ],
               ),
             ),
           ),

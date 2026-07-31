@@ -11,8 +11,11 @@ import '../models/bus_handover.dart';
 import '../models/money_summary.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
+import '../models/tour.dart';
+import '../services/collection_reconciler.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
+import 'finance_controller.dart';
 import 'tour_controller.dart';
 
 /// Loads & persists the money tables (`collections`, `expenses`,
@@ -56,6 +59,22 @@ class MoneyController extends GetxController {
   String? get loadedTourId => _loadedTourId;
 
   SyncService get _sync => Get.find<SyncService>();
+
+  /// Tells the cross-tour P&L its cached totals are out of date.
+  ///
+  /// [FinanceController] aggregates the SAME `collections` / `expenses` /
+  /// `incomes` rows this controller writes, but from its own independent fetch.
+  /// Without this hook its `ensureLoaded()` permanently no-ops after the first
+  /// success, so the Settings card and the Finance report kept showing
+  /// pre-write figures while the per-tour money board moved — two surfaces
+  /// disagreeing about the same money. Only marks stale (no refetch): the next
+  /// visit to a finance surface pays for the reload, not every keystroke here.
+  /// Guarded on registration so money still saves in tests/flows where the
+  /// finance controller was never put.
+  void _invalidateFinance() {
+    if (!Get.isRegistered<FinanceController>()) return;
+    Get.find<FinanceController>().markStale();
+  }
 
   String _collectionsKey(String tourId) => 'collections_$tourId';
   String _expensesKey(String tourId) => 'expenses_$tourId';
@@ -279,6 +298,7 @@ class MoneyController extends GetxController {
           data: c.toMap(),
         );
       }
+      _invalidateFinance();
     } catch (e) {
       await refreshForTour(c.tourId);
       AppSnackBar.error(
@@ -294,6 +314,7 @@ class MoneyController extends GetxController {
     collections.removeWhere((c) => c.id == id);
     try {
       await _sync.smartDelete(table: 'collections', entityId: id);
+      _invalidateFinance();
     } catch (e) {
       await refreshForTour(removed?.tourId ?? _loadedTourId ?? '');
       AppSnackBar.error(
@@ -302,6 +323,85 @@ class MoneyController extends GetxController {
       );
       rethrow;
     }
+  }
+
+  /// Re-attach this tour's collection rows to the seats their payers actually
+  /// hold after a seat move, and report what that does to each payer's balance.
+  ///
+  /// A cross-bus move re-prices the passenger at the DESTINATION bus's bands
+  /// while the cash they already handed over stays exactly as recorded, so each
+  /// returned [SeatMoveMoneyDelta] says how much more to collect — or hand back
+  /// when the new bus is cheaper. See [CollectionReconciler] for why the rows
+  /// need re-homing at all.
+  ///
+  /// Never throws. The seat move this follows is already persisted and visible
+  /// on the chart, so a money-write failure surfaces as an error toast plus a
+  /// refetch rather than unwinding a placement the agent can see.
+  ///
+  /// [crossedBus] gates the on-demand read. A cross-bus move is rare and is the
+  /// whole point of this method, so it is worth a round trip when the money
+  /// tables are not loaded. A same-bus move only re-stamps a stale `seat_id`,
+  /// which is not worth a fetch on every drag — it reconciles for free when the
+  /// tour's rows happen to be loaded, and otherwise waits for the next
+  /// cross-bus move or collection-screen visit.
+  Future<List<SeatMoveMoneyDelta>> reconcileAfterSeatMove({
+    required Tour tour,
+    required Iterable<String> passengerIds,
+    required bool crossedBus,
+  }) async {
+    final ids = passengerIds.toSet();
+    if (ids.isEmpty) return const [];
+
+    final isLoadedTour = _loadedTourId == tour.id;
+    if (!isLoadedTour && !crossedBus) return const [];
+
+    final List<Collection> rows;
+    if (isLoadedTour) {
+      rows = collections.toList();
+    } else {
+      // The assign workspace never loads the money tables, so read this tour's
+      // rows on demand rather than planning against an empty list — that would
+      // silently skip the carry-over for exactly the screen where moves happen.
+      final res = await _sync.smartFetch(
+        table: 'collections',
+        cacheKey: _collectionsKey(tour.id),
+        filters: {'tour_id': tour.id},
+        orderBy: 'created_at',
+      );
+      if (res.failed) return const [];
+      rows = res.rows.map(Collection.fromMap).toList();
+    }
+
+    final plan = CollectionReconciler.plan(
+      tour: tour,
+      passengerIds: ids,
+      collections: rows,
+    );
+    if (plan.isEmpty) return const [];
+
+    try {
+      for (final c in plan.updates) {
+        await _sync.smartUpdate(
+          table: 'collections',
+          entityId: c.id,
+          data: c.toMap(),
+        );
+        if (isLoadedTour) {
+          final idx = collections.indexWhere((e) => e.id == c.id);
+          if (idx >= 0) collections[idx] = c;
+        }
+      }
+      if (isLoadedTour) collections.refresh();
+    } catch (e) {
+      await refreshForTour(tour.id);
+      AppSnackBar.error(
+        tr('errors.save_collection', namedArgs: {'e': '$e'}),
+        title: tr('errors.save_failed'),
+      );
+      return const [];
+    }
+
+    return plan.deltas;
   }
 
   // ── Expenses ──────────────────────────────────────────────
@@ -331,6 +431,7 @@ class MoneyController extends GetxController {
           data: e.toMap(),
         );
       }
+      _invalidateFinance();
     } catch (err) {
       await refreshForTour(e.tourId);
       AppSnackBar.error(
@@ -346,10 +447,70 @@ class MoneyController extends GetxController {
     expenses.removeWhere((e) => e.id == id);
     try {
       await _sync.smartDelete(table: 'expenses', entityId: id);
+      _invalidateFinance();
     } catch (e) {
       await refreshForTour(removed?.tourId ?? _loadedTourId ?? '');
       AppSnackBar.error(
         tr('errors.delete_expense', namedArgs: {'e': '$e'}),
+        title: tr('errors.delete_failed'),
+      );
+      rethrow;
+    }
+  }
+
+  // ── Incomes ───────────────────────────────────────────────
+  // Extra cash taken in outside seat fares (cabin / gallery / other). The
+  // HANDLER logs these on the ground through their own RPCs; these are the
+  // ADMIN's equivalents, so a wrong or missing entry can be corrected from the
+  // bus money screen instead of being permanently stuck at whatever the handler
+  // typed. Same optimistic-then-confirm shape as [upsertExpense].
+
+  Future<void> upsertIncome(IncomeEntry i) async {
+    final idx = incomes.indexWhere((x) => x.id == i.id);
+    final existedBefore = idx >= 0;
+
+    if (existedBefore) {
+      incomes[idx] = i;
+    } else {
+      incomes.add(i);
+    }
+    incomes.refresh();
+
+    try {
+      if (existedBefore) {
+        await _sync.smartUpdate(
+          table: 'incomes',
+          entityId: i.id,
+          data: i.toMap(),
+        );
+      } else {
+        await _sync.smartInsert(
+          table: 'incomes',
+          entityId: i.id,
+          data: i.toMap(),
+        );
+      }
+      _invalidateFinance();
+    } catch (e) {
+      await refreshForTour(i.tourId);
+      AppSnackBar.error(
+        tr('errors.save_income', namedArgs: {'e': '$e'}),
+        title: tr('errors.save_failed'),
+      );
+      rethrow;
+    }
+  }
+
+  Future<void> deleteIncome(String id) async {
+    final removed = incomes.firstWhereOrNull((i) => i.id == id);
+    incomes.removeWhere((i) => i.id == id);
+    try {
+      await _sync.smartDelete(table: 'incomes', entityId: id);
+      _invalidateFinance();
+    } catch (e) {
+      await refreshForTour(removed?.tourId ?? _loadedTourId ?? '');
+      AppSnackBar.error(
+        tr('errors.delete_income', namedArgs: {'e': '$e'}),
         title: tr('errors.delete_failed'),
       );
       rethrow;
@@ -498,13 +659,46 @@ class MoneyController extends GetxController {
       expenses: expenses.toList(),
       handovers: handovers.toList(),
       incomes: incomes.toList(),
+      // Only claim to know the fleet when we actually resolved one. An empty
+      // busById here means the tour/controller wasn't resolvable, NOT that the
+      // tour has no buses — passing an empty set then would flag every single
+      // row as orphaned.
+      knownBusIds: busById.isEmpty ? null : busById.keys.toSet(),
       busRentsTotal: _busRents().values.fold(0.0, (sum, r) => sum + r),
       totalRevenueBilled: _billedRevenues().values.fold(
         0.0,
         (sum, r) => sum + r,
       ),
       toCollectTotal: perBusToCollect,
+      // Trip level: only a rider seated on NO bus at all is stranded here — one
+      // merely moved between buses is still on the trip and still counted once.
+      detachedCashTotal: _detachedCash(
+        collections,
+        (p) => p.assignedSeats.isNotEmpty,
+      ),
     );
+  }
+
+  /// Cash from payers that [isStillSeated] rejects — the shared engine behind
+  /// [BusMoneySummary.detachedCash] at the handler and tour levels, where the
+  /// "still seated" test spans several buses and so can't be answered per bus.
+  ///
+  /// Returns 0 when the tour's roster isn't resolvable: with nobody to check
+  /// against, every row would look detached, and a false "₹X is stranded" alarm
+  /// is worse than staying quiet.
+  double _detachedCash(
+    Iterable<Collection> rows,
+    bool Function(Passenger p) isStillSeated,
+  ) {
+    final passengers = _tourPassengers();
+    if (passengers.isEmpty) return 0;
+    final seated = <String>{
+      for (final p in passengers)
+        if (isStillSeated(p)) p.id,
+    };
+    return rows
+        .where((c) => !seated.contains(c.passengerId))
+        .fold(0.0, (sum, c) => sum + c.netCollected);
   }
 
   /// Read-only summaries for every bus id in [busIds], in the order given.
@@ -570,7 +764,22 @@ class MoneyController extends GetxController {
       ...order.where((h) => h == null),
     ];
     return [
-      for (final h in ordered) HandlerMoneySummary.fromBuses(h, grouped[h]!),
+      for (final h in ordered)
+        HandlerMoneySummary.fromBuses(
+          h,
+          grouped[h]!,
+          // Scoped to THIS handler's fleet: a rider moved between two buses
+          // the same handler runs never left their care, so they are not
+          // stranded cash here even though each bus sees them as detached.
+          detachedCash: _detachedCash(
+            collections.where(
+              (c) => grouped[h]!.any((s) => s.busId == c.busId),
+            ),
+            (p) => p.assignedSeats.any(
+              (a) => grouped[h]!.any((s) => s.busId == a.busId),
+            ),
+          ),
+        ),
     ];
   }
 
@@ -591,9 +800,11 @@ class MoneyController extends GetxController {
     // Real money still owed: billed revenue not yet collected (catches seated
     // riders billed but uncollected, whether or not a shortfall row exists).
     final revenueOutstanding = (s.revenueBilled - s.collected) > eps;
-    // Net can't even cover the owner's rent — the handler is short on the
-    // settlement, so this is an attention state, never "settled".
-    final cannotCoverRent = s.expectedHandover < -eps;
+    // Cash taken in doesn't cover the trip's costs (the owner's rent included —
+    // the ADMIN pays that out of the handover), so the bus is running at a loss.
+    // Reads off the cash net, NOT the handover: the handover figure is
+    // rent-free by design, so it would never surface this.
+    final cannotCoverRent = s.netCollected < -eps;
     if (outstanding || toCollect || revenueOutstanding || cannotCoverRent) {
       return BusMoneyState.actionNeeded;
     }

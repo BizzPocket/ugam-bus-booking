@@ -4,7 +4,7 @@ import 'package:get/get.dart';
 
 import '../../controllers/inbox_controller.dart';
 import '../../design/ugam.dart';
-import '../../screens/inbox_screen.dart';
+import '../../routes/app_routes.dart';
 import '../../screens/main_shell.dart';
 import '../../utils/formatters.dart';
 
@@ -83,8 +83,11 @@ class DashboardGreeting extends StatelessWidget {
             onTap: () => Get.find<ShellController>().switchTab(4),
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 48,
-              height: 48,
+              // 44, matching UgamIconButton — the app-wide round-action edge
+              // this header's other circle now inherits. Stays bespoke because
+              // it renders initials, not an icon.
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: c.cardElev,
                 shape: BoxShape.circle,
@@ -115,61 +118,55 @@ class _MessagesButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final inbox = Get.find<InboxController>();
 
-    return Semantics(
-      label: tr('inbox.title'),
-      button: true,
-      child: GestureDetector(
-        onTap: () => Get.to(() => const InboxScreen()),
-        behavior: HitTestBehavior.opaque,
-        child: Obx(() {
-          final unread = inbox.totalUnread.value;
-          return Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: c.cardElev,
-                  shape: BoxShape.circle,
-                ),
+    return Obx(() {
+      final unread = inbox.totalUnread.value;
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          // The shared round action — its neutral tone is the same `cardElev`
+          // circle this button used to hand-roll, at the app-wide 44 instead
+          // of a bespoke 48. The unread/idle ink (accent vs ink2) has no tone
+          // of its own, so it rides `inkOverride`. Named route, not an
+          // anonymous `Get.to`: push_service.dart:245 skips re-opening the
+          // inbox only when `Get.currentRoute == AppRoutes.inbox`, which an
+          // anonymous route never reports.
+          UgamIconButton(
+            icon: Icons.forum_rounded,
+            onTap: () => Get.toNamed(AppRoutes.inbox),
+            semanticLabel: tr('inbox.title'),
+            inkOverride: unread > 0 ? c.accent : c.ink2,
+          ),
+          if (unread > 0)
+            Positioned(
+              top: -2,
+              right: -2,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 18),
+                height: 18,
+                padding: const EdgeInsets.symmetric(horizontal: 5),
                 alignment: Alignment.center,
-                child: Icon(
-                  Icons.forum_rounded,
-                  size: 20,
-                  color: unread > 0 ? c.accent : c.ink2,
+                decoration: BoxDecoration(
+                  // Stays a SOLID accent: this is an overlay count badge, the
+                  // same species as the dock's badge (ugam_dock_nav.dart:203),
+                  // which F-12 rules exempt app chrome. A tonal 18pt dot on a
+                  // `cardElev` circle would not read.
+                  color: c.accent,
+                  borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  border: Border.all(color: c.bg, width: 1.5),
                 ),
-              ),
-              if (unread > 0)
-                Positioned(
-                  top: -2,
-                  right: -2,
-                  child: Container(
-                    constraints: const BoxConstraints(minWidth: 18),
-                    height: 18,
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: c.accent,
-                      borderRadius: BorderRadius.circular(UgamRadius.chip),
-                      border: Border.all(color: c.bg, width: 1.5),
-                    ),
-                    child: Text(
-                      unread > 99 ? '99+' : '$unread',
-                      style: UgamText.tabular(
-                        UgamText.micro.copyWith(
-                          color: c.onAccent,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 10,
-                        ),
-                      ),
+                child: Text(
+                  unread > 99 ? '99+' : '$unread',
+                  style: UgamText.tabular(
+                    UgamText.micro.copyWith(
+                      color: c.onAccent,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-            ],
-          );
-        }),
-      ),
-    );
+              ),
+            ),
+        ],
+      );
+    });
   }
 }

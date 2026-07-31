@@ -72,55 +72,63 @@ class _TabSegment extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: UgamMotion.tab,
-        curve: UgamMotion.easeOut,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? c.card : Colors.transparent,
-          borderRadius: BorderRadius.circular(11),
-          boxShadow: active
-              ? const [
-                  BoxShadow(
-                    color: Color(0x0F000000),
-                    blurRadius: 4,
-                    offset: Offset(0, 1),
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (item.icon != null) ...[
-              Icon(item.icon, size: 14, color: active ? c.ink : c.ink2),
-              const SizedBox(width: 5),
-            ],
-            Flexible(
-              child: Text(
-                item.label,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.ellipsis,
-                style: UgamText.bodyStrong.copyWith(
-                  color: active ? c.ink : c.ink2,
-                  fontSize: 12,
-                ),
-              ),
+      // 44pt hit box around an UNCHANGED painted pill. The `Center` is
+      // load-bearing: without it the ConstrainedBox's minHeight propagates
+      // into the AnimatedContainer and inflates the visible pill.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
+        child: Center(
+          child: AnimatedContainer(
+            duration: UgamMotion.tab,
+            curve: UgamMotion.easeOut,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: active ? c.card : Colors.transparent,
+              borderRadius: BorderRadius.circular(11),
+              boxShadow: active
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x0F000000),
+                        blurRadius: 4,
+                        offset: Offset(0, 1),
+                      ),
+                    ]
+                  : null,
             ),
-            if (item.count != null) ...[
-              const SizedBox(width: 5),
-              Text(
-                '${item.count}',
-                style: UgamText.tabular(
-                  UgamText.caption.copyWith(
-                    color: active ? c.accent : c.ink3,
-                    fontWeight: FontWeight.w700,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (item.icon != null) ...[
+                  Icon(item.icon, size: 14, color: active ? c.ink : c.ink2),
+                  const SizedBox(width: 5),
+                ],
+                Flexible(
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: UgamText.bodyStrong.copyWith(
+                      color: active ? c.ink : c.ink2,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ],
+                if (item.count != null) ...[
+                  const SizedBox(width: 5),
+                  Text(
+                    '${item.count}',
+                    style: UgamText.tabular(
+                      UgamText.caption.copyWith(
+                        color: active ? c.accent : c.ink3,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );

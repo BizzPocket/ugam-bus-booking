@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import '../ui_scale.dart';
 
 /// A read-only, tappable field that opens a picker (date / time / selection).
 /// Looks like a filled [UgamInput] but its job is to trigger [onTap] rather
@@ -41,10 +42,7 @@ class UgamPickerField extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (label != null) ...[
-          Text(
-            label!,
-            style: UgamText.caption.copyWith(color: c.ink2),
-          ),
+          Text(label!, style: UgamText.caption.copyWith(color: c.ink2)),
           const SizedBox(height: UgamSpacing.sm),
         ],
         Opacity(
@@ -58,7 +56,9 @@ class UgamPickerField extends StatelessWidget {
                   }
                 : null,
             child: Container(
-              height: 52,
+              // Interactive box (the field IS the picker trigger): floored at
+              // the 44pt tap minimum — 52 -> 44.2 at the 0.85 device floor.
+              height: UgamScale.tap(context, 52),
               padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
               decoration: BoxDecoration(
                 color: c.cardElev,

@@ -75,6 +75,30 @@ class PickupController extends GetxController {
     }
   }
 
+  /// The pickup point's position in the admin's manual serial — the ONE order
+  /// every surface that lists pickups should read in (manager list, customer
+  /// picker, the handler's pickup-grouped rosters). Lower sorts first.
+  ///
+  /// Resolves by [id] first, then falls back to a case-insensitive [name] match
+  /// so a booking snapshot taken before the id column (or one whose point was
+  /// renamed-and-recreated) still lands in the right slot. Returns null when the
+  /// point isn't in the list at all — including before the list has loaded — so
+  /// callers can order the leftovers themselves.
+  ///
+  /// Reads the reactive [all] list on EVERY path (see [codeFor] for why).
+  int? rankFor({String? id, String? name}) {
+    // `all` arrives ordered by sort_order, created_at — index IS the serial.
+    final rows = all.toList(growable: false);
+    if (id != null && id.isNotEmpty) {
+      final i = rows.indexWhere((p) => p.id == id);
+      if (i >= 0) return i;
+    }
+    final n = (name ?? '').trim().toLowerCase();
+    if (n.isEmpty) return null;
+    final i = rows.indexWhere((p) => p.name.trim().toLowerCase() == n);
+    return i >= 0 ? i : null;
+  }
+
   /// Normalises an admin-facing short code: trims, upper-cases, caps at 6 chars,
   /// and maps a blank code to null (so the column stays null, not "").
   String? _normCode(String? code) {

@@ -12,6 +12,7 @@ import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 
 
@@ -34,7 +35,20 @@ class AddBusScreen extends StatefulWidget {
   final String tourId;
   final Bus? existing;
 
-  const AddBusScreen({super.key, required this.tourId, this.existing});
+  /// When set (and [existing] is null) the wizard opens in ADD mode but seeds
+  /// every field from this bus as a TEMPLATE — the "Duplicate bus" path. The
+  /// per-vehicle identity (slot name + registration plate + driver) is
+  /// deliberately NOT copied, so the clone auto-numbers into the next slot and
+  /// never collides with the source's unique registration. Saving then creates
+  /// a brand-new bus exactly like a normal add.
+  final Bus? templateBus;
+
+  const AddBusScreen({
+    super.key,
+    required this.tourId,
+    this.existing,
+    this.templateBus,
+  });
 
   bool get isEditing => existing != null;
 
@@ -93,6 +107,18 @@ class _AddBusScreenState extends State<AddBusScreen> {
   /// attempt (cancel, error, or success) so a later plain edit never regenerates.
   bool _forceRegenerate = false;
 
+  /// Set the moment the agent changes anything on the form. Drives the
+  /// unsaved-work guard on the app-bar exit.
+  ///
+  /// Deliberately a flag set by the change callbacks rather than a diff of the
+  /// controllers: Step 3 auto-seeds the single/double sofa price fields on its
+  /// first build (see [_Step3PriceState.initState]), so a value-diff would
+  /// report "unsaved changes" before the agent had touched anything.
+  bool _dirty = false;
+
+  /// Every user-driven change on every step funnels through here.
+  void _markDirty() => setState(() => _dirty = true);
+
   // ── Wizard state ────────────────────────────────────────────────────
   /// 0 = identity, 1 = capacity (add only), 2 = price.
   /// In edit mode the user moves from 0 → 2 directly (step 1 is skipped).
@@ -111,33 +137,52 @@ class _AddBusScreenState extends State<AddBusScreen> {
     super.initState();
     final e = widget.existing;
     if (e != null) {
-      _slotLabel.text = e.name;
-      _busNumber.text = e.busNumber;
-      _boardingPoint.text = e.boardingPoint;
-      _departureTime = timeOfDayFromHhmm(e.departureTime);
-      _driverName.text = e.driverName;
-      _driverPhone.text = e.driverPhone;
-      _price.text = e.pricePerSeat > 0 ? e.pricePerSeat.toStringAsFixed(0) : '';
-      if (e.busPrice > 0) {
-        _busPrice.text = e.busPrice.toStringAsFixed(0);
-      }
-      if (e.singleSofaPrice != null) {
-        _singleSofaPrice.text = e.singleSofaPrice!.toStringAsFixed(0);
-      }
-      if (e.doubleSofaPrice != null) {
-        _doubleSofaPrice.text = e.doubleSofaPrice!.toStringAsFixed(0);
-      }
-      if (e.rearRows > 0) {
-        _rearRows.text = '${e.rearRows}';
-      }
-      if (e.rearPrice != null) {
-        _rearPrice.text = e.rearPrice!.toStringAsFixed(0);
-      }
-      _priceBands = List<PriceBand>.from(e.priceBands);
-      _isAC = e.isAC;
-      _seedCapacityFromLayout(e);
+      // Editing: seed every field from the bus, identity included.
+      _seedFromBus(e, asTemplate: false);
+      _priceInitialized = true;
+    } else if (widget.templateBus != null) {
+      // Duplicating: same seeding, but the per-vehicle identity is skipped so
+      // the clone auto-numbers into the next slot and starts with a blank plate.
+      _seedFromBus(widget.templateBus!, asTemplate: true);
       _priceInitialized = true;
     }
+  }
+
+  /// Copy a source bus's fields into the form controllers. Shared by EDIT mode
+  /// (identity included) and the DUPLICATE template path ([asTemplate] true),
+  /// which skips the per-vehicle identity — slot name, registration plate and
+  /// driver — so the clone auto-numbers into the next slot, keeps an empty
+  /// (NULL) registration (the plate carries a partial unique index) and lets the
+  /// agent enter the new vehicle's driver. Everything reusable — boarding,
+  /// departure, AC, capacity/layout and all pricing — carries over.
+  void _seedFromBus(Bus e, {required bool asTemplate}) {
+    if (!asTemplate) {
+      _slotLabel.text = e.name;
+      _busNumber.text = e.busNumber;
+      _driverName.text = e.driverName;
+      _driverPhone.text = e.driverPhone;
+    }
+    _boardingPoint.text = e.boardingPoint;
+    _departureTime = timeOfDayFromHhmm(e.departureTime);
+    _price.text = e.pricePerSeat > 0 ? e.pricePerSeat.toStringAsFixed(0) : '';
+    if (e.busPrice > 0) {
+      _busPrice.text = e.busPrice.toStringAsFixed(0);
+    }
+    if (e.singleSofaPrice != null) {
+      _singleSofaPrice.text = e.singleSofaPrice!.toStringAsFixed(0);
+    }
+    if (e.doubleSofaPrice != null) {
+      _doubleSofaPrice.text = e.doubleSofaPrice!.toStringAsFixed(0);
+    }
+    if (e.rearRows > 0) {
+      _rearRows.text = '${e.rearRows}';
+    }
+    if (e.rearPrice != null) {
+      _rearPrice.text = e.rearPrice!.toStringAsFixed(0);
+    }
+    _priceBands = List<PriceBand>.from(e.priceBands);
+    _isAC = e.isAC;
+    _seedCapacityFromLayout(e);
   }
 
   /// Reconstruct the capacity-step inputs from a saved bus so EDIT mode shows the
@@ -239,12 +284,19 @@ class _AddBusScreenState extends State<AddBusScreen> {
           _allDoubleBackRow != _initAllDoubleBackRow);
 
   /// The layout the price step previews its rear-zone / price-band rows against:
-  /// the freshly-sized layout when editing and capacity was changed, otherwise
-  /// the bus's saved layout. Keeps the band editor's row range in sync with a
-  /// just-changed seat count.
+  /// the bus's saved layout when editing and the capacity was NOT touched,
+  /// otherwise a layout built from the current Step 2 inputs. Keeps the band
+  /// editor's row range in sync with a just-changed seat count.
+  ///
+  /// ADD mode used to bail to null here, which left the band sheet with no
+  /// `maxRow` — it accepted "row 12 to 20" on a bus that would only ever have
+  /// 7 rows, then [_sanitizedBands] silently clamped it at save time and the
+  /// range appeared to change by itself. The capacity inputs are all known by
+  /// Step 3, and these are the exact arguments [_save] already builds the real
+  /// layout with, so previewing against them costs nothing and lets the sheet
+  /// clamp at entry instead.
   BusLayout? get _previewLayout {
-    if (!widget.isEditing) return null;
-    if (!_capacityChanged) return widget.existing?.layout;
+    if (widget.isEditing && !_capacityChanged) return widget.existing?.layout;
     return BusLayout.generate(
       busType: _busType,
       totalSeats: _totalSeats,
@@ -263,12 +315,27 @@ class _AddBusScreenState extends State<AddBusScreen> {
     return '${tour.title} · $label';
   }
 
-  void _maybeSeedPrice() {
+  /// Seed the common-path fields on the FIRST build in plain add mode. Edit and
+  /// duplicate both set [_priceInitialized] in [initState], so this whole block
+  /// is skipped for them (their fields are already seeded from the source bus).
+  ///
+  /// Price follows the tour's per-seat rate (existing behaviour); departure
+  /// follows the tour's departure time; boarding follows the tour's most
+  /// recently added bus (buses on one tour usually share a boarding point).
+  /// All three stay fully editable — this only removes the retype/re-open cost
+  /// on the common path.
+  void _maybeSeedFromTour() {
     if (_priceInitialized) return;
     final tour = _tour;
     if (tour == null) return;
     if (tour.pricePerSeat > 0) {
       _price.text = tour.pricePerSeat.toStringAsFixed(0);
+    }
+    _departureTime = timeOfDayFromHhmm(tour.departureTime);
+    final lastBoarding =
+        tour.buses.isNotEmpty ? tour.buses.last.boardingPoint.trim() : '';
+    if (lastBoarding.isNotEmpty) {
+      _boardingPoint.text = lastBoarding;
     }
     _priceInitialized = true;
   }
@@ -306,14 +373,38 @@ class _AddBusScreenState extends State<AddBusScreen> {
     }
   }
 
+  /// Step BACKWARDS through the wizard — the bottom Back pill's job. On the
+  /// first step there is nowhere left to go, so it leaves (guarded, same as
+  /// the app-bar chevron).
   void _goBack() {
     HapticFeedback.selectionClick();
     final idx = _indexInSequence;
     if (idx > 0) {
       setState(() => _currentStep = _stepSequence[idx - 1]);
     } else {
-      AppNav.pop(context);
+      _confirmExit();
     }
+  }
+
+  /// LEAVE the wizard. The app-bar chevron is the app's universal "close this
+  /// screen" affordance on every other screen, so here it closes too instead
+  /// of silently walking back a step — walking back is the bottom Back pill.
+  ///
+  /// Guarded when there is unsaved work, so the chevron can no longer discard
+  /// a half-filled form without a word.
+  Future<void> _confirmExit() async {
+    if (_dirty) {
+      final ok = await UgamDialog.confirm(
+        context,
+        title: tr('add_bus.exit_confirm_title'),
+        message: tr('add_bus.exit_confirm_msg'),
+        confirmLabel: tr('add_bus.exit_confirm_cta'),
+        destructive: true,
+      );
+      if (ok != true) return;
+    }
+    if (!mounted) return;
+    AppNav.pop(context);
   }
 
   /// True when more single sofas were requested than there are sleeper berths.
@@ -345,7 +436,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
       initialTime: _departureTime ?? const TimeOfDay(hour: 9, minute: 0),
     );
     if (picked != null) {
-      setState(() => _departureTime = picked);
+      setState(() {
+        _departureTime = picked;
+        _dirty = true;
+      });
     }
   }
 
@@ -580,7 +674,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _maybeSeedPrice();
+    _maybeSeedFromTour();
     final c = UgamColors.of(context);
 
     return UgamScaffold(
@@ -592,7 +686,9 @@ class _AddBusScreenState extends State<AddBusScreen> {
                   ? tr('add_bus.title_edit')
                   : tr('add_bus.title'),
               subtitle: _subtitle.isEmpty ? null : _subtitle,
-              onBack: _goBack,
+              // Closes the wizard (guarded), matching every other screen's
+              // chevron. Stepping back is the bottom Back pill's job.
+              onBack: _confirmExit,
             ),
             _WizardProgress(
               c: c,
@@ -601,7 +697,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
             ),
             Expanded(
               child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
+                duration: UgamMotion.sheet,
                 switchInCurve: UgamMotion.easeOut,
                 switchOutCurve: UgamMotion.easeIn,
                 transitionBuilder: (child, anim) {
@@ -649,9 +745,12 @@ class _AddBusScreenState extends State<AddBusScreen> {
           driverPhone: _driverPhone,
           isAC: _isAC,
           slotBadge: _slotPositionLabel,
-          onToggleAC: (v) => setState(() => _isAC = v),
+          onToggleAC: (v) => setState(() {
+            _isAC = v;
+            _dirty = true;
+          }),
           onPickDepartureTime: _pickDepartureTime,
-          onAnyChange: () => setState(() {}),
+          onAnyChange: _markDirty,
         );
       case 1:
         return _Step2Capacity(
@@ -661,7 +760,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
           sleeperSeats: _sleeperSeats,
           singleSofaSummary: _singleSofaSummary,
           allDoubleBackRow: _allDoubleBackRow,
-          onAllDoubleBackRow: (v) => setState(() => _allDoubleBackRow = v),
+          onAllDoubleBackRow: (v) => setState(() {
+            _allDoubleBackRow = v;
+            _dirty = true;
+          }),
           // Edit mode only: re-apply the current seat engine to a bus whose
           // layout was saved under the old engine. Null in add mode (hides it).
           onRegenerate: widget.isEditing ? _regenerateLayout : null,
@@ -681,8 +783,12 @@ class _AddBusScreenState extends State<AddBusScreen> {
             if (_singleSofaCount > _sleeperSeats) {
               _singleSofaCount = _sleeperSeats;
             }
+            _dirty = true;
           }),
-          onSingleSofa: (v) => setState(() => _singleSofaCount = v),
+          onSingleSofa: (v) => setState(() {
+            _singleSofaCount = v;
+            _dirty = true;
+          }),
         );
       case 2:
       default:
@@ -693,11 +799,14 @@ class _AddBusScreenState extends State<AddBusScreen> {
           singleSofaPrice: _singleSofaPrice,
           doubleSofaPrice: _doubleSofaPrice,
           priceBands: _priceBands,
-          onBandsChanged: (bands) => setState(() => _priceBands = bands),
+          onBandsChanged: (bands) => setState(() {
+            _priceBands = bands;
+            _dirty = true;
+          }),
           layout: _previewLayout,
           tour: _tour,
           totalSeats: _totalSeats,
-          onChanged: () => setState(() {}),
+          onChanged: _markDirty,
         );
     }
   }
@@ -733,14 +842,21 @@ class _WizardProgress extends StatelessWidget {
           final done = i < index;
           return Expanded(
             child: Padding(
-              padding: EdgeInsets.only(right: i == steps - 1 ? 0 : 6),
+              padding: EdgeInsets.only(
+                right: i == steps - 1 ? 0 : UgamSpacing.xs,
+              ),
               child: AnimatedContainer(
                 duration: UgamMotion.tab,
                 curve: UgamMotion.easeOut,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: active || done ? c.accent : c.cardElev,
-                  borderRadius: BorderRadius.circular(2),
+                  // Accent-rationing: only the ACTIVE segment is solid copper.
+                  // Completed segments go tonal, so Step 3 no longer shows
+                  // three filled bars competing with the copper Save CTA.
+                  color: active
+                      ? c.accent
+                      : (done ? c.accent.withValues(alpha: 0.45) : c.cardElev),
+                  borderRadius: BorderRadius.circular(UgamRadius.chip),
                 ),
               ),
             ),
@@ -822,9 +938,16 @@ class _BackPill extends StatelessWidget {
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
+        // Pixel-matched to the UgamCTA sitting beside it in the same Row.
+        // UgamCTA resolves as max(44, md*2 + titleS) — so this uses the SAME
+        // `md` vertical padding, the SAME 44 floor, the SAME titleS label and
+        // the SAME 18pt leading icon. The old `lg + 2` (18) was what made the
+        // pill ~56 against the CTA's 44. Deliberately NOT UgamButton: its
+        // hardcoded 50 cannot match the CTA, which is the whole defect here.
+        constraints: const BoxConstraints(minHeight: 44),
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.lg + 2,
+          vertical: UgamSpacing.md,
         ),
         decoration: BoxDecoration(
           color: c.cardElev,
@@ -833,8 +956,10 @@ class _BackPill extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Fixed 18 (not scaled) so it stays identical to UgamCTA's
+            // leadingIcon, which is also a fixed 18.
             Icon(Icons.chevron_left_rounded, size: 18, color: c.ink),
-            const SizedBox(width: 4),
+            const SizedBox(width: UgamSpacing.xs),
             Text(
               tr('app.action.back'),
               style: UgamText.titleS.copyWith(color: c.ink),
@@ -919,7 +1044,16 @@ class _Step1Identity extends StatelessWidget {
           onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
-        _ACToggle(c: c, value: isAC, onChanged: onToggleAC),
+        _ToggleRow(
+          c: c,
+          icon: Icons.ac_unit_rounded,
+          label: tr('add_bus.ac_toggle.label'),
+          subtitle: isAC
+              ? tr('add_bus.ac_toggle.on')
+              : tr('add_bus.ac_toggle.off'),
+          value: isAC,
+          onChanged: onToggleAC,
+        ),
         const SizedBox(height: UgamSpacing.xl),
 
         // ── Boarding — place (wide) + time (narrow) share a row, so the
@@ -962,11 +1096,15 @@ class _Step1Identity extends StatelessWidget {
           label: tr('add_bus.label.driver_name'),
           controller: driverName,
           hint: tr('add_bus.hint.driver_name_plain'),
+          // These two were the only inputs on the step with no change hook, so
+          // typing a driver in did not register as unsaved work.
+          onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.lg),
         UgamPhoneInput(
           label: tr('add_bus.label.driver_phone'),
           controller: driverPhone,
+          onChanged: (_) => onAnyChange(),
         ),
         const SizedBox(height: UgamSpacing.xl),
       ],
@@ -974,13 +1112,29 @@ class _Step1Identity extends StatelessWidget {
   }
 }
 
-class _ACToggle extends StatelessWidget {
+/// The wizard's one switch row: icon medallion + title + state subtitle +
+/// [UgamSwitch]. Serves the Step 1 "AC" toggle and the Step 2 "all-double back
+/// row" toggle, which were two byte-near-identical classes that had already
+/// drifted (only one of them set the subtitle's `height: 1.4`).
+///
+/// Tapping anywhere on the row flips the value, so the whole row — not the
+/// switch — is the tap target; the medallion is decorative and therefore
+/// scales through [UgamScale.px], not `tap`.
+class _ToggleRow extends StatelessWidget {
   final UgamColorSet c;
+  final IconData icon;
+  final String label;
+
+  /// Reflects the CURRENT state ("On" / "Off"), not a static description.
+  final String subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
 
-  const _ACToggle({
+  const _ToggleRow({
     required this.c,
+    required this.icon,
+    required this.label,
+    required this.subtitle,
     required this.value,
     required this.onChanged,
   });
@@ -1002,16 +1156,16 @@ class _ACToggle extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 38,
-              height: 38,
+              width: UgamScale.px(context, 38),
+              height: UgamScale.px(context, 38),
               decoration: BoxDecoration(
                 color: value ? c.accentFill : c.card,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
               child: Icon(
-                Icons.ac_unit_rounded,
-                size: 18,
+                icon,
+                size: UgamScale.px(context, 18),
                 color: value ? c.accent : c.ink3,
               ),
             ),
@@ -1021,30 +1175,22 @@ class _ACToggle extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Text(label, style: UgamText.bodyStrong.copyWith(color: c.ink)),
                   Text(
-                    tr('add_bus.ac_toggle.label'),
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    value
-                        ? tr('add_bus.ac_toggle.on')
-                        : tr('add_bus.ac_toggle.off'),
+                    subtitle,
                     style: UgamText.caption.copyWith(
                       color: c.ink2,
-                      fontSize: 12,
+                      height: 1.4,
                     ),
                   ),
                 ],
               ),
             ),
-            // No per-switch colour overrides — the global SwitchTheme already
-            // renders a white thumb on the accent track. Overriding the thumb
-            // to accent made it orange-on-orange (a solid pill, no visible
-            // thumb).
-            Switch(value: value, onChanged: onChanged),
+            UgamSwitch(
+              value: value,
+              onChanged: onChanged,
+              semanticLabel: label,
+            ),
           ],
         ),
       ),
@@ -1153,87 +1299,34 @@ class _Step2Capacity extends StatelessWidget {
             _InlineError(c: c, text: singleSofaError!),
           ],
           const SizedBox(height: UgamSpacing.sm),
-          _BackRowToggle(
+          _ToggleRow(
             c: c,
+            icon: Icons.weekend_rounded,
+            label: tr('add_bus.back_row_toggle.label'),
+            subtitle: allDoubleBackRow
+                ? tr('add_bus.back_row_toggle.on')
+                : tr('add_bus.back_row_toggle.off'),
             value: allDoubleBackRow,
             onChanged: onAllDoubleBackRow,
           ),
           if (onRegenerate != null) ...[
             const SizedBox(height: UgamSpacing.lg),
-            _RegenerateLayoutButton(c: c, onTap: onRegenerate!),
+            // This is a button, not a settings row — it was the third copy of
+            // the icon+title+subtitle+chevron row, and the chevron read as
+            // "opens something" when it actually rebuilds and saves. The
+            // subtitle's explanation now lives in the destructive confirm,
+            // which is where it is actually read before anything happens.
+            UgamButton(
+              label: tr('add_bus.regenerate_label'),
+              kind: UgamButtonKind.neutral,
+              icon: Icons.refresh_rounded,
+              expand: true,
+              onPressed: onRegenerate,
+            ),
           ],
         ],
         const SizedBox(height: UgamSpacing.xl),
       ],
-    );
-  }
-}
-
-/// Edit-mode action that re-applies the current seat-layout engine to a bus
-/// whose layout was saved under an older engine. Styled as a secondary, slightly
-/// cautionary row (not the primary save CTA) so it stays discoverable without
-/// competing with the wizard's Next/Save button. Tapping it shows a destructive
-/// confirm before any layout is rebuilt.
-class _RegenerateLayoutButton extends StatelessWidget {
-  final UgamColorSet c;
-  final VoidCallback onTap;
-
-  const _RegenerateLayoutButton({required this.c, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.input),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(color: c.card, shape: BoxShape.circle),
-              alignment: Alignment.center,
-              child: Icon(Icons.refresh_rounded, size: 18, color: c.ink2),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    tr('add_bus.regenerate_label'),
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    tr('add_bus.regenerate_subtitle'),
-                    style: UgamText.caption.copyWith(
-                      color: c.ink2,
-                      fontSize: 12,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -1258,7 +1351,11 @@ class _ResizeWarning extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber_rounded, size: 16, color: c.warm),
+          Icon(
+            Icons.warning_amber_rounded,
+            size: UgamScale.px(context, 16),
+            color: c.warm,
+          ),
           const SizedBox(width: UgamSpacing.sm),
           Expanded(
             child: Text(
@@ -1267,85 +1364,6 @@ class _ResizeWarning extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Interactive control for the "all-double last row" seat-engine toggle. When
-/// ON, the bus's LAST row is built as 4 double sofas; when OFF (default) it's
-/// 3 single + 2 double sofas. The subtitle reflects the current state. No total
-/// seats are added either way — the count is conserved by the engine.
-class _BackRowToggle extends StatelessWidget {
-  final UgamColorSet c;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _BackRowToggle({
-    required this.c,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.md,
-        ),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.input),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: value ? c.accentFill : c.card,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                Icons.weekend_rounded,
-                size: 18,
-                color: value ? c.accent : c.ink3,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    tr('add_bus.back_row_toggle.label'),
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    value
-                        ? tr('add_bus.back_row_toggle.on')
-                        : tr('add_bus.back_row_toggle.off'),
-                    style: UgamText.caption.copyWith(
-                      color: c.ink2,
-                      fontSize: 12,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Switch(value: value, onChanged: onChanged),
-          ],
-        ),
       ),
     );
   }
@@ -1369,7 +1387,10 @@ class _StepperRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 56,
+      // Interactive slab: the +/- buttons fill its full height, so the shell
+      // and the buttons must resolve through the SAME helper or they diverge
+      // and the row overflows. 56 -> 47.6 at the 0.85 floor, still legal.
+      height: UgamScale.tap(context, 56),
       decoration: BoxDecoration(
         color: c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.input),
@@ -1386,9 +1407,7 @@ class _StepperRow extends StatelessWidget {
             child: Text(
               '$value',
               textAlign: TextAlign.center,
-              style: UgamText.tabular(
-                UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
-              ),
+              style: UgamText.tabular(UgamText.titleM.copyWith(color: c.ink)),
             ),
           ),
           _StepperBtn(
@@ -1427,10 +1446,15 @@ class _StepperBtn extends StatelessWidget {
           : null,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 56,
-        height: 56,
+        // Same helper as _StepperRow's shell (see the note there).
+        width: UgamScale.tap(context, 56),
+        height: UgamScale.tap(context, 56),
         alignment: Alignment.center,
-        child: Icon(icon, size: 20, color: enabled ? c.ink : c.ink3),
+        child: Icon(
+          icon,
+          size: UgamScale.px(context, 20),
+          color: enabled ? c.ink : c.ink3,
+        ),
       ),
     );
   }
@@ -2012,10 +2036,7 @@ class _BandRow extends StatelessWidget {
                     band.label.isEmpty
                         ? tr('add_bus.band_sheet.default_label')
                         : band.label,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: c.ink,
-                      fontSize: 13,
-                    ),
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
                   ),
                   const SizedBox(height: 2),
                   Text(
@@ -2027,19 +2048,22 @@ class _BandRow extends StatelessWidget {
             ),
             const SizedBox(width: UgamSpacing.sm),
             Text(
-              '₹${band.price.toStringAsFixed(0)}',
+              // Grouped like every other money figure in the app (₹12,500),
+              // and inked `ink` not `accent`: one copper number per band row
+              // turned the band list into a column of coppers competing with
+              // the Save CTA. The label/range in ink2 carry the hierarchy.
+              Formatters.formatMoneyInr(band.price),
               style: UgamText.tabular(
-                UgamText.bodyStrong.copyWith(color: c.accent, fontSize: 14),
+                UgamText.bodyStrong.copyWith(color: c.ink),
               ),
             ),
             const SizedBox(width: UgamSpacing.sm),
-            GestureDetector(
+            // Was a 26pt hit box nested inside the row's own edit tap, so a
+            // near-miss on "remove band" opened the edit sheet instead.
+            UgamIconButton(
+              icon: Icons.close_rounded,
               onTap: onRemove,
-              behavior: HitTestBehavior.opaque,
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(Icons.close_rounded, size: 18, color: c.ink3),
-              ),
+              semanticLabel: tr('add_bus.bands.remove_semantic'),
             ),
           ],
         ),
@@ -2077,11 +2101,7 @@ class _StepIntro extends StatelessWidget {
         const SizedBox(height: UgamSpacing.sm),
         Text(
           body,
-          style: UgamText.body.copyWith(
-            color: c.ink2,
-            fontSize: 13,
-            height: 1.5,
-          ),
+          style: UgamText.body.copyWith(color: c.ink2, height: 1.5),
         ),
       ],
     );
@@ -2090,24 +2110,21 @@ class _StepIntro extends StatelessWidget {
 
 /// Section header that splits the identity step into meaningful groups
 /// ("The bus", "Boarding", "Driver") so it reads as structure, not a uniform
-/// stack of inputs. Brighter + bolder than a field [_Label] so the two never
-/// read as the same level.
+/// stack of inputs. Brighter than a field [_Label] so the two never read as
+/// the same level.
+///
+/// Now just [UgamSectionLabel] with the brighter ink. It used to fork
+/// `letterSpacing` to 0.6 against micro's own 1.4, so a group header and the
+/// field label directly beneath it — which a user reads as one family — had
+/// visibly different tracking. Colour alone carries the tier now, which is
+/// what this widget's contract always claimed.
 class _GroupHeader extends StatelessWidget {
   final UgamColorSet c;
   final String text;
   const _GroupHeader({required this.c, required this.text});
 
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      text.toUpperCase(),
-      style: UgamText.micro.copyWith(
-        color: c.ink,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.6,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => UgamSectionLabel(text, color: c.ink);
 }
 
 class _Label extends StatelessWidget {
@@ -2116,12 +2133,7 @@ class _Label extends StatelessWidget {
   const _Label({required this.c, required this.text});
 
   @override
-  Widget build(BuildContext context) {
-    return Text(
-      text.toUpperCase(),
-      style: UgamText.micro.copyWith(color: c.ink2),
-    );
-  }
+  Widget build(BuildContext context) => UgamSectionLabel(text, color: c.ink2);
 }
 
 /// Small inline validation caption (danger-tinted) shown beneath a non-input
@@ -2138,7 +2150,11 @@ class _InlineError extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(Icons.error_outline_rounded, size: 14, color: c.danger),
+        Icon(
+          Icons.error_outline_rounded,
+          size: UgamScale.px(context, 14),
+          color: c.danger,
+        ),
         const SizedBox(width: UgamSpacing.xs),
         Expanded(
           child: Text(
@@ -2172,12 +2188,13 @@ class _SlotBadge extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.tag_rounded, size: 18, color: c.ink3),
-          const SizedBox(width: UgamSpacing.sm),
-          Text(
-            label,
-            style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 14),
+          Icon(
+            Icons.tag_rounded,
+            size: UgamScale.px(context, 18),
+            color: c.ink3,
           ),
+          const SizedBox(width: UgamSpacing.sm),
+          Text(label, style: UgamText.bodyStrong.copyWith(color: c.ink)),
           const SizedBox(width: UgamSpacing.sm),
           Text(
             tr('add_bus.slot_auto'),
@@ -2198,10 +2215,16 @@ class _RupeePrefix extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 34,
+      // Decorative gutter — scales so the gap between the glyph and the number
+      // doesn't widen on a small phone while the text shrinks around it.
+      width: UgamScale.px(context, 34),
       child: Center(
         widthFactor: 1,
         child: Text(
+          // NOT UgamText.titleS despite also being 15: titleS is Sora/w600,
+          // and this must match the number it prefixes, which UgamInput sets
+          // to `body.copyWith(fontSize: 15)` (Inter/w500). Same literal, same
+          // reason. See the note in the return payload.
           '₹',
           style: UgamText.body.copyWith(color: c.ink2, fontSize: 15),
         ),

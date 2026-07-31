@@ -235,7 +235,11 @@ class _FinanceCardState extends State<_FinanceCard> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _finance.ensureLoaded();
+      // Refetch when money moved since the last load. Settings is a tab, so its
+      // State survives every visit — with a plain ensureLoaded() the headline
+      // figure froze at whatever it was on first open and never tracked the
+      // expenses/collections logged afterwards.
+      _finance.refreshIfStale();
     });
   }
 
@@ -244,17 +248,27 @@ class _FinanceCardState extends State<_FinanceCard> {
     final c = widget.c;
     return Obx(() {
       final loaded = _finance.loadedOnce.value;
+      // A failed first load must NOT keep pretending to load: without this the
+      // card sat on "Loading…" forever with no way to retry, which is what the
+      // whole finance entry point looked like when the read failed.
+      final failed = _finance.loadFailed.value && !loaded;
       final net = loaded ? _finance.lifetimeNet : 0.0;
       final profit = net >= 0;
-      final netColor = !loaded
-          ? c.ink3
-          : (net.round() == 0 ? c.ink : (profit ? c.good : c.danger));
+      final netColor = failed
+          ? c.danger
+          : !loaded
+              ? c.ink3
+              : (net.round() == 0 ? c.ink : (profit ? c.good : c.danger));
 
       return UgamCard.plain(
         elev: true,
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const FinanceScreen()),
-        ),
+        // Retry in place when the load failed — tapping through to a report
+        // that would only show its own error state helps nobody.
+        onTap: failed
+            ? _finance.reload
+            : () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const FinanceScreen()),
+                ),
         padding: const EdgeInsets.all(UgamSpacing.lg),
         child: Row(
           children: [
@@ -262,11 +276,15 @@ class _FinanceCardState extends State<_FinanceCard> {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: c.accentFill,
+                color: failed ? c.dangerFill : c.accentFill,
                 borderRadius: BorderRadius.circular(13),
               ),
               alignment: Alignment.center,
-              child: Icon(Icons.insights_rounded, size: 21, color: c.accent),
+              child: Icon(
+                failed ? Icons.cloud_off_rounded : Icons.insights_rounded,
+                size: 21,
+                color: failed ? c.danger : c.accent,
+              ),
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -279,7 +297,12 @@ class _FinanceCardState extends State<_FinanceCard> {
                     style: UgamText.micro.copyWith(color: c.ink3),
                   ),
                   const SizedBox(height: 3),
-                  if (!loaded)
+                  if (failed)
+                    Text(
+                      tr('finance.card_failed'),
+                      style: UgamText.titleS.copyWith(color: c.danger),
+                    )
+                  else if (!loaded)
                     Text(
                       tr('finance.card_loading'),
                       style: UgamText.titleS.copyWith(color: c.ink3),
@@ -293,13 +316,19 @@ class _FinanceCardState extends State<_FinanceCard> {
                     ),
                   const SizedBox(height: 2),
                   Text(
-                    tr('finance.card_lifetime'),
+                    failed
+                        ? tr('finance.card_failed_hint')
+                        : tr('finance.card_lifetime'),
                     style: UgamText.caption.copyWith(color: c.ink3),
                   ),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+            Icon(
+              failed ? Icons.refresh_rounded : Icons.chevron_right_rounded,
+              size: 20,
+              color: c.ink3,
+            ),
           ],
         ),
       );

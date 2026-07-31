@@ -5,8 +5,13 @@ import 'package:intl/intl.dart';
 import '../text_styles.dart';
 import '../tokens.dart';
 
-/// Horizontal date selector. Each date renders as a squircle pill that
-/// inflates to a solid accent fill when active.
+/// Horizontal date selector. Each date renders as a squircle pill.
+///
+/// The active pill is **tonal** (accentFill + accent ink + hairline accent
+/// border), matching [UgamSelectorPills] — solid copper stays reserved for the
+/// one focal CTA per screen (the accent-rationing law). The inactive pill
+/// carries a transparent border of the same width so selection never reflows
+/// the strip.
 class UgamDatePillRow extends StatefulWidget {
   final List<DateTime> dates;
   final DateTime selected;
@@ -86,11 +91,18 @@ class _DatePill extends StatelessWidget {
         duration: UgamMotion.tab,
         curve: UgamMotion.easeOut,
         constraints: const BoxConstraints(minWidth: 54),
-        padding:
-            const EdgeInsets.symmetric(vertical: UgamSpacing.md, horizontal: UgamSpacing.md),
+        padding: const EdgeInsets.symmetric(
+          vertical: UgamSpacing.md,
+          horizontal: UgamSpacing.md,
+        ),
         decoration: BoxDecoration(
-          color: active ? c.accent : Colors.transparent,
+          color: active ? c.accentFill : Colors.transparent,
           borderRadius: BorderRadius.circular(22),
+          border: Border.all(
+            color: active
+                ? c.accent.withValues(alpha: 0.32)
+                : Colors.transparent,
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -99,7 +111,7 @@ class _DatePill extends StatelessWidget {
               dayNum,
               style: UgamText.tabular(
                 UgamText.titleM.copyWith(
-                  color: active ? c.onAccent : c.ink,
+                  color: active ? c.accent : c.ink,
                   fontSize: 19,
                 ),
               ),
@@ -108,7 +120,7 @@ class _DatePill extends StatelessWidget {
             Text(
               dayLabel,
               style: UgamText.micro.copyWith(
-                color: active ? c.onAccent.withValues(alpha: 0.88) : c.ink3,
+                color: active ? c.accent.withValues(alpha: 0.88) : c.ink3,
               ),
             ),
           ],

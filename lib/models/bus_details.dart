@@ -491,19 +491,6 @@ class Bus {
     return cellById;
   }
 
-  /// How many berths of [seatId] this passenger holds on this bus. A whole
-  /// double sofa shows up as TWO assignment entries on the same seatId; a shared
-  /// double as one. The base seat id is taken before any `#` suffix.
-  int _berthsHeld(Passenger passenger, String seatId) {
-    final base = seatId.split('#').first;
-    var n = 0;
-    for (final a in passenger.assignedSeats) {
-      if (a.busId != id) continue;
-      if (a.seatId.split('#').first == base) n++;
-    }
-    return n;
-  }
-
   /// Total a passenger owes for the berths they hold ON THIS bus, after the
   /// trip-type factor.
   ///
@@ -548,17 +535,45 @@ class Bus {
     final c = cellById[baseSeatId];
     if (c == null) return 0;
     final berthPrice = berthPriceFor(c.seatType!, c.row);
-    // A double sofa held in full (both berths by the same passenger) is charged
-    // for both berths on its single collection record; otherwise one berth.
-    final berths = c.seatType == SeatType.doubleSofa
-        ? _berthsHeld(passenger, baseSeatId).clamp(1, 2)
-        : 1;
-    final leg = passenger.legForSeatType(c.seatType!, position: c.position);
+    // Price EACH berth this passenger holds on the seat by its OWN stored leg,
+    // then sum. A double sofa held in full is two entries on one seatId; a
+    // shared/single is one. Reading the per-seat SeatAssignment.leg (half for a
+    // one-way berth) mirrors the capacity engine (tour_capacity: a.leg ??
+    // legForSeatType) — the coarse legForSeatType collapsed a mixed same-type
+    // booking to the heavier (round-trip) leg and over-charged a genuinely
+    // one-leg seat. Summing PER BERTH also prices a whole double whose two
+    // berths carry different-weight legs correctly (round-trip + one-way =
+    // 1.0 + 0.5), which berths × one-factor could not. Legacy berths with no
+    // recorded leg fall back to the coarse per-type leg.
+    final coarseLeg =
+        passenger.legForSeatType(c.seatType!, position: c.position);
+    final berthLegs = <TripType>[
+      for (final a in passenger.assignedSeats)
+        if (a.busId == id && a.seatId.split('#').first == baseSeatId)
+          a.leg ?? coarseLeg,
+    ];
+    // A seat can be held on BOTH legs (leg reuse), so a rider can hold up to
+    // (physical berths × 2 legs) one-leg berth-legs: a double = 2 berths × 2 =
+    // FOUR (a GO double + a RET double folded onto one sofa — 2 GO + 2 RET), a
+    // single/seater = TWO (1 GO + 1 RET). Summing them all prices a
+    // fully-occupied-both-legs seat correctly (4 × half == 2 × full for a
+    // double); the cap only guards against stray duplicate rows. An earlier cap
+    // of 2 wrongly under-charged such a merged double at half.
+    final maxBerthLegs = c.seatType!.berthsPerUnit * 2;
+    final legs = berthLegs.isEmpty
+        ? <TripType>[coarseLeg]
+        : (berthLegs.length > maxBerthLegs
+            ? berthLegs.sublist(0, maxBerthLegs)
+            : berthLegs);
+    var due = 0.0;
+    for (final l in legs) {
+      due += berthPrice * tripFactor(l);
+    }
     // Round the FINAL per-seat due to whole rupees at source. Fractional inputs
     // (one-leg 0.5 factor, sofa/2, bus/seats) otherwise leave sub-rupee dues that
     // never square against integer cash. This is the single per-collection-record
     // amount, so rounding here keeps every stored due an integer.
-    return (berthPrice * berths * tripFactor(leg)).roundToDouble();
+    return due.roundToDouble();
   }
 
   @override

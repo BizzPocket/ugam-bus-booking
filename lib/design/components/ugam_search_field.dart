@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import '../ui_scale.dart';
 
 /// The one search pill used across the app — Requests, Tour Groups, Notify,
 /// Customer list, etc. Replaces the ~5 hand-rolled `Container + TextField`
@@ -34,7 +35,9 @@ class UgamSearchField extends StatelessWidget {
     final hasText = (controller?.text ?? '').isNotEmpty;
 
     return Container(
-      height: 48,
+      // Interactive box (the whole pill focuses the field): scales down with
+      // the device but never below the 44pt tap minimum.
+      height: UgamScale.tap(context, 48),
       padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
       decoration: BoxDecoration(
         color: c.cardElev,
@@ -69,9 +72,14 @@ class UgamSearchField extends StatelessWidget {
                 onChanged?.call('');
                 onClear!.call();
               },
-              child: Padding(
-                padding: const EdgeInsets.only(left: UgamSpacing.xs),
-                child: Icon(Icons.close_rounded, size: 18, color: c.ink2),
+              // 44×44 hit box around an unchanged 18pt glyph — the painted
+              // icon is identical, only the target grows.
+              child: SizedBox(
+                width: 44,
+                height: 44,
+                child: Center(
+                  child: Icon(Icons.close_rounded, size: 18, color: c.ink2),
+                ),
               ),
             ),
         ],

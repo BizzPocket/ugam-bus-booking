@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
-import '../design/components/ugam_capacity_meter.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
@@ -48,6 +47,24 @@ class ManageBusesScreen extends StatelessWidget {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (context) => AddBusScreen(tourId: tourId, existing: bus),
+                  ),
+                );
+              },
+            ),
+            // Duplicate: open the add wizard seeded from this bus as a template
+            // (capacity, layout, pricing, boarding, departure, AC all carry
+            // over) but STAY in add mode, so save creates a new bus in the next
+            // slot. The plate and driver are left blank for the new vehicle.
+            _BusMenuTile(
+              c: c,
+              icon: Icons.copy_all_rounded,
+              label: tr('manage_buses.menu_duplicate'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        AddBusScreen(tourId: tourId, templateBus: bus),
                   ),
                 );
               },
@@ -543,10 +560,12 @@ class _HandlerPickTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 2 lines before ellipsis — app-wide name rule, see
+                  // UgamRequestRow.
                   Text(
                     passenger.displayName,
                     style: UgamText.bodyStrong.copyWith(color: c.ink),
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                   if (passenger.phone.isNotEmpty)

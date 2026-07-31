@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/bus_details.dart';
+import 'package:occubusbooking/models/bus_type.dart';
 import 'package:occubusbooking/models/chart_footer.dart';
 import 'package:occubusbooking/models/passenger.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
@@ -24,6 +26,46 @@ int _pageCount(Uint8List bytes) {
   final text = String.fromCharCodes(bytes);
   return RegExp(r'/Type\s*/Page\b').allMatches(text).length;
 }
+
+// ── Drawn-content probe ─────────────────────────────────────────────────────
+//
+// Page COUNT alone can't catch the overflow bug: the broken build produced a
+// perfectly valid single page that was simply EMPTY. So inflate every content
+// stream and count the text-showing operators — that is a direct measure of how
+// much the chart actually drew. A fully occupied bus draws a name + phone +
+// pickup tag per berth (hundreds of ops); a chart whose table was dropped draws
+// only the two title lines.
+int _drawnTextOps(Uint8List bytes) {
+  final raw = String.fromCharCodes(bytes);
+  var ops = 0;
+  for (final m in RegExp(r'stream\r?\n').allMatches(raw)) {
+    final end = raw.indexOf('endstream', m.end);
+    if (end < 0) continue;
+    final chunk = bytes.sublist(m.end, end);
+    List<int> data;
+    try {
+      data = ZLibCodec().decode(chunk);
+    } catch (_) {
+      data = chunk; // uncompressed stream
+    }
+    // pdf's PdfGraphics.drawString emits the array form: `[<hex>]TJ`.
+    ops += RegExp(r'\]TJ').allMatches(String.fromCharCodes(data)).length;
+  }
+  return ops;
+}
+
+/// A sleeper bus generated at [seats] berths — the real-world shape (a full AC
+/// sleeper) whose chart overruns one A4 page once every berth is occupied.
+Bus _generatedBus(String id, String name, int seats) => Bus(
+      id: id,
+      name: name,
+      busType: 'Sleeper',
+      layout: BusLayout.generate(
+        busType: BusType.sleeper,
+        totalSeats: seats,
+        singleSofaCount: seats ~/ 2,
+      ),
+    );
 
 // ── Fixture helpers ─────────────────────────────────────────────────────────
 
@@ -165,6 +207,140 @@ void main() {
 
       expect(bytes, isNotEmpty);
       expect(_pageCount(bytes), 1);
+    });
+
+    // A double sofa shared by TWO DIFFERENT berth owners must render its two
+    // occupants side-by-side (Row + dashed "sofa breaker"), not stacked. This
+    // exercises the _isBerthPair split path — assert the layout doesn't throw.
+    test('shared double sofa (two distinct berth owners) builds without throwing',
+        () async {
+      final b1 = _balconyBus('b1');
+      final tour = Tour(
+        title: 'Shared Double',
+        fromCity: 'Surat',
+        toCity: 'Dwarka',
+        departureDate: DateTime(2026, 7, 23),
+        pricePerSeat: 0,
+        buses: [b1],
+        passengers: [
+          _p('a', name: 'Amit', assigned: const [
+            SeatAssignment(busId: 'b1', seatId: 'b1_DL1'),
+          ]),
+          _p('b', name: 'Bhavesh', assigned: const [
+            SeatAssignment(busId: 'b1', seatId: 'b1_DL1'),
+          ]),
+        ],
+      );
+      // Both distinct riders resolve to the one double-sofa seatId.
+      final names = SeatChartPdf.debugOccupantNamesForBus(tour, 'b1');
+      expect(names['b1_DL1'], unorderedEquals(['Amit', 'Bhavesh']));
+      // The side-by-side berth split (Row + Expanded + dashed divider) must lay
+      // out and produce a valid single page.
+      final bytes = await SeatChartPdf.buildTourChartPdf(
+        tour: tour,
+        footer: const ChartFooter(),
+        onlyBusId: 'b1',
+      );
+      expect(bytes, isNotEmpty);
+      expect(_pageCount(bytes), 1);
+      // ...and the table must actually be DRAWN. The berth split used to build a
+      // height-less divider stretched by CrossAxisAlignment.stretch, which pdf's
+      // Flex resolves to `minHeight = maxHeight = constraints.maxHeight` — and a
+      // table cell passes UNBOUNDED height, so the cell became infinitely tall.
+      // The page Column then silently dropped the table AND the footer, printing
+      // a title-only blank sheet for every bus carrying a shared double sofa.
+      // Two title lines alone would be ~2 text ops; a drawn chart is far more.
+      expect(_drawnTextOps(bytes), greaterThan(10));
+    });
+  });
+
+  // ── Page overflow (the BLANK-page bug) ─────────────────────────────────────
+  //
+  // A busy bus's chart is taller than one A4 page: every berth draws a name, a
+  // phone, a leg tag and a pickup tag. The `pdf` package's Column DROPS the
+  // first child that overflows AND every child after it (it breaks out of the
+  // layout loop before advancing `_context.lastChild`), so the fixed-height
+  // page rendered a title-only BLANK sheet for the fullest buses and silently
+  // ate the footer on the nearly-full ones. Both build modes must now draw the
+  // whole chart.
+  group('SeatChartPdf page overflow', () {
+    /// A 40-berth sleeper with EVERY berth occupied — the shape that went blank.
+    Tour fullBusTour() {
+      final bus = _generatedBus('big', 'VANTARA 3600', 40);
+      final seatIds = bus.layout!.grid
+          .where((c) => c.hasSeat && c.seatId != null)
+          .map((c) => c.seatId!)
+          .toList();
+      return Tour(
+        title: 'Full Sleeper',
+        fromCity: 'Surat',
+        toCity: 'Gondal',
+        departureDate: DateTime(2026, 7, 20),
+        pricePerSeat: 0,
+        buses: [bus],
+        passengers: [
+          for (var i = 0; i < seatIds.length; i++)
+            Passenger(
+              id: 'p$i',
+              tourId: 't1',
+              name: 'Passenger Name $i',
+              phone: '+919879600000',
+              pickupLocationName: 'વ્રજ ભૂમિ પાર્કિંગ',
+              assignedSeats: [
+                SeatAssignment(busId: 'big', seatId: seatIds[i]),
+              ],
+            ),
+        ],
+      );
+    }
+
+    test('a full bus flows onto a second page instead of rendering blank',
+        () async {
+      final tour = fullBusTour();
+      final bytes = await SeatChartPdf.buildTourChartPdf(
+        tour: tour,
+        footer: const ChartFooter(boardingPlace: 'Vraj Bhumi Parking'),
+      );
+
+      // Before the fix this was exactly ONE page carrying only the two title
+      // lines. The table must now be drawn in full, spilling to a second sheet.
+      expect(_pageCount(bytes), greaterThan(1));
+      expect(_drawnTextOps(bytes), greaterThan(100));
+    });
+
+    test('fitOnePage keeps the whole chart on a SINGLE page', () async {
+      final tour = fullBusTour();
+      final bytes = await SeatChartPdf.buildTourChartPdf(
+        tour: tour,
+        footer: const ChartFooter(boardingPlace: 'Vraj Bhumi Parking'),
+        onlyBusId: 'big',
+        fitOnePage: true,
+      );
+
+      // The per-passenger WhatsApp image must stay ONE image — the table scales
+      // down rather than overflowing (which would drop it entirely).
+      expect(_pageCount(bytes), 1);
+      expect(_drawnTextOps(bytes), greaterThan(100));
+    });
+
+    test('a chart that already fits is unaffected by fitOnePage', () async {
+      final tour = _twoBusTour();
+      final flowing = await SeatChartPdf.buildTourChartPdf(
+        tour: tour,
+        footer: const ChartFooter(),
+        onlyBusId: 'b1',
+      );
+      final fitted = await SeatChartPdf.buildTourChartPdf(
+        tour: tour,
+        footer: const ChartFooter(),
+        onlyBusId: 'b1',
+        fitOnePage: true,
+      );
+
+      expect(_pageCount(flowing), 1);
+      expect(_pageCount(fitted), 1);
+      // Same content drawn either way — scaleDown is a no-op when it fits.
+      expect(_drawnTextOps(fitted), _drawnTextOps(flowing));
     });
   });
 

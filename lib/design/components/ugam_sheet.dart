@@ -75,87 +75,96 @@ class _SheetShell extends StatelessWidget {
     return Material(
       type: MaterialType.transparency,
       child: Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: const BorderRadius.vertical(
-          top: Radius.circular(UgamRadius.sheet),
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(UgamRadius.sheet),
+          ),
         ),
-      ),
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: UgamSpacing.sm),
-          // Tappable grab handle — a second, discoverable way to dismiss
-          // (besides swipe-down and tap-outside).
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.of(context).maybePop(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: c.ink3,
-                  borderRadius: BorderRadius.circular(2),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: UgamSpacing.sm),
+            // Tappable grab handle — a second, discoverable way to dismiss
+            // (besides swipe-down and tap-outside).
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).maybePop(),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: c.ink3,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
             ),
-          ),
-          if (title != null) ...[
-            const SizedBox(height: UgamSpacing.md),
-            Padding(
-              padding: const EdgeInsets.only(
-                left: UgamSpacing.xl,
-                right: UgamSpacing.md,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title!,
-                      style: UgamText.titleL.copyWith(color: c.ink),
-                    ),
-                  ),
-                  if (showClose)
-                    GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => Navigator.of(context).maybePop(),
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        decoration: BoxDecoration(
-                          color: c.cardElev,
-                          shape: BoxShape.circle,
-                        ),
-                        alignment: Alignment.center,
-                        child: Icon(
-                          Icons.close_rounded,
-                          size: 18,
-                          color: c.ink2,
-                        ),
+            if (title != null) ...[
+              const SizedBox(height: UgamSpacing.md),
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: UgamSpacing.xl,
+                  right: UgamSpacing.md,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title!,
+                        style: UgamText.titleL.copyWith(color: c.ink),
                       ),
                     ),
-                ],
+                    if (showClose)
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => Navigator.of(context).maybePop(),
+                        // 44×44 hit box around the UNCHANGED 32pt painted
+                        // circle — the glyph and its disc are pixel-identical,
+                        // only the target grows.
+                        child: SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: Center(
+                            child: Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: c.cardElev,
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                Icons.close_rounded,
+                                size: 18,
+                                color: c.ink2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  UgamSpacing.xl,
+                  UgamSpacing.lg,
+                  UgamSpacing.xl,
+                  UgamSpacing.xl,
+                ),
+                child: child,
               ),
             ),
           ],
-          Flexible(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.xl,
-                UgamSpacing.lg,
-                UgamSpacing.xl,
-                UgamSpacing.xl,
-              ),
-              child: child,
-            ),
-          ),
-        ],
-      ),
+        ),
       ),
     );
   }

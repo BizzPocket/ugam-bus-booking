@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
@@ -126,18 +127,41 @@ class _MainShellState extends State<MainShell> {
       final currentIndex = shell.currentIndex.value;
       _visitedTabs.add(currentIndex);
 
-      final currentNavigatorKey = shell.navigatorKeys[currentIndex];
-      final canTabPop = currentNavigatorKey.currentState?.canPop() ?? false;
-      final canRootPop = currentIndex == 0 && !canTabPop;
-
+      // Android back. `canPop` MUST stay false: this Obx only re-runs when
+      // `currentIndex` changes, so any value derived from a nested navigator's
+      // `canPop()` at BUILD time goes stale the moment a tab pushes a route
+      // (pushing does not change the index, so the shell never rebuilds).
+      // Previously a stale-false `canTabPop` let the root route pop first —
+      // back from a pushed sub-page on Home exited the app, and on tabs 1-4 it
+      // jumped to Home instead of popping one level.
+      //
+      // With `canPop: false` the shell route can never be popped out from
+      // under us, and we resolve the target navigator at POP time instead:
+      // pop the active tab's nested stack, else fall back to tab 0, else let
+      // the root navigator / system take it.
+      //
+      // Accepted side effect: predictive-back preview is off for the shell
+      // route (it was already off on tabs 1-4, where `canRootPop` was false).
       return PopScope(
-        canPop: canRootPop,
+        canPop: false,
         onPopInvokedWithResult: (didPop, result) {
-          if (didPop) return;
-          if (canTabPop) {
-            currentNavigatorKey.currentState?.pop();
-          } else if (currentIndex != 0) {
+          if (didPop || !mounted) return;
+          final index = shell.currentIndex.value;
+          final nav = shell.navigatorKeys[index].currentState;
+          if (nav != null && nav.canPop()) {
+            nav.pop();
+          } else if (index != 0) {
             shell.switchTab(0);
+          } else {
+            // Home, nothing left to pop. Preserve the old `canRootPop`
+            // behaviour: hand back to the root navigator if anything sits
+            // beneath the shell, otherwise leave the app.
+            final rootNav = Navigator.of(context);
+            if (rootNav.canPop()) {
+              rootNav.pop();
+            } else {
+              SystemNavigator.pop();
+            }
           }
         },
         child: UgamScaffold(

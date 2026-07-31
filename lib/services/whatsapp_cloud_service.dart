@@ -43,6 +43,22 @@ class WaSendResult {
   bool get anySent => sent > 0;
 }
 
+/// Raised when a WhatsApp Edge Function refuses the whole send (a non-2xx
+/// reply), e.g. the 403 the `bus-message` function returns when the caller is
+/// not this bus's handler or the tour is not yet locked. Carries the server's
+/// real [reason] (from the response body) so callers/logs can diagnose the
+/// failure instead of seeing an opaque transport error.
+class WhatsAppSendException implements Exception {
+  final String reason;
+  final int? status;
+
+  const WhatsAppSendException(this.reason, {this.status});
+
+  @override
+  String toString() =>
+      'WhatsAppSendException(${status != null ? 'status: $status, ' : ''}$reason)';
+}
+
 /// A single templated WhatsApp message to send through the Edge Function.
 class WaMessage {
   final String to;
@@ -134,16 +150,49 @@ class WhatsAppCloudService {
 
         final data = res.data;
         if (data is Map) {
+          // A 2xx that still carries a top-level `error` (e.g. the function's
+          // own "WHATSAPP_TOKEN not configured") describes the WHOLE chunk.
+          // Without this it parsed as zero results and the caller reported
+          // "no recipients" — a misdiagnosis of a configuration failure.
+          final topLevelError = data['error']?.toString();
           final rawResults = (data['results'] as List?) ?? const [];
           final chunkResults = rawResults
               .whereType<Map>()
               .map((r) => WaRecipientResult.fromMap(Map<String, dynamic>.from(r)))
               .toList();
+
+          if (chunkResults.isEmpty &&
+              topLevelError != null &&
+              topLevelError.trim().isNotEmpty) {
+            failed += chunk.length;
+            results.addAll(chunk.map((m) => WaRecipientResult(
+                  to: m.to,
+                  ok: false,
+                  error: topLevelError,
+                )));
+            continue;
+          }
+
           results.addAll(chunkResults);
           sent += (data['sent'] as num?)?.toInt() ??
               chunkResults.where((r) => r.ok).length;
           failed += (data['failed'] as num?)?.toInt() ??
               chunkResults.where((r) => !r.ok).length;
+        } else {
+          // Neither a Map nor a throw: the reply shape is not one we understand
+          // (an HTML error page, a bare string, null). Previously this fell
+          // through as 0 sent / 0 failed / no results — indistinguishable from
+          // "there was nobody to message", which is exactly how a real failure
+          // came to be reported as "no recipients". Record it as a failure of
+          // every recipient in the chunk, carrying what we did receive.
+          debugPrint('[WA] unexpected reply shape: ${data.runtimeType} / $data');
+          failed += chunk.length;
+          results.addAll(chunk.map((m) => WaRecipientResult(
+                to: m.to,
+                ok: false,
+                error: 'Unexpected response from WhatsApp sender '
+                    '(HTTP ${res.status})',
+              )));
         }
       } catch (e) {
         debugPrint('[WA] invoke FAILED: $e');
@@ -163,9 +212,15 @@ class WhatsAppCloudService {
   /// that the bus's `handler_passenger_id` is that handler before sending. The
   /// function loads that bus's passenger phones server-side and sends the
   /// `busMessageTemplate` (body {{1}} = [message]) via the Graph API, returning
-  /// the same `{results, sent, failed}` shape [send] parses. Returns
-  /// [WaSendResult.empty] on an unauthorized (403) / malformed reply; never
-  /// throws on a per-recipient failure — inspect [WaSendResult].
+  /// the same `{results, sent, failed}` shape [send] parses.
+  ///
+  /// On a non-2xx reply `invoke()` THROWS a [FunctionException] (most notably the
+  /// 403 the function returns when the caller is not this bus's handler / the
+  /// tour is not yet locked); the concrete reason lives in the JSON body. We
+  /// catch it and rethrow a [WhatsAppSendException] carrying that real reason so
+  /// the failure is DIAGNOSABLE — rather than swallowing it behind an opaque
+  /// transport error. A per-recipient failure never throws — inspect
+  /// [WaSendResult]; a malformed 2xx reply returns [WaSendResult.empty].
   Future<WaSendResult> sendBusMessageAsHandler({
     required String requestId,
     required String busId,
@@ -173,7 +228,14 @@ class WhatsAppCloudService {
   }) async {
     final body = {'requestId': requestId, 'busId': busId, 'message': message};
     debugPrint('[WA] invoke "bus-message" (handler) body=$body');
-    final res = await _client.functions.invoke('bus-message', body: body);
+    final FunctionResponse res;
+    try {
+      res = await _client.functions.invoke('bus-message', body: body);
+    } on FunctionException catch (e) {
+      final reason = _functionErrorReason(e);
+      debugPrint('[WA] bus-message FAILED status=${e.status} reason=$reason');
+      throw WhatsAppSendException(reason, status: e.status);
+    }
     debugPrint('[WA] bus-message status=${res.status} data=${res.data}');
 
     final data = res.data;
@@ -189,6 +251,18 @@ class WhatsAppCloudService {
     final failed = (data['failed'] as num?)?.toInt() ??
         results.where((r) => !r.ok).length;
     return WaSendResult(sent: sent, failed: failed, results: results);
+  }
+
+  /// Pulls the human-readable reason out of a failed Edge Function reply. The
+  /// `bus-message` function reports failures as `{ "error": "<reason>" }` in the
+  /// JSON body, surfaced as [FunctionException.details]; fall back to the raw
+  /// details / HTTP reason phrase / status when the shape differs.
+  static String _functionErrorReason(FunctionException e) {
+    final d = e.details;
+    if (d is Map && d['error'] != null) return d['error'].toString();
+    if (d is String && d.trim().isNotEmpty) return d;
+    if (d != null) return d.toString();
+    return e.reasonPhrase ?? 'HTTP ${e.status}';
   }
 
   /// Default lifetime for an upload link. The Cloud API fetches the media once

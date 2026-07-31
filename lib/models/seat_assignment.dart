@@ -1,3 +1,4 @@
+import '../utils/json_coerce.dart';
 import 'trip_type.dart';
 
 /// A single seat assignment: ties a passenger to a specific seat on a specific bus.
@@ -35,12 +36,22 @@ class SeatAssignment {
     };
   }
 
+  /// Parses one element of the `assigned_seats` JSONB array.
+  ///
+  /// Postgres type-checks nothing inside `jsonb`, so this receives whatever
+  /// is actually stored — including elements with a missing busId, a numeric
+  /// seatId, or `locked: "yes"`. Coerce rather than cast: throwing here would
+  /// propagate out of `Passenger.fromMap` and fail the whole roster load.
+  /// Callers drop a seat whose busId/seatId cannot be recovered — see
+  /// [Passenger.parseAssignedSeats].
   factory SeatAssignment.fromMap(Map<String, dynamic> map) {
     return SeatAssignment(
-      busId: map['busId'] as String,
-      seatId: map['seatId'] as String,
-      locked: map['locked'] as bool? ?? false,
-      leg: map['leg'] != null ? TripType.fromString(map['leg'] as String) : null,
+      busId: coerceString(map['busId']) ?? '',
+      seatId: coerceString(map['seatId']) ?? '',
+      locked: coerceBool(map['locked']),
+      leg: map['leg'] != null
+          ? TripType.fromString(coerceString(map['leg']))
+          : null,
     );
   }
 

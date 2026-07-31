@@ -148,7 +148,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
                     .first;
             return Column(
               children: [
-                _Header(c: c),
+                UgamAppBar(title: tr('charts.title'), showBack: false),
                 Expanded(
                   child: UgamEmpty(
                     icon: Icons.event_seat_outlined,
@@ -162,13 +162,18 @@ class _ChartsScreenState extends State<ChartsScreen> {
                       onPressed: () {
                         HapticFeedback.lightImpact();
                         final target = addBusTarget;
+                        // Both branches push the same way — the single empty
+                        // -state button used to animate differently depending
+                        // on which label it happened to be showing.
                         if (target != null) {
-                          Get.to(() => AddBusScreen(tourId: target.id));
+                          Get.to(
+                            () => AddBusScreen(tourId: target.id),
+                            transition: Transition.cupertino,
+                          );
                         } else {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => const CreateTourScreen(),
-                            ),
+                          Get.to(
+                            () => const CreateTourScreen(),
+                            transition: Transition.cupertino,
                           );
                         }
                       },
@@ -199,7 +204,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
 
           return Column(
             children: [
-              _Header(c: c),
+              UgamAppBar(title: tr('charts.title'), showBack: false),
               if (eligible.length > 1) ...[
                 UgamSelectorPills(
                   items: [
@@ -307,19 +312,6 @@ class _ChartsScreenState extends State<ChartsScreen> {
   }
 }
 
-// ─── Header ────────────────────────────────────────────────────────────
-
-class _Header extends StatelessWidget {
-  final UgamColorSet c;
-  const _Header({required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    // Shared chrome — this is a top-level tab, so no back affordance.
-    return UgamAppBar(title: tr('charts.title'), showBack: false);
-  }
-}
-
 // ─── Bus bar ───────────────────────────────────────────────────────────
 
 /// One compact row that merges what used to be a separate bus-selector strip
@@ -397,18 +389,20 @@ class _FillIndicator extends StatelessWidget {
       children: [
         Text(
           '$assigned/$total',
-          style: UgamText.tabular(
-            UgamText.numLg.copyWith(color: c.ink, fontSize: 16),
-          ),
+          // `numLg` unforked — this is a tabular count like every other one in
+          // the app, and the 16pt override made it read a step small.
+          style: UgamText.tabular(UgamText.numLg.copyWith(color: c.ink)),
         ),
         const SizedBox(width: UgamSpacing.sm),
         SizedBox(
-          width: 52,
+          // Decorative rail: scales, so it stops crowding the bus pills to its
+          // left on a narrow phone.
+          width: UgamScale.px(context, 52),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(UgamRadius.chip),
             child: LinearProgressIndicator(
               value: ratio.clamp(0.0, 1.0),
-              minHeight: 6,
+              minHeight: UgamScale.px(context, 6),
               backgroundColor: c.card,
               valueColor: AlwaysStoppedAnimation(c.ink2),
             ),
@@ -437,47 +431,27 @@ class _EditSeatsFab extends StatelessWidget {
     return Semantics(
       button: true,
       label: tr('charts.edit_seats'),
-      child: Material(
-        color: c.accent,
-        elevation: 0,
-        borderRadius: BorderRadius.circular(UgamRadius.button),
-        shadowColor: Colors.transparent,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(UgamRadius.button),
-            boxShadow: [
-              BoxShadow(
-                color: c.glow,
-                blurRadius: 18,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(UgamRadius.button),
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onTap();
-            },
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 48),
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.lg,
-                vertical: UgamSpacing.sm + 2,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.edit_rounded, size: 18, color: c.onAccent),
-                  const SizedBox(width: UgamSpacing.sm),
-                  Text(
-                    tr('charts.edit_seats'),
-                    style: UgamText.bodyStrong.copyWith(color: c.onAccent),
-                  ),
-                ],
-              ),
+      // Only the copper GLOW is bespoke — it is unique to this surface. The
+      // button itself is the shared [UgamButton], so its height, radius, icon
+      // size and press feedback match every other primary in the app (and the
+      // box now follows [UgamScale] instead of sitting at a fixed 48 while its
+      // label shrinks).
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+          boxShadow: [
+            BoxShadow(
+              color: c.glow,
+              blurRadius: 18,
+              offset: const Offset(0, 6),
             ),
-          ),
+          ],
+        ),
+        child: UgamButton(
+          label: tr('charts.edit_seats'),
+          icon: Icons.edit_rounded,
+          kind: UgamButtonKind.primary,
+          onPressed: onTap,
         ),
       ),
     );

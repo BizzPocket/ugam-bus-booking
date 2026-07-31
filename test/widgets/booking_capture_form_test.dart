@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+import 'package:occubusbooking/controllers/pickup_controller.dart';
+import 'package:occubusbooking/models/pickup_location.dart';
 import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/trip_type.dart';
@@ -212,4 +214,108 @@ void main() {
     expect(single.firstWhere((l) => l.leg == TripType.roundTrip).qty, 2);
     expect(single.firstWhere((l) => l.leg == TripType.returnOnly).qty, 1);
   });
+
+  // ─── PICKUP IS MANDATORY ON EVERY SURFACE ──────────────────────────────
+  //
+  // A request with no pickup point leaves the roster and the driver's chart
+  // guessing where to collect the rider, so the form requires one by DEFAULT —
+  // the organiser's own add/edit sheets included, not just the customer form.
+  // The one escape hatch: a tour whose pickup list is empty (the field is
+  // hidden) must never be blocked, or the organiser hits a dead end.
+
+  testWidgets('blank pickup blocks collect() by default (admin add)', (
+    tester,
+  ) async {
+    _useTallSurface(tester);
+    _seedPickups();
+    final key = GlobalKey<BookingCaptureFormState>();
+    await tester.pumpWidget(
+      // No requirePickup flag — this is exactly how the admin add sheet builds
+      // it, and it must still demand a pickup point.
+      _host(BookingCaptureForm(key: key, fromCity: 'A', toCity: 'B')),
+    );
+    await tester.pump();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Asha');
+    await tester.enterText(fields.at(1), _phone);
+    await tester.tap(find.byKey(const Key('seat-add-singleSofa')));
+    await tester.pump();
+
+    expect(
+      key.currentState!.collect(),
+      isNull,
+      reason: 'otherwise-valid booking must still be blocked without a pickup',
+    );
+  });
+
+  testWidgets('a chosen pickup passes and rides along on collect()', (
+    tester,
+  ) async {
+    _useTallSurface(tester);
+    _seedPickups();
+    final key = GlobalKey<BookingCaptureFormState>();
+    await tester.pumpWidget(
+      _host(
+        BookingCaptureForm(
+          key: key,
+          fromCity: 'A',
+          toCity: 'B',
+          initial: BookingCaptureInitial.fromLines(
+            name: 'Asha',
+            phone: _phone,
+            lines: const [
+              RequestLine(seatType: SeatType.singleSofa, qty: 1),
+            ],
+            pickupLocationId: 'p1',
+            pickupLocationName: 'Surat',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final data = key.currentState!.collect();
+    expect(data, isNotNull);
+    expect(data!.pickupLocationId, 'p1');
+    expect(data.pickupLocationName, 'Surat');
+  });
+
+  testWidgets('no configured pickup points never blocks the booking', (
+    tester,
+  ) async {
+    _useTallSurface(tester);
+    _seedPickups(const []);
+    final key = GlobalKey<BookingCaptureFormState>();
+    await tester.pumpWidget(
+      _host(BookingCaptureForm(key: key, fromCity: 'A', toCity: 'B')),
+    );
+    await tester.pump();
+
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), 'Asha');
+    await tester.enterText(fields.at(1), _phone);
+    await tester.tap(find.byKey(const Key('seat-add-singleSofa')));
+    await tester.pump();
+
+    final data = key.currentState!.collect();
+    expect(data, isNotNull, reason: 'empty pickup list must not dead-end');
+    expect(data!.pickupLocationId, isNull);
+  });
+}
+
+/// Register a [PickupController] pre-loaded with [points] (a default Surat /
+/// Bardoli pair). `loadedOnce` is set so the form's `ensureLoaded()` short-
+/// circuits and never reaches Supabase, which isn't initialised under test.
+void _seedPickups([
+  List<PickupLocation> points = const [
+    PickupLocation(id: 'p1', name: 'Surat', code: 'ST'),
+    PickupLocation(id: 'p2', name: 'Bardoli', code: 'BD', sortOrder: 1),
+  ],
+]) {
+  final ctrl = PickupController();
+  ctrl.all.assignAll(points);
+  ctrl.loadedOnce.value = true;
+  Get.put<PickupController>(ctrl);
+  addTearDown(Get.reset);
 }

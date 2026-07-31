@@ -35,41 +35,43 @@ class UgamColors {
   const UgamColors._();
 
   static const UgamColorSet dark = UgamColorSet(
-    bg: Color(0xFF0C0D10),          // Cool near-black ground
-    card: Color(0xFF15171C),        // Soft floating surface (no border needed)
-    cardElev: Color(0xFF1E2128),    // Elevated surface
-    border: Color(0x0FFFFFFF),      // White @ ~6% — used sparingly
-    ink: Color(0xFFF5F6F8),         // Near-white
-    ink2: Color(0xFF9A9DA7),        // Secondary
-    ink3: Color(0xFF5C5F69),        // Tertiary / meta
-    accent: Brand.copper,           // Warm copper — the one signal color
-    accentFill: Color(0x24D8966A),  // ~14% copper, tonal surfaces
-    glow: Color(0x4DD8966A),        // ~30% copper — soft halos + button shadow
-    good: Color(0xFF4ADE9A),        // Mint — paid / success
+    bg: Color(0xFF0C0D10), // Cool near-black ground
+    card: Color(0xFF15171C), // Soft floating surface (no border needed)
+    cardElev: Color(0xFF1E2128), // Elevated surface
+    border: Color(0x0FFFFFFF), // White @ ~6% — used sparingly
+    ink: Color(0xFFF5F6F8), // Near-white
+    ink2: Color(0xFF9A9DA7), // Secondary
+    ink3: Color(0xFF5C5F69), // Tertiary / meta
+    accent: Brand.copper, // Warm copper — the one signal color
+    accentFill: Color(0x24D8966A), // ~14% copper, tonal surfaces
+    glow: Color(0x4DD8966A), // ~30% copper — soft halos + button shadow
+    good: Color(0xFF4ADE9A), // Mint — paid / success
     goodFill: Color(0x224ADE9A),
-    warm: Color(0xFFE98AB4),        // Rose — attention / ladies (distinct)
+    warm: Color(0xFFE98AB4), // Rose — attention / ladies (distinct)
     warmFill: Color(0x29E98AB4),
-    danger: Color(0xFFFF5247),      // Vivid red
-    onAccent: Color(0xFF1A0E07),    // Near-black ink on copper
+    danger: Color(0xFFFF5247), // Vivid red
+    dangerFill: Color(0x29FF5247), // ~16% red, tonal danger surfaces
+    onAccent: Color(0xFF1A0E07), // Near-black ink on copper
   );
 
   static const UgamColorSet light = UgamColorSet(
-    bg: Color(0xFFF6F7F9),          // Clean bright ground
-    card: Color(0xFFFFFFFF),        // White surface
-    cardElev: Color(0xFFEEF0F4),    // Soft elevated surface
-    border: Color(0x0F000000),      // Black @ ~6%
-    ink: Color(0xFF14161B),         // Near-black ink
-    ink2: Color(0xFF5A5E68),        // Readable secondary
-    ink3: Color(0xFF9A9DA7),        // Tertiary / meta
-    accent: Brand.copperDeep,       // Deeper copper — legible on white
-    accentFill: Color(0xFFF4E7DC),  // Pale copper tint
-    glow: Color(0x38B8703F),        // ~22% copper halo
+    bg: Color(0xFFF6F7F9), // Clean bright ground
+    card: Color(0xFFFFFFFF), // White surface
+    cardElev: Color(0xFFEEF0F4), // Soft elevated surface
+    border: Color(0x0F000000), // Black @ ~6%
+    ink: Color(0xFF14161B), // Near-black ink
+    ink2: Color(0xFF5A5E68), // Readable secondary
+    ink3: Color(0xFF9A9DA7), // Tertiary / meta
+    accent: Brand.copperDeep, // Deeper copper — legible on white
+    accentFill: Color(0xFFF4E7DC), // Pale copper tint
+    glow: Color(0x38B8703F), // ~22% copper halo
     good: Color(0xFF0E9E73),
     goodFill: Color(0xFFD8F1E7),
-    warm: Color(0xFFC24D86),        // Rose — attention / ladies
+    warm: Color(0xFFC24D86), // Rose — attention / ladies
     warmFill: Color(0xFFF8E2EC),
     danger: Color(0xFFD7362B),
-    onAccent: Color(0xFFFFFFFF),    // Light ink on deep copper
+    dangerFill: Color(0xFFF9E3E1), // Pale red tint
+    onAccent: Color(0xFFFFFFFF), // Light ink on deep copper
   );
 
   static UgamColorSet of(BuildContext context) =>
@@ -96,6 +98,10 @@ class UgamColorSet {
   final Color warm;
   final Color warmFill;
   final Color danger;
+
+  /// Tonal danger surface — the background under danger-inked text/badges.
+  /// Use instead of `danger.withValues(alpha: …)`, which drifts per call site.
+  final Color dangerFill;
   final Color onAccent;
 
   const UgamColorSet({
@@ -114,6 +120,7 @@ class UgamColorSet {
     required this.warm,
     required this.warmFill,
     required this.danger,
+    required this.dangerFill,
     required this.onAccent,
   });
 }
@@ -149,14 +156,28 @@ class UgamSpacing {
 
   static const double xs = 4;
   static const double sm = 8;
+
+  /// The `sm + 2` idiom, named. Appears 15+ times across 6 screens as an
+  /// ad-hoc "slightly looser than sm" step — use this instead of the sum.
+  static const double tight = 10;
   static const double md = 12;
   static const double gutter = 14;
   static const double lg = 16;
+
+  // NOTE: xl == lg (16); prefer lg. This is deliberate (the density pass
+  // compressed xl from 20 down to 16), NOT a distinct scale step. Correcting
+  // it would shift every `xl` call site app-wide, so it stays as-is.
   static const double xl = 16; // was 20 — section seams / card padding
   static const double xxl = 20; // was 24
   static const double huge = 26; // was 32
   static const double huge2 = 32; // was 40
   static const double huge3 = 44; // was 56
+
+  /// Badge / micro-chip padding — the 6×2 geometry `UgamReqChip` already
+  /// ships, named so the ~12 hand-rolled badges across 8 screens stop
+  /// inventing their own.
+  static const double badgeH = 6;
+  static const double badgeV = 2;
 
   /// Bottom padding for scrollables whose content scrolls under the floating
   /// dock (≈ 80px + safe-area). Use instead of hardcoded 140/120/96.

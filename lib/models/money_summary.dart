@@ -27,11 +27,28 @@ class BusMoneySummary {
   final double income;
 
   /// The bus owner's rent, already folded into [expensesTotal]. Kept as a
-  /// discrete figure so it can be surfaced as its own ledger row. The HANDLER
-  /// settles the owner directly out of the cash they collect, so rent is a real
-  /// deduction from what they hand over — it sits INSIDE the handover
-  /// expectation (see [expectedHandover]), never added back.
+  /// discrete figure so it can be surfaced as its own ledger row.
+  ///
+  /// ADMIN-ONLY: the ADMIN settles the bus owner, not the handler, so rent is
+  /// NOT deducted from what the handler hands over — it is added back out of
+  /// [expectedHandover] and never shown on any handler surface. It stays a real
+  /// cost of the trip, so it remains inside [netCollected] / [netBilled].
   final double busRent;
+
+  /// How much of [collected] was paid by riders who NO LONGER hold a seat on
+  /// this bus — they were unseated, or moved to another bus.
+  ///
+  /// Cash is tracked by `bus_id` (it stays with whoever physically took it),
+  /// while [revenueBilled] is recomputed from who is seated RIGHT NOW. So when
+  /// seating changes after money was taken, the two drift apart and the bus
+  /// reads "collected more than it billed" with no visible reason. This is
+  /// exactly that gap, surfaced so the figure is never a mystery.
+  ///
+  /// DISPLAY ONLY: it is already inside [collected] and is NOT subtracted from
+  /// any net — the handler really does hold this cash and still has to account
+  /// for it. Zero when no passenger list was supplied (we can't tell who is
+  /// seated, so we never guess).
+  final double detachedCash;
 
   const BusMoneySummary({
     required this.busId,
@@ -43,15 +60,20 @@ class BusMoneySummary {
     this.revenueBilled = 0,
     this.income = 0,
     this.busRent = 0,
+    this.detachedCash = 0,
   });
 
-  /// Net cash the bus should hand over: collections + extra income − ALL costs
-  /// (every expense in [expensesTotal], the bus owner's rent INCLUDED — the
-  /// handler settles the owner out of the cash they collect). This is exactly
-  /// the cash profit [netCollected]: the handler hands over what's left after
-  /// every cost, so the settlement figure and the P&L net are the SAME number
-  /// on every screen.
-  double get expectedHandover => netCollected;
+  /// Expenses the HANDLER pays on the ground (fuel, driver, food, …) — every
+  /// expense except the bus owner's rent, which the admin settles.
+  double get groundExpenses => expensesTotal - busRent;
+
+  /// Net cash the bus should hand over: collections + extra income − the
+  /// handler's GROUND costs only. The bus owner's rent is the admin's to pay,
+  /// so it is NOT deducted here — the handler hands over the full cash they
+  /// hold after their own ground spending, and the admin settles the owner from
+  /// that. This is why it differs from the cash profit [netCollected] by exactly
+  /// [busRent].
+  double get expectedHandover => collected + income - groundExpenses;
 
   /// Still-owed handover (expected minus what was actually handed over).
   double get outstandingHandover => expectedHandover - handedOver;
@@ -62,8 +84,8 @@ class BusMoneySummary {
   double get netBilled => revenueBilled + income - expensesTotal;
 
   /// CASH profit/loss so far: money actually collected + extra income − (rent +
-  /// expenses). Equal to [expectedHandover] — the handler hands over exactly the
-  /// net cash they hold once every cost (the owner's rent included) is paid.
+  /// expenses). What the admin is left with AFTER paying the owner out of the
+  /// handler's handover — [expectedHandover] minus [busRent].
   double get netCollected => collected + income - expensesTotal;
 
   /// [passengers] + [dueForSeat] make to-collect the TRUE money still owed, not
@@ -116,9 +138,24 @@ class BusMoneySummary {
       }
     }
 
+    // Cash on this bus whose payer holds no seat here any more (see
+    // [detachedCash]). Only derivable when the caller supplied the roster —
+    // with no passengers to check against, EVERY row would look detached, so
+    // the figure stays 0 (unknown) rather than raising a false alarm.
+    final seatedHere = <String>{
+      for (final p in passengers)
+        if (p.assignedSeats.any((a) => a.busId == busId)) p.id,
+    };
+    final detachedCash = passengers.isEmpty
+        ? 0.0
+        : busCollections
+              .where((c) => !seatedHere.contains(c.passengerId))
+              .fold(0.0, (sum, c) => sum + c.netCollected);
+
     return BusMoneySummary(
       busId: busId,
       collected: busCollections.fold(0.0, (sum, c) => sum + c.netCollected),
+      detachedCash: detachedCash,
       income: busIncomes.fold(0.0, (sum, i) => sum + i.amount),
       busRent: busRent,
       revenueBilled: revenueBilled,
@@ -157,9 +194,17 @@ class HandlerMoneySummary {
   final double income;
 
   /// Bus owner rent across this handler's buses, already inside [expensesTotal].
-  /// The handler settles the owners, so it is part of what's deducted from the
-  /// handover expectation, not added back.
+  /// ADMIN-ONLY: the admin settles the owners, so it is added back out of the
+  /// handover expectation and never shown to the handler.
   final double busRent;
+
+  /// Cash this handler holds for riders who sit on NONE of their buses — the
+  /// handler-level reading of [BusMoneySummary.detachedCash]. A rider shuffled
+  /// between two buses the SAME handler runs is NOT detached here (the cash and
+  /// the rider both stayed with this handler), which is why the caller supplies
+  /// it instead of [fromBuses] summing the per-bus figures. Display only — it is
+  /// already inside [collected] and changes no net.
+  final double detachedCash;
 
   const HandlerMoneySummary({
     required this.handlerPassengerId,
@@ -172,25 +217,36 @@ class HandlerMoneySummary {
     required this.toReturnTotal,
     this.income = 0,
     this.busRent = 0,
+    this.detachedCash = 0,
   });
 
   double get netBilled => revenueBilled + income - expensesTotal;
   double get netCollected => collected + income - expensesTotal;
 
-  /// Cash this handler should hand over: collections + income − ALL costs (their
-  /// ground expenses AND the owner's rent they settle). Equal to [netCollected]
-  /// — the cash they hold once every cost is paid.
-  double get expectedHandover => netCollected;
+  /// Ground expenses this handler pays (everything except the owners' rent).
+  double get groundExpenses => expensesTotal - busRent;
+
+  /// Cash this handler should hand over: collections + income − their GROUND
+  /// expenses only. The owners' rent is the admin's to settle, so it is not
+  /// deducted here (differs from [netCollected] by exactly [busRent]).
+  double get expectedHandover => collected + income - groundExpenses;
   double get outstandingHandover => expectedHandover - handedOver;
 
   /// Roll a set of per-bus summaries up into one handler total.
+  ///
+  /// [detachedCash] must be supplied by the caller (which can see the roster
+  /// across the handler's whole fleet); summing the per-bus figures here would
+  /// over-report a rider merely moved from one of this handler's buses to
+  /// another. Defaults to 0 — "unknown", never a false alarm.
   factory HandlerMoneySummary.fromBuses(
     String? handlerPassengerId,
-    List<BusMoneySummary> buses,
-  ) {
+    List<BusMoneySummary> buses, {
+    double detachedCash = 0,
+  }) {
     return HandlerMoneySummary(
       handlerPassengerId: handlerPassengerId,
       busIds: [for (final b in buses) b.busId],
+      detachedCash: detachedCash,
       revenueBilled: buses.fold(0.0, (s, b) => s + b.revenueBilled),
       collected: buses.fold(0.0, (s, b) => s + b.collected),
       income: buses.fold(0.0, (s, b) => s + b.income),
@@ -217,10 +273,41 @@ class TourMoneySummary {
   /// Total extra income (cabin / gallery / other) across every bus on the tour.
   final double totalIncome;
 
-  /// Total bus owner rent across the tour, already inside [totalExpenses]. The
-  /// handlers settle the owners, so it is part of what's deducted from the
-  /// handover expectation, not added back.
+  /// Total bus owner rent across the tour, already inside [totalExpenses].
+  /// ADMIN-ONLY: the admin settles the owners, so it is added back out of the
+  /// handover expectation and never shown to a handler.
   final double totalBusRent;
+
+  /// Cash held across the tour for riders seated on NO bus at all — the
+  /// trip-level reading of [BusMoneySummary.detachedCash]. A rider moved from
+  /// one bus to another is NOT counted (they are still on the trip), so this is
+  /// supplied by the caller rather than summed from the per-bus figures.
+  /// Display only — already inside [totalCollected] and changes no net.
+  final double totalDetachedCash;
+
+  /// Money on rows whose `bus_id` is NOT one of the tour's current buses.
+  ///
+  /// The money board draws one row per bus in `tour.buses` and computes those
+  /// rows from that same list, but these trip totals fold EVERY row carrying
+  /// the tour id. So a row pointing at a bus that is no longer on the tour is
+  /// counted here while appearing on no bus row — the per-bus figures silently
+  /// stop adding up to the total above them, with nothing on screen explaining
+  /// the gap.
+  ///
+  /// These stay INSIDE the totals (the money is real and must never quietly
+  /// vanish from the trip's books); they are broken out purely so the UI can
+  /// show the remainder and make the arithmetic reconcile. All zero when the
+  /// caller supplied no bus list — with nothing to check against, every row
+  /// would look orphaned.
+  final double orphanExpenses;
+  final double orphanCollected;
+  final double orphanIncome;
+
+  /// True when any money at all sits on a bus the tour no longer lists.
+  bool get hasOrphanMoney =>
+      orphanExpenses.abs() > 0.005 ||
+      orphanCollected.abs() > 0.005 ||
+      orphanIncome.abs() > 0.005;
 
   const TourMoneySummary({
     required this.totalCollected,
@@ -231,6 +318,10 @@ class TourMoneySummary {
     this.totalRevenueBilled = 0,
     this.totalIncome = 0,
     this.totalBusRent = 0,
+    this.totalDetachedCash = 0,
+    this.orphanExpenses = 0,
+    this.orphanCollected = 0,
+    this.orphanIncome = 0,
   });
 
   /// Net cash for the tour (collections + extra income − expenses).
@@ -240,11 +331,15 @@ class TourMoneySummary {
   /// expenses).
   double get totalNetBilled => totalRevenueBilled + totalIncome - totalExpenses;
 
+  /// Ground expenses across the tour (everything except the owners' rents).
+  double get totalGroundExpenses => totalExpenses - totalBusRent;
+
   /// Cash the handlers should hand over across the tour: collections + income −
-  /// ALL costs (ground expenses AND the owner rents they settle). Equal to
-  /// [totalNet] — the settlement figure and the tour's cash profit are one and
-  /// the same number on every screen.
-  double get totalExpectedHandover => totalNet;
+  /// their GROUND expenses only. The owners' rents are the admin's to settle, so
+  /// they are not deducted here — [totalNet] is what's left AFTER the admin pays
+  /// them out of this handover.
+  double get totalExpectedHandover =>
+      totalCollected + totalIncome - totalGroundExpenses;
 
   /// Still-owed handover across the whole tour.
   double get totalOutstandingHandover =>
@@ -254,6 +349,10 @@ class TourMoneySummary {
   /// per-bus roll-up (which also counts seated-but-uncollected riders), so the
   /// tour total and the per-bus [BusMoneySummary.toCollectTotal] figures always
   /// agree. When null, to-collect falls back to the recorded shortfalls alone.
+  /// [knownBusIds] are the buses the tour currently lists. Supply them to have
+  /// money on any OTHER bus broken out as [orphanExpenses] / [orphanCollected] /
+  /// [orphanIncome] (still counted in the totals — see those fields). Omit them
+  /// and the orphan figures stay 0.
   factory TourMoneySummary.compute({
     required List<Collection> collections,
     required List<Expense> expenses,
@@ -262,9 +361,32 @@ class TourMoneySummary {
     double busRentsTotal = 0,
     double totalRevenueBilled = 0,
     double? toCollectTotal,
+    double detachedCashTotal = 0,
+    Set<String>? knownBusIds,
   }) {
+    // Null (not supplied) → no orphan detection at all. An EMPTY set is a real
+    // answer ("this tour has no buses"), so it still classifies.
+    double orphanExpenses = 0;
+    double orphanCollected = 0;
+    double orphanIncome = 0;
+    if (knownBusIds != null) {
+      orphanExpenses = expenses
+          .where((e) => !knownBusIds.contains(e.busId))
+          .fold(0.0, (sum, e) => sum + e.amount);
+      orphanCollected = collections
+          .where((c) => !knownBusIds.contains(c.busId))
+          .fold(0.0, (sum, c) => sum + c.netCollected);
+      orphanIncome = incomes
+          .where((i) => !knownBusIds.contains(i.busId))
+          .fold(0.0, (sum, i) => sum + i.amount);
+    }
+
     return TourMoneySummary(
+      orphanExpenses: orphanExpenses,
+      orphanCollected: orphanCollected,
+      orphanIncome: orphanIncome,
       totalCollected: collections.fold(0.0, (sum, c) => sum + c.netCollected),
+      totalDetachedCash: detachedCashTotal,
       totalIncome: incomes.fold(0.0, (sum, i) => sum + i.amount),
       totalBusRent: busRentsTotal,
       totalRevenueBilled: totalRevenueBilled,

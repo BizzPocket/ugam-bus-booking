@@ -152,16 +152,52 @@ enum CollectLeg { go, ret }
 /// [CollectLeg.go] keeps everyone whose trip uses the outbound leg (round-trip +
 /// outbound-only); [CollectLeg.ret] keeps everyone whose trip uses the return leg
 /// (round-trip + return-only). A round-trip rider therefore appears under both.
+/// Pass [seatId] wherever it is known: the leg is then read from the rider's
+/// assignment for THAT berth ([Passenger.legForSeat]) instead of their overall
+/// tripType, so a round-trip rider who holds this seat on the GO leg only —
+/// their return berth being elsewhere — is not offered on its RETURN chooser.
+/// Omitting it keeps the coarse trip-type behaviour for callers with no seat in
+/// hand.
 List<Passenger> occupantsForCollectLeg(
   List<Passenger> occupants,
+  CollectLeg leg, {
+  String? seatId,
+  String? busId,
+}) => occupants.where((p) {
+      final l = seatId == null ? p.tripType : p.legForSeat(seatId, busId: busId);
+      return leg == CollectLeg.go ? l.usesOutbound : l.usesReturn;
+    }).toList();
+
+/// Every rider who actually boards [busId] on [leg], deduped by passenger id in
+/// roster order. This is the "who is on my bus today" roster — attendance,
+/// head-counts, per-leg rosters.
+///
+/// The leg comes from the SEAT they hold on THIS bus (`SeatAssignment.leg`,
+/// falling back to the rider's tripType for legacy rows), NEVER from the rider's
+/// overall tripType. A round-trip rider whose GO berth is on this bus but whose
+/// RET berth is on another bus must not appear on this bus's return roster —
+/// the handler would stand waiting for someone riding a different bus home.
+///
+/// Distinct from [occupantsForCollectLeg], which filters an already-resolved
+/// per-SEAT occupant list by the rider's trip type for the money chooser.
+List<Passenger> ridersOnBusForLeg(
+  Iterable<Passenger> passengers,
+  String busId,
   CollectLeg leg,
-) => occupants
-    .where(
-      (p) => leg == CollectLeg.go
-          ? p.tripType.usesOutbound
-          : p.tripType.usesReturn,
-    )
-    .toList();
+) {
+  final seen = <String>{};
+  final out = <Passenger>[];
+  for (final p in passengers) {
+    final ridesThisLeg = p.assignedSeats.any((a) {
+      if (a.busId != busId) return false;
+      final seatLeg = a.leg ?? p.tripType;
+      return leg == CollectLeg.go ? seatLeg.usesOutbound : seatLeg.usesReturn;
+    });
+    if (!ridesThisLeg) continue;
+    if (seen.add(p.id)) out.add(p);
+  }
+  return out;
+}
 
 /// Whether a shared seat's roster differs across legs, so the chooser should
 /// offer a GO/Return toggle. True only when riders exist on BOTH legs and the
@@ -169,13 +205,17 @@ List<Passenger> occupantsForCollectLeg(
 /// or a round-trip sharing with a one-way rider. A double held by round-trip
 /// riders (same people on both legs), or one leg held by same-leg one-way riders
 /// (nobody on the other leg), needs no toggle.
-bool seatHasLegSplit(List<Passenger> occupants) {
-  final go = occupantsForCollectLeg(occupants, CollectLeg.go)
-      .map((p) => p.id)
-      .toSet();
-  final ret = occupantsForCollectLeg(occupants, CollectLeg.ret)
-      .map((p) => p.id)
-      .toSet();
+bool seatHasLegSplit(List<Passenger> occupants, {String? seatId, String? busId}) {
+  final go =
+      occupantsForCollectLeg(occupants, CollectLeg.go,
+              seatId: seatId, busId: busId)
+          .map((p) => p.id)
+          .toSet();
+  final ret =
+      occupantsForCollectLeg(occupants, CollectLeg.ret,
+              seatId: seatId, busId: busId)
+          .map((p) => p.id)
+          .toSet();
   if (go.isEmpty || ret.isEmpty) return false;
   return !(go.length == ret.length && go.containsAll(ret));
 }

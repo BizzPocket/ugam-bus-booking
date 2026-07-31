@@ -1,5 +1,6 @@
 import '../models/seat_layout.dart';
 import '../models/tour.dart';
+import '../models/trip_type.dart';
 import 'passenger_display.dart';
 
 /// A visible column in the chart table.
@@ -85,7 +86,19 @@ class SeatGridPlacement {
 class SeatOccupant {
   final String name; // passenger.displayName
   final String? phone; // already run through displayPhone()
-  const SeatOccupant({required this.name, this.phone});
+
+  /// The trip leg this occupant rides THIS seat on ([Passenger.legForSeat]),
+  /// or null when unknown. Used by the printed chart to tag a leg-shared seat's
+  /// riders GO/RET — the on-screen colour tint has no equivalent in print.
+  final TripType? leg;
+
+  /// This rider's pickup point ([Passenger.pickupLocationName]), or null when
+  /// none was chosen. Rendered as a small tag on the printed handler chart so
+  /// the handler knows where to collect each passenger. Only the printed-chart
+  /// occupant path sets it; on-screen rendering leaves it null.
+  final String? pickup;
+
+  const SeatOccupant({required this.name, this.phone, this.leg, this.pickup});
 }
 
 /// busId -> (seatId -> occupant), built from every passenger's assignedSeats.

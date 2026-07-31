@@ -55,6 +55,20 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
   int _tabIndex = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // Cold start fetches rosters for RUNNING tours only — that scoping is what
+    // makes launch viable on 2G. An ARCHIVED tour therefore arrives without
+    // its passengers/buses, so pull them now that the user has actually asked
+    // for this one. No-op for tours already hydrated, so the common path
+    // (opening a live tour) costs nothing.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Get.find<TourController>().ensureTourHydrated(widget.tourId);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
     final c = UgamColors.of(context);
@@ -265,14 +279,12 @@ class _HeroSection extends StatelessWidget {
               UgamIconButton(
                 icon: Icons.arrow_back_rounded,
                 onTap: onBack,
-                size: 42,
                 semanticLabel: tr('app.action.back'),
               ),
               const Spacer(),
               UgamIconButton(
                 icon: Icons.more_vert_rounded,
                 onTap: () => _showActions(context),
-                size: 42,
                 semanticLabel: tr('tour_detail.actions_title'),
               ),
             ],
@@ -288,8 +300,7 @@ class _HeroSection extends StatelessWidget {
                   children: [
                     Text(
                       tour.title,
-                      style:
-                          UgamText.titleL.copyWith(color: c.ink, fontSize: 22),
+                      style: UgamText.titleL.copyWith(color: c.ink),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -301,22 +312,19 @@ class _HeroSection extends StatelessWidget {
                         Flexible(
                           child: Text(
                             '${tour.fromCity} → ${tour.toCity}',
-                            style: UgamText.caption
-                                .copyWith(color: c.ink2, fontSize: 12),
+                            style: UgamText.caption.copyWith(color: c.ink2),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const SizedBox(width: UgamSpacing.sm),
                         Text('·',
-                            style: UgamText.caption
-                                .copyWith(color: c.ink3, fontSize: 12)),
+                            style: UgamText.caption.copyWith(color: c.ink3)),
                         const SizedBox(width: UgamSpacing.sm),
                         Text(
                           _durationLabel(context, tour),
                           style: UgamText.tabular(
-                            UgamText.caption
-                                .copyWith(color: c.ink2, fontSize: 12),
+                            UgamText.caption.copyWith(color: c.ink2),
                           ),
                         ),
                       ],
@@ -350,7 +358,7 @@ class _HeroSection extends StatelessWidget {
                     Text(
                       Formatters.formatMoneyInr(tour.pricePerSeat),
                       style: UgamText.tabular(
-                        UgamText.titleM.copyWith(color: c.accent, fontSize: 18),
+                        UgamText.titleM.copyWith(color: c.accent),
                       ),
                     ),
                     Text(
@@ -378,7 +386,9 @@ class _HeroSection extends StatelessWidget {
     final topInset = MediaQuery.of(context).padding.top;
     final statusTone = _toneFor(tour.status);
     return SizedBox(
-      height: 200,
+      // Decorative: the photo tracks the text scale so the card overlapping it
+      // stays proportionally placed on a small phone.
+      height: UgamScale.px(context, 200),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -424,7 +434,6 @@ class _HeroSection extends StatelessWidget {
                 UgamIconButton(
                   icon: Icons.arrow_back_rounded,
                   onTap: onBack,
-                  size: 42,
                   semanticLabel: tr('app.action.back'),
                 ),
                 const Spacer(),
@@ -434,27 +443,14 @@ class _HeroSection extends StatelessWidget {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.45),
+                    // Graphite-on-graphite, matching the sibling status chip on
+                    // the tours list — not a bespoke black/white pill.
+                    color: c.cardElev,
                     borderRadius: BorderRadius.circular(UgamRadius.chip),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: _toneColor(statusTone, c),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        tour.status.displayName.toUpperCase(),
-                        style: UgamText.micro
-                            .copyWith(color: Colors.white, fontSize: 10),
-                      ),
-                    ],
+                  child: UgamStatusDot(
+                    label: tour.status.displayName,
+                    tone: statusTone,
                   ),
                 ),
                 const Spacer(),
@@ -462,7 +458,6 @@ class _HeroSection extends StatelessWidget {
                 UgamIconButton(
                   icon: Icons.more_vert_rounded,
                   onTap: () => _showActions(context),
-                  size: 42,
                   semanticLabel: tr('tour_detail.actions_title'),
                 ),
               ],
@@ -472,7 +467,9 @@ class _HeroSection extends StatelessWidget {
           Positioned(
             left: UgamSpacing.gutter,
             right: UgamSpacing.gutter,
-            bottom: -28,
+            // Tracks the hero above it, so the overlap reads the same at any
+            // scale factor.
+            bottom: -UgamScale.px(context, 28),
             child: UgamCard.plain(
               elev: true,
               padding: const EdgeInsets.fromLTRB(
@@ -490,8 +487,7 @@ class _HeroSection extends StatelessWidget {
                       children: [
                         Text(
                           tour.title,
-                          style:
-                              UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
+                          style: UgamText.titleM.copyWith(color: c.ink),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -504,8 +500,7 @@ class _HeroSection extends StatelessWidget {
                             Flexible(
                               child: Text(
                                 '${tour.fromCity} → ${tour.toCity}',
-                                style: UgamText.caption.copyWith(
-                                    color: c.ink2, fontSize: 11),
+                                style: UgamText.caption.copyWith(color: c.ink2),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -513,15 +508,13 @@ class _HeroSection extends StatelessWidget {
                             const SizedBox(width: UgamSpacing.sm),
                             Text(
                               '·',
-                              style: UgamText.caption
-                                  .copyWith(color: c.ink3, fontSize: 11),
+                              style: UgamText.caption.copyWith(color: c.ink3),
                             ),
                             const SizedBox(width: UgamSpacing.sm),
                             Text(
                               _durationLabel(context, tour),
                               style: UgamText.tabular(
-                                UgamText.caption
-                                    .copyWith(color: c.ink2, fontSize: 11),
+                                UgamText.caption.copyWith(color: c.ink2),
                               ),
                             ),
                           ],
@@ -551,8 +544,7 @@ class _HeroSection extends StatelessWidget {
                         Text(
                           Formatters.formatMoneyInr(tour.pricePerSeat),
                           style: UgamText.tabular(
-                            UgamText.titleM
-                                .copyWith(color: c.accent, fontSize: 18),
+                            UgamText.titleM.copyWith(color: c.accent),
                           ),
                         ),
                         Text(tr('tour_detail.per_seat'),
@@ -629,10 +621,10 @@ class _HeroActionRow extends StatelessWidget {
       },
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.md,
-        ),
+        // One anatomy = one height: this matches _TourToolRow's fixed 56 so the
+        // sheet's rows don't read airier than the Overview tool rows behind it.
+        height: UgamScale.tap(context, 56),
+        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
         decoration: BoxDecoration(
           color: c.cardElev,
           borderRadius: BorderRadius.circular(UgamRadius.row),
@@ -640,14 +632,14 @@ class _HeroActionRow extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 40,
-              height: 40,
+              width: UgamScale.px(context, 40),
+              height: UgamScale.px(context, 40),
               decoration: BoxDecoration(
                 color: fill,
                 borderRadius: BorderRadius.circular(UgamRadius.input),
               ),
               alignment: Alignment.center,
-              child: Icon(icon, size: 19, color: tint),
+              child: Icon(icon, size: UgamScale.px(context, 19), color: tint),
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -764,14 +756,15 @@ class _NextActionCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: UgamScale.px(context, 44),
+                height: UgamScale.px(context, 44),
                 decoration: BoxDecoration(
                   color: fg.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 alignment: Alignment.center,
-                child: Icon(action.icon, size: 20, color: fg),
+                child: Icon(action.icon,
+                    size: UgamScale.px(context, 20), color: fg),
               ),
               const SizedBox(width: UgamSpacing.md),
               Expanded(
@@ -786,8 +779,7 @@ class _NextActionCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       action.title,
-                      style:
-                          UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+                      style: UgamText.titleS.copyWith(color: c.ink),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -799,31 +791,39 @@ class _NextActionCard extends StatelessWidget {
             ],
           ),
           if (action.subtitle != null) ...[
-            const SizedBox(height: UgamSpacing.sm + 2),
+            const SizedBox(height: UgamSpacing.tight),
             Text(
               action.subtitle!,
-              style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+              style: UgamText.caption.copyWith(color: c.ink2),
             ),
           ],
           if (action.secondaryKind != null &&
               action.secondaryCtaLabel != null) ...[
-            const SizedBox(height: UgamSpacing.md),
+            // The seam shrinks because the link now carries its own 44pt box —
+            // net card height is close to unchanged.
+            const SizedBox(height: UgamSpacing.xs),
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () =>
                   _runKind(context, action.secondaryKind!, tour, onSwitchTab),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.check_circle_outline_rounded,
-                      size: 16, color: fg),
-                  const SizedBox(width: 6),
-                  Text(
-                    action.secondaryCtaLabel!,
-                    style: UgamText.bodyStrong
-                        .copyWith(color: fg, fontSize: 13),
-                  ),
-                ],
+              // Without a real 44pt target a near-miss fell through to the
+              // card's own onTap and fired the PRIMARY action instead — a
+              // different screen than the label the user aimed at.
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 44),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check_circle_outline_rounded,
+                        size: 16, color: fg),
+                    const SizedBox(width: 6),
+                    Text(
+                      action.secondaryCtaLabel!,
+                      style: UgamText.bodyStrong
+                          .copyWith(color: fg, fontSize: 13),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -932,14 +932,15 @@ class _BroadcastCardState extends State<_BroadcastCard> {
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: UgamScale.px(context, 44),
+                height: UgamScale.px(context, 44),
                 decoration: BoxDecoration(
                   color: c.goodFill,
                   borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 alignment: Alignment.center,
-                child: Icon(Icons.campaign_rounded, size: 22, color: c.good),
+                child: Icon(Icons.campaign_rounded,
+                    size: UgamScale.px(context, 22), color: c.good),
               ),
               const SizedBox(width: UgamSpacing.md),
               Expanded(
@@ -955,8 +956,7 @@ class _BroadcastCardState extends State<_BroadcastCard> {
                     const SizedBox(height: 2),
                     Text(
                       tr('tour_detail.broadcast_copy_hint'),
-                      style: UgamText.caption
-                          .copyWith(color: c.ink2, fontSize: 11.5),
+                      style: UgamText.caption.copyWith(color: c.ink2),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1041,7 +1041,8 @@ class _PassengersTab extends StatelessWidget {
         // rider without leaving the tour.
         for (var i = 0; i < all.length; i++) ...[
           _PassengerRow(passenger: all[i], tour: tour, c: c),
-          if (i != all.length - 1) const SizedBox(height: UgamSpacing.sm + 2),
+          if (i != all.length - 1)
+            const SizedBox(height: UgamSpacing.tight),
         ],
       ]),
     );
@@ -1143,11 +1144,14 @@ class _RosterHeader extends StatelessWidget {
       children: [
         Text(
           tr('tour_detail.roster_header'),
-          style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+          style: UgamText.titleS.copyWith(color: c.ink),
         ),
         const SizedBox(width: UgamSpacing.sm),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.badgeH,
+            vertical: UgamSpacing.badgeV,
+          ),
           decoration: BoxDecoration(
             color: c.cardElev,
             borderRadius: BorderRadius.circular(UgamRadius.chip),
@@ -1157,7 +1161,6 @@ class _RosterHeader extends StatelessWidget {
             style: UgamText.tabular(
               UgamText.caption.copyWith(
                 color: c.ink2,
-                fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -1172,26 +1175,36 @@ class _RosterHeader extends StatelessWidget {
               onAdd();
             },
             borderRadius: BorderRadius.circular(UgamRadius.chip),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.md,
-                vertical: UgamSpacing.sm,
-              ),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.person_add_alt_1_rounded, size: 16, color: c.ink),
-                  const SizedBox(width: 6),
-                  Text(
-                    tr('tour_detail.add'),
-                    style:
-                        UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
+            // The only "add a rider" entry on a populated roster was a ~33pt
+            // pill. The Center is load-bearing: without it the minHeight
+            // propagates into the Container and inflates the painted pill.
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
+              child: Center(
+                widthFactor: 1,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.md,
+                    vertical: UgamSpacing.sm,
                   ),
-                ],
+                  decoration: BoxDecoration(
+                    color: c.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.person_add_alt_1_rounded,
+                          size: 16, color: c.ink),
+                      const SizedBox(width: 6),
+                      Text(
+                        tr('tour_detail.add'),
+                        style: UgamText.bodyStrong
+                            .copyWith(color: c.ink, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -1288,7 +1301,6 @@ class _PassengerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = _passengerTone(passenger);
-    final dotColor = _toneColor(tone, c);
     return UgamCard.plain(
       elev: true,
       radius: UgamRadius.row,
@@ -1297,8 +1309,10 @@ class _PassengerRow extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 40,
-            height: 40,
+            // Matches the shared UgamPersonRow avatar (36) instead of running
+            // 4px larger than the identical avatar elsewhere in the app.
+            width: UgamScale.px(context, 36),
+            height: UgamScale.px(context, 36),
             decoration: BoxDecoration(
               color: c.card,
               shape: BoxShape.circle,
@@ -1306,8 +1320,7 @@ class _PassengerRow extends StatelessWidget {
             alignment: Alignment.center,
             child: Text(
               _initials(passenger.name),
-              style:
-                  UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 12),
+              style: UgamText.bodyStrong.copyWith(color: c.ink),
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
@@ -1330,8 +1343,7 @@ class _PassengerRow extends StatelessWidget {
                     Text(
                       _ago(passenger.createdAt),
                       style: UgamText.tabular(
-                        UgamText.caption
-                            .copyWith(color: c.ink3, fontSize: 10.5),
+                        UgamText.caption.copyWith(color: c.ink3),
                       ),
                     ),
                   ],
@@ -1342,31 +1354,17 @@ class _PassengerRow extends StatelessWidget {
                     Flexible(
                       child: Text(
                         passenger.requestSummary,
-                        style: UgamText.caption
-                            .copyWith(color: c.ink2, fontSize: 11.5),
+                        style: UgamText.caption.copyWith(color: c.ink2),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     const SizedBox(width: UgamSpacing.sm),
-                    Container(
-                      width: 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: dotColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      passenger.progressLabel,
-                      style: UgamText.tabular(
-                        UgamText.caption.copyWith(
-                          color: dotColor,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                    // Was a hand-rolled 5px dot + 4px gap + forked 11/w700
+                    // label; the shared component owns this everywhere else.
+                    UgamStatusDot(
+                      label: passenger.progressLabel,
+                      tone: tone,
                     ),
                   ],
                 ),
@@ -1445,6 +1443,7 @@ class _BusesTab extends StatelessWidget {
         for (var i = 0; i < tour.buses.length; i++) ...[
           _BusListItem(
             bus: tour.buses[i],
+            tourId: tour.id,
             // Leg-aware berths occupied on this bus (max of the busier leg) —
             // single-sourced from the same helper the capacity engine uses.
             filled: tour.occupiedBerthsFor(tour.buses[i].id),
@@ -1460,9 +1459,19 @@ class _BusesTab extends StatelessWidget {
 
 class _BusListItem extends StatelessWidget {
   final Bus bus;
+
+  /// The enclosing tour's id. `Bus.tourId` is nullable and not always populated,
+  /// so it cannot be trusted as the sole source — BusStatusScreen applies the
+  /// same fallback at bus_status_screen.dart:257.
+  final String tourId;
   final int filled;
   final UgamColorSet c;
-  const _BusListItem({required this.bus, required this.filled, required this.c});
+  const _BusListItem({
+    required this.bus,
+    required this.tourId,
+    required this.filled,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1477,7 +1486,10 @@ class _BusListItem extends StatelessWidget {
         HapticFeedback.selectionClick();
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (context) => BusStatusScreen(tourId: bus.tourId ?? '', busId: bus.id),
+            builder: (context) => BusStatusScreen(
+              tourId: bus.tourId?.isNotEmpty == true ? bus.tourId! : tourId,
+              busId: bus.id,
+            ),
           ),
         );
       },
@@ -1499,8 +1511,7 @@ class _BusListItem extends StatelessWidget {
                 children: [
                   Text(
                     bus.displayLabel,
-                    style:
-                        UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+                    style: UgamText.titleS.copyWith(color: c.ink),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1511,7 +1522,6 @@ class _BusListItem extends StatelessWidget {
                         : tr('tour_detail.driver_not_set'),
                     style: UgamText.caption.copyWith(
                       color: bus.driverName.isNotEmpty ? c.ink2 : c.ink3,
-                      fontSize: 12,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1519,47 +1529,55 @@ class _BusListItem extends StatelessWidget {
                   if (bus.driverPhone.trim().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 3),
-                      child: Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              bus.driverPhone,
-                              style: UgamText.tabular(
-                                UgamText.caption
-                                    .copyWith(color: c.ink3, fontSize: 12),
+                      // Tap barrier, NOT a resize: the two call buttons must
+                      // stay 32 or the driver phone number ellipsizes on a
+                      // 360/375pt device (PLAN §5 item 6). This absorbs a near
+                      // miss so it no longer falls through to the card's own
+                      // onTap and navigates into the seat chart.
+                      child: GestureDetector(
+                        onTap: () {},
+                        behavior: HitTestBehavior.opaque,
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                bus.driverPhone,
+                                style: UgamText.tabular(
+                                  UgamText.caption.copyWith(color: c.ink3),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                          const SizedBox(width: UgamSpacing.sm),
-                          // Reach the driver without leaving the tour — same
-                          // symmetry as the rider row-tap actions. Neutral icon
-                          // buttons keep the gold reserved for the sticky CTA;
-                          // their own taps win over the row's open-chart tap.
-                          UgamIconButton(
-                            icon: Icons.chat_rounded,
-                            onTap: () => _contactDriverOnWhatsApp(bus),
-                            size: 32,
-                            iconSize: 16,
-                            semanticLabel: tr('tour_detail.msg_whatsapp'),
-                          ),
-                          const SizedBox(width: 6),
-                          UgamIconButton(
-                            icon: Icons.call_rounded,
-                            onTap: () => PhoneDialer.call(bus.driverPhone),
-                            size: 32,
-                            iconSize: 16,
-                            semanticLabel: tr('tour_detail.call'),
-                          ),
-                        ],
+                            const SizedBox(width: UgamSpacing.sm),
+                            // Reach the driver without leaving the tour — same
+                            // symmetry as the rider row-tap actions. Neutral
+                            // icon buttons keep the gold reserved for the
+                            // sticky CTA; their own taps win over the row's.
+                            UgamIconButton(
+                              icon: Icons.chat_rounded,
+                              onTap: () => _contactDriverOnWhatsApp(bus),
+                              size: 32,
+                              iconSize: 16,
+                              semanticLabel: tr('tour_detail.msg_whatsapp'),
+                            ),
+                            const SizedBox(width: 6),
+                            UgamIconButton(
+                              icon: Icons.call_rounded,
+                              onTap: () => PhoneDialer.call(bus.driverPhone),
+                              size: 32,
+                              iconSize: 16,
+                              semanticLabel: tr('tour_detail.call'),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   const SizedBox(height: UgamSpacing.sm),
                   Row(
                     children: [
                       if (bus.isAC) ...[
-                        const UgamReqChip(label: 'AC'),
+                        UgamReqChip(label: tr('tour_detail.chip_ac')),
                         const SizedBox(width: 5),
                       ],
                       // Occupancy at a glance — "12/40 filled" — tinted by how
@@ -1583,17 +1601,10 @@ class _BusListItem extends StatelessWidget {
               ),
             ),
             const SizedBox(width: UgamSpacing.sm),
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: c.accentFill,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(Icons.arrow_forward_rounded,
-                  size: 16, color: c.accent),
-            ),
+            // Accent-rationing: the same "open this" affordance is a plain grey
+            // chevron on the Passengers tab, and every bus row repeating a
+            // copper circle stacked a third copper under the sticky CTA.
+            Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
           ],
         ),
       );
@@ -1762,7 +1773,9 @@ class _TimelineRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            width: 36,
+            // Decorative rail — scales so the nodes don't read heavier than the
+            // event text beside them on a small phone.
+            width: UgamScale.px(context, 36),
             child: Column(
               children: [
                 if (isFirst)
@@ -1775,15 +1788,17 @@ class _TimelineRow extends StatelessWidget {
                     ),
                   ),
                 Container(
-                  width: 28,
-                  height: 28,
+                  width: UgamScale.px(context, 28),
+                  height: UgamScale.px(context, 28),
                   decoration: BoxDecoration(
                     color: fill,
                     shape: BoxShape.circle,
+                    // 1.5 stays a hairline — hairlines don't scale.
                     border: Border.all(color: tone, width: 1.5),
                   ),
                   alignment: Alignment.center,
-                  child: Icon(event.icon, size: 13, color: tone),
+                  child: Icon(event.icon,
+                      size: UgamScale.px(context, 13), color: tone),
                 ),
                 if (isLast)
                   const SizedBox(height: 8)
@@ -1818,10 +1833,9 @@ class _TimelineRow extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _agoLine(event.time),
+                      _agoLine(context, event.time),
                       style: UgamText.tabular(
-                        UgamText.caption
-                            .copyWith(color: c.ink3, fontSize: 11),
+                        UgamText.caption.copyWith(color: c.ink3),
                       ),
                     ),
                   ],
@@ -1834,9 +1848,14 @@ class _TimelineRow extends StatelessWidget {
     );
   }
 
-  String _agoLine(DateTime t) {
+  String _agoLine(BuildContext context, DateTime t) {
     final d = DateTime.now().difference(t);
-    if (d.inDays > 6) return DateFormat('MMM d · h:mm a').format(t);
+    // Every other branch of this method is tr()'d; without the locale the
+    // >6-day branch rendered an English "Jul 14 · 3:05 PM" sandwiched between
+    // localized rows in the same timeline.
+    if (d.inDays > 6) {
+      return DateFormat('MMM d · h:mm a', context.locale.toString()).format(t);
+    }
     if (d.inDays > 0) {
       return d.inDays == 1
           ? tr('tour_detail.ago_day_one')
@@ -2081,7 +2100,7 @@ class _HeroVitals extends StatelessWidget {
             child: Text(
               parts.join('   ·   '),
               style: UgamText.tabular(
-                UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                UgamText.caption.copyWith(color: c.ink2),
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -2170,7 +2189,7 @@ class _ActionsGrid extends StatelessWidget {
       onTap: () => push(NotifyScreen(tourId: tour.id)),
     );
 
-    const gap = UgamSpacing.sm + 2;
+    const gap = UgamSpacing.tight;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2244,7 +2263,9 @@ class _TourToolRow extends StatelessWidget {
         },
         borderRadius: BorderRadius.circular(UgamRadius.row),
         child: Container(
-          height: 56,
+          // Six of these stack on the Overview tab; at a fixed 56 they stayed
+          // full size while their labels shrank to 0.85x on a 360pt phone.
+          height: UgamScale.tap(context, 56),
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
           decoration: BoxDecoration(
             color: c.card,
@@ -2253,14 +2274,15 @@ class _TourToolRow extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: UgamScale.px(context, 40),
+                height: UgamScale.px(context, 40),
                 decoration: BoxDecoration(
                   color: fill,
                   borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 alignment: Alignment.center,
-                child: Icon(icon, size: 19, color: iconColor),
+                child: Icon(icon,
+                    size: UgamScale.px(context, 19), color: iconColor),
               ),
               const SizedBox(width: UgamSpacing.md),
               Expanded(
@@ -2271,7 +2293,8 @@ class _TourToolRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+              Icon(Icons.chevron_right_rounded,
+                  size: UgamScale.px(context, 20), color: c.ink3),
             ],
           ),
         ),
@@ -2318,14 +2341,19 @@ class _NextAction {
 }
 
 _NextAction _nextActionFor(Tour tour) {
-  if (tour.passengers.isNotEmpty && tour.buses.isEmpty) {
+  // A tour with no buses can never get anyone seated, so "add a bus" is always
+  // the next step — including a brand-new, passenger-less tour that previously
+  // fell through to the terminal "You're all set" card.
+  if (tour.buses.isEmpty) {
     return _NextAction(
       kind: _NextActionKind.addBus,
       title: tr('tour_detail.action_add_bus_title'),
-      subtitle: tour.passengers.length == 1
-          ? tr('tour_detail.action_add_bus_subtitle_one')
-          : tr('tour_detail.action_add_bus_subtitle_other',
-              namedArgs: {'n': '${tour.passengers.length}'}),
+      subtitle: tour.passengers.isEmpty
+          ? tr('tour_detail.action_add_bus_subtitle_empty')
+          : tour.passengers.length == 1
+              ? tr('tour_detail.action_add_bus_subtitle_one')
+              : tr('tour_detail.action_add_bus_subtitle_other',
+                  namedArgs: {'n': '${tour.passengers.length}'}),
       ctaLabel: tr('tour_detail.add_bus'),
       icon: Icons.directions_bus_rounded,
       tone: UgamStatusTone.warm,

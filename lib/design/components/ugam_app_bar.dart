@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import 'ugam_icon_button.dart';
 
 /// Shared top-app-bar for every pushed screen, so the back button and
 /// title read identically across the app.
@@ -53,38 +54,26 @@ class UgamAppBar extends StatelessWidget {
       child: Row(
         children: [
           if (showBack) ...[
-            Semantics(
-              button: true,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  if (onBack != null) {
-                    onBack!.call();
+            // Routed through the shared circular button (44/19) rather than a
+            // hand-rolled 42 circle, so the app bar matches every other round
+            // chrome action. The pop logic below is unchanged.
+            UgamIconButton(
+              icon: Icons.arrow_back_rounded,
+              onTapFeedback: () {
+                HapticFeedback.selectionClick();
+              },
+              onTap: () {
+                if (onBack != null) {
+                  onBack!.call();
+                } else {
+                  final nav = Navigator.of(context);
+                  if (nav.canPop()) {
+                    nav.pop();
                   } else {
-                    final nav = Navigator.of(context);
-                    if (nav.canPop()) {
-                      nav.pop();
-                    } else {
-                      Get.back();
-                    }
+                    Get.back();
                   }
-                },
-                child: Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: c.cardElev,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.arrow_back_rounded,
-                    size: 19,
-                    color: c.ink,
-                  ),
-                ),
-              ),
+                }
+              },
             ),
             const SizedBox(width: UgamSpacing.md),
           ],
@@ -161,29 +150,18 @@ class UgamAppBarAction extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
-    Widget button = Semantics(
-      button: true,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onTap();
-        },
-        child: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: active ? c.accentFill : c.cardElev,
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: Icon(
-            icon,
-            size: 19,
-            color: tint ?? (active ? c.accent : c.ink),
-          ),
-        ),
-      ),
+    // Routed through the shared circular button (44/19). `active` and `tint`
+    // have no [UgamIconButtonTone] equivalent, so they ride the explicit
+    // fill/ink overrides — the resolved colours are identical to the
+    // hand-rolled circle this replaced.
+    Widget button = UgamIconButton(
+      icon: icon,
+      onTapFeedback: () {
+        HapticFeedback.selectionClick();
+      },
+      onTap: onTap,
+      fillOverride: active ? c.accentFill : null,
+      inkOverride: tint ?? (active ? c.accent : null),
     );
 
     if (tooltip != null) {

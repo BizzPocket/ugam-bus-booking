@@ -110,4 +110,97 @@ void main() {
       expect(groups.single.items.map((r) => r.tag), ['a', 'b']);
     });
   });
+
+  // The handler boards pickup points in ROUTE order, which is the admin's
+  // manual serial — not the alphabet. `rankOf` is how that serial reaches the
+  // grouper (in the app: PickupController.rankFor).
+  group('groupByPickup with a serial rank', () {
+    // A stand-in admin list: index = the admin's manual position.
+    const serial = ['Parking', 'Temple', 'Patiya', 'Circle', 'Hotel'];
+    int? rankById(String? id, String name) {
+      final i = serial.indexWhere((s) => 'id-${s.toLowerCase()}' == id);
+      return i >= 0 ? i : null;
+    }
+
+    List<PickupGroup<_Row>> groupRanked(
+      List<_Row> rows, {
+      int? Function(String?, String)? rankOf,
+    }) => groupByPickup<_Row>(
+      rows,
+      idOf: (r) => r.pickupId,
+      nameOf: (r) => r.pickupName,
+      rankOf: rankOf ?? rankById,
+    );
+
+    test('sections follow the admin serial, not the alphabet', () {
+      final groups = groupRanked(const [
+        _Row('c', 'id-circle', 'Circle'),
+        _Row('h', 'id-hotel', 'Hotel'),
+        _Row('p', 'id-parking', 'Parking'),
+      ]);
+      // Alphabetical would be Circle, Hotel, Parking.
+      expect(groups.map((g) => g.locationName).toList(), [
+        'Parking',
+        'Circle',
+        'Hotel',
+      ]);
+    });
+
+    test('a point the ranker cannot place sorts after the ranked ones', () {
+      final groups = groupRanked(const [
+        _Row('x', 'id-gone', 'Aardvark Stop'), // unknown id AND unknown name
+        _Row('h', 'id-hotel', 'Hotel'),
+        _Row('p', 'id-parking', 'Parking'),
+      ]);
+      expect(groups.map((g) => g.locationName).toList(), [
+        'Parking',
+        'Hotel',
+        'Aardvark Stop',
+      ]);
+    });
+
+    test('unranked leftovers keep their A→Z order among themselves', () {
+      final groups = groupRanked(const [
+        _Row('z', 'id-z', 'Zulu'),
+        _Row('m', 'id-m', 'Mike'),
+        _Row('h', 'id-hotel', 'Hotel'),
+      ]);
+      expect(groups.map((g) => g.locationName).toList(), [
+        'Hotel',
+        'Mike',
+        'Zulu',
+      ]);
+    });
+
+    test('the no-pickup bucket stays last even with ranks', () {
+      final groups = groupRanked(const [
+        _Row('none', null, null),
+        _Row('h', 'id-hotel', 'Hotel'),
+        _Row('p', 'id-parking', 'Parking'),
+      ]);
+      expect(groups.map((g) => g.locationName).toList(), [
+        'Parking',
+        'Hotel',
+        null,
+      ]);
+      expect(groups.last.isUnassigned, isTrue);
+    });
+
+    test('a null rank for every point degrades to plain A→Z', () {
+      // What happens before the pickup list has loaded.
+      final groups = groupRanked(const [
+        _Row('z', 'id-z', 'Zulu'),
+        _Row('a', 'id-a', 'Alpha'),
+      ], rankOf: (_, _) => null);
+      expect(groups.map((g) => g.locationName).toList(), ['Alpha', 'Zulu']);
+    });
+
+    test('ties on the same rank fall back to A→Z (no wobble)', () {
+      final groups = groupRanked(const [
+        _Row('b', 'id-b', 'Bravo'),
+        _Row('a', 'id-a', 'Alpha'),
+      ], rankOf: (_, _) => 3);
+      expect(groups.map((g) => g.locationName).toList(), ['Alpha', 'Bravo']);
+    });
+  });
 }

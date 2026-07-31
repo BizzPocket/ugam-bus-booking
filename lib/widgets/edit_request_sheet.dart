@@ -89,7 +89,8 @@ class _EditRequestSheetState extends State<EditRequestSheet> {
         pickupLocationId: data.pickupLocationId,
         pickupLocationName: data.pickupLocationName,
       );
-      await Get.find<TourController>().updatePassenger(widget.tour.id, updated);
+      await Get.find<TourController>()
+          .updatePassengerFromRequestEdit(widget.tour.id, updated);
       if (!mounted) return;
       Get.back();
       AppSnackBar.success(

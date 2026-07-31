@@ -13,6 +13,7 @@ import '../design/price_band_color.dart';
 import '../design/ugam.dart';
 import '../models/attendance.dart';
 import '../models/bus_details.dart';
+import '../models/bus_handover.dart';
 import '../models/collection.dart';
 import '../models/expense.dart';
 import '../models/handler_bus_money.dart';
@@ -21,6 +22,7 @@ import '../models/income_entry.dart';
 import '../models/passenger.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
+import '../services/wa_template_params.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
@@ -31,6 +33,7 @@ import '../utils/pickup_grouping.dart';
 import '../utils/seat_money_state.dart';
 import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
+import '../utils/wa_param_error_text.dart';
 import 'fullscreen_chart_screen.dart';
 
 /// The ways the handler reads the chart: the visual seat [grid], or the
@@ -93,6 +96,16 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   /// Which leg the attendance view is currently showing (GO vs RETURN).
   AttendanceLeg _attLeg = AttendanceLeg.go;
 
+  /// Cash already handed to the admin for this handler's bus, keyed by id.
+  /// Read through its own RPC rather than the manifest (whose live body has
+  /// drifted from the migration files). Without these the handler's screen kept
+  /// reading the full "in hand" forever, even after the cash changed hands.
+  final Map<String, BusHandover> _handovers = {};
+
+  /// Per-bus journey progress (is the GO leg finished?), keyed by bus id. The
+  /// manifest omits `journey_done`, so this comes from `handler_bus_leg_state`.
+  final Map<String, HandlerBusLegState> _legState = {};
+
   String _collectionKey(String passengerId, String busId, String seatId) =>
       '$passengerId|$busId|$seatId';
 
@@ -149,18 +162,15 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     Bus bus,
     AttendanceLeg leg,
   ) {
-    final seen = <String>{};
-    final out = <Passenger>[];
-    for (final p in manifest.passengers) {
-      final onBus = p.assignedSeats.any((a) => a.busId == bus.id);
-      if (!onBus) continue;
-      final usesLeg = leg == AttendanceLeg.go
-          ? p.tripType.usesOutbound
-          : p.tripType.usesReturn;
-      if (!usesLeg) continue;
-      if (!seen.add(p.id)) continue;
-      out.add(p);
-    }
+    // Resolved by the shared [ridersOnBusForLeg]: the leg comes from the SEAT
+    // held on THIS bus, not from the rider's overall tripType (which listed a
+    // round-trip rider here for the return even when their RET berth was on a
+    // different bus).
+    final out = ridersOnBusForLeg(
+      manifest.passengers,
+      bus.id,
+      leg == AttendanceLeg.go ? CollectLeg.go : CollectLeg.ret,
+    );
     out.sort(
       (a, b) =>
           a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()),
@@ -230,9 +240,13 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
         collections: _collections.values.toList(),
         expenses: _expensesForBus(bus.id),
         incomes: _incomesForBus(bus.id),
-        // The handler pays the bus owner out of collected cash, so the rent is
-        // a real deduction from their in-hand — same figure the admin settles.
-        busRent: bus.busPrice,
+        // Cash already handed to the admin. `inHand` stays the GROSS figure
+        // (the admin's expectedHandover — an invariant asserted in
+        // cross_system_invariants_test); `outstanding` is what's still owed.
+        handovers: _handoversForBus(bus.id),
+        // NO busRent here on purpose: the bus owner's rent is the ADMIN's cost,
+        // settled out of what the handler hands over. The handler only ever
+        // sees collections, their own ground expenses and extra income.
         dueForSeat: bus.amountDueForSeat,
       );
 
@@ -250,9 +264,21 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   Future<void> _load() async {
     try {
       final manifest = await _store.handlerTourManifest(widget.requestId);
+      // Handovers + leg state ride alongside the manifest rather than inside it
+      // (its live body has drifted from the files, so it is never rewritten).
+      // Both are best-effort: a handler whose backend predates these RPCs still
+      // gets a working chart, just without settlement or the GO-leg action.
+      final handovers = await _safeHandovers();
+      final legState = await _safeLegState();
       if (!mounted) return;
       setState(() {
         _manifest = manifest;
+        _handovers
+          ..clear()
+          ..addEntries(handovers.map((h) => MapEntry(h.id, h)));
+        _legState
+          ..clear()
+          ..addEntries(legState.map((s) => MapEntry(s.busId, s)));
         _collections
           ..clear()
           ..addEntries(
@@ -298,6 +324,129 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     }
   }
 
+  /// Settlement and leg-progress reads that must never take the whole screen
+  /// down: on a backend where migration 046 has not been run yet these RPCs do
+  /// not exist and PostgREST answers PGRST202, which would otherwise land in
+  /// [_load]'s catch and show "could not load" over a chart that is perfectly
+  /// fine. Degrading to empty simply hides the settle + GO-leg affordances.
+  Future<List<BusHandover>> _safeHandovers() async {
+    try {
+      return await _store.handlerBusHandovers(widget.requestId);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<HandlerBusLegState>> _safeLegState() async {
+    try {
+      return await _store.handlerBusLegState(widget.requestId);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Handovers recorded against [busId].
+  List<BusHandover> _handoversForBus(String busId) =>
+      _handovers.values.where((h) => h.busId == busId).toList()
+        ..sort((a, b) => b.settledAt.compareTo(a.settledAt));
+
+  /// Record (or correct) one cash handover to the admin for [bus]. Pre-fills
+  /// the amount with what is still outstanding — the overwhelmingly common case
+  /// is handing over the whole remaining balance in one go.
+  Future<void> _openHandoverSheet(Bus bus, HandlerBusMoney summary) async {
+    final tourId = _manifest?.buses.isNotEmpty == true
+        ? (_manifest!.passengers.isNotEmpty
+              ? _manifest!.passengers.first.tourId
+              : '')
+        : '';
+    await UgamSheet.show<void>(
+      context,
+      title: tr('handler_chart.handover_title'),
+      builder: (_) => _HandoverSheet(
+        expected: summary.outstanding,
+        onSave: (amount, note) async {
+          final saved = await _store.handlerUpsertHandover(
+            widget.requestId,
+            BusHandover(
+              tourId: tourId,
+              busId: bus.id,
+              expectedAmount: summary.inHand,
+              handedOverAmount: amount,
+              note: note,
+            ),
+          );
+          if (saved == null) {
+            throw StateError('Handover was rejected.');
+          }
+          if (!mounted) return;
+          setState(() => _handovers[saved.id] = saved);
+        },
+      ),
+    );
+  }
+
+  /// Removes a handover the handler logged themselves. Admin-recorded rows are
+  /// never offered for deletion (the server refuses them too).
+  Future<void> _deleteHandover(BusHandover h) async {
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('handler_chart.handover_delete_title'),
+      message: tr(
+        'handler_chart.handover_delete_body',
+        namedArgs: {'amount': Formatters.formatMoneyInr(h.handedOverAmount)},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('app.action.delete'),
+      confirmIcon: Icons.delete_outline_rounded,
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    try {
+      final removed = await _store.handlerDeleteHandover(widget.requestId, h.id);
+      if (!removed) throw StateError('Delete rejected.');
+      if (!mounted) return;
+      setState(() => _handovers.remove(h.id));
+    } catch (_) {
+      if (mounted) AppSnackBar.error(tr('handler_chart.handover_failed'));
+    }
+  }
+
+  /// Finish the GO leg for this bus: outbound-only riders have completed their
+  /// only journey, so their seats here are released for the return chart. The
+  /// server freezes the outbound chart first, in the same transaction.
+  Future<void> _completeOutboundLeg(Bus bus) async {
+    final state = _legState[bus.id];
+    final pending =
+        (state?.outboundOnlyTotal ?? 0) - (state?.outboundOnlyDone ?? 0);
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('handler_chart.leg_done_title'),
+      message: tr(
+        'handler_chart.leg_done_body',
+        namedArgs: {'count': '$pending', 'bus': bus.customerLabel},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('handler_chart.leg_done_confirm'),
+      confirmIcon: Icons.flag_rounded,
+    );
+    if (!ok || !mounted) return;
+    try {
+      final cleared = await _store.handlerCompleteOutboundLeg(
+        widget.requestId,
+        bus.id,
+      );
+      if (cleared == null) throw StateError('Leg completion rejected.');
+      if (!mounted) return;
+      AppSnackBar.success(
+        tr('handler_chart.leg_done_ok', namedArgs: {'count': '$cleared'}),
+      );
+      // Seats moved server-side, so re-read rather than patching locally.
+      await _load();
+    } catch (_) {
+      if (mounted) AppSnackBar.error(tr('handler_chart.leg_done_failed'));
+    }
+  }
+
   Bus? _selectedBus(HandlerManifest manifest) {
     if (manifest.buses.isEmpty) return null;
     final id = _selectedBusId;
@@ -339,17 +488,33 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
       title: tr('handler_chart.seat_shared_title', namedArgs: {'seat': seatId}),
       builder: (sheetCtx) => _OccupantChooserSheet(
         seatId: seatId,
+        busId: bus.id,
         occupants: occupants,
         outboundDone: outboundDone,
-        onPick: (p) {
-          Navigator.of(sheetCtx).pop();
-          _showOccupantSheet(bus, seatId, p);
+        // Push the collect sheet OVER the chooser instead of destroying the
+        // chooser first: on a Double Sofa shared by up to four riders, backing
+        // out of the collect sheet now returns to the chooser (pick the rider
+        // next to the one you tapped) rather than dropping all the way back to
+        // the seat grid. The chooser only closes once a collection is saved,
+        // which is the end state the pop-first version produced.
+        onPick: (p) async {
+          final saved = await _showOccupantSheet(bus, seatId, p);
+          if (saved == true && sheetCtx.mounted) {
+            Navigator.of(sheetCtx).pop();
+          }
         },
       ),
     );
   }
 
-  Future<void> _showOccupantSheet(Bus bus, String seatId, Passenger passenger) {
+  /// Opens the per-passenger collect sheet. Resolves to `true` when the handler
+  /// saved a collection, `null` when they backed out — the shared-seat chooser
+  /// reads that to decide whether to stay open.
+  Future<bool?> _showOccupantSheet(
+    Bus bus,
+    String seatId,
+    Passenger passenger,
+  ) {
     final due = bus.amountDueForSeat(passenger, seatId);
     final existing = _collectionFor(passenger.id, bus.id, seatId);
     // Resolve the tour id from the bus first, falling back to the passenger;
@@ -358,7 +523,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
         ? bus.tourId!
         : passenger.tourId;
 
-    return UgamSheet.show<void>(
+    return UgamSheet.show<bool>(
       context,
       title: tr('handler_chart.collect_title'),
       builder: (sheetCtx) => _CollectSheet(
@@ -598,17 +763,25 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             );
           } else if (result.anySent) {
             AppSnackBar.warning(
-              tr(
-                'bus_message.partial_body',
-                namedArgs: {
-                  'sent': '${result.sent}',
-                  'failed': '${result.failed}',
-                },
-              ),
+              '${tr('bus_message.partial_body', namedArgs: {
+                    'sent': '${result.sent}',
+                    'failed': '${result.failed}',
+                  })}${firstWaError(result)}',
               title: tr('bus_message.partial_title'),
             );
+          } else if (result.results.isEmpty) {
+            // A 2xx with no per-recipient rows: either the bus genuinely has no
+            // seated riders, or the reply was malformed. Say which, rather than
+            // reporting a send failure the handler cannot act on.
+            AppSnackBar.warning(tr('bus_message.no_recipients'));
           } else {
-            AppSnackBar.error(tr('bus_message.failed_body'));
+            // Meta's own rejection text (e.g. "(#132000) Param text cannot have
+            // new-line/tab characters…") — previously dropped, which is what
+            // made a refused announcement look like nothing had happened.
+            AppSnackBar.error(
+              '${tr('bus_message.failed_body')}${firstWaError(result)}',
+              title: tr('bus_message.failed_title'),
+            );
           }
         },
       ),
@@ -768,8 +941,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             ],
             currentIndex: _viewMode == _ViewMode.grid ? 0 : 1,
             onChanged: (i) => setState(
-              () => _viewMode =
-                  i == 0 ? _ViewMode.grid : _ViewMode.attendance,
+              () => _viewMode = i == 0 ? _ViewMode.grid : _ViewMode.attendance,
             ),
           ),
         ),
@@ -792,8 +964,24 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                   toCollect: summary.toCollect,
                   spent: summary.spent,
                   income: summary.income,
-                  rent: summary.rent,
                   inHand: summary.inHand,
+                  handedOver: summary.handedOver,
+                  outstanding: summary.outstanding,
+                  settled: summary.isSettled,
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                _SettlementCard(
+                  summary: summary,
+                  handovers: _handoversForBus(bus.id),
+                  c: c,
+                  onSettle: () => _openHandoverSheet(bus, summary),
+                  onDelete: (h) => _deleteHandover(h),
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                _LegCompletionCard(
+                  state: _legState[bus.id],
+                  c: c,
+                  onComplete: () => _completeOutboundLeg(bus),
                 ),
                 const SizedBox(height: UgamSpacing.md),
                 _BoardedSummary(go: goCounts, ret: retCounts, c: c),
@@ -874,23 +1062,21 @@ class _LoadingSkeleton extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Mirrors what _body actually builds, so the header does not visibly
+          // reflow when the manifest lands: the tab-pill strip, then ONE
+          // full-width money hero, then the two-up boarded chips — not three
+          // equal tiles.
           const UgamSkeleton(height: 44, radius: UgamRadius.input),
           const SizedBox(height: UgamSpacing.lg),
           const UgamSkeleton.text(width: 140),
           const SizedBox(height: UgamSpacing.md),
+          const UgamSkeleton(height: 76, radius: UgamRadius.card),
+          const SizedBox(height: UgamSpacing.md),
           Row(
             children: const [
-              Expanded(
-                child: UgamSkeleton(height: 76, radius: UgamRadius.card),
-              ),
+              Expanded(child: UgamSkeleton(height: 38, radius: UgamRadius.row)),
               SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: UgamSkeleton(height: 76, radius: UgamRadius.card),
-              ),
-              SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: UgamSkeleton(height: 76, radius: UgamRadius.card),
-              ),
+              Expanded(child: UgamSkeleton(height: 38, radius: UgamRadius.row)),
             ],
           ),
           const SizedBox(height: UgamSpacing.lg),
@@ -947,16 +1133,15 @@ class _SeatGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
     final layout = bus.layout;
     if (layout == null || layout.totalCells == 0) {
-      return Container(
+      // Matches the two UgamEmpty states this screen already renders in _body;
+      // this one used to be a lone grey caption line, which read as unfinished.
+      return Padding(
         padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
-        alignment: Alignment.center,
-        child: Text(
-          tr('handler_chart.no_seat_layout'),
-          textAlign: TextAlign.center,
-          style: UgamText.caption.copyWith(color: c.ink2),
+        child: UgamEmpty(
+          icon: Icons.event_seat_outlined,
+          title: tr('handler_chart.no_seat_layout'),
         ),
       );
     }
@@ -967,8 +1152,12 @@ class _SeatGrid extends StatelessWidget {
         layout: layout,
         cellWidth: kSeatTileW,
         cellHeight: kSeatTileH,
-        colGap: 8,
-        rowGap: 8,
+        // 6, matching charts_screen and fullscreen_chart_screen. CombinedSeatGrid
+        // wraps rows in a scale-down FittedBox, so the old 8 forced a smaller
+        // scale factor and rendered the SAME bus's tiles smaller here than on
+        // the admin chart.
+        colGap: 6,
+        rowGap: 6,
         driverLabel: tr('handler_chart.driver'),
         tileBuilder: (ctx, cell) {
           // EVERY rider on this seat (up to four on a Double Sofa across
@@ -1014,54 +1203,31 @@ class _SeatGrid extends StatelessWidget {
   }
 }
 
-/// A small filled circle used for group / money badges on a seat tile.
-class _Dot extends StatelessWidget {
-  final Color color;
-  final double size;
-
-  const _Dot({required this.color, required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-    );
-  }
-}
-
 // ─── Call button ───────────────────────────────────────────────────────
 
-/// The round tap-to-call button shared by the roster row, the shared-seat
-/// chooser, and the attendance list. Dials [phone] via the platform dialer.
+/// The round tap-to-call button shared by the shared-seat chooser, the driver
+/// card, and the attendance list. Dials [phone] via the platform dialer.
+///
+/// The circle itself is [UgamIconButton] with the tonal `accent` tone, so it is
+/// 44×44 (was a hand-rolled 40) and reads identically to every other round
+/// chrome action in the app. This class survives only as the one place the
+/// dialer call, the haptic and the a11y label are wired up — the driver card
+/// used to re-roll the whole stack a second time.
 class _CallButton extends StatelessWidget {
   final String phone;
-  final UgamColorSet c;
 
-  const _CallButton({required this.phone, required this.c});
+  const _CallButton({required this.phone});
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: tr('handler_chart.call_semantic', namedArgs: {'phone': phone}),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          PhoneDialer.call(phone);
-        },
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: c.accentFill,
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: Icon(Icons.call_rounded, size: 17, color: c.accent),
-        ),
+    return UgamIconButton(
+      icon: Icons.call_rounded,
+      tone: UgamIconButtonTone.accent,
+      onTapFeedback: HapticFeedback.selectionClick,
+      onTap: () => PhoneDialer.call(phone),
+      semanticLabel: tr(
+        'handler_chart.call_semantic',
+        namedArgs: {'phone': phone},
       ),
     );
   }
@@ -1093,8 +1259,10 @@ class _PriceBandKey extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.sell_outlined, size: 16, color: c.ink2),
-                const SizedBox(width: 6),
+                // 18 + sm, matching the expense / income section headers this
+                // key stacks directly above.
+                Icon(Icons.sell_outlined, size: 18, color: c.ink2),
+                const SizedBox(width: UgamSpacing.sm),
                 Text(
                   tr('handler_chart.price_bands'),
                   style: UgamText.titleS.copyWith(color: c.ink),
@@ -1139,12 +1307,15 @@ class _PriceBandRow extends StatelessWidget {
         : (raw == 'Rear' ? tr('handler_chart.band_rear') : raw);
     return Row(
       children: [
+        // 12x12 / r3, exactly the swatch UgamSeatChartLegend paints. The two
+        // legends stack on the same screen, so a 16px r4 swatch above a 12px r3
+        // one read as two different systems.
         Container(
-          width: 16,
-          height: 16,
+          width: 12,
+          height: 12,
           decoration: BoxDecoration(
             color: color.withValues(alpha: 0.85),
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(3),
             border: Border.all(color: color),
           ),
         ),
@@ -1209,7 +1380,10 @@ class _TripBadge extends StatelessWidget {
         ? tr('handler_chart.badge_half_suffix', namedArgs: {'leg': base})
         : base;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.badgeH,
+        vertical: UgamSpacing.badgeV,
+      ),
       decoration: BoxDecoration(
         color: oneWay ? tint : c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.chip),
@@ -1219,7 +1393,10 @@ class _TripBadge extends StatelessWidget {
         style: UgamText.micro.copyWith(
           // Dark ground on the bright leg tint; muted ink on the neutral pill.
           color: oneWay ? c.bg : c.ink2,
-          fontSize: 8,
+          // No fontSize override: micro (10) is already the smallest step on
+          // the scale. The old fork to 8 became ~6.8 once the root text scaler
+          // multiplied it on a small phone, and the handler could not read
+          // which leg a rider was on before choosing whom to collect from.
           letterSpacing: 0.3,
           fontWeight: FontWeight.w900,
         ),
@@ -1241,6 +1418,10 @@ class _TripBadge extends StatelessWidget {
 /// sheet opens.
 class _OccupantChooserSheet extends StatefulWidget {
   final String seatId;
+
+  /// The bus this berth belongs to. Seat ids are only unique WITHIN a bus, so
+  /// the per-seat leg lookup needs it to resolve the right assignment.
+  final String busId;
   final List<Passenger> occupants;
 
   /// Whether the agent has completed the outbound leg — seeds the default leg
@@ -1250,6 +1431,7 @@ class _OccupantChooserSheet extends StatefulWidget {
 
   const _OccupantChooserSheet({
     required this.seatId,
+    required this.busId,
     required this.occupants,
     required this.outboundDone,
     required this.onPick,
@@ -1268,9 +1450,21 @@ class _OccupantChooserSheetState extends State<_OccupantChooserSheet> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final hasSplit = seatHasLegSplit(widget.occupants);
+    // Seat-scoped: the leg comes from each rider's assignment for THIS berth,
+    // not their overall trip, so the RETURN chooser can't offer a rider whose
+    // return berth is a different seat.
+    final hasSplit = seatHasLegSplit(
+      widget.occupants,
+      seatId: widget.seatId,
+      busId: widget.busId,
+    );
     final shown = hasSplit
-        ? occupantsForCollectLeg(widget.occupants, _leg)
+        ? occupantsForCollectLeg(
+            widget.occupants,
+            _leg,
+            seatId: widget.seatId,
+            busId: widget.busId,
+          )
         : widget.occupants;
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -1341,50 +1535,49 @@ class _LegSharedTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = passenger;
     final hasPhone = p.phone.trim().isNotEmpty;
-    return GestureDetector(
+    // UgamCard.plain with `elev` + the row radius resolves to exactly the
+    // surface this row hand-rolled (cardElev / 14), and adds the press-scale
+    // feedback every other tappable card in the app has — tapping a rider on a
+    // four-person sofa now confirms before the sheet swaps.
+    return UgamCard.plain(
       onTap: onPick,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.md),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-        ),
-        child: Row(
-          children: [
-            _TripBadge(tripType: leg, c: c),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    p.displayName,
-                    style: UgamText.bodyStrong.copyWith(color: c.ink),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+      elev: true,
+      radius: UgamRadius.row,
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      child: Row(
+        children: [
+          _TripBadge(tripType: leg, c: c),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 2 lines before ellipsis — app-wide name rule, see
+                // UgamRequestRow.
+                Text(
+                  p.displayName,
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  hasPhone ? p.phone : tr('handler_chart.no_mobile'),
+                  style: UgamText.tabular(
+                    UgamText.micro.copyWith(color: hasPhone ? c.ink2 : c.ink3),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    hasPhone ? p.phone : tr('handler_chart.no_mobile'),
-                    style: UgamText.tabular(
-                      UgamText.micro.copyWith(
-                        color: hasPhone ? c.ink2 : c.ink3,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            if (hasPhone) ...[
-              const SizedBox(width: UgamSpacing.sm),
-              _CallButton(phone: p.phone, c: c),
-            ],
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+          ),
+          if (hasPhone) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            _CallButton(phone: p.phone),
           ],
-        ),
+          const SizedBox(width: UgamSpacing.xs),
+          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+        ],
       ),
     );
   }
@@ -1491,9 +1684,11 @@ class _DriverContact extends StatelessWidget {
         padding: const EdgeInsets.all(UgamSpacing.sm),
         child: Row(
           children: [
+            // Decorative medallion (not tappable) -> px, so it tracks the same
+            // curve the name/phone text beside it already rides.
             Container(
-              width: 40,
-              height: 40,
+              width: UgamScale.px(context, 40),
+              height: UgamScale.px(context, 40),
               decoration: BoxDecoration(
                 color: c.accentFill,
                 shape: BoxShape.circle,
@@ -1501,7 +1696,7 @@ class _DriverContact extends StatelessWidget {
               alignment: Alignment.center,
               child: Icon(
                 Icons.directions_bus_filled_rounded,
-                size: 19,
+                size: UgamScale.px(context, 19),
                 color: c.accent,
               ),
             ),
@@ -1539,46 +1734,19 @@ class _DriverContact extends StatelessWidget {
             ),
             if (hasPhone) ...[
               const SizedBox(width: UgamSpacing.sm),
-              Semantics(
-                button: true,
-                label: tr(
-                  'handler_chart.call_semantic',
+              // Was a second, byte-identical hand-rolled copy of _CallButton.
+              _CallButton(phone: phone),
+              const SizedBox(width: UgamSpacing.xs),
+              // The WhatsApp twin had no Semantics at all while the call button
+              // beside it announced itself; UgamIconButton supplies both.
+              UgamIconButton(
+                icon: Icons.chat_rounded,
+                tone: UgamIconButtonTone.good,
+                onTapFeedback: HapticFeedback.selectionClick,
+                onTap: () => _openWhatsApp(phone),
+                semanticLabel: tr(
+                  'handler_chart.whatsapp_semantic',
                   namedArgs: {'phone': phone},
-                ),
-                child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    PhoneDialer.call(phone);
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: c.accentFill,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(Icons.call_rounded, size: 17, color: c.accent),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  _openWhatsApp(phone);
-                },
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: c.goodFill,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(Icons.chat_rounded, size: 17, color: c.good),
                 ),
               ),
             ],
@@ -1618,8 +1786,12 @@ class _SummaryHeader extends StatelessWidget {
   final double toCollect;
   final double spent;
   final double income;
-  final double rent;
   final double inHand;
+
+  /// Cash already handed to the admin, and what is still outstanding.
+  final double handedOver;
+  final double outstanding;
+  final bool settled;
 
   const _SummaryHeader({
     required this.collected,
@@ -1627,23 +1799,38 @@ class _SummaryHeader extends StatelessWidget {
     required this.toCollect,
     required this.spent,
     required this.income,
-    required this.rent,
     required this.inHand,
+    this.handedOver = 0,
+    required this.outstanding,
+    this.settled = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final hasHandover = handedOver.abs() > Collection.kMoneyEpsilon;
 
-    // ONE money hero: "In hand" is the headline; everything else is folded
-    // into a tap-to-reveal breakdown so the chart/roster owns the viewport.
+    // ONE money hero. The headline is what the handler STILL has to hand over,
+    // not the gross take: once they settle on the roadside the number they are
+    // looking at must actually go down. With no handover recorded the two are
+    // identical, so this changes nothing until settlement is used.
     return UgamHeroStat(
-      label: tr('handler_chart.stat_in_hand'),
-      value: Formatters.formatMoneyInr(inHand),
-      secondary: tr(
-        'handler_chart.in_hand_secondary',
-        namedArgs: {'amount': Formatters.formatMoneyInr(collected)},
-      ),
+      label: settled
+          ? tr('handler_chart.stat_settled')
+          : tr('handler_chart.stat_in_hand'),
+      value: Formatters.formatMoneyInr(settled ? handedOver : outstanding),
+      secondary: hasHandover
+          ? tr(
+              'handler_chart.handed_secondary',
+              namedArgs: {
+                'handed': Formatters.formatMoneyInr(handedOver),
+                'total': Formatters.formatMoneyInr(inHand),
+              },
+            )
+          : tr(
+              'handler_chart.in_hand_secondary',
+              namedArgs: {'amount': Formatters.formatMoneyInr(collected)},
+            ),
       breakdown: [
         HeroStatLine(
           tr('handler_chart.stat_collected'),
@@ -1670,15 +1857,29 @@ class _SummaryHeader extends StatelessWidget {
           Formatters.formatMoneyInr(spent),
           tone: c.warm,
         ),
-        // The owner's rent the handler pays out of collected cash — shown as a
-        // distinct deduction so the in-hand drop reads clearly. Hidden when the
-        // bus carries no rent.
-        if (rent > 0.005)
+        // Closes the arithmetic: collected + income − spent = what goes to the
+        // admin. The bus owner's rent is deliberately absent — that is the
+        // admin's cost, settled out of this handover, never the handler's.
+        HeroStatLine(
+          tr('handler_chart.stat_to_admin'),
+          Formatters.formatMoneyInr(inHand),
+          tone: c.ink,
+        ),
+        // Only once cash has actually moved — an always-on ₹0 "handed over"
+        // line would be noise on the majority of buses that never settle
+        // partially.
+        if (hasHandover) ...[
           HeroStatLine(
-            tr('handler_chart.stat_rent'),
-            Formatters.formatMoneyInr(rent),
-            tone: c.warm,
+            tr('handler_chart.stat_handed_over'),
+            Formatters.formatMoneyInr(handedOver),
+            tone: c.good,
           ),
+          HeroStatLine(
+            tr('handler_chart.stat_outstanding'),
+            Formatters.formatMoneyInr(outstanding),
+            tone: settled ? c.good : c.accent,
+          ),
+        ],
       ],
     );
   }
@@ -1731,10 +1932,12 @@ class _CollectSheetState extends State<_CollectSheet> {
           ? ''
           : col!.amountReceived.toStringAsFixed(0),
     );
+    // Only pre-seed "returned" with a GENUINE manual return; auto-recorded
+    // change stays blank so a re-open re-derives it from the typed received
+    // amount. Shared with the admin collect sheet so the two never drift.
+    final seedReturn = manualReturnToSeed(col);
     _returnedCtrl = TextEditingController(
-      text: (col?.amountRefunded ?? 0) == 0
-          ? ''
-          : col!.amountRefunded.toStringAsFixed(0),
+      text: seedReturn == null ? '' : seedReturn.toStringAsFixed(0),
     );
     _collectedByCtrl = TextEditingController(text: col?.collectedBy ?? '');
     _noteCtrl = TextEditingController(text: col?.note ?? '');
@@ -1764,7 +1967,9 @@ class _CollectSheetState extends State<_CollectSheet> {
       );
       // Dismiss the keyboard so it animates out cleanly with the sheet.
       FocusManager.instance.primaryFocus?.unfocus();
-      if (mounted) Navigator.of(context).pop();
+      // `true` tells the shared-seat chooser the collection landed, so it can
+      // close behind us. Backing out pops with null and leaves it open.
+      if (mounted) Navigator.of(context).pop(true);
     } catch (_) {
       if (mounted) setState(() => _saving = false);
       AppSnackBar.error(tr('handler_chart.error_save_collection'));
@@ -1786,9 +1991,12 @@ class _CollectSheetState extends State<_CollectSheet> {
           // ── Header: avatar, name, handler chip, age group ──
           Row(
             children: [
+              // Decorative avatar -> px. Left at 48 it held its full footprint
+              // while the initial inside it shrank with the text scaler, so the
+              // circle visibly ballooned around the letter on a small phone.
               Container(
-                width: 48,
-                height: 48,
+                width: UgamScale.px(context, 48),
+                height: UgamScale.px(context, 48),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: c.accentFill,
@@ -1820,26 +2028,9 @@ class _CollectSheetState extends State<_CollectSheet> {
                         ),
                         if (passenger.isHandler) ...[
                           const SizedBox(width: UgamSpacing.sm),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: c.warmFill,
-                              borderRadius: BorderRadius.circular(
-                                UgamRadius.chip,
-                              ),
-                            ),
-                            child: Text(
-                              tr('handler_chart.handler_badge'),
-                              style: UgamText.micro.copyWith(
-                                color: c.warm,
-                                fontSize: 9,
-                                letterSpacing: 0.6,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
+                          UgamReqChip(
+                            label: tr('handler_chart.handler_badge'),
+                            variant: UgamChipVariant.warm,
                           ),
                         ],
                       ],
@@ -1856,12 +2047,11 @@ class _CollectSheetState extends State<_CollectSheet> {
           ),
           const SizedBox(height: UgamSpacing.lg),
           // ── Phone + Call ──
-          Container(
+          // Was a hand-rolled cardElev slab at UgamRadius.input (14) sitting
+          // inside a sheet whose other surfaces are UgamRadius.card (16).
+          UgamCard.plain(
+            elev: true,
             padding: const EdgeInsets.all(UgamSpacing.md),
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-            ),
             child: Row(
               children: [
                 Icon(Icons.phone_outlined, size: 18, color: c.ink2),
@@ -1959,7 +2149,14 @@ class _CollectSheetState extends State<_CollectSheet> {
             builder: (_) {
               final balance =
                   _parse(_receivedCtrl) - _parse(_returnedCtrl) - due;
-              final (String balLabel, Color balColor) = balance > 0
+              // The pill carries its own tonal FILL out of the branch rather
+              // than deriving one with a hand-picked alpha, so it sits at the
+              // same weight as every other good/warm/danger surface.
+              final (
+                String balLabel,
+                Color balColor,
+                Color balFill,
+              ) = balance > 0
                   ? (
                       tr(
                         'handler_chart.balance_change',
@@ -1968,6 +2165,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                         },
                       ),
                       c.warm,
+                      c.warmFill,
                     )
                   : balance < 0
                   ? (
@@ -1978,8 +2176,9 @@ class _CollectSheetState extends State<_CollectSheet> {
                         },
                       ),
                       c.danger,
+                      c.dangerFill,
                     )
-                  : (tr('handler_chart.balance_settled'), c.good);
+                  : (tr('handler_chart.balance_settled'), c.good, c.goodFill);
               // Smooth the color/text transitions as the amount field changes;
               // the balance VALUE/logic is unchanged, only the visual is eased.
               return AnimatedContainer(
@@ -1991,7 +2190,7 @@ class _CollectSheetState extends State<_CollectSheet> {
                   vertical: UgamSpacing.md,
                 ),
                 decoration: BoxDecoration(
-                  color: balColor.withValues(alpha: 0.12),
+                  color: balFill,
                   borderRadius: BorderRadius.circular(UgamRadius.row),
                 ),
                 child: AnimatedDefaultTextStyle(
@@ -2163,20 +2362,13 @@ class _HandlerExpenseRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm + 2,
+          vertical: UgamSpacing.md,
         ),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Text(
-                expense.category.displayName,
-                style: UgamText.micro.copyWith(color: c.ink2),
-              ),
+            UgamReqChip(
+              label: expense.category.displayName,
+              variant: UgamChipVariant.neutral,
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -2219,10 +2411,7 @@ class _HandlerExpenseRow extends StatelessWidget {
                   onDelete();
                 },
                 behavior: HitTestBehavior.opaque,
-                child: const Padding(
-                  padding: EdgeInsets.all(6),
-                  child: _DeleteGlyph(),
-                ),
+                child: const _DeleteGlyph(),
               ),
             ),
           ],
@@ -2232,13 +2421,26 @@ class _HandlerExpenseRow extends StatelessWidget {
   }
 }
 
+/// The trash affordance on an expense / income ledger row.
+///
+/// Deliberately NOT a [UgamIconButton]: its `danger` tone paints a filled
+/// circle, and one per row would turn a dense ledger into a column of red
+/// discs. Instead the painted glyph is untouched (18pt, ink3) and only its
+/// hit box grows — an invisible 44×44 box around it, so the handler stops
+/// fat-fingering delete on a row they meant to tap-to-edit.
 class _DeleteGlyph extends StatelessWidget {
   const _DeleteGlyph();
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Icon(Icons.delete_outline_rounded, size: 18, color: c.ink3);
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Center(
+        child: Icon(Icons.delete_outline_rounded, size: 18, color: c.ink3),
+      ),
+    );
   }
 }
 
@@ -2336,36 +2538,13 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
             // or it would be double-counted.
             children: ExpenseCategory.values
                 .where((cat) => cat != ExpenseCategory.busOwner)
-                .map((cat) {
-                  final active = cat == _category;
-                  return GestureDetector(
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      setState(() => _category = cat);
-                    },
-                    behavior: HitTestBehavior.opaque,
-                    child: AnimatedContainer(
-                      duration: UgamMotion.tab,
-                      curve: UgamMotion.easeOut,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: UgamSpacing.lg,
-                        vertical: UgamSpacing.sm + 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: active ? c.accentFill : c.cardElev,
-                        borderRadius: BorderRadius.circular(UgamRadius.chip),
-                        border: Border.all(color: active ? c.accent : c.border),
-                      ),
-                      child: Text(
-                        cat.displayName,
-                        style: UgamText.caption.copyWith(
-                          color: active ? c.accent : c.ink2,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  );
-                })
+                .map(
+                  (cat) => _CategoryChip(
+                    label: cat.displayName,
+                    active: cat == _category,
+                    onTap: () => setState(() => _category = cat),
+                  ),
+                )
                 .toList(),
           ),
           const SizedBox(height: UgamSpacing.lg),
@@ -2396,6 +2575,334 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
             onPressed: _saving ? null : _save,
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─── Settlement (handover to admin) ────────────────────────────────────
+
+/// The handler's settlement ledger for one bus: what is still owed to the
+/// admin, a CTA to record a handover, and the rows already handed over.
+///
+/// Before this existed the handler's screen kept reading the full "in hand"
+/// figure forever — the cash physically changed hands on the roadside and
+/// nothing on the phone ever moved.
+class _SettlementCard extends StatelessWidget {
+  final HandlerBusMoney summary;
+  final List<BusHandover> handovers;
+  final UgamColorSet c;
+  final VoidCallback onSettle;
+  final void Function(BusHandover) onDelete;
+
+  const _SettlementCard({
+    required this.summary,
+    required this.handovers,
+    required this.c,
+    required this.onSettle,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final settled = summary.isSettled;
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                settled
+                    ? Icons.verified_rounded
+                    : Icons.account_balance_wallet_rounded,
+                size: 18,
+                color: settled ? c.good : c.accent,
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: Text(
+                  tr('handler_chart.settle_title'),
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+              ),
+              Text(
+                Formatters.formatMoneyInr(summary.outstanding),
+                style: UgamText.bodyStrong.copyWith(
+                  color: settled ? c.good : c.accent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            settled
+                ? tr('handler_chart.settle_done')
+                : tr('handler_chart.settle_hint'),
+            style: UgamText.caption.copyWith(color: c.ink2),
+          ),
+          if (handovers.isNotEmpty) ...[
+            const SizedBox(height: UgamSpacing.md),
+            for (final h in handovers)
+              Padding(
+                padding: const EdgeInsets.only(bottom: UgamSpacing.tight),
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle_outline_rounded,
+                        size: 15, color: c.good),
+                    const SizedBox(width: UgamSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        (h.note ?? '').trim().isEmpty
+                            ? Formatters.formatMoneyInr(h.handedOverAmount)
+                            : '${Formatters.formatMoneyInr(h.handedOverAmount)} · ${h.note!.trim()}',
+                        style: UgamText.caption.copyWith(color: c.ink),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    // Admin-recorded settlements stay read-only here — the
+                    // server refuses the delete too, so never offer the action.
+                    if (h.byHandler)
+                      UgamIconButton(
+                        icon: Icons.close_rounded,
+                        onTap: () => onDelete(h),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+          if (!settled) ...[
+            const SizedBox(height: UgamSpacing.md),
+            UgamCTA(
+              label: tr('handler_chart.settle_cta'),
+              leadingIcon: Icons.south_east_rounded,
+              onPressed: onSettle,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Records one cash handover. The amount pre-fills with everything still
+/// outstanding, since handing over the whole remaining balance at once is by
+/// far the common case.
+class _HandoverSheet extends StatefulWidget {
+  final double expected;
+  final Future<void> Function(double amount, String? note) onSave;
+
+  const _HandoverSheet({required this.expected, required this.onSave});
+
+  @override
+  State<_HandoverSheet> createState() => _HandoverSheetState();
+}
+
+class _HandoverSheetState extends State<_HandoverSheet> {
+  late final TextEditingController _amountCtrl;
+  final TextEditingController _noteCtrl = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _amountCtrl = TextEditingController(
+      text: widget.expected <= 0 ? '' : widget.expected.toStringAsFixed(0),
+    );
+  }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final amount = double.tryParse(_amountCtrl.text.trim()) ?? 0;
+    if (amount <= 0) {
+      AppSnackBar.error(tr('handler_chart.error_amount_zero'));
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final note = _noteCtrl.text.trim();
+      await widget.onSave(amount, note.isEmpty ? null : note);
+      FocusManager.instance.primaryFocus?.unfocus();
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+      AppSnackBar.error(tr('handler_chart.handover_failed'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr(
+              'handler_chart.handover_intro',
+              namedArgs: {
+                'amount': Formatters.formatMoneyInr(widget.expected),
+              },
+            ),
+            style: UgamText.body.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamInput(
+            label: tr('handler_chart.handover_amount'),
+            controller: _amountCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          UgamInput(
+            label: tr('handler_chart.handover_note'),
+            controller: _noteCtrl,
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamCTA(
+            label: _saving
+                ? tr('handler_chart.saving')
+                : tr('handler_chart.handover_save'),
+            loading: _saving,
+            onPressed: _saving ? null : _save,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── GO-leg completion ─────────────────────────────────────────────────
+
+/// Lets the handler close their own bus's GO leg once every outbound-only
+/// rider has finished their single journey — releasing those seats so the
+/// return chart shows them free. Hidden entirely when the bus carries no
+/// outbound-only riders (nothing to release), and shown as done afterwards.
+class _LegCompletionCard extends StatelessWidget {
+  final HandlerBusLegState? state;
+  final UgamColorSet c;
+  final VoidCallback onComplete;
+
+  const _LegCompletionCard({
+    required this.state,
+    required this.c,
+    required this.onComplete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final s = state;
+    // No state means migration 046 isn't live on this backend yet — degrade to
+    // nothing rather than offering an action that would fail.
+    if (s == null || s.outboundOnlyTotal == 0) return const SizedBox.shrink();
+
+    final pending = s.outboundOnlyTotal - s.outboundOnlyDone;
+    final done = pending <= 0;
+
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                done ? Icons.flag_circle_rounded : Icons.flag_outlined,
+                size: 18,
+                color: done ? c.good : c.accent,
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: Text(
+                  tr('handler_chart.leg_title'),
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            done
+                ? tr('handler_chart.leg_done_state')
+                : tr('handler_chart.leg_pending',
+                    namedArgs: {'count': '$pending'}),
+            style: UgamText.caption.copyWith(color: c.ink2),
+          ),
+          if (!done) ...[
+            const SizedBox(height: UgamSpacing.md),
+            UgamCTA(
+              label: tr('handler_chart.leg_done_confirm'),
+              leadingIcon: Icons.flag_rounded,
+              onPressed: onComplete,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The category selector pill shared by the expense and income sheets — one
+/// implementation where the two sheets each carried a byte-identical copy that
+/// could silently drift apart.
+///
+/// Styling is the tonal treatment `UgamSelectorPills` uses (accentFill + accent
+/// ink + accent hairline when active). The `minHeight` is the tap-target floor:
+/// the pill's own padding lands it near 40 and the caption inside shrinks with
+/// the text scaler, so without the floor it drops under 44 on a small phone.
+class _CategoryChip extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _CategoryChip({
+    required this.label,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: UgamMotion.tab,
+        curve: UgamMotion.easeOut,
+        constraints: BoxConstraints(minHeight: UgamScale.tap(context, 44)),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.lg,
+          vertical: UgamSpacing.md,
+        ),
+        decoration: BoxDecoration(
+          color: active ? c.accentFill : c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+          border: Border.all(color: active ? c.accent : c.border),
+        ),
+        child: Text(
+          label,
+          style: UgamText.caption.copyWith(
+            color: active ? c.accent : c.ink2,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ),
     );
   }
@@ -2527,20 +3034,13 @@ class _HandlerIncomeRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm + 2,
+          vertical: UgamSpacing.md,
         ),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Text(
-                income.category.displayName,
-                style: UgamText.micro.copyWith(color: c.ink2),
-              ),
+            UgamReqChip(
+              label: income.category.displayName,
+              variant: UgamChipVariant.neutral,
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -2586,10 +3086,7 @@ class _HandlerIncomeRow extends StatelessWidget {
                   onDelete();
                 },
                 behavior: HitTestBehavior.opaque,
-                child: const Padding(
-                  padding: EdgeInsets.all(6),
-                  child: _DeleteGlyph(),
-                ),
+                child: const _DeleteGlyph(),
               ),
             ),
           ],
@@ -2688,36 +3185,15 @@ class _IncomeSheetState extends State<_IncomeSheet> {
           Wrap(
             spacing: UgamSpacing.sm,
             runSpacing: UgamSpacing.sm,
-            children: IncomeCategory.values.map((cat) {
-              final active = cat == _category;
-              return GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _category = cat);
-                },
-                behavior: HitTestBehavior.opaque,
-                child: AnimatedContainer(
-                  duration: UgamMotion.tab,
-                  curve: UgamMotion.easeOut,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.lg,
-                    vertical: UgamSpacing.sm + 2,
+            children: IncomeCategory.values
+                .map(
+                  (cat) => _CategoryChip(
+                    label: cat.displayName,
+                    active: cat == _category,
+                    onTap: () => setState(() => _category = cat),
                   ),
-                  decoration: BoxDecoration(
-                    color: active ? c.accentFill : c.cardElev,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                    border: Border.all(color: active ? c.accent : c.border),
-                  ),
-                  child: Text(
-                    cat.displayName,
-                    style: UgamText.caption.copyWith(
-                      color: active ? c.accent : c.ink2,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
+                )
+                .toList(),
           ),
           const SizedBox(height: UgamSpacing.lg),
           UgamInput(
@@ -2787,15 +3263,45 @@ class _HandlerBusMessageSheetState extends State<_HandlerBusMessageSheet> {
       AppSnackBar.error(tr('bus_message.empty_text'));
       return;
     }
+
+    // Same Meta pre-flight as the admin composer (shared rule set) — a line
+    // break, tab or 5+ spaces is refused by Meta for EVERY recipient, so catch
+    // it here where the handler can still repair it.
+    final violations = WaTemplateParams.validateOne(text);
+    if (violations.isNotEmpty) {
+      final fixable = WaTemplateParams.canAutoFix(text);
+      final fix = await UgamDialog.confirm(
+        context,
+        title: tr('bus_message.invalid_title'),
+        message: waViolationsText(violations),
+        cancelLabel: tr('app.action.cancel'),
+        confirmLabel: fixable
+            ? tr('bus_message.fix_auto')
+            : tr('bus_message.invalid_edit'),
+        confirmIcon: fixable ? Icons.auto_fix_high_rounded : Icons.edit_rounded,
+      );
+      if (fix && fixable && mounted) {
+        final fixed = WaTemplateParams.sanitize(text);
+        _textCtrl.value = TextEditingValue(
+          text: fixed,
+          selection: TextSelection.collapsed(offset: fixed.length),
+        );
+      }
+      return;
+    }
+
     setState(() => _sending = true);
     try {
       await widget.onSend(text);
       // Dismiss the keyboard so it animates out cleanly with the sheet.
       FocusManager.instance.primaryFocus?.unfocus();
       if (mounted) Navigator.of(context).pop();
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _sending = false);
-      AppSnackBar.error(tr('bus_message.failed_body'));
+      // Carry the server's REAL reason (WhatsAppSendException.reason — the 403
+      // gate text, or Meta's own rejection) instead of a generic "send failed"
+      // the handler can do nothing with.
+      AppSnackBar.error('${tr('bus_message.failed_body')}\n$e');
     }
   }
 
@@ -2898,7 +3404,7 @@ class _BoardedChip extends StatelessWidget {
       child: Row(
         children: [
           Icon(icon, size: 14, color: tint),
-          const SizedBox(width: 6),
+          const SizedBox(width: UgamSpacing.sm),
           Expanded(
             child: Text(
               tr(
@@ -2942,6 +3448,50 @@ class _AttendanceView extends StatelessWidget {
     required this.onToggleLeg,
     required this.onTogglePresent,
   });
+
+  /// The pickup-grouped roster. Sections follow the admin's manual pickup
+  /// serial (the route order the manager list and the customer picker show),
+  /// NOT the alphabet — a handler boards points in road order, so an A→Z list
+  /// read as random. [PickupController] is the ranker; wrapped in [Obx] so the
+  /// sections re-order themselves the moment the async pickup list lands, and
+  /// falls back to plain A→Z when no controller is registered (e.g. in tests).
+  Widget _roster(UgamColorSet c) {
+    final pk = Get.isRegistered<PickupController>()
+        ? Get.find<PickupController>()
+        : null;
+    if (pk == null) return _grouped(c, null);
+    // The key rides the Obx: it is the AnimatedSwitcher's direct child, so the
+    // leg toggle still cross-fades.
+    return Obx(() {
+      // Read the list HERE, not only inside the rank callback: on a roster
+      // where nobody carries a pickup the callback never fires, and an Obx that
+      // registers zero observables paints as "improper use of a GetX".
+      final hasList = pk.all.isNotEmpty;
+      return _grouped(c, hasList ? pk : null);
+    }, key: ValueKey<AttendanceLeg>(leg));
+  }
+
+  Widget _grouped(UgamColorSet c, PickupController? pk) {
+    return PickupGroupedList<_AttendanceEntry>(
+      key: pk == null ? ValueKey<AttendanceLeg>(leg) : null,
+      groups: groupByPickup<_AttendanceEntry>(
+        rows,
+        idOf: (e) => e.passenger.pickupLocationId,
+        nameOf: (e) => e.passenger.pickupLocationName,
+        rankOf: pk == null
+            ? null
+            : (id, name) => pk.rankFor(id: id, name: name),
+      ),
+      rowBuilder: (e) => _AttendanceRow(
+        passenger: e.passenger,
+        present: e.present,
+        onChanged: (v) => onTogglePresent(e.passenger, v),
+        c: c,
+      ),
+      unassignedLabel: tr('handler_chart.pickup_none'),
+      c: c,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -3007,13 +3557,11 @@ class _AttendanceView extends StatelessWidget {
         ),
         const SizedBox(height: UgamSpacing.lg),
         if (rows.isEmpty)
-          Container(
+          Padding(
             padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
-            alignment: Alignment.center,
-            child: Text(
-              tr('handler_chart.att_none'),
-              textAlign: TextAlign.center,
-              style: UgamText.caption.copyWith(color: c.ink2),
+            child: UgamEmpty(
+              icon: Icons.how_to_reg_rounded,
+              title: tr('handler_chart.att_none'),
             ),
           )
         else
@@ -3024,76 +3572,33 @@ class _AttendanceView extends StatelessWidget {
             duration: UgamMotion.sheet,
             switchInCurve: UgamMotion.easeOut,
             switchOutCurve: UgamMotion.easeOut,
-            child: PickupGroupedList<_AttendanceEntry>(
-              key: ValueKey<AttendanceLeg>(leg),
-              groups: groupByPickup<_AttendanceEntry>(
-                rows,
-                idOf: (e) => e.passenger.pickupLocationId,
-                nameOf: (e) => e.passenger.pickupLocationName,
-              ),
-              rowBuilder: (e) => _AttendanceRow(
-                bus: bus,
-                passenger: e.passenger,
-                present: e.present,
-                onChanged: (v) => onTogglePresent(e.passenger, v),
-                c: c,
-              ),
-              unassignedLabel: tr('handler_chart.pickup_none'),
-              c: c,
-            ),
+            child: _roster(c),
           ),
       ],
     );
   }
 }
 
-/// A compact pickup-point chip for a passenger row: the admin-facing short CODE
-/// (from [PickupController]) when set, else the pickup NAME the booking
-/// snapshotted. Renders nothing when the rider has no pickup. Wrapped in [Obx]
-/// when the controller is live so the code fills in once the pickup list loads.
-class _PickupChip extends StatelessWidget {
-  final Passenger passenger;
-  const _PickupChip({required this.passenger});
-
-  Widget _chip(String? label) {
-    if (label == null || label.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(left: UgamSpacing.sm),
-      child: UgamReqChip(label: label, variant: UgamChipVariant.neutral),
-    );
-  }
-
-  String? _label(PickupController? pk) {
-    final code = pk?.codeFor(passenger.pickupLocationId);
-    if (code != null && code.isNotEmpty) return code;
-    final name = passenger.pickupLocationName;
-    return (name != null && name.isNotEmpty) ? name : null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final pk = Get.isRegistered<PickupController>()
-        ? Get.find<PickupController>()
-        : null;
-    // Obx repaints once the async pickup list arrives; with no live controller
-    // (e.g. under `flutter test`) fall back to the booking's name snapshot.
-    if (pk == null) return _chip(_label(null));
-    return Obx(() => _chip(_label(pk)));
-  }
-}
-
-/// One attendance line: the passenger's seat id chip(s) on this bus, their name
-/// + mobile, and a present / left-behind toggle. The trailing control is a
-/// [Switch] instead of a call button.
+/// One attendance line, laid out over TWO lines so nothing has to ellipse:
+///
+///   line 1 — the passenger's NAME (full, wrapping) + group dot + pickup, with
+///            the present / left-behind toggle pinned right;
+///   line 2 — their mobile and the call button.
+///
+/// A single-line row could not hold all of that: the chips, phone, call button
+/// and switch squeezed the name down to "vi…", which is useless on roll-call —
+/// the handler calls the name out and looks for a hand. Splitting the row gives
+/// the name the full width.
+///
+/// NO seat chip (user call, 2026-07-26): boarding is a name check, and the seat
+/// id belongs to the grid view. Don't re-add it.
 class _AttendanceRow extends StatelessWidget {
-  final Bus bus;
   final Passenger passenger;
   final bool present;
   final ValueChanged<bool> onChanged;
   final UgamColorSet c;
 
   const _AttendanceRow({
-    required this.bus,
     required this.passenger,
     required this.present,
     required this.onChanged,
@@ -3106,100 +3611,120 @@ class _AttendanceRow extends StatelessWidget {
     final hasPhone = p.phone.trim().isNotEmpty;
     final hasGroup = p.groupId != null && p.groupId!.isNotEmpty;
     final groupColor = hasGroup ? groupColorForId(p.groupId!) : null;
-    // Every seat this passenger holds on THIS bus, joined (a whole double-sofa
-    // resolves to a single seat id via the set).
-    final seatIds =
-        p.assignedSeats
-            .where((a) => a.busId == bus.id)
-            .map((a) => a.seatId)
-            .toSet()
-            .toList()
-          ..sort();
-    final seatLabel = seatIds.join(', ');
 
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm + 2,
+        vertical: UgamSpacing.md,
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Seat id chip(s).
-          Container(
-            constraints: const BoxConstraints(minWidth: 40),
-            height: 40,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-            ),
-            child: Text(
-              seatLabel,
-              style: UgamText.tabular(
-                UgamText.caption.copyWith(
-                  color: c.ink,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          // Name + mobile + group dot.
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
+          // ── Line 1: name (+ group dot, pickup) · present toggle ──────────
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: UgamSpacing.sm,
+                  runSpacing: UgamSpacing.xs,
                   children: [
-                    Flexible(
-                      child: Text(
-                        p.displayName,
-                        style: UgamText.bodyStrong.copyWith(color: c.ink),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                    Text(
+                      p.displayName,
+                      style: UgamText.bodyStrong.copyWith(color: c.ink),
                     ),
-                    if (groupColor != null) ...[
-                      const SizedBox(width: 6),
-                      _Dot(color: groupColor, size: 8),
-                    ],
+                    if (groupColor != null)
+                      // 6, matching UgamStatusDot's dot. The shared component
+                      // can't be used directly — it resolves its colour from a
+                      // 4-value tone enum, and a group colour is an arbitrary
+                      // hue off the golden-angle generator.
+                      Container(
+                        width: 6,
+                        height: 6,
+                        margin: const EdgeInsets.only(bottom: 3),
+                        decoration: BoxDecoration(
+                          color: groupColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
                     _PickupChip(passenger: p),
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              // `good` tone: green carries real meaning here ("marked
+              // present"), not just "enabled". UgamSwitch also drops the old
+              // `activeThumbColor: c.onAccent` — copper ink on a green track
+              // meant the accent read as scattered down every row of a boarded
+              // bus. The haptic and the Semantics(toggled:) wrapper live in it.
+              UgamSwitch(
+                value: present,
+                onChanged: onChanged,
+                tone: UgamSwitchTone.good,
+                semanticLabel: tr('handler_chart.att_mark_present'),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.xs),
+          // ── Line 2: mobile · call ────────────────────────────────────────
+          // No seat chip: roll-call is done by NAME, and the seat id is the
+          // grid view's job (user call, 2026-07-26).
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Text(
                   hasPhone ? p.phone : tr('handler_chart.no_mobile'),
                   style: UgamText.tabular(
-                    UgamText.micro.copyWith(color: hasPhone ? c.ink2 : c.ink3),
+                    UgamText.caption.copyWith(
+                      color: hasPhone ? c.ink2 : c.ink3,
+                    ),
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
+              ),
+              // Tap-to-call — reach a no-show straight from the roster.
+              if (hasPhone) ...[
+                const SizedBox(width: UgamSpacing.sm),
+                _CallButton(phone: p.phone),
               ],
-            ),
-          ),
-          // Tap-to-call — reach a no-show straight from the attendance list.
-          if (hasPhone) ...[
-            const SizedBox(width: UgamSpacing.sm),
-            _CallButton(phone: p.phone, c: c),
-          ],
-          // Present / left-behind toggle.
-          const SizedBox(width: UgamSpacing.sm),
-          Semantics(
-            label: tr('handler_chart.att_mark_present'),
-            toggled: present,
-            child: Switch(
-              value: present,
-              onChanged: (v) {
-                HapticFeedback.lightImpact();
-                onChanged(v);
-              },
-              activeTrackColor: c.good,
-              activeThumbColor: c.onAccent,
-            ),
+            ],
           ),
         ],
       ),
     );
+  }
+}
+
+/// The rider's pickup point, shown inline on the attendance row. Prefers the
+/// admin-facing short CODE from [PickupController] (e.g. "ST"), falling back to
+/// the name snapshot stored on the booking when no code / no controller (e.g.
+/// under `flutter test`) is available. Renders nothing when neither exists.
+class _PickupChip extends StatelessWidget {
+  final Passenger passenger;
+  const _PickupChip({required this.passenger});
+
+  String? _label(PickupController? pk) {
+    final code = pk?.codeFor(passenger.pickupLocationId);
+    if (code != null && code.isNotEmpty) return code;
+    final name = passenger.pickupLocationName;
+    return (name != null && name.isNotEmpty) ? name : null;
+  }
+
+  Widget _chip(String? label) => (label == null || label.isEmpty)
+      ? const SizedBox.shrink()
+      : UgamReqChip(label: label, variant: UgamChipVariant.neutral);
+
+  @override
+  Widget build(BuildContext context) {
+    final pk = Get.isRegistered<PickupController>()
+        ? Get.find<PickupController>()
+        : null;
+    // Obx repaints once the async pickup list arrives.
+    if (pk == null) return _chip(_label(null));
+    return Obx(() => _chip(_label(pk)));
   }
 }

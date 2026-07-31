@@ -6,6 +6,7 @@ import '../controllers/finance_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour_finance.dart';
 import '../utils/formatters.dart';
+import '../widgets/money_loading_skeleton.dart';
 import 'tour_money_board_screen.dart';
 
 /// FINANCE — the cross-tour Profit & Loss report.
@@ -29,24 +30,30 @@ class FinanceScreen extends StatefulWidget {
 class _FinanceScreenState extends State<FinanceScreen> {
   FinanceController get _finance => Get.find<FinanceController>();
 
-  // Default the report to "this month" — the agent's most common question is
-  // "how am I doing right now", not the lifetime total. Pure initial-state
-  // change (no new persistence); the user can still switch to year / all time.
-  FinancePeriod _period = FinancePeriod.thisMonth;
+  // Default the report to ALL TIME. "This month" filters on the trip's END
+  // date, so stacked on top of the old completed-only rule it opened empty for
+  // any agent whose trips didn't happen to finish this calendar month — the
+  // report read as broken. All time always has the agent's money in it; the
+  // month/year pills are still one tap away.
+  FinancePeriod _period = FinancePeriod.allTime;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _finance.ensureLoaded();
+      // Refetch when a money write happened since the last load, so the report
+      // can't disagree with the per-tour money board.
+      _finance.refreshIfStale();
     });
   }
 
   void _openTour(TourFinance tf) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => TourMoneyBoardScreen(tourId: tf.tourId),
-      ),
+    // Cupertino, matching every other push into or between the money screens
+    // (tour_money_board_screen.dart:62,:69,:79 and bus_money_screen.dart:366)
+    // so the same destination animates identically wherever it is opened from.
+    Get.to(
+      () => TourMoneyBoardScreen(tourId: tf.tourId),
+      transition: Transition.cupertino,
     );
   }
 
@@ -84,18 +91,22 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 final firstLoading =
                     _finance.isLoading.value && !_finance.loadedOnce.value;
                 if (firstLoading) {
-                  return const _Loading();
+                  // The SHARED money skeleton — the four sibling money screens
+                  // already shimmer this exact shape, so the first load no
+                  // longer reflows differently on Finance alone.
+                  return const MoneyLoadingSkeleton();
                 }
                 if (_finance.loadFailed.value && !_finance.loadedOnce.value) {
-                  return _ErrorState(onRetry: _finance.reload);
+                  return UgamEmpty.error(onRetry: _finance.reload);
                 }
 
                 final tours = _finance.financesFor(_period);
                 final totals = FinanceTotals.from(tours);
 
                 return RefreshIndicator(
-                  color: c.accent,
-                  backgroundColor: c.cardElev,
+                  // Theme-driven, exactly like the four sibling money screens —
+                  // a per-screen copper spinner made one pull-to-refresh look
+                  // different from every other.
                   onRefresh: _finance.reload,
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(
@@ -150,19 +161,23 @@ class _FinanceScreenState extends State<FinanceScreen> {
 /// Unsigned amount, e.g. `₹1,72,000`.
 String _inr(num v) => Formatters.formatMoneyInr(v.abs());
 
-/// Signed amount with explicit +/−, e.g. `+₹38,200` / `−₹4,100` / `₹0`.
+/// Signed amount with explicit +/-, e.g. `+₹38,200` / `-₹4,100` / `₹0`.
+///
+/// The sign uses the ASCII hyphen [Formatters.formatMoneyInr] emits, not a
+/// typographic U+2212 — a negative figure has to be glyph-identical to the same
+/// figure on the money board / P&L, which the agent compares side by side.
 String _signedInr(num v) {
   final r = v.round();
-  if (r == 0) return '₹0';
+  if (r == 0) return Formatters.formatMoneyInr(0);
   final body = Formatters.formatMoneyInr(r.abs());
-  return r > 0 ? '+$body' : '−$body';
+  return r > 0 ? '+$body' : '-$body';
 }
 
 /// Compact amount for tight stat columns, e.g. `₹1.7L`, `₹38K`, signed.
 String _compactSigned(num v) {
-  if (v.round() == 0) return '₹0';
+  if (v.round() == 0) return Formatters.formatMoneyInrCompact(0);
   final body = Formatters.formatMoneyInrCompact(v.abs());
-  return v < 0 ? '−$body' : '+$body';
+  return v < 0 ? '-$body' : '+$body';
 }
 
 String _dateLabel(BuildContext context, DateTime d) =>
@@ -202,7 +217,7 @@ class _HeroCard extends StatelessWidget {
                   vertical: UgamSpacing.xs,
                 ),
                 decoration: BoxDecoration(
-                  color: profit ? c.goodFill : c.danger.withValues(alpha: 0.16),
+                  color: profit ? c.goodFill : c.dangerFill,
                   borderRadius: BorderRadius.circular(UgamRadius.chip),
                 ),
                 child: Row(
@@ -305,12 +320,14 @@ class _HeroMetric extends StatelessWidget {
       children: [
         Row(
           children: [
+            // 6pt dot + `sm` gap — the same geometry [UgamStatusDot] ships, so
+            // the hero legend matches every other dot+label pair in the app.
             Container(
-              width: 7,
-              height: 7,
+              width: 6,
+              height: 6,
               decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
             ),
-            const SizedBox(width: UgamSpacing.xs + 2),
+            const SizedBox(width: UgamSpacing.sm),
             Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
           ],
         ),
@@ -436,13 +453,19 @@ class _TourFinanceRow extends StatelessWidget {
     final netColor = zero ? c.ink2 : (profit ? c.good : c.danger);
     final (iconBg, iconFg) = zero
         ? (c.cardElev, c.ink2)
-        : (profit ? c.goodFill : c.danger.withValues(alpha: 0.16),
+        : (profit ? c.goodFill : c.dangerFill,
             profit ? c.good : c.danger);
 
     final busLabel = tf.buses == 1
         ? tr('finance.bus_one', namedArgs: {'n': '${tf.buses}'})
         : tr('finance.bus_other', namedArgs: {'n': '${tf.buses}'});
-    final meta = '${_dateLabel(context, tf.date)} · $busLabel';
+    // A running trip's net is provisional (more cash still to come in, more
+    // costs still to be logged), so the row says so rather than letting it read
+    // as a settled result sitting next to genuinely finished trips.
+    final stateLabel = tf.isCompleted
+        ? tr('finance.row_state_completed')
+        : tr('finance.row_state_running');
+    final meta = '${_dateLabel(context, tf.date)} · $busLabel · $stateLabel';
 
     // Margin is net over GROSS income (passenger fares + extra income), so
     // cabin/gallery cash isn't ignored in the percentage.
@@ -461,9 +484,12 @@ class _TourFinanceRow extends StatelessWidget {
         children: [
           Row(
             children: [
+              // Decorative leading tile — [UgamScale.px], so the glyph box
+              // tracks the label text instead of staying full-size while the
+              // row's type shrinks on a narrow phone.
               Container(
-                width: 38,
-                height: 38,
+                width: UgamScale.px(context, 38),
+                height: UgamScale.px(context, 38),
                 decoration: BoxDecoration(
                   color: iconBg,
                   borderRadius: BorderRadius.circular(UgamRadius.input),
@@ -475,7 +501,7 @@ class _TourFinanceRow extends StatelessWidget {
                       : (profit
                           ? Icons.trending_up_rounded
                           : Icons.trending_down_rounded),
-                  size: 18,
+                  size: UgamScale.px(context, 18),
                   color: iconFg,
                 ),
               ),
@@ -579,58 +605,8 @@ class _Empty extends StatelessWidget {
   }
 }
 
-/// Initial-load skeleton: a hero placeholder, a stat strip, and a couple of
-/// per-tour row placeholders — mirrors the real layout instead of a spinner.
-class _Loading extends StatelessWidget {
-  const _Loading();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        UgamSpacing.xs,
-        UgamSpacing.gutter,
-        UgamSpacing.xxl,
-      ),
-      children: [
-        const UgamSkeleton(height: 184, radius: UgamRadius.card),
-        const SizedBox(height: UgamSpacing.md),
-        Row(
-          children: const [
-            Expanded(child: UgamSkeleton(height: 84, radius: UgamRadius.stat)),
-            SizedBox(width: UgamSpacing.sm),
-            Expanded(child: UgamSkeleton(height: 84, radius: UgamRadius.stat)),
-            SizedBox(width: UgamSpacing.sm),
-            Expanded(child: UgamSkeleton(height: 84, radius: UgamRadius.stat)),
-          ],
-        ),
-        const SizedBox(height: UgamSpacing.xl),
-        const UgamSkeleton(height: 120, radius: UgamRadius.card),
-        const SizedBox(height: UgamSpacing.md),
-        const UgamSkeleton(height: 120, radius: UgamRadius.card),
-      ],
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  final Future<void> Function() onRetry;
-  const _ErrorState({required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    // Error/empty states must NOT use solid champagne — the retry is TONAL.
-    return UgamEmpty(
-      icon: Icons.cloud_off_rounded,
-      title: tr('finance.error_title'),
-      cta: UgamButton(
-        label: tr('finance.error_retry'),
-        icon: Icons.refresh_rounded,
-        kind: UgamButtonKind.tonal,
-        onPressed: () => onRetry(),
-      ),
-    );
-  }
-}
+// The first-load skeleton and the load-failure state are the SHARED
+// `MoneyLoadingSkeleton` / `UgamEmpty.error` used by the four sibling money
+// screens. The private `_Loading` / `_ErrorState` copies that used to live here
+// had already drifted from them (three stat boxes vs two, a tonal retry vs the
+// shared solid one) and were deleted.

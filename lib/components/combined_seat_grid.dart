@@ -54,6 +54,13 @@ class CombinedSeatGrid extends StatelessWidget {
   /// (TourController.moveSeat / swapSeats). The grid writes NO data.
   final void Function(String fromSeatId, String toSeatId)? onSeatDraggedToSeat;
 
+  /// Fired when a PENDING (unseated) rider is dragged from the dock onto a seat,
+  /// giving `(passengerId, seatId)`. Null disables the pending-rider drop target
+  /// on every tile, so seat→seat-only charts are unchanged. The caller validates
+  /// leg/berth room and places-or-rejects.
+  final void Function(String passengerId, String seatId)?
+      onPendingRiderDroppedToSeat;
+
   /// Per-cell: can this seat be PICKED UP? The caller answers (e.g. "true only
   /// for a single, unambiguous occupant"). Defaults to false when null, so no
   /// seat is draggable unless the caller opts it in.
@@ -99,6 +106,7 @@ class CombinedSeatGrid extends StatelessWidget {
     this.reserveTopAction = false,
     this.enableDrag = false,
     this.onSeatDraggedToSeat,
+    this.onPendingRiderDroppedToSeat,
     this.canDragSeat,
     this.dropHighlightFor,
     this.dragActive = false,
@@ -332,6 +340,9 @@ class CombinedSeatGrid extends StatelessWidget {
             : () => onSeatDragStarted!(cell),
         onDragEnd: onSeatDragEnded,
         onSeatDropped: onSeatDraggedToSeat,
+        onPendingRiderDropped: onPendingRiderDroppedToSeat == null
+            ? null
+            : (paxId) => onPendingRiderDroppedToSeat!(paxId, seatId),
         child: tile,
       );
       // A NON-draggable seat (an empty/held cell) has no drag gesture of its

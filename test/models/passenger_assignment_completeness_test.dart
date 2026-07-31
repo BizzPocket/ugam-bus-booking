@@ -88,6 +88,51 @@ void main() {
     });
   });
 
+  // remainingBerths powers the manual-placement hard block: a passenger may
+  // never be assigned MORE berths than requested. It is the requested berths
+  // minus what is already held, floored at zero (never negative even if data
+  // is somehow over-assigned).
+  group('remainingBerths (over-allocation guard)', () {
+    test('single sofa, nothing placed → 1 remaining', () {
+      expect(_p([_single()], const []).remainingBerths, 1);
+    });
+
+    test('double sofa, nothing placed → 2 remaining', () {
+      expect(_p([_double()], const []).remainingBerths, 2);
+    });
+
+    test('double sofa, one berth held → 1 remaining (the block scenario)', () {
+      // A double request half-filled by a single berth still needs exactly 1
+      // more — so taking a WHOLE double (2 berths) here must be blocked.
+      final half =
+          _p([_double()], [const SeatAssignment(busId: 'b1', seatId: 'DL1')]);
+      expect(half.remainingBerths, 1);
+    });
+
+    test('double sofa, whole double held → 0 remaining', () {
+      expect(_p([_double()], _wholeDouble('DL1')).remainingBerths, 0);
+    });
+
+    test('mixed 1 single + 1 double, only the single placed → 2 remaining', () {
+      final p = _p([_single(), _double()],
+          [const SeatAssignment(busId: 'b1', seatId: 'A1')]);
+      expect(p.remainingBerths, 2);
+    });
+
+    test('over-assigned data never yields a negative remainder', () {
+      // 1 double requested (2 berths) but 3 berths somehow present → clamp to 0.
+      final over = _p([_double()], [
+        ..._wholeDouble('DL1'),
+        const SeatAssignment(busId: 'b1', seatId: 'A1'),
+      ]);
+      expect(over.remainingBerths, 0);
+    });
+
+    test('no request lines → 0 remaining', () {
+      expect(_p(const [], const []).remainingBerths, 0);
+    });
+  });
+
   group('progressLabel (berth-accurate, in lock-step with isFullyAssigned)', () {
     test('two doubles fully seated reads ✓ 4/4', () {
       final full = _p([_double(qty: 2)], [

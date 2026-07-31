@@ -112,6 +112,8 @@ async function handleBookingRequest(
     ? "updated"
     : payload.event === "cancelled"
     ? "cancelled"
+    : payload.event === "cancel_requested"
+    ? "cancel_requested"
     : "created";
 
   // Booking request + its tour (title + owning admin). Service role bypasses RLS.

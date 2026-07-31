@@ -280,4 +280,105 @@ void main() {
       });
     });
   });
+
+  // ── ridersOnBusForLeg — the per-bus, per-leg boarding roster ───────────────
+  //
+  // Drives handler attendance. The leg MUST come from the seat held on THIS
+  // bus: filtering on the rider's overall tripType put a round-trip rider on
+  // every bus they touch, on both legs.
+  group('ridersOnBusForLeg', () {
+    /// Round-trip rider: GO berth on bus1, RET berth on bus2.
+    Passenger splitAcrossBuses() => Passenger(
+          id: 'split',
+          tourId: 't1',
+          name: 'Split',
+          phone: '+910000000000',
+          tripType: TripType.roundTrip,
+          assignedSeats: const [
+            SeatAssignment(
+              busId: _bus,
+              seatId: 'GO1',
+              leg: TripType.outboundOnly,
+            ),
+            SeatAssignment(
+              busId: 'bus2',
+              seatId: 'RET1',
+              leg: TripType.returnOnly,
+            ),
+          ],
+        );
+
+    test('a rider whose RETURN berth is on ANOTHER bus is off this roster', () {
+      final p = splitAcrossBuses();
+      expect(ridersOnBusForLeg([p], _bus, CollectLeg.go).map((x) => x.id),
+          ['split']);
+      // The bug: tripType.usesReturn is true, so they used to be listed here.
+      expect(ridersOnBusForLeg([p], _bus, CollectLeg.ret), isEmpty);
+      expect(ridersOnBusForLeg([p], 'bus2', CollectLeg.ret).map((x) => x.id),
+          ['split']);
+    });
+
+    test('a round-trip rider seated on one bus boards it on BOTH legs', () {
+      final p = _p('rt', trip: TripType.roundTrip, seats: ['L1']);
+      expect(ridersOnBusForLeg([p], _bus, CollectLeg.go).length, 1);
+      expect(ridersOnBusForLeg([p], _bus, CollectLeg.ret).length, 1);
+    });
+
+    test('one-way riders appear only on their own leg', () {
+      final go = _p('go', trip: TripType.outboundOnly, seats: ['L1']);
+      final ret = _p('ret', trip: TripType.returnOnly, seats: ['L2']);
+      expect(
+          ridersOnBusForLeg([go, ret], _bus, CollectLeg.go).map((p) => p.id),
+          ['go']);
+      expect(
+          ridersOnBusForLeg([go, ret], _bus, CollectLeg.ret).map((p) => p.id),
+          ['ret']);
+    });
+
+    test('a rider holding two berths of one sofa is listed ONCE', () {
+      final p = _p('solo', trip: TripType.roundTrip, seats: ['DS1', 'DS1']);
+      expect(ridersOnBusForLeg([p], _bus, CollectLeg.go).length, 1);
+    });
+
+    test('a rider with no seat on this bus is excluded', () {
+      final p = _p('other', trip: TripType.roundTrip, seats: ['L1'],
+          bus: 'bus9');
+      expect(ridersOnBusForLeg([p], _bus, CollectLeg.go), isEmpty);
+    });
+  });
+
+  // ── Seat-scoped money chooser ─────────────────────────────────────────────
+  group('occupantsForCollectLeg with a seatId', () {
+    /// Round-trip rider holding DS1 on the GO leg only; their return berth is a
+    /// different seat. The RETURN chooser for DS1 must not offer them.
+    final split = Passenger(
+      id: 'split',
+      tourId: 't1',
+      name: 'Split',
+      phone: '+910000000000',
+      tripType: TripType.roundTrip,
+      assignedSeats: const [
+        SeatAssignment(busId: _bus, seatId: 'DS1', leg: TripType.outboundOnly),
+        SeatAssignment(busId: _bus, seatId: 'DS9', leg: TripType.returnOnly),
+      ],
+    );
+
+    test('seat-scoped filtering uses the leg of THAT berth', () {
+      expect(
+        occupantsForCollectLeg([split], CollectLeg.go,
+            seatId: 'DS1', busId: _bus).map((p) => p.id),
+        ['split'],
+      );
+      expect(
+        occupantsForCollectLeg([split], CollectLeg.ret,
+            seatId: 'DS1', busId: _bus),
+        isEmpty,
+      );
+    });
+
+    test('without a seatId the coarse trip-type behaviour is unchanged', () {
+      // Round-trip overall → present on both legs, as before.
+      expect(occupantsForCollectLeg([split], CollectLeg.ret).length, 1);
+    });
+  });
 }

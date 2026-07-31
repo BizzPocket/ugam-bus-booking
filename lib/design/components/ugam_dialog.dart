@@ -1,141 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import 'ugam_button.dart';
 
-/// Visual weight of a [UgamButton]. Maps tone → fill/text so callers
-/// pick intent ("this is the primary action", "this destroys data")
-/// rather than re-deriving colors at every call site.
-enum UgamButtonKind {
-  /// Solid accent. The single affirmative action on a surface. Per the
-  /// accent-rationing law, use AT MOST ONE per screen (usually the sticky
-  /// [UgamCTA]); every other "primary-ish" action should be [tonal].
-  primary,
-
-  /// Tonal accent — champagne ink on [accentFill] with a hairline accent
-  /// border. The canonical "quiet primary": repeated/per-row primaries
-  /// (Confirm, Collect, Send, Book, Apply) so solid gold stays rationed to
-  /// one focal point per screen.
-  tonal,
-
-  /// Quiet, transparent. Cancel / dismiss — never competes with primary.
-  ghost,
-
-  /// Tonal neutral fill. A secondary action that still needs a hit area.
-  neutral,
-
-  /// Solid danger. A confirmed destructive action (delete, remove).
-  danger,
-
-  /// Tonal danger. A destructive action that shouldn't shout (inline
-  /// "unassign", "clear") — danger-tinted but not a solid red slab.
-  dangerTonal,
-}
-
-/// The one button used for dialog actions, sheet actions, and any
-/// secondary CTA that isn't the full-width [UgamCTA]. Consistent height,
-/// radius, loading + disabled handling — so destructive vs affirmative
-/// reads the same on every screen instead of a color-only `TextButton`.
-class UgamButton extends StatelessWidget {
-  final String label;
-  final IconData? icon;
-  final VoidCallback? onPressed;
-  final UgamButtonKind kind;
-  final bool loading;
-
-  /// When true, the button stretches to fill its parent's width.
-  final bool expand;
-
-  const UgamButton({
-    super.key,
-    required this.label,
-    this.onPressed,
-    this.icon,
-    this.kind = UgamButtonKind.primary,
-    this.loading = false,
-    this.expand = false,
-  });
-
-  bool get _enabled => onPressed != null && !loading;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-
-    final (Color bg, Color fg, Color? border) = switch (kind) {
-      UgamButtonKind.primary => (c.accent, c.onAccent, null),
-      UgamButtonKind.tonal => (
-        c.accentFill,
-        c.accent,
-        c.accent.withValues(alpha: 0.28),
-      ),
-      UgamButtonKind.ghost => (Colors.transparent, c.ink2, null),
-      UgamButtonKind.neutral => (c.cardElev, c.ink, c.border),
-      UgamButtonKind.danger => (c.danger, Colors.white, null),
-      UgamButtonKind.dangerTonal => (
-        c.danger.withValues(alpha: 0.12),
-        c.danger,
-        null,
-      ),
-    };
-
-    final content = loading
-        ? SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.2,
-              valueColor: AlwaysStoppedAnimation(fg),
-            ),
-          )
-        : Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 18, color: fg),
-                const SizedBox(width: UgamSpacing.sm),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  style: UgamText.bodyStrong.copyWith(color: fg),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          );
-
-    return Opacity(
-      opacity: _enabled ? 1 : 0.5,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _enabled
-              ? () {
-                  HapticFeedback.lightImpact();
-                  onPressed!();
-                }
-              : null,
-          borderRadius: BorderRadius.circular(UgamRadius.input),
-          child: Container(
-            height: 50,
-            width: expand ? double.infinity : null,
-            padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-              border: border == null ? null : Border.all(color: border),
-            ),
-            child: content,
-          ),
-        ),
-      ),
-    );
-  }
-}
+// [UgamButton] and [UgamButtonKind] used to be declared in THIS file, which is
+// why screens hand-rolled buttons instead of finding it. They now live in
+// `ugam_button.dart`; this re-export keeps every existing
+// `import '.../ugam_dialog.dart'` compiling unchanged.
+export 'ugam_button.dart';
 
 /// Standardised dialogs. Replaces the per-screen `AlertDialog` +
 /// `TextButton` pattern so confirm/destructive prompts look and behave

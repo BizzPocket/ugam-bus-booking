@@ -10,6 +10,7 @@ import '../utils/seat_grid_placement.dart';
 import '../utils/time_format.dart';
 import 'chart_footer_store.dart';
 import 'seat_chart_pdf.dart';
+import 'wa_template_params.dart';
 import 'whatsapp_cloud_service.dart';
 
 /// High-level WhatsApp Cloud API actions for the tour lifecycle:
@@ -122,12 +123,28 @@ class WhatsAppOutbound {
     // spawn hundreds of simultaneous PDF renders (memory) yet never grinds one
     // passenger at a time. Results stay index-aligned with [seated].
     final messages = List<WaMessage?>.filled(total, null);
+    // Recipients whose chart could not be rendered/uploaded. They are NOT sent
+    // an image-less message: `seat_allotment` declares an IMAGE header, so Meta
+    // rejects a header-less payload with "(#132012) Parameter format does not
+    // match format in the created template" for EVERY such recipient. Reporting
+    // the real cause here beats a blanket 132012 that hides it — this is the
+    // failure mode that makes the send look broken on one platform only, when
+    // the actual break is the local rasteriser.
+    final chartFailures = <WaRecipientResult>[];
     for (var start = 0; start < total; start += concurrency) {
       final end = start + concurrency > total ? total : start + concurrency;
       await Future.wait([
         for (var i = start; i < end; i++)
-          _buildAllocationMessage(tour, seated[i], footer, date).then((m) {
-            messages[i] = m;
+          _buildAllocationMessage(tour, seated[i], footer, date).then((r) {
+            if (r.message != null) {
+              messages[i] = r.message;
+            } else {
+              chartFailures.add(WaRecipientResult(
+                to: WhatsAppCloudService.graphPhone(seated[i].phone),
+                ok: false,
+                error: r.error ?? 'Seat chart could not be prepared',
+              ));
+            }
             done++;
             onProgress?.call(done, total);
           }),
@@ -137,17 +154,42 @@ class WhatsAppOutbound {
     final list = messages.whereType<WaMessage>().toList();
     debugPrint('[WA] sendSeatAllocations: template='
         '${WhatsAppCloudConfig.seatAllocationTemplate} built ${list.length} '
-        'msg(s) -> ${list.map((m) => m.to).toList()}');
-    return _cloud.send(list);
+        'msg(s), ${chartFailures.length} chart failure(s) '
+        '-> ${list.map((m) => m.to).toList()}');
+    if (chartFailures.isNotEmpty) {
+      debugPrint('[WA] chart failure reason(s): '
+          '${chartFailures.map((f) => f.error).toSet().toList()}');
+    }
+
+    if (list.isEmpty) {
+      return WaSendResult(
+        sent: 0,
+        failed: chartFailures.length,
+        results: chartFailures,
+      );
+    }
+
+    final res = await _cloud.send(list);
+    if (chartFailures.isEmpty) return res;
+    return WaSendResult(
+      sent: res.sent,
+      failed: res.failed + chartFailures.length,
+      results: [...res.results, ...chartFailures],
+    );
   }
 
   /// Builds ONE passenger's `seat_allotment` message — renders + uploads their
   /// seat-chart image header (each recipient gets their own bus with their own
   /// seats highlighted) and assembles the body params. The seat
   /// numbers live ONLY on the highlighted chart now; the body carries the
-  /// departure details + handler contact. A failed chart upload degrades to a
-  /// no-image message rather than dropping the recipient.
-  Future<WaMessage> _buildAllocationMessage(
+  /// departure details + handler contact.
+  ///
+  /// Returns `(message: …, error: null)` on success, or `(message: null,
+  /// error: reason)` when the chart could not be rendered or uploaded. It
+  /// deliberately does NOT fall back to a no-image message: the approved
+  /// `seat_allotment` template declares an IMAGE header, so Meta rejects a
+  /// header-less payload with 132012 and the true cause is lost.
+  Future<({WaMessage? message, String? error})> _buildAllocationMessage(
     Tour tour,
     Passenger p,
     ChartFooter footer,
@@ -207,31 +249,40 @@ class WhatsAppOutbound {
         passenger: p,
         footer: footer,
       );
-      if (images.isNotEmpty) {
-        chartUrl = await _cloud.uploadSigned(
-          bucket: WhatsAppCloudConfig.seatChartBucket,
-          path: '${tour.id}/${p.id}.png',
-          bytes: images.first,
-          contentType: 'image/png',
-        );
+      if (images.isEmpty) {
+        debugPrint('[WA] chart render produced no page for ${p.id}');
+        return (message: null, error: 'Seat chart image could not be rendered');
       }
+      chartUrl = await _cloud.uploadSigned(
+        bucket: WhatsAppCloudConfig.seatChartBucket,
+        path: '${tour.id}/${p.id}.png',
+        bytes: images.first,
+        contentType: 'image/png',
+      );
     } catch (e) {
+      // Surfaced to the agent verbatim (the summary dialog prints the first
+      // error), because THIS string is what identifies a platform-specific
+      // rasteriser or upload break instead of a generic "send failed".
       debugPrint('[WA] chart image failed for ${p.id}: $e');
+      return (message: null, error: 'Seat chart failed: $e');
     }
 
-    return WaMessage(
-      to: WhatsAppCloudService.graphPhone(p.phone),
-      template: WhatsAppCloudConfig.seatAllocationTemplate,
-      headerImageUrl: chartUrl,
-      bodyParams: [
-        _orDash(p.name),
-        tour.title, // {{2}} greeting: "{name}, {tour} માટે …"
-        busLabel,
-        place,
-        date,
-        timeLabel,
-        handlerContact,
-      ],
+    return (
+      message: WaMessage(
+        to: WhatsAppCloudService.graphPhone(p.phone),
+        template: WhatsAppCloudConfig.seatAllocationTemplate,
+        headerImageUrl: chartUrl,
+        bodyParams: [
+          _orDash(p.name),
+          tour.title, // {{2}} greeting: "{name}, {tour} માટે …"
+          busLabel,
+          place,
+          date,
+          timeLabel,
+          handlerContact,
+        ],
+      ),
+      error: null,
     );
   }
 
@@ -247,23 +298,71 @@ class WhatsAppOutbound {
   /// the other sends use. Never throws on a per-recipient failure; inspect
   /// [WaSendResult]. (The HANDLER path goes through the dedicated `bus-message`
   /// function instead — see WhatsAppCloudService.sendBusMessageAsHandler.)
+  /// The Graph-formatted phone numbers a [busId] announcement should reach:
+  /// every rider holding a seat on that bus, DE-DUPLICATED BY PHONE and in a
+  /// stable roster order.
+  ///
+  /// One message per PHONE, not per passenger row. A family that booked under a
+  /// single number has several passenger rows on the same bus, so building the
+  /// batch per-row delivered the identical announcement two or three times to
+  /// that one phone. The handler path (the `bus-message` Edge Function) already
+  /// de-duplicates exactly this way; this keeps the admin path consistent.
+  /// Blank phones are dropped rather than sent as an empty `to` Meta rejects.
+  ///
+  /// Pure + static so the recipient rule is unit-testable without a network.
+  static List<String> busMessageRecipients(Tour tour, String busId) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final p in tour.passengers) {
+      if (!p.assignedSeats.any((a) => a.busId == busId)) continue;
+      final to = WhatsAppCloudService.graphPhone(p.phone);
+      if (to.isEmpty || !seen.add(to)) continue;
+      out.add(to);
+    }
+    return out;
+  }
+
   Future<WaSendResult> sendBusMessage({
     required Tour tour,
     required String busId,
     required String messageText,
   }) async {
-    final recipients = tour.passengers
-        .where((p) => p.assignedSeats.any((a) => a.busId == busId))
-        .toList();
-    if (recipients.isEmpty) {
-      debugPrint('[WA] sendBusMessage early-return: no passengers on bus $busId');
+    // Meta rejects a body parameter carrying a new-line, a tab or 5+ spaces —
+    // for EVERY recipient, after the whole batch has been fanned out. The
+    // composers check this first and offer a repair; this is the last line of
+    // defence so no other caller can put a doomed announcement on the wire.
+    // Reported as a per-recipient failure (not an exception) so it flows
+    // through the same result plumbing every caller already renders.
+    final violations = WaTemplateParams.validateOne(messageText);
+    if (violations.isNotEmpty) {
+      debugPrint('[WA] sendBusMessage BLOCKED locally: '
+          '${violations.map((v) => v.issue.name).toList()}');
+      return WaSendResult(
+        sent: 0,
+        failed: 1,
+        results: [
+          WaRecipientResult(
+            to: '',
+            ok: false,
+            error: 'Message rejected before sending: '
+                '${violations.map((v) => v.issue.name).join(', ')}. '
+                'WhatsApp does not allow line breaks, tabs or 5+ spaces in a '
+                'template message.',
+          ),
+        ],
+      );
+    }
+
+    final phones = busMessageRecipients(tour, busId);
+    if (phones.isEmpty) {
+      debugPrint('[WA] sendBusMessage early-return: no recipient on bus $busId');
       return WaSendResult.empty;
     }
 
-    final messages = recipients
+    final messages = phones
         .map(
-          (p) => WaMessage(
-            to: WhatsAppCloudService.graphPhone(p.phone),
+          (to) => WaMessage(
+            to: to,
             template: WhatsAppCloudConfig.busMessageTemplate,
             bodyParams: [messageText],
           ),

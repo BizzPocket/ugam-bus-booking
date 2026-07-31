@@ -349,12 +349,32 @@ SeatDropDecision decideSeatDrop({
       // A pure leg conflict — the mover's leg is full, not a size mismatch.
       return SeatDropDecision.blocked(SeatDropBlock.noLegRoom);
     }
+    // A WHOLE-double mover (2 berths on one leg) can still MERGE onto a double
+    // already holding two occupants when the mover's leg is free across both
+    // berths — e.g. two GO-only riders seated + a whole RET-only double incoming
+    // → GO 2/2 + RET 2/2, all sharing one sofa. Same leg-disjoint fit as a pair.
+    if (fromCell.seatType == SeatType.doubleSofa &&
+        targetCell.seatType == SeatType.doubleSofa &&
+        _pairFitsLegDisjoint([mover], targetOccupants)) {
+      return SeatDropDecision.fillPairInto();
+    }
     return SeatDropDecision.blocked(SeatDropBlock.sharedTargetAmbiguous);
   }
 
   // Target held by exactly one person.
   final occ = targetOccupants.first;
   if (occ.passengerId == mover.passengerId) {
+    // SAME rider's OWN opposite-leg whole double: they booked a GO double AND a
+    // RET double that landed on TWO sofas (or their round-trip double split).
+    // Both are leg-disjoint, so fold them onto ONE sofa (GO 2/2 + RET 2/2 = the
+    // full sofa across both legs) instead of the plain self no-op — the mover's
+    // berths move onto the target, which keeps its own berths (fillPairInto).
+    if (moverBerths >= 2 &&
+        fromCell.seatType == SeatType.doubleSofa &&
+        targetCell.seatType == SeatType.doubleSofa &&
+        _pairFitsLegDisjoint([mover], [occ])) {
+      return SeatDropDecision.fillPairInto();
+    }
     return SeatDropDecision.blocked(SeatDropBlock.self);
   }
 
@@ -383,6 +403,20 @@ SeatDropDecision decideSeatDrop({
     if (tgtCap >= 2 && occBerthsHere <= srcCapForFill) {
       return SeatDropDecision.blocked(SeatDropBlock.noLegRoom);
     }
+  }
+
+  // MERGE a WHOLE-double mover (2 berths on ONE leg) onto an occupied double
+  // whose sole occupant rides the DISJOINT leg: the mover's berths take the
+  // free leg, so both sofas' riders share ONE double across the trip (e.g. a
+  // GO-only whole double dropped on a RET-only whole double → GO 2/2 + RET 2/2).
+  // Without this a 2-berth mover skips the 1-berth fill above and the leg-blind
+  // swap below fires — silently SWAPPING the two sofas instead of leg-sharing.
+  // Same-leg or round-trip loads overflow _pairFitsLegDisjoint → fall to swap.
+  if (moverBerths >= 2 &&
+      fromCell.seatType == SeatType.doubleSofa &&
+      targetCell.seatType == SeatType.doubleSofa &&
+      _pairFitsLegDisjoint([mover], [occ])) {
+    return SeatDropDecision.fillPairInto();
   }
 
   // SWAP — only when each side's berth load fits the other's cell, so we never

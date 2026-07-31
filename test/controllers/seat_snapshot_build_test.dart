@@ -280,4 +280,109 @@ void main() {
     expect(occupant.name, 'Ravi Patel');
     expect(occupant.phone, '9876543210');
   });
+
+  // ── Shared berths & per-seat legs ─────────────────────────────────────────
+  //
+  // The snapshot is written once, at GO-leg completion, and never rebuilt — so
+  // anything it drops is lost permanently. It used to read
+  // `seatOccupantsForBus(...).go / .ret`, which keeps ONE holder per leg.
+
+  test('a Double Sofa held by TWO same-leg riders archives BOTH', () {
+    final passengers = [
+      rider(
+        id: 'p-a',
+        name: 'Amit',
+        phone: '111',
+        tripType: TripType.roundTrip,
+        seats: [seat('b1', 'D1')],
+      ),
+      rider(
+        id: 'p-b',
+        name: 'Bhavesh',
+        phone: '222',
+        tripType: TripType.roundTrip,
+        seats: [seat('b1', 'D1')], // the OTHER berth of the same sofa
+      ),
+    ];
+
+    final snap = buildSeatSnapshot(
+      tourId: 't1',
+      leg: SnapshotLeg.outbound,
+      buses: [bus('b1')],
+      passengers: passengers,
+      capturedAt: DateTime(2026, 6, 19),
+    );
+
+    final names = snap!.buses.single.occupantsAt('D1').map((s) => s.name);
+    expect(names, unorderedEquals(['Amit', 'Bhavesh']));
+  });
+
+  test('a whole double held SOLO still archives one rider, not two', () {
+    final passengers = [
+      rider(
+        id: 'p-solo',
+        name: 'Solo Owner',
+        phone: '111',
+        tripType: TripType.roundTrip,
+        // Two assignment entries on the SAME seatId = one rider, whole sofa.
+        seats: [seat('b1', 'D1'), seat('b1', 'D1')],
+      ),
+    ];
+
+    final snap = buildSeatSnapshot(
+      tourId: 't1',
+      leg: SnapshotLeg.outbound,
+      buses: [bus('b1')],
+      passengers: passengers,
+      capturedAt: DateTime(2026, 6, 19),
+    );
+
+    expect(snap!.buses.single.occupantsAt('D1').length, 1);
+  });
+
+  test('the leg comes from the SEAT, not the rider\'s overall tripType', () {
+    // Round-trip rider whose GO berth and RET berth are DIFFERENT seats.
+    final passengers = [
+      Passenger(
+        id: 'p-split',
+        tourId: 't1',
+        name: 'Split Rider',
+        phone: '111',
+        tripType: TripType.roundTrip,
+        requestLines: const [
+          RequestLine(
+            seatType: SeatType.seater,
+            qty: 1,
+            leg: TripType.roundTrip,
+          ),
+        ],
+        assignedSeats: const [
+          SeatAssignment(busId: 'b1', seatId: 'GO1', leg: TripType.outboundOnly),
+          SeatAssignment(busId: 'b1', seatId: 'RET1', leg: TripType.returnOnly),
+        ],
+      ),
+    ];
+
+    final go = buildSeatSnapshot(
+      tourId: 't1',
+      leg: SnapshotLeg.outbound,
+      buses: [bus('b1')],
+      passengers: passengers,
+      capturedAt: DateTime(2026, 6, 19),
+    )!;
+    final ret = buildSeatSnapshot(
+      tourId: 't1',
+      leg: SnapshotLeg.return_,
+      buses: [bus('b1')],
+      passengers: passengers,
+      capturedAt: DateTime(2026, 6, 19),
+    )!;
+
+    // Each leg freezes only the berth actually ridden on that leg — a
+    // tripType-based filter put this rider on BOTH seats on BOTH legs.
+    expect(go.buses.single.occupantsAt('GO1').single.name, 'Split Rider');
+    expect(go.buses.single.occupantsAt('RET1'), isEmpty);
+    expect(ret.buses.single.occupantsAt('RET1').single.name, 'Split Rider');
+    expect(ret.buses.single.occupantsAt('GO1'), isEmpty);
+  });
 }

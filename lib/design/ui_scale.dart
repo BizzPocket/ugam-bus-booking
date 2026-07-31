@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 
 /// App-wide responsive scale.
@@ -18,13 +20,18 @@ import 'package:flutter/widgets.dart';
 /// `MediaQuery.textScaler` at the app root (see `MyApp.build`). That is the
 /// ONLY place the factor is applied automatically — it scales text everywhere.
 ///
-/// Fixed-pixel chrome does NOT scale automatically. A shared component MAY opt
-/// in for its own fixed dimensions by multiplying by [of] —
-/// `final s = UgamScale.of(context);` then `54 * s` — as `UgamInput` does.
-/// This is deliberately opt-in: most components rely on the app-wide text
-/// scaling plus the `_min` floor rather than per-dimension scaling. Do not
+/// Fixed-pixel chrome does NOT scale automatically. A component opts in per
+/// dimension, and WHICH helper it uses depends on whether the box is tappable:
+///
+///   * [px] — decorative only (avatars, medallions, hero images, logos,
+///     thumbnails, rails). Scales freely with the factor.
+///   * [tap] — anything a finger lands on. Scales but is floored at 44pt, the
+///     minimum tap target. Using [px] on a tappable box would shrink it below
+///     44 on small phones and make the app strictly worse.
+///
+/// [of] remains available for the raw factor (as `UgamInput` uses it). Do not
 /// assume a given widget's paddings/heights track this curve unless it calls
-/// [of] itself.
+/// one of these itself.
 class UgamScale {
   const UgamScale._();
 
@@ -42,4 +49,15 @@ class UgamScale {
   /// (the two never compound — `textScaler` does not change [MediaQuery.size]).
   static double of(BuildContext context) =>
       _fromWidth(MediaQuery.sizeOf(context).width);
+
+  /// Scale a fixed DECORATIVE dimension (icon medallions, avatars, hero
+  /// images, logos, thumbnails, non-interactive rails). Never use for a
+  /// tappable box — use [tap].
+  static double px(BuildContext context, double v) => v * of(context);
+
+  /// Scale a fixed INTERACTIVE box, floored at the 44pt minimum tap target.
+  /// The factor is clamped at 0.85, so e.g. 50 -> 44 and 56 -> 47.6, while
+  /// 44 stays 44 on every device.
+  static double tap(BuildContext context, double v) =>
+      math.max(44.0, v * of(context));
 }

@@ -1,4 +1,5 @@
 import 'package:uuid/uuid.dart';
+import '../utils/json_coerce.dart';
 import 'age_group.dart';
 import 'payment_status.dart';
 import 'priority_status.dart';
@@ -274,6 +275,16 @@ class Passenger {
   /// Whether at least one seat is assigned but not all.
   bool get isPartiallyAssigned => totalSeatsAssigned > 0 && !isFullyAssigned;
 
+  /// Physical berths this passenger may still be assigned before hitting their
+  /// requested count — [seatBerths] minus what is already held, never negative.
+  /// The manual-placement hard block refuses any placement whose berths exceed
+  /// this, so a rider can never end up with MORE seats than they asked for
+  /// (e.g. a 2-berth double request grabbing a single + a whole double = 3).
+  int get remainingBerths {
+    final left = seatBerths - totalSeatsAssigned;
+    return left < 0 ? 0 : left;
+  }
+
   /// Deterministic signature of the CURRENT seat allocation — sorted
   /// "busId:seatId" pairs joined — so it changes iff the held seats change.
   /// Empty when the rider holds no seat.
@@ -345,38 +356,40 @@ class Passenger {
     // Parse the legacy passenger-level leg first so it can backfill any request
     // line that predates the per-line `leg` field (rows written before the
     // migration carried the leg only here, in `trip_type`).
-    final tripType = TripType.fromString(map['trip_type'] as String?);
+    final tripType = TripType.fromString(coerceString(map['trip_type']));
     return Passenger(
       id: (map['id'] ?? '').toString(),
       tourId: (map['tour_id'] ?? '').toString(),
-      userId: map['user_id'] as String?,
+      userId: coerceString(map['user_id']),
       name: (map['name'] ?? '').toString(),
       phone: (map['phone'] ?? '').toString(),
-      ageGroup: AgeGroup.fromString(map['age_group'] as String?),
+      ageGroup: AgeGroup.fromString(coerceString(map['age_group'])),
       requestLines: _parseRequestLines(map['request_lines'], tripType),
       assignedSeats: _parseAssignedSeats(map['assigned_seats']),
       paymentStatus: PaymentStatus.values.firstWhere(
         (s) => s.name == map['payment_status'],
         orElse: () => PaymentStatus.notPaid,
       ),
-      isHandler: map['is_handler'] as bool? ?? false,
-      isWaitlisted: map['is_waitlisted'] as bool? ?? false,
-      isConfirmed: map['is_confirmed'] as bool? ?? false,
-      note: map['note'] as String?,
+      isHandler: coerceBool(map['is_handler']),
+      isWaitlisted: coerceBool(map['is_waitlisted']),
+      isConfirmed: coerceBool(map['is_confirmed']),
+      note: coerceString(map['note']),
       tripType: tripType,
-      groupId: map['group_id'] as String?,
-      priorityStatus: PriorityStatus.fromString(map['priority_status'] as String?),
-      priorityReason: map['priority_reason'] as String?,
-      journeyDone: map['journey_done'] as bool? ?? false,
-      pickupLocationId: map['pickup_location_id'] as String?,
-      pickupLocationName: map['pickup_location_name'] as String?,
+      groupId: coerceString(map['group_id']),
+      priorityStatus: PriorityStatus.fromString(
+        coerceString(map['priority_status']),
+      ),
+      priorityReason: coerceString(map['priority_reason']),
+      journeyDone: coerceBool(map['journey_done']),
+      pickupLocationId: coerceString(map['pickup_location_id']),
+      pickupLocationName: coerceString(map['pickup_location_name']),
       cancelledAt: map['cancelled_at'] != null
           ? DateTime.tryParse(map['cancelled_at'].toString())
           : null,
       cancelRequestedAt: map['cancel_requested_at'] != null
           ? DateTime.tryParse(map['cancel_requested_at'].toString())
           : null,
-      seatsNotifiedSig: map['seats_notified_sig'] as String?,
+      seatsNotifiedSig: coerceString(map['seats_notified_sig']),
       createdAt: _parseDate(map['created_at']),
     );
   }
@@ -387,11 +400,10 @@ class Passenger {
   ) {
     if (value == null) return [];
     if (value is List) {
-      return value
-          .map((e) => RequestLine.fromMap(
-                Map<String, dynamic>.from(e as Map),
-                fallbackLeg: fallbackLeg,
-              ))
+      // Non-map elements are dropped rather than cast — see the note in
+      // parseAssignedSeats. A `[null]` here used to take down the whole load.
+      return coerceMapList(value)
+          .map((e) => RequestLine.fromMap(e, fallbackLeg: fallbackLeg))
           .toList();
     }
     // Backward compat: old format had seatPreference + requestedSeats
@@ -406,10 +418,14 @@ class Passenger {
         // Old format: ["L1", "L2"] — can't recover busId, return empty
         return [];
       }
-      return value
-          .map(
-            (e) => SeatAssignment.fromMap(Map<String, dynamic>.from(e as Map)),
-          )
+      // coerceMapList drops non-map elements (a `[null]` in jsonb is valid
+      // Postgres and used to throw here, failing the entire roster load).
+      // A seat whose busId or seatId can't be recovered is then dropped too:
+      // it cannot be rendered on a chart or matched to a bus, and keeping it
+      // with empty ids would make it collide with every other broken seat.
+      return coerceMapList(value)
+          .map(SeatAssignment.fromMap)
+          .where((s) => s.busId.isNotEmpty && s.seatId.isNotEmpty)
           .toList();
     }
     return [];
@@ -445,6 +461,7 @@ class Passenger {
     DateTime? cancelRequestedAt,
     String? seatsNotifiedSig,
     bool clearCancelRequested = false,
+    bool clearGroup = false,
   }) {
     return Passenger(
       id: id,
@@ -461,7 +478,11 @@ class Passenger {
       isConfirmed: isConfirmed ?? this.isConfirmed,
       note: note ?? this.note,
       tripType: tripType ?? this.tripType,
-      groupId: groupId ?? this.groupId,
+      // `clearGroup` wins so an ungroup can null the membership (plain copyWith
+      // can't set null through the `??` fallback). Callers MUST ungroup through
+      // this flag — a hand-rolled full-constructor rebuild silently drops every
+      // field it forgets, and `toMap()` then persists those as null.
+      groupId: clearGroup ? null : (groupId ?? this.groupId),
       priorityStatus: priorityStatus ?? this.priorityStatus,
       priorityReason: priorityReason ?? this.priorityReason,
       journeyDone: journeyDone ?? this.journeyDone,

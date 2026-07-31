@@ -115,7 +115,7 @@ void main() {
     // Seat summary is plural-free "2 · <type>" — assert on the count prefix.
     expect(find.textContaining('2 ·'), findsOneWidget);
     // Collapsed → the per-card primary action is NOT built yet.
-    expect(find.text('requests.action.confirm_and_seat'), findsNothing);
+    expect(find.text('requests.action.confirm'), findsNothing);
   });
 
   testWidgets('tapping a row expands it to reveal note + primary action',
@@ -127,7 +127,7 @@ void main() {
       ]),
     );
 
-    expect(find.text('requests.action.confirm_and_seat'), findsNothing);
+    expect(find.text('requests.action.confirm'), findsNothing);
     expect(find.textContaining('qa-note-xyz'), findsNothing);
 
     await tester.tap(find.text('Anjali QA'));
@@ -135,7 +135,7 @@ void main() {
 
     // Expanded → note box + New-state primary action are now in the tree.
     expect(find.textContaining('qa-note-xyz'), findsOneWidget);
-    expect(find.text('requests.action.confirm_and_seat'), findsOneWidget);
+    expect(find.text('requests.action.confirm'), findsOneWidget);
   });
 
   testWidgets('only one row is expanded at a time', (tester) async {
@@ -197,7 +197,7 @@ void main() {
     expect(iconInRow(Icons.arrow_forward_rounded),
         findsOneWidget); // outbound one-way
     // Not yet expanded → the action row is not built.
-    expect(find.text('requests.action.confirm_and_seat'), findsNothing);
+    expect(find.text('requests.action.confirm'), findsNothing);
   });
 
   testWidgets('rows are swipeable normally, not in selection mode',

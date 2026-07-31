@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 import 'package:occubusbooking/controllers/tour_controller.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/passenger.dart';
+import 'package:occubusbooking/models/passenger_group.dart';
 import 'package:occubusbooking/models/priority_status.dart';
 import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
@@ -104,6 +105,14 @@ Tour _exceptionsTour() {
       _passenger('g2', 'Geeta B', groupId: 'patel',
           lines: [_line(SeatType.doubleSofa)]),
     ],
+    // The roster's groupId is a PassengerGroup.id, so the group must exist on
+    // the tour for the card to name it. The screen resolves id -> label and
+    // renders NOTHING when the lookup misses (mirroring requests_screen), so
+    // omitting this row silently drops the group tag instead of leaking the
+    // raw id — which is exactly the bug the resolver was added to fix.
+    groups: [
+      PassengerGroup(id: 'patel', tourId: 't1', label: 'Patel Family'),
+    ],
   );
 }
 
@@ -188,8 +197,21 @@ void main() {
     expect(find.text('Ramesh Patel'), findsOneWidget);
     expect(find.text('Mohan Shah'), findsOneWidget);
 
-    // The group-scoped exception surfaces its group label (key fallback).
+    // The group-scoped exception surfaces its group tag. The visible string is
+    // the un-translated key (translations aren't loaded in tests, so tr() can't
+    // interpolate the label), but the chip only renders at all once the screen
+    // has resolved groupId -> PassengerGroup.
     expect(find.text('seating_exceptions.group_label'), findsOneWidget);
+
+    // NOT asserted (deliberately): that the raw PassengerGroup.id is absent
+    // from the whole card. The CHIP no longer leaks it, but the engine's own
+    // message still interpolates the id — here "Group patel (4 berths across 2
+    // bookings) does not fit on any single bus." In production that id is a v4
+    // UUID, so the card body still reads "Group 3f2a1c9e-…". Closing that means
+    // editing the seating engine's message construction, which this UI pass is
+    // scoped out of; tracked as a follow-up. Tighten this to
+    // `expect(find.textContaining('patel'), findsNothing)` once the engine
+    // resolves the label itself.
   });
 
   testWidgets('shows the calm "All clear" panel when there are no exceptions',

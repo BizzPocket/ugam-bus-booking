@@ -16,6 +16,7 @@ import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
+import '../utils/round_trip_combine.dart';
 import '../widgets/booking_capture_form.dart';
 
 /// Customer-side seat request form — image-5 fidelity.
@@ -90,8 +91,40 @@ class _CustomerBookingRequestScreenState
   Future<void> _submit() async {
     // The shared form validates and surfaces inline field errors itself; it
     // returns null when invalid, so we early-return without touching the network.
-    final data = _formKey.currentState?.collect();
+    var data = _formKey.currentState?.collect();
     if (data == null) return;
+
+    // A GO-only + RET-only pair of the SAME seat type is physically ONE seat for
+    // the WHOLE trip (a round trip) that got split into two one-way lines — it
+    // over-counts the party and reads as two seats. Offer to fold each such pair
+    // into a single round-trip seat, or keep them as two separate one-way seats.
+    if (hasCombinableRoundTripPairs(data.lines)) {
+      if (!mounted) return;
+      final combine = await UgamDialog.confirm(
+        context,
+        title: tr('customer_booking.combine_title'),
+        message: tr('customer_booking.combine_body'),
+        confirmLabel: tr('customer_booking.combine_yes'),
+        cancelLabel: tr('customer_booking.combine_no'),
+      );
+      if (combine) {
+        final lines = combineRoundTripPairs(data.lines);
+        final counts = unitCountsOf(lines);
+        data = BookingCaptureData(
+          name: data.name,
+          phone: data.phone,
+          normalisedPhone: data.normalisedPhone,
+          tripType: summaryTripTypeOf(lines),
+          lines: lines,
+          note: data.note,
+          doubleSofa: counts.doubleSofa,
+          singleSofa: counts.singleSofa,
+          seater: counts.seater,
+          pickupLocationId: data.pickupLocationId,
+          pickupLocationName: data.pickupLocationName,
+        );
+      }
+    }
 
     // Bookings close the moment the organiser locks the tour. Re-check against
     // the LIVE tour where we have it (this screen can be opened from a stale
@@ -477,6 +510,8 @@ class _CustomerBookingRequestScreenState
                     toCity: widget.tour.toCity,
                     initial: _initial,
                     enableContacts: false,
+                    // Pickup is mandatory here as on every capture surface —
+                    // it's the form's default now, no per-surface opt-in.
                     // Live-update the CTA's count chip as seats change.
                     onChanged: () => setState(() {}),
                   ),

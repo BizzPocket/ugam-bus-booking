@@ -66,12 +66,23 @@ class SnapshotBus {
   });
 
   /// The occupant frozen at [seatId] on this bus, or null if the seat was empty.
+  /// Only the FIRST rider — use [occupantsAt] on any surface that must show a
+  /// shared berth truthfully.
   SnapshotSeat? occupant(String seatId) {
     for (final s in seats) {
       if (s.seatId == seatId) return s;
     }
     return null;
   }
+
+  /// EVERY rider frozen at [seatId] on this bus, in capture order (GO first).
+  ///
+  /// A Double Sofa is two berths, so one seatId can carry two DIFFERENT riders
+  /// on the same leg. [occupant] returns only the first, which silently erased
+  /// the second from the archived chart — the same "one rider per seat"
+  /// assumption that blanked the printed chart. Read-only surfaces must use this.
+  List<SnapshotSeat> occupantsAt(String seatId) =>
+      [for (final s in seats) if (s.seatId == seatId) s];
 
   Map<String, dynamic> toMap() {
     return {

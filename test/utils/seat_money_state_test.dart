@@ -59,8 +59,70 @@ Collection _changeDue() => Collection(
       amountReceived: 120,
     );
 
+void _manualReturnToSeedTests() {
+  group('manualReturnToSeed — collect sheet re-open (admin == handler)', () {
+    test('no collection → blank', () {
+      expect(manualReturnToSeed(null), isNull);
+    });
+
+    test('auto-recorded change (overpay) → blank so a re-open re-derives it', () {
+      // Owed 500, paid 1000, 500 auto-booked as change. Re-opening must NOT
+      // freeze 500 into "returned" — correcting received to 500 would otherwise
+      // leave a phantom 500 shortfall.
+      final overpaid = Collection(
+        tourId: 't',
+        busId: 'b',
+        passengerId: 'p',
+        amountDue: 500,
+        amountReceived: 1000,
+        amountRefunded: 500,
+      );
+      expect(manualReturnToSeed(overpaid), isNull);
+    });
+
+    test('a GENUINE manual return is pre-seeded', () {
+      // Exactly paid (no auto-change) but 200 was explicitly returned → keep it.
+      final refunded = Collection(
+        tourId: 't',
+        busId: 'b',
+        passengerId: 'p',
+        amountDue: 1500,
+        amountReceived: 1500,
+        amountRefunded: 200,
+      );
+      expect(manualReturnToSeed(refunded), 200);
+    });
+
+    test('manual return LARGER than the auto-change is kept', () {
+      // Paid 1600 on a 1500 due (auto-change 100) but 300 was returned → 300 is
+      // a real manual return (differs from the 100 auto-change), so seed it.
+      final mixed = Collection(
+        tourId: 't',
+        busId: 'b',
+        passengerId: 'p',
+        amountDue: 1500,
+        amountReceived: 1600,
+        amountRefunded: 300,
+      );
+      expect(manualReturnToSeed(mixed), 300);
+    });
+
+    test('no refund at all → blank', () {
+      final paid = Collection(
+        tourId: 't',
+        busId: 'b',
+        passengerId: 'p',
+        amountDue: 500,
+        amountReceived: 500,
+      );
+      expect(manualReturnToSeed(paid), isNull);
+    });
+  });
+}
+
 void main() {
   _refundToRecordTests();
+  _manualReturnToSeedTests();
 
   group('riderMoneyStateOf', () {
     test('no collection but money owed reads as owing', () {
@@ -81,6 +143,54 @@ void main() {
 
     test('overpayment (change due) reads as returnDue', () {
       expect(riderMoneyStateOf(100, _changeDue()), SeatMoneyState.returnDue);
+    });
+  });
+
+  // Fares are per-BUS, so carrying a paid rider onto another bus re-prices them
+  // immediately while their row still carries the OLD bus's amount_due. The
+  // state has to follow the LIVE fare or a rider who owes the band difference
+  // keeps reading as settled until someone happens to re-save the row.
+  group('riderMoneyStateOf — live fare beats the stored snapshot', () {
+    Collection paidAt(double amount) => Collection(
+      tourId: 't',
+      busId: 'b',
+      passengerId: 'p',
+      amountDue: amount,
+      amountReceived: amount,
+    );
+
+    test('carried into a DEARER band reads as owing, not paid', () {
+      // Paid ₹1,500 in full on bus 1; bus 2 bills ₹2,000 for the new seat.
+      expect(riderMoneyStateOf(2000, paidAt(1500)), SeatMoneyState.owing);
+      expect(liveBalanceOf(2000, paidAt(1500)), -500);
+    });
+
+    test('carried into a CHEAPER band reads as returnDue', () {
+      expect(riderMoneyStateOf(1300, paidAt(1500)), SeatMoneyState.returnDue);
+      expect(liveBalanceOf(1300, paidAt(1500)), 200);
+    });
+
+    test('a matching band still reads as paid', () {
+      expect(riderMoneyStateOf(1500, paidAt(1500)), SeatMoneyState.paid);
+      expect(liveBalanceOf(1500, paidAt(1500)), 0);
+    });
+
+    test('a refund counts, so a partly-refunded row is not "paid"', () {
+      final refunded = Collection(
+        tourId: 't',
+        busId: 'b',
+        passengerId: 'p',
+        amountDue: 1500,
+        amountReceived: 1500,
+        amountRefunded: 200,
+      );
+      expect(netCollectedOf(refunded), 1300);
+      expect(riderMoneyStateOf(1500, refunded), SeatMoneyState.owing);
+    });
+
+    test('no collection at all is unchanged: owed reads as owing', () {
+      expect(netCollectedOf(null), 0);
+      expect(liveBalanceOf(100, null), -100);
     });
   });
 

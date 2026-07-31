@@ -219,11 +219,17 @@ export async function getFcmAccessToken(sa: ServiceAccount): Promise<string> {
 }
 
 /// FCM v1 error statuses that mean "this token is dead, stop sending to it".
+///
+/// ONLY genuine unregistered / not-found signals prune a token. A malformed
+/// PAYLOAD returns INVALID_ARGUMENT (HTTP 400) for EVERY recipient, so treating
+/// that as a dead token would wipe out ALL of an admin's device tokens on a
+/// single bad send. Never prune on INVALID_ARGUMENT or any other payload error —
+/// leave the token in place so a fixed payload reaches it next time.
 export function isDeadTokenStatus(httpStatus: number, errStatus?: string): boolean {
   return (
     httpStatus === 404 ||
     errStatus === "UNREGISTERED" ||
     errStatus === "NOT_FOUND" ||
-    errStatus === "INVALID_ARGUMENT"
+    errStatus === "registration-token-not-registered"
   );
 }

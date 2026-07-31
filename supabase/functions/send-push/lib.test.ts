@@ -107,7 +107,10 @@ Deno.test("isDeadTokenStatus — only terminal token errors prune", () => {
   assert(isDeadTokenStatus(404));
   assert(isDeadTokenStatus(400, "UNREGISTERED"));
   assert(isDeadTokenStatus(400, "NOT_FOUND"));
-  assert(isDeadTokenStatus(400, "INVALID_ARGUMENT"));
+  assert(isDeadTokenStatus(400, "registration-token-not-registered"));
+  // A malformed PAYLOAD fails with INVALID_ARGUMENT for EVERY recipient —
+  // never prune on it, or one bad send wipes all of an admin's tokens.
+  assertFalse(isDeadTokenStatus(400, "INVALID_ARGUMENT"));
   assertFalse(isDeadTokenStatus(503, "UNAVAILABLE"));
   assertFalse(isDeadTokenStatus(500, "INTERNAL"));
   assertFalse(isDeadTokenStatus(200));

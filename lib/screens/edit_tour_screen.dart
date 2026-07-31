@@ -34,6 +34,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
   bool _saving = false;
   Timer? _fieldDebounce;
   String? _dateError;
+  String? _titleError;
+  String? _fromError;
+  String? _toError;
 
   // Originals captured at initState — used to detect dirty state and
   // to power the "Cancel changes" action.
@@ -81,7 +84,20 @@ class _EditTourScreenState extends State<EditTourScreen> {
   void _onFieldChanged() {
     _fieldDebounce?.cancel();
     _fieldDebounce = Timer(const Duration(milliseconds: 90), () {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {
+          // Clear a field's validation error once it has content again.
+          if (_titleError != null && _titleCtrl.text.trim().isNotEmpty) {
+            _titleError = null;
+          }
+          if (_fromError != null && _fromCtrl.text.trim().isNotEmpty) {
+            _fromError = null;
+          }
+          if (_toError != null && _toCtrl.text.trim().isNotEmpty) {
+            _toError = null;
+          }
+        });
+      }
     });
   }
 
@@ -176,7 +192,20 @@ class _EditTourScreenState extends State<EditTourScreen> {
   }
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
+    // UgamInput is a bare TextField with no validator, so the form's own
+    // validate() is a no-op. Enforce the required fields here on the trimmed
+    // values and surface per-field errors via each input's errorText slot.
+    final title = _titleCtrl.text.trim();
+    final fromCity = _fromCtrl.text.trim();
+    final toCity = _toCtrl.text.trim();
+    setState(() {
+      _titleError =
+          title.isEmpty ? tr('edit_tour.error_name_required') : null;
+      _fromError =
+          fromCity.isEmpty ? tr('edit_tour.error_from_required') : null;
+      _toError = toCity.isEmpty ? tr('edit_tour.error_to_required') : null;
+    });
+    if (title.isEmpty || fromCity.isEmpty || toCity.isEmpty) return;
     if (_departureDate == null) {
       setState(() => _dateError = tr('edit_tour.error_select_start_date'));
       return;
@@ -186,9 +215,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
     try {
       await Get.find<TourController>().editTour(
         tourId: widget.tourId,
-        title: _titleCtrl.text.trim(),
-        fromCity: _fromCtrl.text.trim(),
-        toCity: _toCtrl.text.trim(),
+        title: title,
+        fromCity: fromCity,
+        toCity: toCity,
         departureDate: _departureDate!,
         departureTime: _departureTime != null
             ? hhmmFromTimeOfDay(_departureTime!)
@@ -446,6 +475,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                     UgamInput(
                       label: tr('create_tour.label.tour_name'),
                       controller: _titleCtrl,
+                      errorText: _titleError,
                     ),
                     const SizedBox(height: UgamSpacing.lg),
                     Text(
@@ -454,7 +484,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     if (MediaQuery.of(context).size.width < 400) ...[
-                      UgamInput(controller: _fromCtrl),
+                      UgamInput(controller: _fromCtrl, errorText: _fromError),
                       const SizedBox(height: UgamSpacing.xs),
                       Center(
                         child: Container(
@@ -473,11 +503,16 @@ class _EditTourScreenState extends State<EditTourScreen> {
                         ),
                       ),
                       const SizedBox(height: UgamSpacing.xs),
-                      UgamInput(controller: _toCtrl),
+                      UgamInput(controller: _toCtrl, errorText: _toError),
                     ] else ...[
                       Row(
                         children: [
-                          Expanded(child: UgamInput(controller: _fromCtrl)),
+                          Expanded(
+                            child: UgamInput(
+                              controller: _fromCtrl,
+                              errorText: _fromError,
+                            ),
+                          ),
                           Container(
                             margin: const EdgeInsets.symmetric(
                               horizontal: UgamSpacing.sm + 2,
@@ -495,7 +530,12 @@ class _EditTourScreenState extends State<EditTourScreen> {
                               color: c.accent,
                             ),
                           ),
-                          Expanded(child: UgamInput(controller: _toCtrl)),
+                          Expanded(
+                            child: UgamInput(
+                              controller: _toCtrl,
+                              errorText: _toError,
+                            ),
+                          ),
                         ],
                       ),
                     ],

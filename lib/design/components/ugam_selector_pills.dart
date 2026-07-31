@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import '../ui_scale.dart';
 
 /// One item in a [UgamSelectorPills] strip.
 ///   * [label] (required) — the pill text
@@ -41,7 +42,10 @@ class UgamSelectorPills extends StatelessWidget {
     final c = UgamColors.of(context);
 
     return SizedBox(
-      height: 38,
+      // Interactive strip: every pill is a tap target, so this routes through
+      // [UgamScale.tap]. 38 was below the 44pt minimum on EVERY device — the
+      // floor raises it to a legal 44 and holds it there as the device shrinks.
+      height: UgamScale.tap(context, 38),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: padding,

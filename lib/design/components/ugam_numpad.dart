@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import '../ui_scale.dart';
 import 'ugam_cta.dart';
 import 'ugam_expander.dart';
 import 'ugam_sheet.dart';
@@ -40,10 +41,7 @@ class UgamAmountHero extends StatelessWidget {
         ],
         Text(
           amount,
-          style: UgamText.numXl.copyWith(
-            color: tone ?? c.ink,
-            fontSize: 48,
-          ),
+          style: UgamText.numXl.copyWith(color: tone ?? c.ink, fontSize: 48),
           maxLines: 1,
         ),
       ],
@@ -116,11 +114,7 @@ class UgamNumpad extends StatelessWidget {
       childAspectRatio: 1.7,
       children: [
         for (final k in keys)
-          _NumKey(
-            spec: k,
-            onDigit: _tap,
-            onBackspace: _backspace,
-          ),
+          _NumKey(spec: k, onDigit: _tap, onBackspace: _backspace),
       ],
     );
   }
@@ -132,12 +126,8 @@ class _Key {
   final _KeyKind kind;
   final String label;
   const _Key.digit(this.label) : kind = _KeyKind.digit;
-  const _Key.backspace()
-      : kind = _KeyKind.backspace,
-        label = '';
-  const _Key.blank()
-      : kind = _KeyKind.blank,
-        label = '';
+  const _Key.backspace() : kind = _KeyKind.backspace, label = '';
+  const _Key.blank() : kind = _KeyKind.blank, label = '';
 }
 
 class _NumKey extends StatelessWidget {
@@ -162,7 +152,10 @@ class _NumKey extends StatelessWidget {
     final isBackspace = spec.kind == _KeyKind.backspace;
 
     return SizedBox(
-      height: 56,
+      // Interactive key: floored at 44 (56 -> 47.6 at the 0.85 device floor),
+      // so the pad gets shorter on a small phone without any key going
+      // under-sized.
+      height: UgamScale.tap(context, 56),
       child: Material(
         color: c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.input),
@@ -178,17 +171,10 @@ class _NumKey extends StatelessWidget {
           },
           child: Center(
             child: isBackspace
-                ? Icon(
-                    Icons.backspace_outlined,
-                    size: 20,
-                    color: c.ink2,
-                  )
+                ? Icon(Icons.backspace_outlined, size: 20, color: c.ink2)
                 : Text(
                     spec.label,
-                    style: UgamText.numLg.copyWith(
-                      color: c.ink,
-                      fontSize: 22,
-                    ),
+                    style: UgamText.numLg.copyWith(color: c.ink, fontSize: 22),
                   ),
           ),
         ),
@@ -309,9 +295,8 @@ class _AmountSheetBodyState extends State<_AmountSheetBody> {
         ],
         ValueListenableBuilder<String>(
           valueListenable: _value,
-          builder: (context, v, child) => UgamAmountHero(
-            amount: v.isEmpty ? '0' : v,
-          ),
+          builder: (context, v, child) =>
+              UgamAmountHero(amount: v.isEmpty ? '0' : v),
         ),
         if (widget.statusBuilder != null) ...[
           const SizedBox(height: UgamSpacing.md),
@@ -325,10 +310,7 @@ class _AmountSheetBodyState extends State<_AmountSheetBody> {
         UgamNumpad(value: _value),
         if (widget.details != null) ...[
           const SizedBox(height: UgamSpacing.lg),
-          UgamExpander(
-            title: 'Details',
-            child: widget.details!(context),
-          ),
+          UgamExpander(title: 'Details', child: widget.details!(context)),
         ],
         const SizedBox(height: UgamSpacing.xl),
         ValueListenableBuilder<String>(

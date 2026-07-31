@@ -38,20 +38,39 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   bool _saving = false;
   Timer? _previewDebounce;
   String? _dateError;
+  String? _titleError;
+  String? _fromError;
+  String? _toError;
 
   @override
   void initState() {
     super.initState();
-    // Live preview rebuilds on every keystroke.
+    // Live preview rebuilds on every keystroke. The broadcast field is
+    // included so the CTA label can flip between "Create tour" and
+    // "Create & Broadcast" as the agent types a message.
     _titleCtrl.addListener(_previewListener);
     _fromCtrl.addListener(_previewListener);
     _toCtrl.addListener(_previewListener);
+    _broadcastCtrl.addListener(_previewListener);
   }
 
   void _previewListener() {
     _previewDebounce?.cancel();
     _previewDebounce = Timer(const Duration(milliseconds: 90), () {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {
+          // Clear a field's validation error once it has content again.
+          if (_titleError != null && _titleCtrl.text.trim().isNotEmpty) {
+            _titleError = null;
+          }
+          if (_fromError != null && _fromCtrl.text.trim().isNotEmpty) {
+            _fromError = null;
+          }
+          if (_toError != null && _toCtrl.text.trim().isNotEmpty) {
+            _toError = null;
+          }
+        });
+      }
     });
   }
 
@@ -60,6 +79,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
     _titleCtrl.removeListener(_previewListener);
     _fromCtrl.removeListener(_previewListener);
     _toCtrl.removeListener(_previewListener);
+    _broadcastCtrl.removeListener(_previewListener);
     _previewDebounce?.cancel();
     _titleCtrl.dispose();
     _fromCtrl.dispose();
@@ -125,7 +145,22 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
 
   Future<void> _submit() async {
     if (_saving) return;
-    if (!_formKey.currentState!.validate()) return;
+
+    // UgamInput is a bare TextField with no validator, so the form's own
+    // validate() is a no-op. Enforce the required fields here on the trimmed
+    // values and surface per-field errors via each input's errorText slot.
+    final title = _titleCtrl.text.trim();
+    final fromCity = _fromCtrl.text.trim();
+    final toCity = _toCtrl.text.trim();
+    setState(() {
+      _titleError =
+          title.isEmpty ? tr('create_tour.validation.name_required') : null;
+      _fromError =
+          fromCity.isEmpty ? tr('create_tour.validation.from_required') : null;
+      _toError =
+          toCity.isEmpty ? tr('create_tour.validation.to_required') : null;
+    });
+    if (title.isEmpty || fromCity.isEmpty || toCity.isEmpty) return;
     if (_departureDate == null) {
       setState(
         () => _dateError = tr('create_tour.validation.select_start_date'),
@@ -165,9 +200,9 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
           : _broadcastCtrl.text.trim();
 
       final newTour = await tourCtrl.createTour(
-        title: _titleCtrl.text.trim(),
-        fromCity: _fromCtrl.text.trim(),
-        toCity: _toCtrl.text.trim(),
+        title: title,
+        fromCity: fromCity,
+        toCity: toCity,
         departureDate: _departureDate!,
         departureTime: _departureTime != null
             ? hhmmFromTimeOfDay(_departureTime!)
@@ -205,7 +240,13 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
       // so the agent taps their saved Broadcast List or group to send. Free —
       // no Cloud API, no Meta approval. Fire-and-forget: navigation already
       // happened, so the agent returns to the tour detail after sending.
-      unawaited(WhatsAppService().broadcastTour(tour: newTour));
+      // Only launch the external picker when there is actually something to
+      // broadcast — otherwise a blank create would eject the agent into
+      // WhatsApp for no reason. With nothing to send we simply stay on the
+      // tour detail we just pushed.
+      if (broadcastMessage != null || broadcastImageUrl != null) {
+        unawaited(WhatsAppService().broadcastTour(tour: newTour));
+      }
     } catch (_) {
       if (mounted) AppSnackBar.error(tr('create_tour.snackbar.error'));
     } finally {
@@ -216,6 +257,12 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    // The CTA only promises a broadcast when there is actually something to
+    // broadcast (a message and/or an image); otherwise it plainly creates the
+    // tour and stays on the detail screen. Kept live by the broadcast-field
+    // listener registered in initState.
+    final hasBroadcast =
+        _broadcastCtrl.text.trim().isNotEmpty || _broadcastImage != null;
 
     return UgamScaffold(
       body: SafeArea(
@@ -247,6 +294,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       label: tr('create_tour.label.tour_name'),
                       hint: tr('create_tour.hint.tour_name'),
                       controller: _titleCtrl,
+                      errorText: _titleError,
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     Text(
@@ -258,6 +306,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       UgamInput(
                         hint: tr('create_tour.hint.from_city'),
                         controller: _fromCtrl,
+                        errorText: _fromError,
                       ),
                       const SizedBox(height: UgamSpacing.xs),
                       Center(
@@ -280,6 +329,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       UgamInput(
                         hint: tr('create_tour.hint.to_city'),
                         controller: _toCtrl,
+                        errorText: _toError,
                       ),
                     ] else ...[
                       Row(
@@ -288,6 +338,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                             child: UgamInput(
                               hint: tr('create_tour.hint.from_city'),
                               controller: _fromCtrl,
+                              errorText: _fromError,
                             ),
                           ),
                           Container(
@@ -311,6 +362,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                             child: UgamInput(
                               hint: tr('create_tour.hint.to_city'),
                               controller: _toCtrl,
+                              errorText: _toError,
                             ),
                           ),
                         ],
@@ -445,8 +497,12 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
               child: UgamCTA(
                 label: _saving
                     ? tr('create_tour.action.creating')
-                    : tr('create_tour.action.create_broadcast'),
-                leadingIcon: Icons.send_rounded,
+                    : (hasBroadcast
+                          ? tr('create_tour.action.create_broadcast')
+                          : tr('create_tour.action.create_tour')),
+                leadingIcon: hasBroadcast
+                    ? Icons.send_rounded
+                    : Icons.add_rounded,
                 loading: _saving,
                 onPressed: _submit,
               ),

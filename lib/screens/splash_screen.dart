@@ -1,11 +1,14 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../components/ugam_logo.dart';
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
+import '../routes/app_routes.dart';
+import '../utils/app_snackbar.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -22,8 +25,11 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
-
+    // NO imperative SystemUiOverlayStyle here. `app.dart` installs a
+    // theme-aware AnnotatedRegion app-wide (light glyphs on dark, dark glyphs
+    // on light); hard-pinning `.light` made the clock/battery/signal invisible
+    // on the cream light theme. `main_shell.dart` had this exact call removed
+    // for the same reason.
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),
@@ -41,15 +47,36 @@ class _SplashScreenState extends State<SplashScreen>
   /// a customer always lands on the customer home, deterministically.
   Future<void> _routeWhenReady() async {
     final auth = Get.find<AuthController>();
-    await Future.wait([
-      auth.whenRestored,
-      Future.delayed(const Duration(milliseconds: 450)),
-    ]);
+    var restoreTimedOut = false;
+    try {
+      await Future.wait([
+        // Bound the session-restore read. On a stalled network the underlying
+        // admin lookup can hang WITHOUT throwing, so `whenRestored` would never
+        // complete and the user would stare at the splash forever. Time it out
+        // and route on whatever auth state we already have (an admin's
+        // isLoggedIn/isAdmin are set before that network hop, so a logged-in
+        // admin still lands on the admin home; the tour list re-fetches once
+        // online). A finite fall-through always beats an infinite spinner.
+        auth.whenRestored.timeout(const Duration(seconds: 10)),
+        Future.delayed(const Duration(milliseconds: 450)),
+      ]);
+    } on TimeoutException {
+      restoreTimedOut = true;
+    }
     if (!mounted) return;
     if (auth.isLoggedIn.value && auth.isAdmin) {
-      Get.offAllNamed('/');
+      Get.offAllNamed(AppRoutes.home);
     } else {
-      Get.offAllNamed('/customer-home');
+      Get.offAllNamed(AppRoutes.customerHome);
+    }
+    // Tell the user why we moved on without a fully confirmed session. The
+    // toast lives in the root overlay, so it survives the route change and
+    // lands on the destination screen rather than the torn-down splash.
+    if (restoreTimedOut) {
+      AppSnackBar.warning(
+        tr('splash.restore_timeout_message'),
+        title: tr('splash.restore_timeout_title'),
+      );
     }
   }
 
@@ -69,7 +96,10 @@ class _SplashScreenState extends State<SplashScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const UgamLogo(size: 140),
+              // Decorative mark -> px(), not tap(): nothing here is tappable,
+              // so it may shrink freely with the device instead of towering
+              // over a wordmark that textScaler has already shrunk to 0.85x.
+              UgamLogo(size: UgamScale.px(context, 140)),
               const SizedBox(height: UgamSpacing.xxl),
               Text(
                 tr('splash.brand_name'),

@@ -9,6 +9,7 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
+import '../routes/app_routes.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../widgets/dashboard/attention_section.dart';
@@ -18,8 +19,8 @@ import '../widgets/dashboard/loading_shimmer.dart';
 import '../widgets/dashboard/quick_actions.dart';
 import '../widgets/dashboard/recent_request_row.dart';
 import '../widgets/dashboard/trip_hero.dart';
-import 'inbox_screen.dart';
 import 'main_shell.dart';
+import 'notify_screen.dart';
 import 'seating_exceptions_screen.dart';
 import 'seats_screen.dart';
 import 'tour_detail_screen.dart';
@@ -62,7 +63,7 @@ class DashboardScreen extends StatelessWidget {
           if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
             return UgamEmpty(
               icon: Icons.cloud_off_rounded,
-              title: tr('dashboard.section_overview'),
+              title: tr('dashboard.error_title'),
               body: tourCtrl.errorMessage.value,
               cta: UgamCTA(
                 label: tr('app.action.retry'),
@@ -97,7 +98,7 @@ class DashboardScreen extends StatelessWidget {
                 UgamSpacing.gutter,
                 UgamSpacing.lg,
                 UgamSpacing.gutter,
-                140,
+                UgamSpacing.dockClearance,
               ),
               children: [
                 Obx(() => DashboardGreeting(
@@ -112,7 +113,7 @@ class DashboardScreen extends StatelessWidget {
                 // Unread WhatsApp messages nudge — only when there's something
                 // to read; the always-present entry point is the home-header
                 // chat icon. Neutral surface (accent stays rationed to the top
-                // attention CTA); the count rides an accent pill.
+                // attention CTA); the count rides a TONAL accent pill.
                 Obx(() {
                   final unread = Get.find<InboxController>().totalUnread.value;
                   if (unread <= 0) return const SizedBox.shrink();
@@ -152,7 +153,7 @@ class DashboardScreen extends StatelessWidget {
                           isPrimary: i == 0,
                         ),
                         if (i != attention.length - 1)
-                          const SizedBox(height: UgamSpacing.sm + 2),
+                          const SizedBox(height: UgamSpacing.tight),
                       ],
                     ],
                   );
@@ -169,17 +170,25 @@ class DashboardScreen extends StatelessWidget {
                         DashboardSectionLabel(
                           label: tr('dashboard.section_recent'),
                           action: tr('dashboard.see_all'),
-                          onAction: () => shell.switchTab(3), // Requests tab
+                          // Requests tab. Route through the same entry point
+                          // the dock uses so there is one way in. NOTE: from
+                          // the dashboard (index 0) this is behaviourally
+                          // identical to switchTab — onTabTapped only pops the
+                          // target navigator when it is ALREADY the current
+                          // tab, so a Requests sub-page the agent left open
+                          // still shows. Resetting it needs a shell-side
+                          // method; escalated rather than hand-rolled here.
+                          onAction: () => shell.onTabTapped(3),
                           c: c,
                         ),
                         const SizedBox(height: UgamSpacing.md),
                         for (var i = 0; i < recent.length; i++) ...[
                           DashboardRecentRow(
                             entry: recent[i],
-                            onTap: () => shell.switchTab(3), // Requests tab
+                            onTap: () => shell.onTabTapped(3), // Requests tab
                           ),
                           if (i != recent.length - 1)
-                            const SizedBox(height: UgamSpacing.sm + 2),
+                            const SizedBox(height: UgamSpacing.tight),
                         ],
                       ],
                     ),
@@ -226,7 +235,7 @@ class DashboardScreen extends StatelessWidget {
           ctaLabel: tr('dashboard.cta_review'),
           ctaIcon: Icons.event_busy_rounded,
           tone: UgamStatusTone.warm,
-          onTap: () => Get.find<ShellController>().switchTab(3),
+          onTap: () => Get.find<ShellController>().onTabTapped(3),
         ));
         continue;
       }
@@ -339,9 +348,16 @@ class DashboardScreen extends StatelessWidget {
           ctaLabel: tr('dashboard.cta_lock'),
           ctaIcon: Icons.lock_rounded,
           tone: UgamStatusTone.good,
-          onTap: () {
-            Get.find<ShellController>().switchTab(4);
-          },
+          // Lock & notify lives on the tour-scoped Notify screen — the same
+          // destination tour_detail_screen.dart:1989 (_NextActionKind
+          // .lockAndNotify) and :2170 (the "Lock" tool row) push for this
+          // exact verb. Was switchTab(4), which is the Settings tab
+          // (main_shell.dart:98) and dropped the tour context entirely.
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => NotifyScreen(tourId: tour.id),
+            ),
+          ),
         ));
       }
     }
@@ -363,7 +379,8 @@ class DashboardScreen extends StatelessWidget {
 
 /// Dashboard nudge card for unread WhatsApp customer messages. Neutral surface
 /// (accent-rationing law — the accent CTA belongs to the top attention row);
-/// the unread count rides a small accent pill. Opens the full [InboxScreen].
+/// the unread count rides a small TONAL accent pill — `accentFill` + `accent`
+/// ink, never a solid copper blob. Opens the inbox by named route.
 class _MessagesCard extends StatelessWidget {
   final int count;
   final UgamColorSet c;
@@ -372,19 +389,28 @@ class _MessagesCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Decorative chrome inside an already-tappable card (the whole card is the
+    // target), so [UgamScale.px], never [tap] — nothing here is its own target.
+    final tile = UgamScale.px(context, 40);
+    final glyph = UgamScale.px(context, 20);
     return UgamCard.plain(
-      onTap: () => Get.to(() => const InboxScreen()),
+      // Named route, not an anonymous `Get.to(() => const InboxScreen())`:
+      // push_service.dart:245 guards inbox re-entry with
+      // `Get.currentRoute != AppRoutes.inbox`, and an anonymous route never
+      // reports '/inbox', so a WhatsApp push arriving while the inbox was
+      // open from here stacked a second identical inbox.
+      onTap: () => Get.toNamed(AppRoutes.inbox),
       child: Row(
         children: [
           Container(
-            width: 40,
-            height: 40,
+            width: tile,
+            height: tile,
             decoration: BoxDecoration(
               color: c.accentFill,
               borderRadius: BorderRadius.circular(UgamRadius.chip),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.forum_rounded, size: 20, color: c.accent),
+            child: Icon(Icons.forum_rounded, size: glyph, color: c.accent),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -405,27 +431,29 @@ class _MessagesCard extends StatelessWidget {
             ),
           ),
           Container(
-            constraints: const BoxConstraints(minWidth: 22),
-            height: 22,
-            padding: const EdgeInsets.symmetric(horizontal: 7),
+            constraints: BoxConstraints(minWidth: UgamScale.px(context, 22)),
+            height: UgamScale.px(context, 22),
+            padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.sm),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: c.accent,
+              // Tonal, not a solid accent fill: this is a passive counter, and
+              // the dock's active-tab pill (app chrome, exempt) is already a
+              // solid copper on this screen. One solid accent per content area.
+              color: c.accentFill,
               borderRadius: BorderRadius.circular(UgamRadius.chip),
             ),
             child: Text(
               count > 99 ? '99+' : '$count',
               style: UgamText.tabular(
                 UgamText.micro.copyWith(
-                  color: c.onAccent,
+                  color: c.accent,
                   fontWeight: FontWeight.w800,
-                  fontSize: 11,
                 ),
               ),
             ),
           ),
           const SizedBox(width: UgamSpacing.xs),
-          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+          Icon(Icons.chevron_right_rounded, size: glyph, color: c.ink3),
         ],
       ),
     );

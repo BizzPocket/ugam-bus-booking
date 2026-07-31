@@ -14,7 +14,6 @@ enum SeatRenderKind {
   halfDouble,
   shared,
   legShare,
-  legShareHalf,
   quad,
 }
 
@@ -109,9 +108,18 @@ SeatRender resolveSeatRender({
   }
   final legShare = go != null && ret != null;
 
-  // Free berths still bookable on a double, leg-aware: used = max(GO, RET).
-  // Only meaningful when berth-accurate (markHalfDouble); leg-deduped charts
-  // can't count berths so they never split.
+  // Free berths still bookable on a double, leg-aware: a double has two berths
+  // PER LEG, so a free half exists whenever EITHER leg has an unused berth —
+  // e.g. the whole sofa booked on RET (r=2) but only one rider on GO (g=1)
+  // still leaves a free GO berth. An earlier max(g,r) collapsed both legs and
+  // hid that half. Only meaningful when berth-accurate (markHalfDouble);
+  // leg-deduped charts can't count berths so they never split.
+  //
+  // Now that the leg-row grid below claims every double whose two legs carry
+  // DIFFERENT riders, this only settles the leftover case: riders who ride both
+  // legs, i.e. is a lone round-trip occupant sitting on one berth (half) or on
+  // the whole sofa (booked). A partly-free leg row is deliberately NOT carved
+  // up any more — see the grid's note.
   var hasFreeHalf = false;
   if (markHalfDouble && isDouble) {
     var g = 0, r = 0;
@@ -126,49 +134,75 @@ SeatRender resolveSeatRender({
           r++;
       }
     }
-    final used = g > r ? g : r;
-    hasFreeHalf = (2 - used) >= 1;
+    hasFreeHalf = (2 - g) >= 1 || (2 - r) >= 1;
   }
 
   final extra = isDouble && occ.length > 2 ? occ.length - 2 : 0;
 
+  // Reached only for a double whose two legs carry the SAME riders (the grid
+  // below took every other double), so this is the "two-plus people sharing the
+  // sofa for the whole trip" tile: names stacked, no leg split to draw.
   final isShared = isDouble && occ.length > 1 && !legShare;
-  final isHalfDouble = markHalfDouble &&
-      isDouble &&
-      occ.length == 1 &&
-      occupants.length == 1;
+  // A double with ONE distinct occupant that still has a free berth renders as
+  // a half (occupant + empty half), not a full booked tile. Also only reached
+  // for a both-legs rider now — a one-leg occupant is drawn on their own leg
+  // row by the grid below, which is what shows their free opposite leg.
+  final isHalfDouble = markHalfDouble && isDouble && occ.length == 1 && hasFreeHalf;
 
   // A double sofa is two berths, each reusable across legs, so up to FOUR
   // distinct riders can share it. Draw them as a GO row over a RET row instead
   // of two names + a "+N" badge that hid the rest. A round-trip rider holds
   // both legs of their berth, so they appear in both rows.
-  if (isDouble && occ.length > 2) {
+  //
+  // This leg-row grid is the ONE geometry for a double, at EVERY occupancy —
+  // not just the 3-4 rider case it was introduced for. When the two legs carry
+  // different riders, the smaller paths used to each invent their own picture
+  // and both misread the sofa:
+  //   * a GO + RET pair with a berth to spare fell to `legShareHalf`, which
+  //     quartered BOTH riders (the leg pair crammed into the left column, one
+  //     merged empty berth down the right) — so a rider holding a whole leg
+  //     row looked like they held a quarter of the sofa;
+  //   * two SAME-leg riders fell to `shared`, stacked over the WHOLE tile, so
+  //     the opposite leg — completely free — read as fully booked.
+  // Keying on "do the legs differ" (rather than a headcount) keeps the genuine
+  // stacked cases stacked: two round-trip sharers, or a lone round-trip rider,
+  // ride BOTH legs, so there is no leg split to draw and printing each name on
+  // both rows would only duplicate it.
+  if (isDouble && occ.isNotEmpty) {
     final qgo = occ.where((p) => _legOf(p, cell.seatId).usesOutbound).toList();
     final qret = occ.where((p) => _legOf(p, cell.seatId).usesReturn).toList();
-    final goRow = qgo.length > 2 ? qgo.sublist(0, 2) : qgo;
-    final retRow = qret.length > 2 ? qret.sublist(0, 2) : qret;
-    // Each leg row only seats two. A rider beyond that (an OVER-BOOKED leg —
-    // 3+ on GO or RET, e.g. two round-trip holders + a one-way squeezed in)
-    // has no slot in either row; count everyone NOT drawn so the "+N" badge
-    // surfaces them instead of vanishing. occ.length > 4 alone missed this,
-    // because the overflow can sit on one leg while the other has room.
-    final shownIds = <String>{
-      for (final p in goRow) p.id,
-      for (final p in retRow) p.id,
-    };
-    final hidden = occ.where((p) => !shownIds.contains(p.id)).length;
-    return SeatRender(
-      kind: SeatRenderKind.quad,
-      occ: occ,
-      quadGo: goRow,
-      quadRet: retRow,
-      extra: hidden,
-    );
+    final sameOnBothLegs = qgo.length == qret.length &&
+        qgo.every((p) => qret.any((q) => q.id == p.id));
+    if (!sameOnBothLegs) {
+      final goRow = qgo.length > 2 ? qgo.sublist(0, 2) : qgo;
+      final retRow = qret.length > 2 ? qret.sublist(0, 2) : qret;
+      // Each leg row only seats two. A rider beyond that (an OVER-BOOKED leg —
+      // 3+ on GO or RET, e.g. two round-trip holders + a one-way squeezed in)
+      // has no slot in either row; count everyone NOT drawn so the "+N" badge
+      // surfaces them instead of vanishing. occ.length > 4 alone missed this,
+      // because the overflow can sit on one leg while the other has room.
+      final shownIds = <String>{
+        for (final p in goRow) p.id,
+        for (final p in retRow) p.id,
+      };
+      final hidden = occ.where((p) => !shownIds.contains(p.id)).length;
+      return SeatRender(
+        kind: SeatRenderKind.quad,
+        occ: occ,
+        quadGo: goRow,
+        quadRet: retRow,
+        extra: hidden,
+      );
+    }
   }
 
+  // Only a SINGLE sofa reaches here: on a double, a GO-only + a RET-only rider
+  // put different riders on the two legs, so the leg-row grid above already
+  // claimed it. A single berth has no berths to lay out side-by-side, so the
+  // GO-over-RET stack IS its whole tile.
   if (legShare) {
     return SeatRender(
-      kind: hasFreeHalf ? SeatRenderKind.legShareHalf : SeatRenderKind.legShare,
+      kind: SeatRenderKind.legShare,
       occ: occ,
       go: go,
       ret: ret,

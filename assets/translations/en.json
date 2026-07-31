@@ -5,6 +5,7 @@
   "pickup": {
     "form_label": "Pickup point",
     "form_placeholder": "Select pickup point (optional)",
+    "form_placeholder_required": "Select pickup point",
     "sheet_title": "Choose pickup point",
     "clear": "No pickup point",
     "reflect_label": "Pickup",
@@ -250,6 +251,7 @@
     "greeting_evening": "Good Evening",
     "welcome_fallback": "Welcome",
     "section_overview": "QUICK OVERVIEW",
+    "error_title": "Couldn't load your trips",
     "section_upcoming": "Upcoming Tours",
     "see_all": "See All",
     "stat_active_tours": "Active Tours",
@@ -303,6 +305,7 @@
     "departs": "Departs {date}",
     "departs_short": "departs {date}",
     "open_trip": "Open trip",
+    "view_pnl": "View P&L",
     "choose_trip": "Choose a trip",
     "leg_go": "Go",
     "leg_return": "Return",
@@ -415,6 +418,11 @@
       "body": "Remove {name}'s request from this tour? They will need to resubmit if you change your mind.",
       "confirm": "Decline"
     },
+    "discard_dialog": {
+      "title": "Discard this booking?",
+      "body": "You have entered seats for this request. Closing now will discard everything you have typed.",
+      "confirm": "Discard"
+    },
     "empty_no_tours": {
       "title": "No active tours",
       "body": "Create a tour to start collecting seat requests."
@@ -475,13 +483,15 @@
       "promoted_to_new": "{name} promoted back to New.",
       "declined_title": "Declined",
       "declined_body": "{name} removed from this tour.",
+      "declined_wa_failed": "Declined, but couldn't open WhatsApp to notify them.",
       "bulk_waitlisted": "Moved {n} to waitlist",
       "bulk_wa_opened": "Opened {n} WhatsApp chats",
       "cancel_approved_title": "Cancellation approved",
       "cancel_approved_body": "{name} removed and seat freed.",
       "cancel_approved_wa_failed": "Approved, but couldn't open WhatsApp to notify them.",
       "cancel_dismissed_title": "Request dismissed",
-      "cancel_dismissed_body": "{name} kept on this tour."
+      "cancel_dismissed_body": "{name} kept on this tour.",
+      "confirm_wa_failed": "Confirmed, but couldn't send the WhatsApp confirmation."
     },
     "bulk": {
       "waitlist": "Waitlist",
@@ -490,6 +500,7 @@
       "decline": "Decline",
       "promoted": "Promoted {n} back to New",
       "declined": "Declined {n} requests",
+      "declined_wa_partial": "Declined {n} · messaged {sent}, {failed} failed",
       "decline_title": "Decline these requests?",
       "decline_body": "This permanently removes {n} selected requests. This cannot be undone.",
       "decline_confirm": "Decline",
@@ -717,12 +728,14 @@
     "resize_confirm_title": "Change seats?",
     "resize_confirm_msg": "This unassigns the {count} passenger(s) seated on this bus. They return to the unassigned list and can be re-seated. Continue?",
     "resize_confirm_cta": "Change seats",
-    "regenerate_label": "Regenerate layout",
-    "regenerate_subtitle": "Rebuild the seat layout from these settings using the current engine.",
-    "regenerate_confirm_title": "Regenerate layout?",
-    "regenerate_confirm_msg": "This rebuilds the seat layout from the current settings and renumbers every berth. The {count} passenger(s) seated on this bus will be freed and must be re-assigned. Continue?",
-    "regenerate_confirm_msg_empty": "This rebuilds the seat layout from the current settings and renumbers every berth. No passengers are seated on this bus, so nothing is unassigned. Continue?",
-    "regenerate_confirm_cta": "Regenerate layout",
+    "regenerate_label": "Rebuild layout & save",
+    "regenerate_confirm_title": "Rebuild layout and save?",
+    "regenerate_confirm_msg": "This rebuilds the seat layout from the current settings and renumbers every berth. The {count} passenger(s) seated on this bus will be freed and must be re-assigned. Your other changes on this screen are saved at the same time and the bus closes. Continue?",
+    "regenerate_confirm_msg_empty": "This rebuilds the seat layout from the current settings and renumbers every berth. No passengers are seated on this bus, so nothing is unassigned. Your other changes on this screen are saved at the same time and the bus closes. Continue?",
+    "regenerate_confirm_cta": "Rebuild & save",
+    "exit_confirm_title": "Leave without saving?",
+    "exit_confirm_msg": "Your changes on this screen have not been saved. Leave anyway?",
+    "exit_confirm_cta": "Discard",
     "step_progress": "Step {current} / {total}",
     "step1": {
       "eyebrow": "IDENTITY",
@@ -761,6 +774,7 @@
       "title": "Price bands",
       "subtitle": "Premium front rows or a discounted back range — price set per person.",
       "add": "Add price band",
+      "remove_semantic": "Remove price band",
       "rows_clamped_note": "Rows are clamped to the bus once it is built."
     },
     "band_sheet": {
@@ -801,6 +815,7 @@
   },
   "admin_setup": {
     "title": "Admin setup",
+    "mail_subject": "Admin access request",
     "heading": "Create the first admin account.",
     "subtitle": "These credentials are stored in your Appwrite admins collection. Anyone using this phone number with the right password will get full admin access in the app.",
     "label_name": "NAME",
@@ -878,11 +893,15 @@
     },
     "validation": {
       "invalid_amount": "Invalid amount",
-      "select_start_date": "Please select a start date"
+      "select_start_date": "Please select a start date",
+      "name_required": "Please enter a tour name",
+      "from_required": "Please enter a departure city",
+      "to_required": "Please enter a destination city"
     },
     "action": {
       "create_broadcast": "Create & Broadcast",
-      "creating": "Creating tour…"
+      "creating": "Creating tour…",
+      "create_tour": "Create tour"
     },
     "snackbar": {
       "created_title": "Tour Created!",
@@ -953,6 +972,10 @@
     "warn_duplicate_body": "You already have a pending request just like this — same name and seats. Submit another anyway?",
     "warn_duplicate_submit": "Submit anyway",
     "warn_duplicate_cancel": "Cancel",
+    "combine_title": "Combine into a round trip?",
+    "combine_body": "You've added the same seat for Go and for Return separately. That's really ONE seat for the whole tour (a round trip). Combine them into one round-trip seat, or keep them as two separate one-way seats?",
+    "combine_yes": "Combine (round trip)",
+    "combine_no": "Keep separate",
     "err_too_fast": "Please wait a few seconds before submitting again.",
     "cta_seat_count": "{n} seats",
     "cta_seat_count_one": "1 seat",
@@ -994,6 +1017,7 @@
     "err_phone_invalid": "Please enter a 10-digit phone number",
     "err_phone_fake": "Please enter a real 10-digit mobile number.",
     "err_no_seats": "Pick at least one seat",
+    "err_pickup_required": "Please choose a pickup point",
     "add_seat_row": "Add seat row",
     "remove_row": "Remove",
     "leg_full": "Full trip",
@@ -1100,9 +1124,13 @@
       "title": "Delete this tour?",
       "message": "This will permanently delete {detail} and every booking request tied to it. This cannot be undone.",
       "deleted": "Tour \"{title}\" deleted."
-    }
+    },
+    "error_name_required": "Please enter a tour name",
+    "error_from_required": "Please enter a departure city",
+    "error_to_required": "Please enter a destination city"
   },
   "login": {
+    "brand_name": "UGAM",
     "tagline": "Tour Booking Agent",
     "hero": "Welcome\nback.",
     "description": "Sign in with your phone number to continue planning extraordinary journeys.",
@@ -1116,6 +1144,7 @@
     "btn_sign_in": "Sign in",
     "btn_different_number": "Use a different number",
     "btn_setup": "First-time setup — create admin account",
+    "btn_admin_access": "Need admin access?",
     "btn_ping": "Send a Ping",
     "terms": "By continuing, you agree to our Terms of Service\nand Privacy Policy.",
     "ping_success_title": "Ping Success",
@@ -1147,9 +1176,6 @@
     "tab_tour": "TOUR",
     "tab_charts": "CHARTS",
     "tab_requests": "REQUESTS",
-    "tab_assign": "ASSIGN",
-    "tab_notify": "NOTIFY",
-    "tab_messages": "INBOX",
     "tab_settings": "SETTINGS"
   },
   "inbox": {
@@ -1230,6 +1256,10 @@
     "message_bus": "Message this bus",
     "pick_bus": "Pick a bus",
     "recipient_count": "{count} passenger(s) on this bus",
+    "recipient_count_named": "Sending to {bus} · {count} passenger(s)",
+    "pick_bus_first": "Pick a bus first — this message goes only to that bus.",
+    "confirm_title": "Send to {bus}?",
+    "confirm_body": "This announcement goes to {count} passenger(s) seated on {bus}. Check the bus name in your message matches.",
     "field_message": "Message",
     "field_message_hint": "Type your announcement…",
     "frame_note": "A greeting and closing blessing are added automatically — just type your message.",
@@ -1243,7 +1273,15 @@
     "failed_title": "Send failed",
     "failed_body": "Could not send the message. Check WhatsApp setup.",
     "no_recipients": "No seated passengers on this bus to message.",
-    "handler_intro": "Send a WhatsApp message to every passenger on {bus}."
+    "handler_intro": "Send a WhatsApp message to every passenger on {bus}.",
+    "invalid_title": "WhatsApp will refuse this message",
+    "invalid_edit": "Edit message",
+    "fix_auto": "Fix automatically",
+    "invalid_empty": "Type a message first.",
+    "invalid_newline": "WhatsApp does not allow line breaks inside a template message. Remove the {count} line break(s) — or tap Fix automatically to join the paragraphs.",
+    "invalid_tab": "WhatsApp does not allow tab characters inside a template message.",
+    "invalid_spaces": "WhatsApp does not allow more than 4 spaces in a row inside a template message.",
+    "invalid_too_long": "Too long: {count} characters. WhatsApp allows at most {max}. Please shorten the message."
   },
   "seat": {
     "group_locked_msg": "Group members must stay on the same bus. Move the whole group instead.",
@@ -1283,7 +1321,8 @@
     "subtitle_buses": "{count} buses",
     "subtitle_seats": "{assigned}/{capacity} seats",
     "subtitle_seats_free": "{free} free of {capacity}",
-    "menu_call_driver": "Call driver"
+    "menu_call_driver": "Call driver",
+    "menu_duplicate": "Duplicate bus"
   },
   "notify": {
     "no_active_tours_title": "No Active Tours",
@@ -1365,7 +1404,10 @@
     "lock_reason_unassigned": "Some seats are still unassigned",
     "lock_reason_no_handler": "Pick a handler before locking",
     "reset_sent": "Reset sent",
-    "no_seated_passengers": "No seated passengers to notify yet. Assign seats first."
+    "no_seated_passengers": "No seated passengers to notify yet. Assign seats first.",
+    "lock_send_dialog_title": "Lock tour & send seats?",
+    "lock_send_dialog_body": "Once locked, seat assignments can't be changed without unlocking. Locking now also sends each of {count} seated passenger(s) their seat number and bus chart on WhatsApp.",
+    "lock_send_dialog_confirm": "Lock & send"
   },
   "seat_assignment": {
     "title": "Seat Assignment",
@@ -1456,7 +1498,9 @@
   },
   "splash": {
     "brand_name": "Ugam Booking",
-    "tagline": "Ugam Fauj Bus Booking"
+    "tagline": "Ugam Fauj Bus Booking",
+    "restore_timeout_title": "Slow connection",
+    "restore_timeout_message": "Taking longer than usual. Continuing — some details may load once you're back online."
   },
   "tour_detail": {
     "duration_day_one": "1 day",
@@ -1499,6 +1543,7 @@
     "stat_assigned": "Assigned",
     "stat_revenue": "Revenue",
     "per_seat": "/ seat",
+    "chip_ac": "AC",
     "broadcast_this_tour": "Broadcast this tour",
     "broadcast_copy_hint": "Copy a ready-to-paste WhatsApp message",
     "copy_broadcast_message": "Copy broadcast message",
@@ -1616,7 +1661,8 @@
     "action_done_title_completed": "Trip completed",
     "action_done_title_ready": "All set for departure",
     "action_done_subtitle_completed": "This tour is in the archive.",
-    "action_done_subtitle_ready": "Nothing blocking — sit tight until departure."
+    "action_done_subtitle_ready": "Nothing blocking — sit tight until departure.",
+    "action_add_bus_subtitle_empty": "Add your first bus to start seating riders."
   },
   "tour_seat_assignment": {
     "tooltip_manage_buses": "Manage buses",
@@ -1666,6 +1712,7 @@
     "no_buses_title": "No buses on this tour yet",
     "no_buses_body": "Add at least one bus before assigning seats.",
     "btn_add_bus": "Add Bus",
+    "btn_view_requests": "View requests",
     "no_passengers_title": "No passengers yet",
     "no_passengers_body": "Once customers submit requests for this tour, they appear here.",
     "no_layout": "This bus has no seat layout — open the bus to add one.",
@@ -1676,6 +1723,8 @@
     "err_type_mismatch": "{passengerName} did not request a {seatType}. Edit their request first.",
     "snack_fully_assigned_title": "All seats placed",
     "snack_fully_assigned_body": "{passengerName} is fully assigned.",
+    "over_allocate_title": "Too many seats",
+    "over_allocate_body": "{passengerName} needs only {remaining} more — this seat would go over their requested count.",
     "snack_all_done_title": "Ready to lock",
     "snack_all_done_body": "All passengers assigned. Tap \"Lock Tour\" to confirm and notify.",
     "snack_no_handler": "All passengers assigned — pick a handler before locking.",
@@ -1763,6 +1812,8 @@
     "col_upper": "Upper",
     "col_lower": "Lower",
     "aisle": "A C",
+    "leg_go": "Outbound journey (going)",
+    "leg_ret": "RETURN",
     "gaadi_number": "Vehicle no.",
     "place": "Place",
     "date": "Date",
@@ -1781,8 +1832,11 @@
     "context_date_label": "Date",
     "context_handler_label": "Handler",
     "contact": "Contact",
-    "leg_go": "Outbound journey (going)",
-    "leg_return": "Return journey (coming back)"
+    "leg_return": "Return journey (coming back)",
+    "scope_label": "Chart for",
+    "scope_full": "Whole journey",
+    "scope_go": "Going",
+    "scope_return": "Return"
   },
   "fullscreen_chart": {
     "empty": "No seat chart to show.",
@@ -1854,7 +1908,17 @@
     "delete_expense_body": "This expense record will be permanently removed. This can't be undone.",
     "delete_handover_title": "Delete this handover?",
     "delete_handover_body": "This handover record will be permanently removed. This can't be undone.",
-    "delete_confirm": "Delete"
+    "delete_confirm": "Delete",
+    "detached_cash_title": "Cash without a seat here",
+    "detached_cash_body": "Collected on this bus from riders who no longer hold a seat here — they moved to another bus or were unseated. The money is still in hand; decide whether to move it, refund it, or keep it.",
+    "detached_unknown_rider": "Removed rider",
+    "add_income": "Add income",
+    "edit_income": "Edit income",
+    "save_income": "Save income",
+    "income_details": "Details",
+    "field_received_by": "Received by",
+    "delete_income_title": "Delete this income?",
+    "delete_income_body": "This income record will be permanently removed. This can't be undone."
   },
   "collection": {
     "eyebrow": "FINANCE",
@@ -1929,6 +1993,7 @@
     "no_phone": "No phone number",
     "call": "Call",
     "call_semantic": "Call {phone}",
+    "whatsapp_semantic": "Message {phone} on WhatsApp",
     "seat_shared_title": "Seat {seat} · shared",
     "leg_shared_intro": "Two passengers share this seat across legs. Pick one to view or collect.",
     "collect_title": "Collect",
@@ -1961,7 +2026,7 @@
     "stat_to_return": "To return",
     "stat_to_collect": "To collect",
     "stat_spent": "Spent",
-    "stat_rent": "Bus rent",
+    "stat_to_admin": "To hand over to admin",
     "stat_in_hand": "In hand",
     "bus_expenses": "Bus expenses",
     "bus_expenses_total": "{bus} · {amount} spent",
@@ -1995,7 +2060,31 @@
     "received_by": "Received by {name}",
     "field_received_by": "Received by",
     "error_amount_zero": "Enter an amount greater than zero.",
-    "error_save_expense": "Couldn't save the expense. Please try again."
+    "error_save_expense": "Couldn't save the expense. Please try again.",
+    "stat_settled": "Handed over",
+    "stat_handed_over": "Handed over",
+    "stat_outstanding": "Still to hand over",
+    "handed_secondary": "{handed} handed over of {total}",
+    "settle_title": "Hand over to admin",
+    "settle_hint": "Record the cash you gave the organiser so this bus reads settled.",
+    "settle_done": "This bus is settled — nothing left to hand over.",
+    "settle_cta": "Record handover",
+    "handover_title": "Record handover",
+    "handover_intro": "{amount} is still to hand over for this bus.",
+    "handover_amount": "Amount handed over",
+    "handover_note": "Note (optional)",
+    "handover_save": "Save handover",
+    "handover_failed": "Could not save the handover. Please try again.",
+    "handover_delete_title": "Remove this handover?",
+    "handover_delete_body": "{amount} will no longer count as handed over.",
+    "leg_title": "Onward journey",
+    "leg_pending": "{count} one-way rider(s) finish here. Close the leg to free their seats for the return chart.",
+    "leg_done_state": "GO leg closed — those seats are free for the return.",
+    "leg_done_title": "Close the GO leg?",
+    "leg_done_body": "{count} one-way rider(s) on {bus} finish here. Their seats are released for the return chart. Round-trip riders are not affected.",
+    "leg_done_confirm": "Close GO leg",
+    "leg_done_ok": "GO leg closed — {count} rider(s) released.",
+    "leg_done_failed": "Could not close the leg. Please try again."
   },
   "seat_legend": {
     "free": "Free",
@@ -2198,7 +2287,12 @@
     "collect": "Collect",
     "more_detail": "More detail",
     "trip_in_profit": "Trip is in profit",
-    "trip_at_loss": "Trip is at a loss"
+    "trip_at_loss": "Trip is at a loss",
+    "orphan_title": "Money on a removed bus",
+    "orphan_body": "This is counted in the trip totals but belongs to a bus that is no longer on this tour, so it shows on no bus above.",
+    "orphan_expenses": "Expenses {n}",
+    "orphan_collected": "Collected {n}",
+    "orphan_income": "Income {n}"
   },
   "tour_overview": {
     "tour_not_found": "Tour not found.",
@@ -2288,7 +2382,9 @@
     "dialer_open_failed": "Could not open the dialer for {phone}.",
     "dialer_open_failed_generic": "Could not open the dialer.",
     "duplicate": "Already exists — looks like a duplicate (e.g. the same bus number on this tour).",
-    "dismiss_cancel": "Could not dismiss the cancellation request."
+    "dismiss_cancel": "Could not dismiss the cancellation request.",
+    "save_income": "Could not save income. {e}",
+    "delete_income": "Could not delete income. {e}"
   },
   "enums": {
     "seat_type": {
@@ -2490,13 +2586,17 @@
     "row_revenue_value": "Rev {n}",
     "row_expenses": "EXPENSES",
     "row_margin": "MARGIN",
-    "empty_title": "No completed tours yet",
-    "empty_body": "When a tour finishes, its profit or loss lands here — across every trip you run.",
+    "empty_title": "No trips with money yet",
+    "empty_body": "Once you collect cash or log an expense on a trip, its profit or loss lands here — across every trip you run.",
     "error_title": "Couldn't load finances",
     "error_retry": "Retry",
     "card_eyebrow": "PROFIT & LOSS",
     "card_loading": "Calculating…",
-    "card_lifetime": "Lifetime · tap for full report"
+    "card_lifetime": "Lifetime · tap for full report",
+    "card_failed": "Couldn't load",
+    "card_failed_hint": "Tap to retry",
+    "row_state_completed": "Completed",
+    "row_state_running": "Running"
   },
   "trip_pnl": {
     "eyebrow": "Money",
@@ -2517,6 +2617,18 @@
     "profit": "profit",
     "loss": "loss",
     "cash_net": "Cash net",
-    "entry_sub": "Per bus & per handler"
+    "entry_sub": "Per bus & per handler",
+    "detached_cash_bus": "{n} of this cash is from riders who are no longer seated on this bus (moved or unseated), so it is more than the fares billed here.",
+    "detached_cash_handler": "{n} of this cash is from riders who are no longer on any of their buses, so it is more than the fares billed here.",
+    "detached_cash_trip": "{n} of this cash is from riders who no longer hold a seat on this trip."
+  },
+  "seat_move_money": {
+    "title": "Fare changed with the bus",
+    "subtitle": "The money already collected moved across with the passenger. This is what is left to settle at the new bus's price.",
+    "line_collect": "Collect the difference — paid {paid} on {from}, now {due} on {to}.",
+    "line_return": "Return the difference — paid {paid} on {from}, now {due} on {to}.",
+    "toast_collect": "Seat move: {amount} still to collect at the new fare.",
+    "toast_return": "Seat move: {amount} to return at the new fare.",
+    "toast_both": "Seat move: {collect} to collect, {give} to return at the new fares."
   }
 }

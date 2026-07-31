@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/money_controller.dart';
+import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/bus_handover.dart';
@@ -33,6 +34,21 @@ class BusMoneyScreen extends StatefulWidget {
 class _BusMoneyScreenState extends State<BusMoneyScreen> {
   final MoneyController controller = Get.find<MoneyController>();
 
+  /// The CURRENT bus row, re-resolved from [TourController] on every build.
+  ///
+  /// [widget.bus] is a snapshot taken when this screen was pushed. The money
+  /// summaries read the owner's rent live (via `MoneyController._busRents()`),
+  /// so rendering the rent ledger row from the snapshot let the two disagree
+  /// the moment a rent was edited elsewhere — the ledger showed the old figure
+  /// while the Expenses tile totalled the new one. Falls back to the snapshot
+  /// when the tour/controller isn't resolvable, so this never renders nothing.
+  Bus get _liveBus {
+    if (!Get.isRegistered<TourController>()) return widget.bus;
+    final tour = Get.find<TourController>().getTour(widget.tour.id);
+    return tour?.buses.firstWhereOrNull((b) => b.id == widget.bus.id) ??
+        widget.bus;
+  }
+
   /// True only when the money load failed AND nothing is already held to keep —
   /// so a transient read failure shows a retry instead of an all-zero cockpit.
   /// Reads the money obs inside the calling [Obx], so a successful retry
@@ -52,9 +68,33 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
     });
   }
 
+  /// Who the bus's "detached" cash was taken from — riders with a collection on
+  /// THIS bus who hold no seat here any more (moved to another bus, or
+  /// unseated). Mirrors [BusMoneySummary.detachedCash]'s rule exactly, so the
+  /// amount above and the names below can never disagree. Deduped, in roster
+  /// order; a payer who has since been removed from the tour falls back to a
+  /// generic label rather than being silently dropped.
+  List<String> _detachedPayerNames() {
+    final passengers = widget.tour.passengers;
+    final seatedHere = <String>{
+      for (final p in passengers)
+        if (p.assignedSeats.any((a) => a.busId == widget.bus.id)) p.id,
+    };
+    final names = <String>[];
+    final seen = <String>{};
+    for (final c in controller.collections) {
+      if (c.busId != widget.bus.id) continue;
+      if (seatedHere.contains(c.passengerId)) continue;
+      if (!seen.add(c.passengerId)) continue;
+      final p = passengers.firstWhereOrNull((p) => p.id == c.passengerId);
+      final n = p?.name.trim() ?? '';
+      names.add(n.isEmpty ? tr('bus_money.detached_unknown_rider') : n);
+    }
+    return names;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
     return UgamScaffold(
       body: SafeArea(
         child: Column(
@@ -113,11 +153,11 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           // it's what the agent must act on. Everything else is
                           // demoted to a quiet supporting row below.
                           _OutstandingHero(
-                            // Clamp the *displayed* settlement figure at 0: before
-                            // collections cover the bus rent the net can be
-                            // negative, but a handler never pays rent out of pocket
-                            // before collecting, so "-30000 owed" is nonsense to
-                            // show. Underlying net math is untouched.
+                            // Clamp the *displayed* settlement figure at 0: the
+                            // handover is rent-free (the admin settles the owner),
+                            // but heavy ground spending before collections land can
+                            // still take it negative, and "-30000 owed" is nonsense
+                            // to show. Underlying net math is untouched.
                             amount: s.outstandingHandover < 0
                                 ? 0.0
                                 : s.outstandingHandover,
@@ -176,6 +216,18 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                               );
                             },
                           ),
+                          // Why the collected figure can exceed what this bus
+                          // billed: cash stays with the bus that took it, while
+                          // billed revenue follows whoever is seated NOW. Named
+                          // here (the ledger is where the agent comes to ask
+                          // "whose money is this?"), not just totalled.
+                          if (s.detachedCash.abs() > 0.005) ...[
+                            const SizedBox(height: UgamSpacing.md),
+                            _DetachedCashCard(
+                              amount: s.detachedCash,
+                              names: _detachedPayerNames(),
+                            ),
+                          ],
                           const SizedBox(height: UgamSpacing.xl),
 
                           // The "Collect from passengers" jump now lives in the
@@ -191,8 +243,10 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           const SizedBox(height: UgamSpacing.sm),
                           // The auto bus-owner rent is derived from the bus (the
                           // single source of truth, already inside expensesTotal) —
-                          // so it counts as content for the empty check.
-                          if (widget.bus.busPrice <= 0 && expenses.isEmpty)
+                          // so it counts as content for the empty check. Read
+                          // LIVE (not from the pushed snapshot) so this row can
+                          // never contradict the Expenses tile above it.
+                          if (_liveBus.busPrice <= 0 && expenses.isEmpty)
                             Padding(
                               padding: const EdgeInsets.symmetric(
                                 vertical: UgamSpacing.lg,
@@ -205,13 +259,13 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           else ...[
                             // Fixed, non-deletable rent row at the top: derived from
                             // the bus, not a DB row, so it has no delete icon.
-                            if (widget.bus.busPrice > 0)
+                            if (_liveBus.busPrice > 0)
                               Padding(
                                 padding: const EdgeInsets.only(
                                   bottom: UgamSpacing.sm,
                                 ),
                                 child: _BusOwnerRentRow(
-                                  busPrice: widget.bus.busPrice,
+                                  busPrice: _liveBus.busPrice,
                                 ),
                               ),
                             ...expenses.map(
@@ -257,12 +311,17 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           ],
                           const SizedBox(height: UgamSpacing.xl),
 
-                          // ── Extra income (read-only) ───────────────────────
+                          // ── Extra income ───────────────────────────────────
                           // Handler logs Cabin/Gallery/Other extra cash on the
-                          // ground; the admin only views it here (no add/edit).
-                          Text(
-                            tr('bus_money.section_income'),
-                            style: UgamText.titleM.copyWith(color: c.ink),
+                          // ground. The admin can now add/edit/delete it here
+                          // too: income feeds the handover expectation and both
+                          // profit figures, so leaving it handler-write-only
+                          // meant a mistyped entry was permanently uncorrectable
+                          // from the admin side.
+                          _SectionHeader(
+                            title: tr('bus_money.section_income'),
+                            actionLabel: tr('app.action.add'),
+                            onAction: () => _openIncomeSheet(context),
                           ),
                           const SizedBox(height: UgamSpacing.sm),
                           if (incomes.isEmpty)
@@ -281,7 +340,34 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                                 padding: const EdgeInsets.only(
                                   bottom: UgamSpacing.sm,
                                 ),
-                                child: _IncomeRow(income: i),
+                                // Same swipe-to-delete + tap-to-edit idiom as
+                                // the expense rows directly above.
+                                child: UgamSwipeAction(
+                                  key: ValueKey('income-${i.id}'),
+                                  confirmDelete: () => UgamDialog.confirm(
+                                    context,
+                                    title: tr('bus_money.delete_income_title'),
+                                    message: tr('bus_money.delete_income_body'),
+                                    cancelLabel: tr('app.action.cancel'),
+                                    confirmLabel: tr(
+                                      'bus_money.delete_confirm',
+                                    ),
+                                    destructive: true,
+                                    confirmIcon: Icons.delete_outline_rounded,
+                                  ),
+                                  onDelete: () async {
+                                    try {
+                                      await controller.deleteIncome(i.id);
+                                    } catch (_) {}
+                                  },
+                                  child: _IncomeRow(
+                                    income: i,
+                                    onTap: () => _openIncomeSheet(
+                                      context,
+                                      existing: i,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           const SizedBox(height: UgamSpacing.xl),
@@ -424,6 +510,56 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                       label: label,
                       amount: amount,
                       paidBy: paidBy.isEmpty ? null : paidBy,
+                    ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Add/edit an extra-income entry (cabin / gallery / other) for this bus.
+  /// Mirrors [_openExpenseSheet] exactly — same numpad-first sheet, same
+  /// copyWith-on-edit rule so an edit updates the row instead of inserting a
+  /// duplicate.
+  void _openIncomeSheet(BuildContext context, {IncomeEntry? existing}) {
+    IncomeCategory category = existing?.category ?? IncomeCategory.other;
+    final labelCtrl = TextEditingController(text: existing?.label ?? '');
+    final receivedByCtrl = TextEditingController(
+      text: existing?.receivedBy ?? '',
+    );
+
+    UgamSheet.show<void>(
+      context,
+      title: existing == null
+          ? tr('bus_money.add_income')
+          : tr('bus_money.edit_income'),
+      builder: (sheetCtx) {
+        return _IncomeSheetBody(
+          initialCategory: category,
+          initialAmount: existing?.amount,
+          labelCtrl: labelCtrl,
+          receivedByCtrl: receivedByCtrl,
+          onCategory: (c) => category = c,
+          confirmLabel: tr('bus_money.save_income'),
+          onConfirm: (amount) async {
+            final receivedBy = receivedByCtrl.text.trim();
+            final label = labelCtrl.text.trim();
+            await controller.upsertIncome(
+              existing == null
+                  ? IncomeEntry(
+                      tourId: widget.tour.id,
+                      busId: widget.bus.id,
+                      category: category,
+                      label: label,
+                      amount: amount,
+                      receivedBy: receivedBy.isEmpty ? null : receivedBy,
+                    )
+                  : existing.copyWith(
+                      category: category,
+                      label: label,
+                      amount: amount,
+                      receivedBy: receivedBy.isEmpty ? null : receivedBy,
                     ),
             );
           },
@@ -676,14 +812,19 @@ class _OutstandingHero extends StatelessWidget {
           // The screen's single focal figure — a big Sora number set over a
           // soft copper halo. Sized for the cockpit, not a showroom (§A5).
           SizedBox(
-            height: 72,
+            // The band and its halo are decorative, so both ride
+            // [UgamScale.px] and follow the figure's own text scaling — left
+            // fixed, the number visibly floated inside an over-tall glow on a
+            // small phone. `fontSize: 38` stays: text already scales at the
+            // app root, which is exactly why the boxes must follow it.
+            height: UgamScale.px(context, 72),
             child: Stack(
               alignment: Alignment.center,
               clipBehavior: Clip.none,
               children: [
                 Container(
-                  width: 150,
-                  height: 150,
+                  width: UgamScale.px(context, 150),
+                  height: UgamScale.px(context, 150),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: RadialGradient(
@@ -733,15 +874,18 @@ class _OutstandingHero extends StatelessWidget {
   }
 }
 
+/// One heading for every ledger section. The action is OPTIONAL so a section
+/// without one (Extra income, which the admin only views) still routes through
+/// this row instead of dropping to a bare `Text` at a different height.
 class _SectionHeader extends StatelessWidget {
   final String title;
-  final String actionLabel;
-  final VoidCallback onAction;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   const _SectionHeader({
     required this.title,
-    required this.actionLabel,
-    required this.onAction,
+    this.actionLabel,
+    this.onAction,
   });
 
   @override
@@ -759,15 +903,141 @@ class _SectionHeader extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        const SizedBox(width: UgamSpacing.sm),
-        // Section add/record action — TONAL quiet-primary, never solid gold.
-        UgamButton(
-          label: actionLabel,
-          icon: Icons.add_rounded,
-          kind: UgamButtonKind.tonal,
-          onPressed: onAction,
-        ),
+        if (onAction != null && actionLabel != null) ...[
+          const SizedBox(width: UgamSpacing.sm),
+          // Section add/record action — TONAL quiet-primary, never solid gold.
+          UgamButton(
+            label: actionLabel!,
+            icon: Icons.add_rounded,
+            kind: UgamButtonKind.tonal,
+            onPressed: onAction,
+          ),
+        ],
       ],
+    );
+  }
+}
+
+/// Numpad-first body for the add/edit-income sheet. Deliberately the same shape
+/// as [_ExpenseSheetBody] (category pills → amount hero → numpad → collapsed
+/// details → sticky CTA) so logging money IN and money OUT feel identical.
+class _IncomeSheetBody extends StatefulWidget {
+  final IncomeCategory initialCategory;
+  final double? initialAmount;
+  final TextEditingController labelCtrl;
+  final TextEditingController receivedByCtrl;
+  final ValueChanged<IncomeCategory> onCategory;
+  final String confirmLabel;
+  final Future<void> Function(double amount) onConfirm;
+
+  const _IncomeSheetBody({
+    required this.initialCategory,
+    required this.initialAmount,
+    required this.labelCtrl,
+    required this.receivedByCtrl,
+    required this.onCategory,
+    required this.confirmLabel,
+    required this.onConfirm,
+  });
+
+  @override
+  State<_IncomeSheetBody> createState() => _IncomeSheetBodyState();
+}
+
+class _IncomeSheetBodyState extends State<_IncomeSheetBody> {
+  // Every income category is loggable (unlike expenses, where busOwner is
+  // excluded because the rent is derived from the bus).
+  final List<IncomeCategory> _cats = IncomeCategory.values;
+
+  late IncomeCategory _category = widget.initialCategory;
+  late final ValueNotifier<String> _value = ValueNotifier<String>(_seed());
+
+  String _seed() {
+    final init = widget.initialAmount;
+    if (init == null || init == 0) return '';
+    if (init == init.roundToDouble()) return init.toInt().toString();
+    return init.toString();
+  }
+
+  @override
+  void dispose() {
+    _value.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final selected = _cats.indexOf(_category);
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            tr('bus_money.field_category'),
+            style: UgamText.micro.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          UgamSelectorPills(
+            padding: EdgeInsets.zero,
+            items: _cats
+                .map((cat) => UgamSelectorItem(label: cat.displayName))
+                .toList(),
+            currentIndex: selected < 0 ? 0 : selected,
+            onChanged: (i) {
+              setState(() => _category = _cats[i]);
+              widget.onCategory(_cats[i]);
+            },
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          ValueListenableBuilder<String>(
+            valueListenable: _value,
+            builder: (context, v, child) => UgamAmountHero(
+              amount: v.isEmpty ? '0' : v,
+              label: tr('bus_money.field_amount'),
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          UgamNumpad(value: _value, allowDecimal: true),
+          const SizedBox(height: UgamSpacing.lg),
+          UgamExpander(
+            title: tr('bus_money.income_details'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                UgamInput(
+                  label: tr('bus_money.field_label'),
+                  controller: widget.labelCtrl,
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                UgamInput(
+                  label: tr('bus_money.field_received_by'),
+                  controller: widget.receivedByCtrl,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+          ValueListenableBuilder<String>(
+            valueListenable: _value,
+            builder: (context, v, child) {
+              final amount = double.tryParse(v) ?? 0;
+              return UgamCTA(
+                label: widget.confirmLabel,
+                onPressed: amount > 0
+                    ? () async {
+                        await widget.onConfirm(amount);
+                        if (context.mounted) Navigator.of(context).pop();
+                      }
+                    : null,
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 }
@@ -782,28 +1052,26 @@ class _ExpenseRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     // Tapping the row opens the edit sheet; delete is a swipe-left gesture
-    // owned by the enclosing UgamSwipeAction.
-    return GestureDetector(
+    // owned by the enclosing UgamSwipeAction. `onTap` goes THROUGH the card
+    // (an outer GestureDetector swallowed the card's own press animation).
+    return UgamCard.plain(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: UgamCard.plain(
-        radius: UgamRadius.row,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.gutter,
-          vertical: UgamSpacing.md,
-        ),
+      radius: UgamRadius.row,
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.gutter,
+        vertical: UgamSpacing.md,
+      ),
+      child: ConstrainedBox(
+        // 44pt tap floor expressed as content height: the card already adds
+        // `md` above and below, so 44 - 12 - 12 = 20. A no-op at the 390pt
+        // baseline (the chip row is already ~21) — it only bites once the
+        // text scales down and would otherwise drop the row under 44.
+        constraints: const BoxConstraints(minHeight: 44 - UgamSpacing.md * 2),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Text(
-                expense.category.displayName,
-                style: UgamText.micro.copyWith(color: c.ink2),
-              ),
+            UgamReqChip(
+              label: expense.category.displayName,
+              variant: UgamChipVariant.neutral,
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -823,6 +1091,70 @@ class _ExpenseRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Explains cash on this bus that its own seated riders can't account for:
+/// money taken from people who have since moved to another bus or been
+/// unseated. Collections stay with the bus that physically took the cash, while
+/// billed revenue is recomputed from who is seated now — so without this card a
+/// bus can silently read "collected ₹14,250 against ₹8,550 of fares".
+///
+/// Purely informational: [amount] is already inside the collected/net figures
+/// above and nothing here changes them. It names the payers because the agent's
+/// next question is always "whose money is this, and do I owe it back?".
+class _DetachedCashCard extends StatelessWidget {
+  final double amount;
+  final List<String> names;
+
+  const _DetachedCashCard({required this.amount, required this.names});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      tone: UgamCardTone.warm,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline_rounded, size: 18, color: c.warm),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: Text(
+                  tr('bus_money.detached_cash_title'),
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              Text(
+                Formatters.formatMoneyInr(amount),
+                style: UgamText.numLg.copyWith(color: c.warm, fontSize: 17),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          Text(
+            tr('bus_money.detached_cash_body'),
+            style: UgamText.caption.copyWith(color: c.ink2),
+          ),
+          if (names.isNotEmpty) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Wrap(
+              spacing: UgamSpacing.sm,
+              runSpacing: UgamSpacing.xs,
+              children: [
+                for (final n in names)
+                  UgamReqChip(label: n, variant: UgamChipVariant.neutral),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -848,16 +1180,9 @@ class _BusOwnerRentRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.chip),
-            ),
-            child: Text(
-              ExpenseCategory.busOwner.displayName,
-              style: UgamText.micro.copyWith(color: c.ink2),
-            ),
+          UgamReqChip(
+            label: ExpenseCategory.busOwner.displayName,
+            variant: UgamChipVariant.neutral,
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -885,7 +1210,11 @@ class _BusOwnerRentRow extends StatelessWidget {
 class _IncomeRow extends StatelessWidget {
   final IncomeEntry income;
 
-  const _IncomeRow({required this.income});
+  /// Opens the edit sheet. Null keeps the row read-only (the handler-facing
+  /// surfaces still render it that way).
+  final VoidCallback? onTap;
+
+  const _IncomeRow({required this.income, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -895,6 +1224,9 @@ class _IncomeRow extends StatelessWidget {
         ? income.category.displayName
         : income.label;
     return UgamCard.plain(
+      // Tap goes THROUGH the card (not a nested InkWell) so the press
+      // animation fires — same rule as _ExpenseRow / _HandoverRow.
+      onTap: onTap,
       radius: UgamRadius.row,
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.gutter,
@@ -902,16 +1234,9 @@ class _IncomeRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.chip),
-            ),
-            child: Text(
-              income.category.displayName,
-              style: UgamText.micro.copyWith(color: c.ink2),
-            ),
+          UgamReqChip(
+            label: income.category.displayName,
+            variant: UgamChipVariant.neutral,
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -963,15 +1288,19 @@ class _HandoverRow extends StatelessWidget {
     final date =
         '${Formatters.formatDateShort(handover.settledAt, locale: context.locale.languageCode)}, '
         '${DateFormat('h:mm a', 'en_US').format(handover.settledAt)}';
-    return GestureDetector(
+    // `onTap` goes THROUGH the card so the press animation fires (the outer
+    // GestureDetector that used to wrap it swallowed the feedback).
+    return UgamCard.plain(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: UgamCard.plain(
-        radius: UgamRadius.row,
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.gutter,
-          vertical: UgamSpacing.md,
-        ),
+      radius: UgamRadius.row,
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.gutter,
+        vertical: UgamSpacing.md,
+      ),
+      child: ConstrainedBox(
+        // Same 44pt tap floor as _ExpenseRow: 44 minus the card's `md`
+        // padding top and bottom. No-op at the 390pt baseline.
+        constraints: const BoxConstraints(minHeight: 44 - UgamSpacing.md * 2),
         child: Row(
           children: [
             Expanded(

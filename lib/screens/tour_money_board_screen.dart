@@ -103,11 +103,11 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
               child: Obx(() {
                 final tour = _tours.getTour(widget.tourId);
                 if (tour == null) {
-                  return Center(
-                    child: Text(
-                      tr('tour_money_board.tour_not_found'),
-                      style: UgamText.body.copyWith(color: c.ink2),
-                    ),
+                  // Same key, same shape as trip_pnl_screen's not-found state —
+                  // a bare centred sentence read as a half-built screen.
+                  return UgamEmpty(
+                    icon: Icons.search_off_rounded,
+                    title: tr('tour_money_board.tour_not_found'),
                   );
                 }
 
@@ -129,6 +129,9 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                 final summaries = _money.summariesForBuses(
                   buses.map((b) => b.id),
                 );
+                // One computation shared by the P&L card and the orphan row —
+                // they must describe the same numbers.
+                final tourSummary = _money.tourSummary();
 
                 if (buses.isEmpty) {
                   return UgamEmpty(
@@ -151,7 +154,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                     ),
                     children: [
                       _PnlEntryCard(
-                        summary: _money.tourSummary(),
+                        summary: tourSummary,
                         onTap: _openPnl,
                         c: c,
                       ),
@@ -178,6 +181,13 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                             c: c,
                           ),
                         ),
+                      // Money sitting on a bus this tour no longer lists. It IS
+                      // inside the totals capsule below, so without this row the
+                      // per-bus figures visibly fail to add up to the total with
+                      // nothing on screen explaining the difference.
+                      if (tourSummary.hasOrphanMoney) ...[
+                        _OrphanMoneyCard(summary: tourSummary, c: c),
+                      ],
                     ],
                   ),
                 );
@@ -195,6 +205,83 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
             }),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ─── Orphan (unassigned-bus) money ──────────────────────────────────────────
+
+/// Money recorded against a bus that is no longer on this tour.
+///
+/// The rows above are drawn one-per-bus from `tour.buses`, while the totals
+/// capsule folds EVERY row carrying the tour id — so without this card the
+/// per-bus figures silently stop adding up to the total and nothing on screen
+/// says why. The money is deliberately still counted in the totals (it is real
+/// cash and real cost); this card only names the remainder, in the same
+/// surface-don't-hide spirit as the per-bus detached-cash card.
+class _OrphanMoneyCard extends StatelessWidget {
+  final TourMoneySummary summary;
+  final UgamColorSet c;
+
+  const _OrphanMoneyCard({required this.summary, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = <String>[
+      if (summary.orphanExpenses.abs() > 0.005)
+        tr(
+          'tour_money_board.orphan_expenses',
+          namedArgs: {'n': Formatters.formatMoneyInr(summary.orphanExpenses)},
+        ),
+      if (summary.orphanCollected.abs() > 0.005)
+        tr(
+          'tour_money_board.orphan_collected',
+          namedArgs: {'n': Formatters.formatMoneyInr(summary.orphanCollected)},
+        ),
+      if (summary.orphanIncome.abs() > 0.005)
+        tr(
+          'tour_money_board.orphan_income',
+          namedArgs: {'n': Formatters.formatMoneyInr(summary.orphanIncome)},
+        ),
+    ];
+
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      tone: UgamCardTone.warm,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.help_outline_rounded, size: 16, color: c.warm),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: Text(
+                  tr('tour_money_board.orphan_title'),
+                  style: UgamText.titleS.copyWith(color: c.ink),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          for (final line in lines)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                line,
+                style: UgamText.tabular(
+                  UgamText.caption.copyWith(color: c.ink2),
+                ),
+              ),
+            ),
+          const SizedBox(height: UgamSpacing.xs),
+          Text(
+            tr('tour_money_board.orphan_body'),
+            style: UgamText.caption.copyWith(color: c.ink3),
+          ),
+        ],
       ),
     );
   }
@@ -230,13 +317,16 @@ class _PnlEntryCard extends StatelessWidget {
         children: [
           // Soft copper halo — the screen's one signature glow (§A4). Depth
           // from light, not borders: this hero sits above the flatter rows.
+          // Purely decorative, so the whole halo (size AND offset) rides
+          // [UgamScale.px]: unscaled it kept a full 200pt radius while the card
+          // shrank around it, bleeding further across the card on small phones.
           Positioned(
-            left: -30,
-            top: -60,
+            left: -UgamScale.px(context, 30),
+            top: -UgamScale.px(context, 60),
             child: IgnorePointer(
               child: Container(
-                width: 200,
-                height: 200,
+                width: UgamScale.px(context, 200),
+                height: UgamScale.px(context, 200),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
@@ -250,13 +340,17 @@ class _PnlEntryCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: UgamScale.px(context, 40),
+                height: UgamScale.px(context, 40),
                 decoration: BoxDecoration(
                   color: c.accentFill,
                   borderRadius: BorderRadius.circular(UgamRadius.stat),
                 ),
-                child: Icon(Icons.insights_rounded, size: 20, color: c.accent),
+                child: Icon(
+                  Icons.insights_rounded,
+                  size: UgamScale.px(context, 20),
+                  color: c.accent,
+                ),
               ),
               const SizedBox(width: UgamSpacing.md),
               Expanded(
@@ -396,8 +490,8 @@ class _BusMoneyRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: UgamScale.px(context, 34),
+                height: UgamScale.px(context, 34),
                 decoration: BoxDecoration(
                   color: c.cardElev,
                   borderRadius: BorderRadius.circular(UgamRadius.seat),
@@ -405,7 +499,7 @@ class _BusMoneyRow extends StatelessWidget {
                 alignment: Alignment.center,
                 child: Icon(
                   Icons.directions_bus_filled_rounded,
-                  size: 17,
+                  size: UgamScale.px(context, 17),
                   color: c.ink2,
                 ),
               ),
@@ -552,7 +646,9 @@ class _MoneyPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm + 2,
+        // `sm`, matching _CapsulePill below — the two visually identical chips
+        // sat 4pt apart in height on the same screen.
+        vertical: UgamSpacing.sm,
       ),
       decoration: BoxDecoration(
         color: c.cardElev,

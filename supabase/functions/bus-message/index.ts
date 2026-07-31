@@ -2,10 +2,13 @@
 // bus-message  —  Supabase Edge Function
 // ------------------------------------------------------------
 // A per-bus WhatsApp announcement sent by an ANONYMOUS tour handler (the
-// handler app has no Supabase session — it only knows its booking requestId).
+// handler app has no Supabase session — it only knows its opaque handler ref).
+// That ref is a booking_requests.id for a handler who booked in-app and a
+// passengers.id for one the organiser added by hand (migration 042); it is
+// resolved through handler_ctx, never read against booking_requests directly.
 // verify_jwt is OFF; authorization is done IN CODE with the service-role client:
 //
-//   1. is_request_handler(requestId) must be true (the request's
+//   1. is_request_handler(requestId) must be true (the ref's
 //      (tour_id, customer_phone) matches a passenger with is_handler = true).
 //   2. The target bus (busId) must have handler_passenger_id equal to THAT
 //      handler passenger's id — i.e. the handler may only message a bus they own.
@@ -125,13 +128,19 @@ Deno.serve(async (req: Request) => {
     return json({ error: "Not authorized for this request" }, 403);
   }
 
-  // Resolve the request's (tour_id, customer_phone) so we can find the exact
+  // Resolve the ref's (tour_id, customer_phone) so we can find the exact
   // handler passenger and confirm they own this bus.
-  const { data: reqRow, error: reqErr } = await db
-    .from("booking_requests")
-    .select("tour_id, customer_phone")
-    .eq("id", requestId)
-    .maybeSingle();
+  //
+  // `requestId` is OPAQUE (migration 042): it is a booking_requests.id for a
+  // handler who booked in-app, and a passengers.id for one the organiser added
+  // by hand. Reading booking_requests directly here would pass the gate above
+  // and then 403 on exactly the manually-added handlers 042 exists to unblock,
+  // so this goes through the same resolver every handler gate uses.
+  const { data: ctxRows, error: reqErr } = await db.rpc(
+    "handler_ctx",
+    { p_id: requestId },
+  );
+  const reqRow = Array.isArray(ctxRows) ? ctxRows[0] : ctxRows;
   if (reqErr || !reqRow) {
     return json({ error: "Request not found" }, 403);
   }

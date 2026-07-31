@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import '../components/ugam_logo.dart';
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
+import '../routes/app_routes.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,12 +17,28 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   AuthController get controller => Get.find<AuthController>();
 
+  /// True once a phone lookup has come back without a matching admin. Gates
+  /// the "need admin access?" link to [AdminSetupScreen], which had no entry
+  /// point anywhere in the app before this.
+  bool _lookupFailed = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       controller.prepareLoginScreen();
     });
+  }
+
+  /// Wraps [AuthController.submitPhone] to notice a failed lookup without
+  /// reaching into the controller: `submitPhone` only sets
+  /// `awaitingAdminPassword` when it actually found an admin, so if the flag
+  /// is still down after it returns, this number cannot sign in.
+  Future<void> _submitPhone() async {
+    await controller.submitPhone();
+    if (!mounted) return;
+    final failed = !controller.awaitingAdminPassword.value;
+    if (failed != _lookupFailed) setState(() => _lookupFailed = failed);
   }
 
   @override
@@ -77,15 +94,19 @@ class _LoginScreenState extends State<LoginScreen> {
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
+                                // Decorative brand block -> px(), never tap().
+                                // All four numbers scale together so the halo
+                                // keeps its proportion to the mark instead of
+                                // towering over text textScaler already shrank.
                                 SizedBox(
-                                  height: 132,
+                                  height: UgamScale.px(context, 132),
                                   child: Stack(
                                     alignment: Alignment.center,
                                     clipBehavior: Clip.none,
                                     children: [
                                       Container(
-                                        width: 188,
-                                        height: 188,
+                                        width: UgamScale.px(context, 188),
+                                        height: UgamScale.px(context, 188),
                                         decoration: BoxDecoration(
                                           shape: BoxShape.circle,
                                           gradient: RadialGradient(
@@ -97,16 +118,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                           ),
                                         ),
                                       ),
-                                      const UgamLogo(size: 64),
+                                      UgamLogo(size: UgamScale.px(context, 64)),
                                     ],
                                   ),
                                 ),
                                 const SizedBox(height: UgamSpacing.lg),
                                 Text(
-                                  'UGAM',
+                                  tr('login.brand_name'),
                                   style: UgamText.hero.copyWith(
                                     color: c.ink,
-                                    fontSize: 52,
                                     letterSpacing: 2.0,
                                   ),
                                 ),
@@ -134,7 +154,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               },
                               onSubmitted: (_) {
                                 if (!controller.awaitingAdminPassword.value) {
-                                  controller.submitPhone();
+                                  _submitPhone();
                                 }
                               },
                             ),
@@ -177,25 +197,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           if (!controller.canBiometricUnlock.value) {
                             return const SizedBox.shrink();
                           }
+                          // Was a bare Row in a GestureDetector — copper text
+                          // with no button surface and a ~20pt hit box. TONAL,
+                          // not ghost: ghost resolves to c.ink2 and would grey
+                          // out the copper this affordance is built on. It also
+                          // costs no solid-accent budget, so the UgamCTA below
+                          // stays this screen's one solid fill.
                           return Padding(
                             padding:
                                 const EdgeInsets.only(bottom: UgamSpacing.md),
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: controller.unlockWithBiometric,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.fingerprint_rounded,
-                                      size: 20, color: c.accent),
-                                  const SizedBox(width: UgamSpacing.sm),
-                                  Text(
-                                    tr('login.unlock_biometric'),
-                                    style: UgamText.bodyStrong
-                                        .copyWith(color: c.accent),
-                                  ),
-                                ],
-                              ),
+                            child: UgamButton(
+                              kind: UgamButtonKind.tonal,
+                              label: tr('login.unlock_biometric'),
+                              icon: Icons.fingerprint_rounded,
+                              onPressed: controller.unlockWithBiometric,
                             ),
                           );
                         }),
@@ -210,9 +225,25 @@ class _LoginScreenState extends State<LoginScreen> {
                             loading: loading,
                             onPressed: showPasswordStep
                                 ? controller.verifyAdminPassword
-                                : controller.submitPhone,
+                                : _submitPhone,
                           );
                         }),
+                        // AdminSetupScreen was unreachable: a number that is
+                        // not a provisioned admin dead-ended at this form with
+                        // no path to the fully-built support screen. Surfaced
+                        // only AFTER a lookup comes back empty, so the default
+                        // login render is unchanged.
+                        if (_lookupFailed)
+                          Padding(
+                            padding:
+                                const EdgeInsets.only(top: UgamSpacing.sm),
+                            child: UgamButton(
+                              kind: UgamButtonKind.ghost,
+                              label: tr('login.btn_admin_access'),
+                              onPressed: () =>
+                                  Get.toNamed(AppRoutes.adminSetup),
+                            ),
+                          ),
                       ],
                     ),
                   ),

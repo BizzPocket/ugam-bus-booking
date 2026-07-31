@@ -116,6 +116,10 @@ class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
     );
 
     final body = Container(
+      // The `md` vertical padding above resolves to ~40.6pt, not the 44 the
+      // comment claims. This floor restores the real minimum tap target
+      // without changing the padding (so nothing reflows on taller labels).
+      constraints: const BoxConstraints(minHeight: 44),
       decoration: BoxDecoration(
         color: _enabled ? c.accent : c.accent.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(UgamRadius.chip),

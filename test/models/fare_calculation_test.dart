@@ -262,6 +262,34 @@ void main() {
       expect(bus.amountDueForSeat(whole, 'DL1'), 2000);
     });
 
+    test('double fully occupied on BOTH legs by one rider (2 GO + 2 RET) = full',
+        () {
+      // A rider who booked a GO double AND a RET double, folded onto ONE sofa:
+      // 4 one-leg berth-legs = the whole sofa across both legs. Must price the
+      // full 1550 (== a round-trip whole double), NOT 775 — the old 2-berth cap
+      // charged only half.
+      final bus = buildBus(); // double berth = 775
+      final p = Passenger(
+        tourId: 't1',
+        name: 'test',
+        phone: '1',
+        requestLines: const [
+          RequestLine(
+              seatType: SeatType.doubleSofa, qty: 1, leg: TripType.outboundOnly),
+          RequestLine(
+              seatType: SeatType.doubleSofa, qty: 1, leg: TripType.returnOnly),
+        ],
+        assignedSeats: const [
+          SeatAssignment(busId: 'bus1', seatId: 'DL1', leg: TripType.outboundOnly),
+          SeatAssignment(busId: 'bus1', seatId: 'DL1', leg: TripType.outboundOnly),
+          SeatAssignment(busId: 'bus1', seatId: 'DL1', leg: TripType.returnOnly),
+          SeatAssignment(busId: 'bus1', seatId: 'DL1', leg: TripType.returnOnly),
+        ],
+      );
+      expect(bus.amountDueForSeat(p, 'DL1'), 1550);
+      expect(bus.amountDueFor(p), 1550);
+    });
+
     test('amountDueFor and per-seat agree for a whole sofa', () {
       // The passenger total (summed per entry) equals the single per-seat
       // record amount for a whole sofa — both are the full 1550.
@@ -272,6 +300,105 @@ void main() {
       ]);
       expect(bus.amountDueFor(whole), 1550);
       expect(bus.amountDueForSeat(whole, 'DL1'), 1550);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // ONE-LEG PRICE FIX: a seat is priced by its OWN stored [SeatAssignment.leg],
+  // not the coarse per-type summary. A mixed same-type booking (one round-trip
+  // single + one GO-only single) collapses legForSeatType(singleSofa) to
+  // round-trip, which USED TO over-charge the genuinely one-leg seat at FULL
+  // price. Each seat now reads its own leg, so the GO-only berth pays HALF.
+  // ───────────────────────────────────────────────────────────────────────────
+  group('amountDueForSeat — per-seat leg (mixed same-type booking)', () {
+    // A bus with two single sofas @ 1200 each.
+    Bus twoSingleBus() => Bus(
+          id: 'bus1',
+          name: 'Bus 1',
+          pricePerSeat: 1000,
+          singleSofaPrice: 1200,
+          layout: BusLayout(rows: 1, cols: 5, grid: const [
+            SeatCell(
+              row: 0,
+              col: 1,
+              seatType: SeatType.singleSofa,
+              position: SeatPosition.lower,
+              seatId: 'SL1',
+            ),
+            SeatCell(
+              row: 0,
+              col: 2,
+              seatType: SeatType.singleSofa,
+              position: SeatPosition.lower,
+              seatId: 'SL2',
+            ),
+          ]),
+        );
+
+    // One round-trip single + one GO-only single, placed on SL1 (RT) and
+    // SL2 (GO), each seat carrying its own stamped leg.
+    Passenger mixed() => Passenger(
+          tourId: 't1',
+          name: 'Mixed',
+          phone: '1',
+          requestLines: const [
+            RequestLine(
+                seatType: SeatType.singleSofa,
+                qty: 1,
+                leg: TripType.roundTrip),
+            RequestLine(
+                seatType: SeatType.singleSofa,
+                qty: 1,
+                leg: TripType.outboundOnly),
+          ],
+          assignedSeats: const [
+            SeatAssignment(
+                busId: 'bus1', seatId: 'SL1', leg: TripType.roundTrip),
+            SeatAssignment(
+                busId: 'bus1', seatId: 'SL2', leg: TripType.outboundOnly),
+          ],
+        );
+
+    test('the coarse per-type leg collapses to round-trip (the trap)', () {
+      // Proves the input the bug relied on: legForSeatType is round-trip for
+      // BOTH single seats, so pricing off it would charge the GO seat full.
+      expect(mixed().legForSeatType(SeatType.singleSofa), TripType.roundTrip);
+    });
+
+    test('round-trip berth pays full, one-leg berth pays HALF', () {
+      final bus = twoSingleBus();
+      final p = mixed();
+      expect(bus.amountDueForSeat(p, 'SL1'), 1200,
+          reason: 'round-trip seat = full');
+      expect(bus.amountDueForSeat(p, 'SL2'), closeTo(600, 1e-9),
+          reason: 'one-leg seat priced by ITS OWN leg, not the summary');
+      // Whole-passenger total is the sum of the two per-seat records.
+      expect(bus.amountDueFor(p), closeTo(1800, 1e-9));
+    });
+
+    test('legacy unstamped seat still falls back to the coarse leg', () {
+      // A seat with no recorded leg must behave exactly as before: priced by
+      // legForSeatType, which is round-trip here → full 1200.
+      final bus = twoSingleBus();
+      final p = Passenger(
+        tourId: 't1',
+        name: 'Legacy',
+        phone: '1',
+        requestLines: const [
+          RequestLine(
+              seatType: SeatType.singleSofa,
+              qty: 1,
+              leg: TripType.roundTrip),
+          RequestLine(
+              seatType: SeatType.singleSofa,
+              qty: 1,
+              leg: TripType.outboundOnly),
+        ],
+        assignedSeats: const [
+          SeatAssignment(busId: 'bus1', seatId: 'SL1'), // no leg recorded
+        ],
+      );
+      expect(bus.amountDueForSeat(p, 'SL1'), 1200);
     });
   });
 
@@ -608,6 +735,27 @@ void main() {
       ]);
       // Back band 6/berth → whole = 12.
       expect(bus.amountDueForSeat(wholeBack, 'DL3'), 12);
+    });
+
+    test('one-leg rider in a price band pays HALF the band price (collect path)',
+        () {
+      // Exactly what the collect sheet shows: the due for a GO-only rider on a
+      // banded seat = half of THAT seat's band price (each seat can differ).
+      final bus = bandedBus(); // SL0 in front band = 15/berth (overrides the 25)
+      final go = passenger(
+        seats: const [SeatAssignment(busId: 'pbus', seatId: 'SL0')],
+        tripType: TripType.outboundOnly,
+      );
+      expect(bus.berthPriceFor(SeatType.singleSofa, 0), 15,
+          reason: 'band price wins over the 25 single-sofa override');
+      // 15 × 0.5 = 7.5 → rounded to a whole rupee at source.
+      expect(bus.amountDueForSeat(go, 'SL0'), 8);
+      // A round-trip rider on the same banded seat pays the FULL band price.
+      final rt = passenger(
+        seats: const [SeatAssignment(busId: 'pbus', seatId: 'SL0')],
+        tripType: TripType.roundTrip,
+      );
+      expect(bus.amountDueForSeat(rt, 'SL0'), 15);
     });
 
     test('first matching band wins on overlap', () {

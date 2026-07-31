@@ -422,10 +422,12 @@ void main() {
   });
 
   group('ambiguous target', () {
-    test('a MULTI-berth (whole-double) mover onto a 2-person target is ambiguous',
+    test('a ROUND-TRIP whole-double mover onto a round-trip 2-person target is ambiguous',
         () {
-      // A whole-double mover can never share a leg, so dropping it onto an
-      // already-shared double has no unambiguous outcome → ambiguous block.
+      // A round-trip whole double rides BOTH legs on both berths, so it cannot
+      // leg-share with round-trip occupants (every leg overflows) → ambiguous.
+      // (A ONE-LEG whole double CAN merge onto a leg-disjoint target — see the
+      // 'whole-double leg-share merge' group below.)
       final d = decideSeatDrop(
         fromCell: cell('DL1', dbl),
         targetCell: cell('DL2', dbl),
@@ -433,6 +435,204 @@ void main() {
         targetOccupants: [occ('b'), occ('c')],
       );
       expect(d.block, SeatDropBlock.sharedTargetAmbiguous);
+    });
+  });
+
+  // A WHOLE one-leg double (2 berths on ONE leg, one occupant) dragged onto an
+  // occupied double whose riders take the DISJOINT leg must MERGE (leg-share),
+  // not swap — the user's "merge Pranav and test onto one sofa (go + return)".
+  group('whole-double leg-share merge (2026-07-22)', () {
+    test('whole GO-only double MERGES onto a RET-only occupied double (not swap)',
+        () {
+      final d = decideSeatDrop(
+        fromCell: cell('DU4', dbl),
+        targetCell: cell('DU5', dbl),
+        fromOccupants: [
+          occ('test',
+              trip: TripType.outboundOnly,
+              berthsHere: 2,
+              wholeDoublesHeld: 1,
+              requestedDoubleQty: 1),
+        ],
+        targetOccupants: [
+          occ('pranav',
+              trip: TripType.returnOnly,
+              berthsHere: 2,
+              wholeDoublesHeld: 1,
+              requestedDoubleQty: 1),
+        ],
+      );
+      expect(d.action, SeatDropAction.fillPairInto);
+    });
+
+    test('two GO-only whole doubles still SWAP (same leg, no merge room)', () {
+      final d = decideSeatDrop(
+        fromCell: cell('DU4', dbl),
+        targetCell: cell('DU5', dbl),
+        fromOccupants: [
+          occ('a', trip: TripType.outboundOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+        targetOccupants: [
+          occ('b', trip: TripType.outboundOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+      );
+      expect(d.action, SeatDropAction.swap);
+    });
+
+    test('round-trip whole double onto a RET-only double still SWAPS (RET overflows)',
+        () {
+      final d = decideSeatDrop(
+        fromCell: cell('DU4', dbl),
+        targetCell: cell('DU5', dbl),
+        fromOccupants: [
+          occ('a', trip: TripType.roundTrip, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+        targetOccupants: [
+          occ('b', trip: TripType.returnOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+      );
+      expect(d.action, SeatDropAction.swap);
+    });
+
+    test('whole RET-only double MERGES onto a double already holding two GO riders '
+        '(builds the 4-rider sofa)', () {
+      final d = decideSeatDrop(
+        fromCell: cell('DU4', dbl),
+        targetCell: cell('DU5', dbl),
+        fromOccupants: [
+          occ('test', trip: TripType.returnOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+        targetOccupants: [
+          occ('a', trip: TripType.outboundOnly, berthsHere: 1),
+          occ('b', trip: TripType.outboundOnly, berthsHere: 1),
+        ],
+      );
+      expect(d.action, SeatDropAction.fillPairInto);
+    });
+  });
+
+  // A rider's OWN two one-leg WHOLE doubles (a GO double + a RET double that
+  // landed on two sofas) folded back onto ONE sofa — same person, leg-disjoint.
+  group('same-person whole-double consolidation (2026-07-22)', () {
+    test('own GO double dragged onto own RET double MERGES (not self-blocked)',
+        () {
+      final d = decideSeatDrop(
+        fromCell: cell('DU4', dbl),
+        targetCell: cell('DU5', dbl),
+        fromOccupants: [
+          occ('test',
+              trip: TripType.outboundOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+        targetOccupants: [
+          occ('test',
+              trip: TripType.returnOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+      );
+      expect(d.action, SeatDropAction.fillPairInto);
+    });
+
+    test('own SAME-leg doubles stay a self no-op (legs overlap → blocked)', () {
+      final d = decideSeatDrop(
+        fromCell: cell('DU4', dbl),
+        targetCell: cell('DU5', dbl),
+        fromOccupants: [
+          occ('test',
+              trip: TripType.outboundOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+        targetOccupants: [
+          occ('test',
+              trip: TripType.outboundOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+      );
+      expect(d.block, SeatDropBlock.self);
+    });
+  });
+
+  // CROSS-TYPE sharing (single ↔ double). A single-berth rider — whether it
+  // comes from a single sofa or from a double-sofa half — leg-shares onto the
+  // DISJOINT leg of EITHER a single or a double (the fill branch keys on the
+  // TARGET's cap). A whole 2-berth double never fits a 1-berth single.
+  group('cross-type single ↔ double sharing (2026-07-22)', () {
+    test('single GO rider → occupied single RET = fill (single-sofa leg-share)',
+        () {
+      final d = decideSeatDrop(
+        fromCell: cell('SL1', single),
+        targetCell: cell('SL2', single),
+        fromOccupants: [occ('a', trip: TripType.outboundOnly)],
+        targetOccupants: [occ('b', trip: TripType.returnOnly)],
+      );
+      expect(d.action, SeatDropAction.fill);
+    });
+
+    test('single GO rider → occupied single GO = swap (same leg can\'t share)',
+        () {
+      // Two same-leg riders on 1-berth singles can't leg-share, so the drop
+      // exchanges their seats (a swap) rather than blocking — a single was never
+      // shareable on the same leg, so it legitimately falls through to swap.
+      final d = decideSeatDrop(
+        fromCell: cell('SL1', single),
+        targetCell: cell('SL2', single),
+        fromOccupants: [occ('a', trip: TripType.outboundOnly)],
+        targetOccupants: [occ('b', trip: TripType.outboundOnly)],
+      );
+      expect(d.action, SeatDropAction.swap);
+    });
+
+    test('single GO rider → FREE double = move (takes one berth, half)', () {
+      final d = decideSeatDrop(
+        fromCell: cell('SL1', single),
+        targetCell: cell('DL1', dbl),
+        fromOccupants: [occ('a', trip: TripType.outboundOnly)],
+        targetOccupants: const [],
+      );
+      expect(d.action, SeatDropAction.move);
+      expect(d.berths, 1);
+    });
+
+    test('single RET rider → double held by a WHOLE-GO rider = fill (leg-share)',
+        () {
+      final d = decideSeatDrop(
+        fromCell: cell('SL1', single),
+        targetCell: cell('DL1', dbl),
+        fromOccupants: [occ('a', trip: TripType.returnOnly)],
+        targetOccupants: [occ('b', trip: TripType.outboundOnly, berthsHere: 2)],
+      );
+      expect(d.action, SeatDropAction.fill);
+    });
+
+    test('double-half GO rider → FREE single = move', () {
+      final d = decideSeatDrop(
+        fromCell: cell('DL1', dbl),
+        targetCell: cell('SL1', single),
+        fromOccupants: [occ('a', trip: TripType.outboundOnly, berthsHere: 1)],
+        targetOccupants: const [],
+      );
+      expect(d.action, SeatDropAction.move);
+      expect(d.berths, 1);
+    });
+
+    test('double-half GO rider → occupied single RET = fill (cross-type share)',
+        () {
+      final d = decideSeatDrop(
+        fromCell: cell('DL1', dbl),
+        targetCell: cell('SL1', single),
+        fromOccupants: [occ('a', trip: TripType.outboundOnly, berthsHere: 1)],
+        targetOccupants: [occ('b', trip: TripType.returnOnly)],
+      );
+      expect(d.action, SeatDropAction.fill);
+    });
+
+    test('WHOLE one-leg double (2 berths) → single is too small (never shares)',
+        () {
+      final d = decideSeatDrop(
+        fromCell: cell('DL1', dbl),
+        targetCell: cell('SL1', single),
+        fromOccupants: [
+          occ('a', trip: TripType.outboundOnly, berthsHere: 2, requestedDoubleQty: 1),
+        ],
+        targetOccupants: const [],
+      );
+      expect(d.block, SeatDropBlock.tooSmall);
     });
   });
 

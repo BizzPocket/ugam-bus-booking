@@ -51,8 +51,8 @@ void main() {
   tearDown(Get.reset);
 
   testWidgets(
-      'browse mode: Past section present + collapsed (past title hidden), '
-      'upcoming visible', (tester) async {
+      'browse mode HIDES past tours (kept out of the default view), upcoming '
+      'visible', (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
     ctrl.tours.assignAll([_pastTour(), _upcomingTour()]);
@@ -60,23 +60,17 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pumpAndSettle();
 
-    // The Past group renders (its header label is the raw i18n key — l10n not
-    // initialized — and it's keyed for Obx-stable open/closed state).
-    expect(find.text('tours.group.past'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('tours-past-group')),
-      findsOneWidget,
-    );
-
-    // Collapsed by default: the AnimatedCrossFade shows its empty firstChild, so
-    // the past tour's title is NOT laid out / hittable yet.
+    // Past/closed tours are deliberately kept OUT of the default browse view
+    // (tours_screen: the Past group is only added when `_query.isNotEmpty`), so
+    // neither the group header nor the past tour appears while just browsing.
+    expect(find.text('tours.group.past'), findsNothing);
     expect(find.text('Old Somnath Yatra'), findsNothing);
 
-    // The upcoming tour (always-expanded group) IS visible.
+    // The upcoming tour IS visible.
     expect(find.text('Future Dwarka Yatra'), findsOneWidget);
   });
 
-  testWidgets('tapping the Past header reveals the past tour title',
+  testWidgets('searching surfaces the Past group with the matching past tour',
       (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
@@ -85,14 +79,15 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pumpAndSettle();
 
-    // Pre-tap: collapsed, so the past title is absent.
-    expect(find.text('Old Somnath Yatra'), findsNothing);
+    // Open the search field (app-bar icon) and query the past tour.
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'Somnath');
+    await tester.pumpAndSettle();
 
-    // Tap the Past header (its label text sits inside the tappable header row).
-    await tester.tap(find.text('tours.group.past'));
-    await tester.pumpAndSettle(); // run the AnimatedCrossFade open animation
-
-    // Post-tap: the past tour's title is now findable.
-    expect(find.text('Old Somnath Yatra'), findsOneWidget);
+    // Now the Past group renders (search surfaces it) with the matching tour,
+    // and the non-matching upcoming tour is filtered out.
+    expect(find.text('tours.group.past'), findsOneWidget);
+    expect(find.text('Future Dwarka Yatra'), findsNothing);
   });
 }

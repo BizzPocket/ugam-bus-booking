@@ -18,7 +18,9 @@ class AdminSetupScreen extends StatelessWidget {
     final uri = Uri(
       scheme: 'mailto',
       path: _supportEmail,
-      query: 'subject=Admin%20Access%20Request',
+      // Localized subject. Dart's Uri normalizer preserves valid %XX escapes,
+      // so encodeComponent's output is not double-encoded here.
+      query: 'subject=${Uri.encodeComponent(tr('admin_setup.mail_subject'))}',
     );
     try {
       final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -78,16 +80,19 @@ class AdminSetupScreen extends StatelessWidget {
                       // Clean tokenized header — the lone copper signal: a
                       // support-agent mark floating on a soft copper halo
                       // (depth from light, not a border).
+                      // Purely decorative -> px(), never tap(): the halo and
+                      // the tile are not hit targets, so they shrink with the
+                      // device instead of crowding out the copy beneath them.
                       SizedBox(
-                        width: 96,
-                        height: 96,
+                        width: UgamScale.px(context, 96),
+                        height: UgamScale.px(context, 96),
                         child: Stack(
                           alignment: Alignment.center,
                           clipBehavior: Clip.none,
                           children: [
                             Container(
-                              width: 96,
-                              height: 96,
+                              width: UgamScale.px(context, 96),
+                              height: UgamScale.px(context, 96),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 gradient: RadialGradient(
@@ -97,8 +102,8 @@ class AdminSetupScreen extends StatelessWidget {
                               ),
                             ),
                             Container(
-                              width: 52,
-                              height: 52,
+                              width: UgamScale.px(context, 52),
+                              height: UgamScale.px(context, 52),
                               decoration: BoxDecoration(
                                 color: c.accentFill,
                                 borderRadius: BorderRadius.circular(
@@ -108,7 +113,7 @@ class AdminSetupScreen extends StatelessWidget {
                               alignment: Alignment.center,
                               child: Icon(
                                 Icons.support_agent_rounded,
-                                size: 28,
+                                size: UgamScale.px(context, 28),
                                 color: c.accent,
                               ),
                             ),
@@ -127,47 +132,21 @@ class AdminSetupScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: UgamSpacing.lg),
                       // Email chip: tap to open mail, long-press to copy.
-                      // No border — a quiet elevated fill separates it.
+                      // The hand-rolled Container was a like-for-like neutral
+                      // button (cardElev fill, UgamRadius.input, icon + label)
+                      // that merely LOOKED like a static info strip, so it is
+                      // now the real thing. UgamButton has no long-press slot,
+                      // so the copy gesture rides an outer GestureDetector —
+                      // its LongPressGestureRecognizer and the button's inner
+                      // tap recognizer resolve cleanly in the gesture arena.
                       GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _contactSupport,
                         onLongPress: _copyEmail,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: UgamSpacing.md,
-                            vertical: UgamSpacing.md,
-                          ),
-                          decoration: BoxDecoration(
-                            color: c.cardElev,
-                            borderRadius: BorderRadius.circular(
-                              UgamRadius.input,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.mail_outline_rounded,
-                                size: 16,
-                                color: c.ink2,
-                              ),
-                              const SizedBox(width: UgamSpacing.sm),
-                              Flexible(
-                                child: Text(
-                                  _supportEmail,
-                                  style: UgamText.bodyStrong.copyWith(
-                                    color: c.ink,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: UgamSpacing.sm),
-                              Icon(
-                                Icons.copy_rounded,
-                                size: 14,
-                                color: c.ink3,
-                              ),
-                            ],
-                          ),
+                        child: UgamButton(
+                          kind: UgamButtonKind.neutral,
+                          label: _supportEmail,
+                          icon: Icons.mail_outline_rounded,
+                          expand: true,
+                          onPressed: _contactSupport,
                         ),
                       ),
                     ],

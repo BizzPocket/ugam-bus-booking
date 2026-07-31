@@ -78,8 +78,10 @@ class UgamTheme {
           foregroundColor: c.onAccent,
           elevation: 0,
           shadowColor: Colors.transparent,
-          padding:
-              const EdgeInsets.symmetric(horizontal: UgamSpacing.xxl, vertical: UgamSpacing.lg),
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.xxl,
+            vertical: UgamSpacing.lg,
+          ),
           shape: const StadiumBorder(),
           textStyle: UgamText.titleS.copyWith(color: c.onAccent),
         ),
@@ -88,8 +90,10 @@ class UgamTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: c.accent,
           side: BorderSide(color: c.accent, width: 1.5),
-          padding:
-              const EdgeInsets.symmetric(horizontal: UgamSpacing.xl, vertical: UgamSpacing.md + 2),
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.xl,
+            vertical: UgamSpacing.md + 2,
+          ),
           shape: const StadiumBorder(),
           textStyle: UgamText.bodyStrong.copyWith(color: c.accent),
         ),
@@ -150,11 +154,7 @@ class UgamTheme {
         shape: const StadiumBorder(),
         side: BorderSide(color: c.border),
       ),
-      dividerTheme: DividerThemeData(
-        color: c.border,
-        thickness: 1,
-        space: 0,
-      ),
+      dividerTheme: DividerThemeData(color: c.border, thickness: 1, space: 0),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: c.accent,
         foregroundColor: c.onAccent,
@@ -163,11 +163,14 @@ class UgamTheme {
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith(
-            (s) => s.contains(WidgetState.selected) ? c.onAccent : c.ink3),
+          (s) => s.contains(WidgetState.selected) ? c.onAccent : c.ink3,
+        ),
         trackColor: WidgetStateProperty.resolveWith(
-            (s) => s.contains(WidgetState.selected) ? c.accent : c.cardElev),
-        trackOutlineColor:
-            WidgetStateProperty.resolveWith((_) => Colors.transparent),
+          (s) => s.contains(WidgetState.selected) ? c.accent : c.cardElev,
+        ),
+        trackOutlineColor: WidgetStateProperty.resolveWith(
+          (_) => Colors.transparent,
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: c.card,
@@ -177,6 +180,53 @@ class UgamTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(UgamRadius.input),
         ),
+      ),
+      // INTERIM. Three screens still call the raw Material `showTimePicker`
+      // (`add_bus_screen.dart`, `create_tour_screen.dart`,
+      // `edit_tour_screen.dart`), which without this theme renders in stock
+      // Material purple on a stock surface. Theming it here fixes all three at
+      // once; a shared `UgamSheet`-based picker is the real fix and is
+      // deliberately deferred (it is a 3-call-site behavioural change).
+      //
+      // The dial hand is the one solid accent here: it is the selection
+      // indicator on a modal surface, not a screen-level CTA, so the
+      // accent-rationing law does not apply.
+      timePickerTheme: TimePickerThemeData(
+        backgroundColor: c.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UgamRadius.sheet),
+        ),
+        helpTextStyle: UgamText.micro.copyWith(color: c.ink2),
+        dialBackgroundColor: c.cardElev,
+        dialHandColor: c.accent,
+        dialTextColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.onAccent : c.ink,
+        ),
+        dialTextStyle: UgamText.body.copyWith(color: c.ink),
+        hourMinuteColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.accentFill : c.cardElev,
+        ),
+        hourMinuteTextColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.accent : c.ink,
+        ),
+        hourMinuteTextStyle: UgamText.titleXl.copyWith(color: c.ink),
+        hourMinuteShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+        ),
+        dayPeriodColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.accentFill : c.cardElev,
+        ),
+        dayPeriodTextColor: WidgetStateColor.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? c.accent : c.ink2,
+        ),
+        dayPeriodTextStyle: UgamText.bodyStrong.copyWith(color: c.ink),
+        dayPeriodBorderSide: BorderSide(color: c.border),
+        dayPeriodShape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(UgamRadius.input),
+          side: BorderSide(color: c.border),
+        ),
+        entryModeIconColor: c.ink2,
+        padding: const EdgeInsets.all(UgamSpacing.xl),
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
         color: c.accent,

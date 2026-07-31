@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/attendance.dart';
 import '../models/bus_details.dart';
+import '../models/bus_handover.dart';
 import '../models/collection.dart';
 import '../models/expense.dart';
 import '../models/income_entry.dart';
@@ -723,4 +724,120 @@ class CustomerRequestsStore {
     );
     return result as bool? ?? false;
   }
+
+  /// Every cash handover recorded against the buses this handler runs — the
+  /// ones they logged themselves AND any the admin entered from the other side,
+  /// so the handler sees the whole settlement picture for their bus.
+  ///
+  /// Deliberately NOT part of `handler_tour_manifest`: that RPC has been
+  /// re-created verbatim across a dozen migrations and its live body has drifted
+  /// from the files, so handovers are read through their own RPC rather than
+  /// risk rewriting the manifest from a stale copy. Returns an empty list when
+  /// the caller isn't a handler.
+  Future<List<BusHandover>> handlerBusHandovers(String requestId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_bus_handovers',
+      params: {'p_request_id': requestId},
+    );
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((m) => BusHandover.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  /// Records (or corrects) one cash handover the handler made to the admin, via
+  /// a SECURITY DEFINER RPC — handlers are anonymous, and `bus_handovers` is
+  /// owner-only under RLS. The server resolves the tour, verifies the bus is one
+  /// the CALLER handles, and stamps `source='handler'`; an admin-recorded row
+  /// can never be overwritten this way. Returns the saved row, or null when the
+  /// write was rejected. Lets exceptions propagate so the UI can surface a real
+  /// failure.
+  Future<BusHandover?> handlerUpsertHandover(
+    String requestId,
+    BusHandover h,
+  ) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_upsert_handover',
+      params: {'p_request_id': requestId, 'p_handover': h.toMap()},
+    );
+    if (result is! Map) return null;
+    return BusHandover.fromMap(Map<String, dynamic>.from(result));
+  }
+
+  /// Deletes one handover the handler logged themselves. Returns true when a row
+  /// was removed — false for a non-handler, a bus they don't run, or a row the
+  /// admin recorded (those stay read-only on the handler side).
+  Future<bool> handlerDeleteHandover(
+    String requestId,
+    String handoverId,
+  ) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_delete_handover',
+      params: {'p_request_id': requestId, 'p_handover_id': handoverId},
+    );
+    return result as bool? ?? false;
+  }
+
+  /// How far the handler's own bus has got through the journey.
+  ///
+  /// Deliberately its own RPC rather than new fields on `handler_tour_manifest`:
+  /// that function's live body has drifted from the migration files, so it is
+  /// never rewritten from a stale copy (the same reason handovers read through
+  /// their own RPC). It supplies the one thing the manifest omits —
+  /// `journey_done` — which is what tells the UI whether the GO leg is finished.
+  /// Returns an empty list when the caller isn't a handler.
+  Future<List<HandlerBusLegState>> handlerBusLegState(String requestId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_bus_leg_state',
+      params: {'p_request_id': requestId},
+    );
+    if (result is! List) return const [];
+    return result.whereType<Map>().map((m) {
+      int n(String k) => (m[k] as num?)?.toInt() ?? 0;
+      return (
+        busId: (m['bus_id'] ?? '').toString(),
+        outboundOnlyTotal: n('outbound_only_total'),
+        outboundOnlyDone: n('outbound_only_done'),
+        ridersOnOutbound: n('riders_on_outbound'),
+        ridersOnReturn: n('riders_on_return'),
+      );
+    }).toList();
+  }
+
+  /// Finishes the GO leg for ONE bus the handler runs: every outbound-only
+  /// rider on it has completed their only journey, so their seats on this bus
+  /// are released and they are marked `journey_done`. Round-trip and
+  /// return-only riders are untouched.
+  ///
+  /// The server freezes this bus's outbound chart into `tour_seat_snapshots`
+  /// in the SAME transaction before releasing anything, so — unlike the admin's
+  /// best-effort client-side capture — seats can never be destroyed without
+  /// their history being kept. Returns the number of riders cleared, or null
+  /// when the caller doesn't handle that bus. Lets exceptions propagate so the
+  /// UI can surface a real failure.
+  Future<int?> handlerCompleteOutboundLeg(
+    String requestId,
+    String busId,
+  ) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_complete_outbound_leg',
+      params: {'p_request_id': requestId, 'p_bus_id': busId},
+    );
+    return (result as num?)?.toInt();
+  }
 }
+
+/// Per-bus journey progress for the handler, from `handler_bus_leg_state`.
+typedef HandlerBusLegState = ({
+  String busId,
+  int outboundOnlyTotal,
+  int outboundOnlyDone,
+  int ridersOnOutbound,
+  int ridersOnReturn,
+});

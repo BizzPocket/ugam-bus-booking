@@ -5,21 +5,36 @@ import '../design/ugam.dart';
 import '../models/chart_footer.dart';
 import '../models/tour.dart';
 import '../utils/passenger_display.dart';
+import '../utils/seat_occupants.dart';
 
-/// Modal bottom sheet: edit boardingPlace / departureTime / note (pre-filled
-/// from [initial]). Shows read-only context (bus numbers, departure date,
-/// handler name) above the fields. Returns the edited footer, or null on cancel.
-Future<ChartFooter?> showChartFooterSheet(
+/// What the agent asked the chart sheet to produce: the edited footer plus the
+/// journey [leg] the chart should be scoped to (null = the whole journey).
+class ChartExportOptions {
+  final ChartFooter footer;
+  final CollectLeg? leg;
+
+  const ChartExportOptions({required this.footer, this.leg});
+}
+
+/// Modal bottom sheet: pick the journey leg and edit boardingPlace /
+/// departureTime / note (pre-filled from [initial]). Shows read-only context
+/// (bus numbers, departure date, handler name) above the fields. Returns the
+/// chosen options, or null on cancel.
+Future<ChartExportOptions?> showChartFooterSheet(
   BuildContext context, {
   required ChartFooter initial,
   required Tour tour,
 }) {
-  return UgamSheet.show<ChartFooter>(
+  return UgamSheet.show<ChartExportOptions>(
     context,
     title: tr('chart.sheet_title'),
     builder: (_) => _ChartFooterSheet(initial: initial, tour: tour),
   );
 }
+
+/// The leg options offered by the sheet, in pill order. Null is the
+/// whole-journey chart (both legs on one sheet, today's behaviour).
+const List<CollectLeg?> _legOptions = [null, CollectLeg.go, CollectLeg.ret];
 
 class _ChartFooterSheet extends StatefulWidget {
   final ChartFooter initial;
@@ -36,12 +51,20 @@ class _ChartFooterSheetState extends State<_ChartFooterSheet> {
   late final TextEditingController _departureTime;
   late final TextEditingController _note;
 
+  /// Index into [_legOptions]. Once the GO leg is completed the outbound riders
+  /// have travelled and their seats are freed, so the chart the agent needs is
+  /// the RETURN one — default to it instead of making them re-pick every time.
+  late int _legIndex;
+
   @override
   void initState() {
     super.initState();
     _boardingPlace = TextEditingController(text: widget.initial.boardingPlace);
     _departureTime = TextEditingController(text: widget.initial.departureTime);
     _note = TextEditingController(text: widget.initial.note);
+    _legIndex = widget.tour.goLegCompleted
+        ? _legOptions.indexOf(CollectLeg.ret)
+        : 0;
   }
 
   @override
@@ -58,7 +81,9 @@ class _ChartFooterSheetState extends State<_ChartFooterSheet> {
       departureTime: _departureTime.text.trim(),
       note: _note.text.trim(),
     );
-    Navigator.of(context).pop(footer);
+    Navigator.of(context).pop(
+      ChartExportOptions(footer: footer, leg: _legOptions[_legIndex]),
+    );
   }
 
   @override
@@ -114,6 +139,28 @@ class _ChartFooterSheetState extends State<_ChartFooterSheet> {
                 ],
               ],
             ),
+          ),
+          const SizedBox(height: UgamSpacing.xl),
+
+          // ── Journey leg ────────────────────────────────────────────
+          // Which journey this chart is for. The RETURN chart lists only the
+          // riders who travel home (round-trip + return-only), flips the route,
+          // and banners itself RETURN — so a completed GO leg no longer leaves
+          // the agent printing an outbound chart for the way back.
+          Text(
+            tr('chart.scope_label').toUpperCase(),
+            style: UgamText.micro.copyWith(color: c.ink3),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          UgamSelectorPills(
+            padding: EdgeInsets.zero,
+            items: [
+              UgamSelectorItem(label: tr('chart.scope_full')),
+              UgamSelectorItem(label: tr('chart.scope_go')),
+              UgamSelectorItem(label: tr('chart.scope_return')),
+            ],
+            currentIndex: _legIndex,
+            onChanged: (i) => setState(() => _legIndex = i),
           ),
           const SizedBox(height: UgamSpacing.xl),
 
