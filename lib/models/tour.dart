@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:uuid/uuid.dart';
+import 'booking_mode.dart';
 import 'tour_status.dart';
 import 'bus_details.dart';
 import 'passenger.dart';
@@ -35,6 +36,18 @@ class Tour {
   final String? createdBy;
   final bool isPublic;
 
+  /// How customers book seats on this tour (migration 048). Defaults to
+  /// [BookingMode.request] — the legacy flow — so every pre-048 tour is
+  /// untouched.
+  ///
+  /// DELIBERATELY ABSENT FROM [toMap]: PostgREST rejects the WHOLE payload when
+  /// it carries a column the live schema doesn't have yet, so shipping this in
+  /// the tour insert/update would break EVERY tour write on any server where
+  /// 048 hasn't been applied. It is read here and written only through
+  /// `TourController.setBookingMode`, whose single-column update can fail
+  /// loudly on its own without taking tour create/edit down with it.
+  final BookingMode bookingMode;
+
   /// Phase-2 broadcast composed at create time: the announcement text sent to
   /// the agent's audience via WhatsApp, plus an optional hero image URL
   /// (Supabase Storage). Both null until the agent fills the broadcast composer.
@@ -66,6 +79,7 @@ class Tour {
     this.handlerId,
     this.createdBy,
     this.isPublic = true,
+    this.bookingMode = BookingMode.request,
     this.broadcastMessage,
     this.broadcastImageUrl,
     this.buses = const [],
@@ -85,6 +99,23 @@ class Tour {
   /// surface (customer + admin/handler) gates on one shared rule. Closed once
   /// the tour is locked or completed.
   bool get acceptsBookings => status.acceptsBookings;
+
+  /// Buses on this tour that actually have a drawable seat chart.
+  Iterable<Bus> get chartableBuses =>
+      buses.where((b) => (b.layout?.totalSeats ?? 0) > 0);
+
+  /// Whether the customer seat chart is SELLABLE right now: chart mode, still
+  /// open for bookings, and at least one bus with a layout to tap on.
+  ///
+  /// This is the one real ordering change chart mode imposes — a customer can't
+  /// pick a seat that doesn't exist yet, so the vehicle has to be attached
+  /// before the tour can sell, instead of being booked after demand is tallied.
+  bool get sellsFromChart =>
+      bookingMode.isChart && acceptsBookings && chartableBuses.isNotEmpty;
+
+  /// A chart-mode tour held back purely because no bus has a layout yet — the
+  /// organiser-facing "add a bus to open bookings" state.
+  bool get chartNeedsBus => bookingMode.isChart && chartableBuses.isEmpty;
 
   int get totalSeatsRequested =>
       passengers.fold(0, (sum, p) => sum + p.totalSeatsRequested);
@@ -285,6 +316,8 @@ class Tour {
       handlerId: map['handler_id']?.toString(),
       createdBy: map['created_by']?.toString(),
       isPublic: map['is_public'] is bool ? map['is_public'] as bool : true,
+      // Absent on a pre-048 server -> BookingMode.request, i.e. today's flow.
+      bookingMode: BookingMode.fromString(map['booking_mode']?.toString()),
       broadcastMessage: map['broadcast_message']?.toString(),
       broadcastImageUrl: map['broadcast_image_url']?.toString(),
       buses: buses,
@@ -331,6 +364,7 @@ class Tour {
     String? handlerId,
     String? createdBy,
     bool? isPublic,
+    BookingMode? bookingMode,
     String? broadcastMessage,
     String? broadcastImageUrl,
     List<Bus>? buses,
@@ -355,6 +389,7 @@ class Tour {
       handlerId: handlerId ?? this.handlerId,
       createdBy: createdBy ?? this.createdBy,
       isPublic: isPublic ?? this.isPublic,
+      bookingMode: bookingMode ?? this.bookingMode,
       broadcastMessage: broadcastMessage ?? this.broadcastMessage,
       broadcastImageUrl: broadcastImageUrl ?? this.broadcastImageUrl,
       buses: buses ?? this.buses,

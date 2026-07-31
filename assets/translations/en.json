@@ -2433,6 +2433,12 @@
       "cancelled": "Cancelled",
       "completed": "Completed"
     },
+    "booking_mode": {
+      "request": "Request seats",
+      "chart": "Pick seats on chart",
+      "request_desc": "Customers ask for the seats they need. You tally demand, book the bus, then assign every seat yourself.",
+      "chart_desc": "Customers tap their own seat on the live bus chart. Needs a bus with a layout before the tour can sell."
+    },
     "payment_status": {
       "paid": "Paid",
       "pending": "Pending"
