@@ -2636,5 +2636,12 @@
     "toast_collect": "सीट बदली: नए किराए पर {amount} वसूलना बाकी।",
     "toast_return": "सीट बदली: नए किराए पर {amount} लौटाना है।",
     "toast_both": "सीट बदली: {collect} वसूलना, {give} लौटाना।"
+  },
+  "upi": {
+    "scan_hint": "किसी भी UPI ऐप से स्कैन करें — GPay, PhonePe, Paytm",
+    "open_app": "UPI ऐप खोलें",
+    "copied": "UPI ID कॉपी हुई",
+    "err_no_app": "इस फ़ोन में कोई UPI ऐप नहीं मिला। इसके बजाय QR स्कैन करें।",
+    "err_invalid": "इस भुगतान में UPI ID या राशि नहीं है।"
   }
 }

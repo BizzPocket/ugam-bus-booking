@@ -2636,5 +2636,12 @@
     "toast_collect": "Seat move: {amount} still to collect at the new fare.",
     "toast_return": "Seat move: {amount} to return at the new fare.",
     "toast_both": "Seat move: {collect} to collect, {give} to return at the new fares."
+  },
+  "upi": {
+    "scan_hint": "Scan with any UPI app — GPay, PhonePe, Paytm",
+    "open_app": "Open UPI app",
+    "copied": "UPI ID copied",
+    "err_no_app": "No UPI app found on this phone. Scan the QR instead.",
+    "err_invalid": "This payment is missing a UPI ID or an amount."
   }
 }

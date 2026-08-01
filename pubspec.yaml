@@ -81,6 +81,7 @@ dependencies:
 
   # App version/build for the settings + customer "more" footers
   package_info_plus: ^9.0.1
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:
