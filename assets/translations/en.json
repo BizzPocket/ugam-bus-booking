@@ -1069,7 +1069,9 @@
     "chip_tour_full": "TOUR FULL",
     "chip_seats_left": "{n} SEATS LEFT",
     "chip_open_requests": "OPEN FOR REQUESTS",
-    "chip_bookings_closed": "BOOKINGS CLOSED"
+    "chip_bookings_closed": "BOOKINGS CLOSED",
+    "cta_pick_seats": "Pick your berth",
+    "cta_seats_not_open": "Seats open soon"
   },
   "edit_tour": {
     "title": "Edit Tour",
@@ -2643,5 +2645,61 @@
     "copied": "UPI ID copied",
     "err_no_app": "No UPI app found on this phone. Scan the QR instead.",
     "err_invalid": "This payment is missing a UPI ID or an amount."
+  },
+  "seat_pick": {
+    "title": "Pick berths",
+    "err_no_bus": "Seats open once the organiser adds a bus.",
+    "err_load": "Couldn't load the seat chart.",
+    "retry": "Try again",
+    "leg_round": "Round trip",
+    "leg_go": "Go only",
+    "leg_return": "Return only",
+    "legend_open": "Open",
+    "legend_yours": "Yours",
+    "legend_taken": "Taken",
+    "legend_lady": "Lady",
+    "berth_one": "1 berth",
+    "berth_many": "{n} berths",
+    "continue": "Continue",
+    "warn_max": "You can book up to {n} berths at a time."
+  },
+  "seat_confirm": {
+    "title": "Your details",
+    "name_label": "Name",
+    "phone_label": "Phone",
+    "pickup_label": "Pickup point",
+    "pickup_hint": "Choose a pickup point",
+    "note_label": "Note for the organiser",
+    "gender_female": "Lady",
+    "gender_male": "Gent",
+    "gender_skip": "Prefer not to say",
+    "err_name": "Enter your name",
+    "err_phone": "Enter a 10-digit phone number",
+    "err_pickup": "Choose a pickup point",
+    "err_seats_gone": "{seats} went to someone else. Pick another berth.",
+    "err_failed": "Couldn't confirm the booking. Try again.",
+    "success": "Booked. Your berths are confirmed.",
+    "cta_one": "Confirm 1 berth",
+    "cta_many": "Confirm {n} berths",
+    "total": "Total",
+    "pay_on_bus": "Pay on the bus",
+    "advance_title": "Pay the advance",
+    "advance_note": "Balance of {total} is paid on the bus."
+  },
+  "booking_settings": {
+    "title": "Booking & payment",
+    "how_customers_book": "How customers book",
+    "money": "Money",
+    "mode_locked": "This tour already has bookings, so the mode is fixed.",
+    "needs_bus": "Add a bus with a seat layout before customers can pick berths.",
+    "vpa_label": "UPI ID for collections",
+    "vpa_help": "Customers scan a QR that pays into this. UPI is zero MDR by law, so nothing is deducted.",
+    "payee_label": "Name shown to the payer",
+    "advance_label": "Advance per berth (₹)",
+    "advance_help": "Leave empty to take no advance. The balance is still collected as cash on the bus.",
+    "save": "Save",
+    "saved": "Booking settings saved",
+    "err_save": "Couldn't save. Check the migration is deployed.",
+    "err_vpa": "That does not look like a UPI ID (name@bank)."
   }
 }

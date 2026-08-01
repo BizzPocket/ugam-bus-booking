@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show PostgresChangeEvent;
+import '../models/booking_mode.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../models/passenger.dart';
@@ -3050,6 +3051,66 @@ class TourController extends GetxController {
         isDuplicate ? tr('errors.duplicate') : '$failure $e',
         title: tr('errors.save_failed'),
       );
+      rethrow;
+    }
+  }
+
+  /// Write ONLY the booking-mode / collection columns (migrations 048–050).
+  ///
+  /// Deliberately a narrow, hand-rolled update rather than going through
+  /// [_updateTour]: those columns are absent from [Tour.toMap] on purpose,
+  /// because PostgREST rejects the WHOLE payload when it carries a column the
+  /// live schema doesn't have — shipping them in the ordinary tour write would
+  /// break every tour save on a server where 048–050 aren't applied yet. Sent
+  /// alone, a missing column fails only this call, loudly, with nothing else
+  /// affected.
+  Future<void> updateBookingSettings(
+    String tourId, {
+    BookingMode? bookingMode,
+    int? advancePerBerthPaise,
+    bool clearAdvance = false,
+    String? collectVpa,
+    String? collectPayeeName,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (bookingMode != null) {
+      payload['booking_mode'] = bookingMode.storageKey;
+    }
+    if (clearAdvance) {
+      payload['advance_per_berth_paise'] = null;
+    } else if (advancePerBerthPaise != null) {
+      payload['advance_per_berth_paise'] = advancePerBerthPaise;
+    }
+    if (collectVpa != null) {
+      payload['collect_vpa'] =
+          collectVpa.trim().isEmpty ? null : collectVpa.trim();
+    }
+    if (collectPayeeName != null) {
+      payload['collect_payee_name'] =
+          collectPayeeName.trim().isEmpty ? null : collectPayeeName.trim();
+    }
+    if (payload.isEmpty) return;
+
+    _updateTourLocal(
+      tourId,
+      (t) => t.copyWith(
+        bookingMode: bookingMode,
+        advancePerBerthPaise: clearAdvance ? null : advancePerBerthPaise,
+        collectVpa: collectVpa,
+        collectPayeeName: collectPayeeName,
+      ),
+    );
+    try {
+      // Routed through the sync layer so it inherits the same retry/backoff
+      // behaviour as every other write.
+      await _sync.smartUpdate(
+        table: 'tours',
+        entityId: tourId,
+        data: payload,
+      );
+    } catch (e) {
+      dev.log('updateBookingSettings failed — $e', name: 'TourController');
+      AppSnackBar.error(tr('booking_settings.err_save'));
       rethrow;
     }
   }

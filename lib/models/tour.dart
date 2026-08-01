@@ -48,6 +48,33 @@ class Tour {
   /// loudly on its own without taking tour create/edit down with it.
   final BookingMode bookingMode;
 
+  /// Paise per BERTH asked for online up front (migration 049).
+  /// null = no online payment on this tour · 0 = the full amount due.
+  /// The balance keeps arriving as cash on the bus, through the existing
+  /// collection ledger.
+  final int? advancePerBerthPaise;
+
+  /// UPI handle + display name the customer's QR pays into (migration 050).
+  /// A VPA is receive-only, so it is safe for an anonymous customer to read.
+  final String? collectVpa;
+  final String? collectPayeeName;
+
+  /// Whether this tour can ask a customer to pay an advance online: it needs
+  /// both a policy and somewhere for the money to land.
+  bool get collectsAdvance =>
+      advancePerBerthPaise != null &&
+      collectVpa != null &&
+      collectVpa!.trim().isNotEmpty;
+
+  /// What ONE berth is asked to pay up front, in paise. Zero when the tour
+  /// takes no advance. A policy of 0 means "the whole amount due", which the
+  /// caller resolves against the real price — this only covers the fixed case.
+  int advanceForBerths(int berths) {
+    final per = advancePerBerthPaise;
+    if (per == null || per <= 0) return 0;
+    return per * berths;
+  }
+
   /// Phase-2 broadcast composed at create time: the announcement text sent to
   /// the agent's audience via WhatsApp, plus an optional hero image URL
   /// (Supabase Storage). Both null until the agent fills the broadcast composer.
@@ -80,6 +107,9 @@ class Tour {
     this.createdBy,
     this.isPublic = true,
     this.bookingMode = BookingMode.request,
+    this.advancePerBerthPaise,
+    this.collectVpa,
+    this.collectPayeeName,
     this.broadcastMessage,
     this.broadcastImageUrl,
     this.buses = const [],
@@ -318,6 +348,9 @@ class Tour {
       isPublic: map['is_public'] is bool ? map['is_public'] as bool : true,
       // Absent on a pre-048 server -> BookingMode.request, i.e. today's flow.
       bookingMode: BookingMode.fromString(map['booking_mode']?.toString()),
+      advancePerBerthPaise: (map['advance_per_berth_paise'] as num?)?.toInt(),
+      collectVpa: map['collect_vpa']?.toString(),
+      collectPayeeName: map['collect_payee_name']?.toString(),
       broadcastMessage: map['broadcast_message']?.toString(),
       broadcastImageUrl: map['broadcast_image_url']?.toString(),
       buses: buses,
@@ -365,6 +398,9 @@ class Tour {
     String? createdBy,
     bool? isPublic,
     BookingMode? bookingMode,
+    int? advancePerBerthPaise,
+    String? collectVpa,
+    String? collectPayeeName,
     String? broadcastMessage,
     String? broadcastImageUrl,
     List<Bus>? buses,
@@ -390,6 +426,9 @@ class Tour {
       createdBy: createdBy ?? this.createdBy,
       isPublic: isPublic ?? this.isPublic,
       bookingMode: bookingMode ?? this.bookingMode,
+      advancePerBerthPaise: advancePerBerthPaise ?? this.advancePerBerthPaise,
+      collectVpa: collectVpa ?? this.collectVpa,
+      collectPayeeName: collectPayeeName ?? this.collectPayeeName,
       broadcastMessage: broadcastMessage ?? this.broadcastMessage,
       broadcastImageUrl: broadcastImageUrl ?? this.broadcastImageUrl,
       buses: buses ?? this.buses,

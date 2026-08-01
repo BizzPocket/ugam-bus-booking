@@ -11,6 +11,7 @@ import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 import 'customer_booking_request_screen.dart';
+import 'seat_selection_screen.dart';
 
 /// Public-facing tour detail — image-5 fidelity.
 ///
@@ -951,6 +952,23 @@ class _StickyBookCta extends StatelessWidget {
       label = tr('customer_tour_detail.cta_bookings_closed');
       icon = Icons.lock_outline_rounded;
       onTap = null;
+    } else if (tour.bookingMode.isChart) {
+      // Chart mode: the customer taps their own berth instead of sending a
+      // request for the organiser to fulfil. A chart tour with no bus yet can't
+      // sell — you can't pick a seat that doesn't exist — so it says so rather
+      // than opening an empty chart.
+      if (tour.chartNeedsBus) {
+        label = tr('customer_tour_detail.cta_seats_not_open');
+        icon = Icons.event_seat_outlined;
+        onTap = null;
+      } else {
+        label = tr('customer_tour_detail.cta_pick_seats');
+        icon = Icons.event_seat_rounded;
+        onTap = () => Get.to(
+          () => SeatSelectionScreen(tour: tour),
+          transition: Transition.cupertino,
+        );
+      }
     } else if (full) {
       label = tr('customer_tour_detail.cta_join_waitlist');
       icon = Icons.hourglass_top_rounded;

@@ -11,6 +11,7 @@ import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/time_format.dart';
+import '../widgets/booking_settings_sheet.dart';
 
 class EditTourScreen extends StatefulWidget {
   final String tourId;
@@ -639,6 +640,22 @@ class _EditTourScreenState extends State<EditTourScreen> {
                       controller: _descCtrl,
                       maxLength: 300,
                     ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    // Booking mode + collection details live behind their own
+                    // sheet: they save immediately through a narrow column
+                    // update, separate from this form's save, because those
+                    // columns are deliberately outside Tour.toMap.
+                    Builder(builder: (ctx) {
+                      final live =
+                          Get.find<TourController>().getTour(widget.tourId);
+                      if (live == null) return const SizedBox.shrink();
+                      return UgamPickerField(
+                        label: tr('booking_settings.title'),
+                        value: live.bookingMode.displayName,
+                        icon: Icons.event_seat_outlined,
+                        onTap: () => showBookingSettingsSheet(ctx, live),
+                      );
+                    }),
                   ],
                 ),
               ),
