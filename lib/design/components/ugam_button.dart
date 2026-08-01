@@ -88,7 +88,9 @@ class UgamButton extends StatelessWidget {
     final c = UgamColors.of(context);
 
     final (Color bg, Color fg, Color? border) = switch (kind) {
-      UgamButtonKind.primary => (c.accent, c.onAccent, null),
+      // Neutral by design — max contrast against the ground, no brand hue.
+      // The accent is reserved for meaning ("this is yours"), not for controls.
+      UgamButtonKind.primary => (c.action, c.onAction, null),
       UgamButtonKind.tonal => (
         c.accentFill,
         c.accent,

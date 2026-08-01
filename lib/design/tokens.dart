@@ -19,59 +19,76 @@ import 'package:flutter/material.dart';
 /// `UgamColors.of(context)`.
 
 /// Brand seed palette — the ONE place brand color is defined.
+///
+/// The accent is a **cabin-lamp amber**, and it has exactly one job: it means
+/// **"this is yours"** — the berth you picked, the leg you chose, your row in a
+/// list. It is deliberately NOT the button colour. Every reference app checked
+/// (Uber's `buttonPrimaryFill` is literally `#000000`; Ola's brand is green and
+/// its booking button is still black) spends the brand hue on meaning, not on
+/// the primary control. See [UgamColorSet.action].
 class Brand {
   const Brand._();
 
-  /// Primary copper accent (dark mode). Bright enough to glow on graphite and
-  /// to carry near-black [UgamColorSet.onAccent] text.
-  static const Color copper = Color(0xFFD8966A);
+  /// Cabin-lamp amber (dark mode). Bright enough to carry near-black
+  /// [UgamColorSet.onAccent] text on the indigo ground.
+  static const Color amber = Color(0xFFFFC24B);
 
-  /// Deeper copper — the bottom stop of the primary-button gradient, and the
-  /// accent in light mode (legible on the bright ground).
-  static const Color copperDeep = Color(0xFFC07E50);
+  /// Deeper amber — the accent in light mode, where the bright cut would fail
+  /// contrast as ink on white.
+  static const Color amberDeep = Color(0xFFB07100);
 }
 
 class UgamColors {
   const UgamColors._();
 
+  /// **Midnight** — the dark ground. Indigo is the coach window at night;
+  /// amber is the cabin lamp. Readable at 2am without the glare a white chart
+  /// throws.
   static const UgamColorSet dark = UgamColorSet(
-    bg: Color(0xFF0C0D10), // Cool near-black ground
-    card: Color(0xFF15171C), // Soft floating surface (no border needed)
-    cardElev: Color(0xFF1E2128), // Elevated surface
-    border: Color(0x0FFFFFFF), // White @ ~6% — used sparingly
-    ink: Color(0xFFF5F6F8), // Near-white
-    ink2: Color(0xFF9A9DA7), // Secondary
-    ink3: Color(0xFF5C5F69), // Tertiary / meta
-    accent: Brand.copper, // Warm copper — the one signal color
-    accentFill: Color(0x24D8966A), // ~14% copper, tonal surfaces
-    glow: Color(0x4DD8966A), // ~30% copper — soft halos + button shadow
-    good: Color(0xFF4ADE9A), // Mint — paid / success
+    bg: Color(0xFF0C111F), // Deep indigo ground — never pure black
+    card: Color(0xFF141A2B), // Floating surface
+    cardElev: Color(0xFF1F2740), // Elevated surface
+    border: Color(0x1AFFFFFF), // White @ 10% — hairline, not shadow
+    ink: Color(0xFFEDF1FA), // Near-white with a cool cast
+    ink2: Color(0xFF959EBA), // Secondary
+    ink3: Color(0xFF5C6584), // Tertiary / meta
+    accent: Brand.amber, // "Yours" — the berth you picked. Nothing else.
+    accentFill: Color(0x24FFC24B), // ~14% amber, tonal surfaces
+    glow: Color(0x4DFFC24B), // ~30% amber — soft halos
+    action: Color(0xFFEDF1FA), // The button: max contrast, no brand hue
+    onAction: Color(0xFF0C111F), // Ground-coloured ink on the button
+    good: Color(0xFF4ADE9A), // Mint — money received
     goodFill: Color(0x224ADE9A),
-    warm: Color(0xFFE98AB4), // Rose — attention / ladies (distinct)
-    warmFill: Color(0x29E98AB4),
-    danger: Color(0xFFFF5247), // Vivid red
-    dangerFill: Color(0x29FF5247), // ~16% red, tonal danger surfaces
-    onAccent: Color(0xFF1A0E07), // Near-black ink on copper
+    warm: Color(0xFFF58BB8), // Rose — a lady is seated here
+    warmFill: Color(0x29F58BB8),
+    danger: Color(0xFFFF6B60), // Red — something needs you
+    dangerFill: Color(0x29FF6B60),
+    onAccent: Color(0xFF1A1200), // Near-black ink on amber
   );
 
+  /// **Daylight** — the light ground. White page with grey surfaces sitting ON
+  /// it (the Uber/Ola arrangement), not white cards floating on grey. Holds up
+  /// on a phone in Gujarat sun.
   static const UgamColorSet light = UgamColorSet(
-    bg: Color(0xFFF6F7F9), // Clean bright ground
-    card: Color(0xFFFFFFFF), // White surface
-    cardElev: Color(0xFFEEF0F4), // Soft elevated surface
-    border: Color(0x0F000000), // Black @ ~6%
-    ink: Color(0xFF14161B), // Near-black ink
-    ink2: Color(0xFF5A5E68), // Readable secondary
-    ink3: Color(0xFF9A9DA7), // Tertiary / meta
-    accent: Brand.copperDeep, // Deeper copper — legible on white
-    accentFill: Color(0xFFF4E7DC), // Pale copper tint
-    glow: Color(0x38B8703F), // ~22% copper halo
-    good: Color(0xFF0E9E73),
-    goodFill: Color(0xFFD8F1E7),
-    warm: Color(0xFFC24D86), // Rose — attention / ladies
+    bg: Color(0xFFFFFFFF), // White page
+    card: Color(0xFFFAFAFA), // Surface sits on the page, slightly darker
+    cardElev: Color(0xFFF1F2F3), // Elevated surface
+    border: Color(0x1C000000), // Black @ 11% — hairline, not shadow
+    ink: Color(0xFF111214), // Near-black ink
+    ink2: Color(0xFF5E6169), // Readable secondary
+    ink3: Color(0xFF8E939B), // Tertiary / meta
+    accent: Brand.amberDeep, // Deep amber — legible as ink on white
+    accentFill: Color(0xFFFFF3DC), // Pale amber tint
+    glow: Color(0x33B07100), // ~20% amber halo
+    action: Color(0xFF111214), // The button: near-black, no brand hue
+    onAction: Color(0xFFFFFFFF), // White ink on the button
+    good: Color(0xFF16A34A),
+    goodFill: Color(0xFFDCF5E5),
+    warm: Color(0xFFC24D86), // Rose — a lady is seated here
     warmFill: Color(0xFFF8E2EC),
-    danger: Color(0xFFD7362B),
-    dangerFill: Color(0xFFF9E3E1), // Pale red tint
-    onAccent: Color(0xFFFFFFFF), // Light ink on deep copper
+    danger: Color(0xFFC81E1E),
+    dangerFill: Color(0xFFF9E3E1),
+    onAccent: Color(0xFFFFFFFF), // White ink on deep amber
   );
 
   static UgamColorSet of(BuildContext context) =>
@@ -87,8 +104,23 @@ class UgamColorSet {
   final Color ink;
   final Color ink2;
   final Color ink3;
+  /// The one signal colour: **"this is yours."** The berth you picked, the leg
+  /// you chose, your row in a list. It is NOT the button — see [action].
   final Color accent;
   final Color accentFill;
+
+  /// The primary control fill — always maximum contrast against [bg] and
+  /// deliberately carrying NO brand hue.
+  ///
+  /// This is the mechanism that makes the reference apps read premium rather
+  /// than any particular colour: Uber's `buttonPrimaryFill` is `#000000`, and
+  /// Ola ships a black booking button despite a green brand. Spending the
+  /// accent on the button is what makes a UI read cheap, because then nothing
+  /// on screen is left to carry meaning.
+  final Color action;
+
+  /// Ink on [action].
+  final Color onAction;
 
   /// Soft copper halo — radial glow behind hero figures and the drop-shadow
   /// under the primary button. The signature flourish of the futuristic look.
@@ -114,6 +146,8 @@ class UgamColorSet {
     required this.ink3,
     required this.accent,
     required this.accentFill,
+    required this.action,
+    required this.onAction,
     required this.glow,
     required this.good,
     required this.goodFill,

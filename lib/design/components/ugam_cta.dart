@@ -121,7 +121,7 @@ class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
       // without changing the padding (so nothing reflows on taller labels).
       constraints: const BoxConstraints(minHeight: 44),
       decoration: BoxDecoration(
-        color: _enabled ? c.accent : c.accent.withValues(alpha: 0.5),
+        color: _enabled ? c.action : c.action.withValues(alpha: 0.4),
         borderRadius: BorderRadius.circular(UgamRadius.chip),
       ),
       child: inner,
