@@ -831,11 +831,17 @@ class _BookPill extends StatelessWidget {
           vertical: 7,
         ),
         decoration: BoxDecoration(
-          color: c.accent,
+          // Neutral, not amber: the accent means "this is yours", never
+          // "press me". Uber's buttonPrimaryFill is #000000 and Ola ships a
+          // black booking button despite a green brand — spending the brand
+          // hue on controls is what leaves nothing to carry meaning.
+          color: c.action,
           borderRadius: BorderRadius.circular(UgamRadius.chip),
           boxShadow: [
             BoxShadow(
-              color: c.glow,
+              // Was the amber glow, which read as a halo under a button that
+              // is no longer amber. Separation is by hairline and contrast now.
+              color: Colors.black.withValues(alpha: 0.18),
               blurRadius: 14,
               offset: const Offset(0, 6),
             ),
@@ -847,12 +853,12 @@ class _BookPill extends StatelessWidget {
             Text(
               tr('customer_tour_list.book_button'),
               style: UgamText.bodyStrong.copyWith(
-                color: c.onAccent,
+                color: c.onAction,
                 fontSize: 12,
               ),
             ),
             const SizedBox(width: 4),
-            Icon(Icons.arrow_forward_rounded, size: 13, color: c.onAccent),
+            Icon(Icons.arrow_forward_rounded, size: 13, color: c.onAction),
           ],
         ),
       ),
