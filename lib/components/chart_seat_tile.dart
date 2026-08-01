@@ -187,28 +187,41 @@ class _SplitTile extends StatelessWidget {
     required this.freeBerths,
   });
 
+  /// Intrinsic dimensions, NOT flex.
+  ///
+  /// CombinedSeatGrid wraps every tile in a FittedBox, which hands the child
+  /// UNBOUNDED constraints and then scales the result. `Expanded` inside a
+  /// Column under an unbounded height is a hard assertion failure ("RenderFlex
+  /// children have non-zero flex but incoming height constraints are
+  /// unbounded"), and it takes the whole chart down with it — the screen
+  /// renders an empty body rather than one broken tile. So this tile sizes
+  /// itself and lets the FittedBox do the fitting.
+  static const double _berthH = 17;
+  static const double _berthW = 34;
+
   @override
   Widget build(BuildContext context) {
     Widget berth({required Color bg, required Color fg, String? label}) {
-      return Expanded(
-        child: Container(
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(UgamRadius.seat - 3),
-          ),
-          alignment: Alignment.center,
-          child: label == null
-              ? null
-              : Text(
-                  label,
-                  style: UgamText.micro.copyWith(
-                    color: fg,
-                    fontSize: 7.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  maxLines: 1,
-                ),
+      return Container(
+        width: _berthW,
+        height: _berthH,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(UgamRadius.seat - 3),
         ),
+        alignment: Alignment.center,
+        child: label == null
+            ? null
+            : Text(
+                label,
+                style: UgamText.micro.copyWith(
+                  color: fg,
+                  fontSize: 7.5,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+              ),
       );
     }
 
@@ -224,6 +237,7 @@ class _SplitTile extends StatelessWidget {
         border: Border.all(color: c.border, width: 1),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           if (topTaken)
             berth(

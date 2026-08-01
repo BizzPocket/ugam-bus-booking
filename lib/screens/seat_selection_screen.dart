@@ -35,7 +35,18 @@ import 'seat_booking_confirm_screen.dart';
 class SeatSelectionScreen extends StatefulWidget {
   final Tour tour;
 
-  const SeatSelectionScreen({super.key, required this.tour});
+  /// Data sources, injectable so the chart can be widget-tested without a
+  /// network. Both default to the real RPC-backed service.
+  final Future<List<Bus>> Function(String tourId)? loadBuses;
+  final Future<Map<String, SeatAvailability>> Function(String tourId)?
+      loadAvailability;
+
+  const SeatSelectionScreen({
+    super.key,
+    required this.tour,
+    this.loadBuses,
+    this.loadAvailability,
+  });
 
   @override
   State<SeatSelectionScreen> createState() => _SeatSelectionScreenState();
@@ -85,8 +96,12 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
       _error = null;
     });
     try {
-      final buses = await _service.tourBuses(widget.tour.id);
-      final avail = await _service.availability(widget.tour.id);
+      final buses = await (widget.loadBuses ?? _service.tourBuses)(
+        widget.tour.id,
+      );
+      final avail = await (widget.loadAvailability ?? _service.availability)(
+        widget.tour.id,
+      );
       if (!mounted) return;
       setState(() {
         _buses = buses;
@@ -105,7 +120,9 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
 
   Future<void> _refreshAvailability() async {
     try {
-      final avail = await _service.availability(widget.tour.id);
+      final avail = await (widget.loadAvailability ?? _service.availability)(
+        widget.tour.id,
+      );
       if (!mounted) return;
       setState(() => _availability = avail);
     } catch (_) {
