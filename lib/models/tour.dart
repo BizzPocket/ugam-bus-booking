@@ -131,6 +131,12 @@ class Tour {
   bool get acceptsBookings => status.acceptsBookings;
 
   /// Buses on this tour that actually have a drawable seat chart.
+  ///
+  /// ORGANISER-SIDE ONLY. `buses` is embedded by the sync layer from a table
+  /// with no anon SELECT policy, so on the CUSTOMER app this is always empty —
+  /// which is the whole reason `chart_tour_buses` exists as a SECURITY DEFINER
+  /// RPC. Never gate a customer-facing action on this or on anything derived
+  /// from it ([sellsFromChart], [chartNeedsBus]); ask the server instead.
   Iterable<Bus> get chartableBuses =>
       buses.where((b) => (b.layout?.totalSeats ?? 0) > 0);
 

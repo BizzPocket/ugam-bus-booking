@@ -954,21 +954,21 @@ class _StickyBookCta extends StatelessWidget {
       onTap = null;
     } else if (tour.bookingMode.isChart) {
       // Chart mode: the customer taps their own berth instead of sending a
-      // request for the organiser to fulfil. A chart tour with no bus yet can't
-      // sell — you can't pick a seat that doesn't exist — so it says so rather
-      // than opening an empty chart.
-      if (tour.chartNeedsBus) {
-        label = tr('customer_tour_detail.cta_seats_not_open');
-        icon = Icons.event_seat_outlined;
-        onTap = null;
-      } else {
-        label = tr('customer_tour_detail.cta_pick_seats');
-        icon = Icons.event_seat_rounded;
-        onTap = () => Get.to(
-          () => SeatSelectionScreen(tour: tour),
-          transition: Transition.cupertino,
-        );
-      }
+      // request for the organiser to fulfil.
+      //
+      // Deliberately NOT gated on `tour.chartNeedsBus`. That getter reads
+      // `tour.buses`, and `buses` has NO anon SELECT policy (owner-only, which
+      // is exactly why chart_tour_buses exists as a SECURITY DEFINER RPC) — so
+      // customer-side `tour.buses` is ALWAYS empty and the gate could never
+      // pass. Whether a chart is sellable is a question only the server can
+      // answer; SeatSelectionScreen asks it via the RPC and shows its own
+      // "seats open once the organiser adds a bus" empty state.
+      label = tr('customer_tour_detail.cta_pick_seats');
+      icon = Icons.event_seat_rounded;
+      onTap = () => Get.to(
+        () => SeatSelectionScreen(tour: tour),
+        transition: Transition.cupertino,
+      );
     } else if (full) {
       label = tr('customer_tour_detail.cta_join_waitlist');
       icon = Icons.hourglass_top_rounded;

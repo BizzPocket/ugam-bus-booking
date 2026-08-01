@@ -14,6 +14,7 @@ import 'customer_booking_request_screen.dart';
 import 'customer_more_screen.dart';
 import 'customer_my_requests_screen.dart';
 import 'customer_tour_detail_screen.dart';
+import 'seat_selection_screen.dart';
 
 /// Public-facing tour list — image-5 fidelity.
 ///
@@ -214,14 +215,18 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                                   transition: Transition.cupertino,
                                 ),
                                 // One-tap "Book": jump straight to the booking
-                                // form, collapsing list → detail → form to a
+                                // step, collapsing list → detail → form to a
                                 // single nav. Row tap still opens detail.
+                                // Chart-mode tours go to the seat chart
+                                // instead of the request form — otherwise this
+                                // shortcut silently bypasses the new flow.
                                 onBook: () {
                                   HapticFeedback.selectionClick();
+                                  final t = g.tours[j];
                                   Get.to(
-                                    () => CustomerBookingRequestScreen(
-                                      tour: g.tours[j],
-                                    ),
+                                    () => t.bookingMode.isChart
+                                        ? SeatSelectionScreen(tour: t)
+                                        : CustomerBookingRequestScreen(tour: t),
                                     transition: Transition.cupertino,
                                   );
                                 },
