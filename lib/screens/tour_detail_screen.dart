@@ -376,6 +376,17 @@ class _HeroSection extends StatelessWidget {
     );
   }
 
+  /// Physical pixels wide the hero is actually painted at, capped so a
+  /// high-DPI phone can't ask for more than the stored image has (1600).
+  /// Returning null would mean "decode at full size", which is the thing
+  /// this exists to avoid.
+  static int _heroDecodeWidth(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final physical = (mq.size.width * mq.devicePixelRatio).round();
+    if (physical <= 0) return 800; // degenerate metrics — pick a sane default
+    return physical > 1600 ? 1600 : physical;
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasImage = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
@@ -396,8 +407,24 @@ class _HeroSection extends StatelessWidget {
             child: Image.network(
               tour.broadcastImageUrl!,
               fit: BoxFit.cover,
+              // Decode at the size we actually PAINT, not the size uploaded.
+              // The picker stores at maxWidth 1600 (create_tour_screen), so
+              // without this the hero decodes to a 1600x1067 ARGB bitmap —
+              // ~6.8 MB of RAM for a 200pt-tall decorative strip, on phones
+              // that have little to spare. cacheWidth resizes during decode,
+              // so the big bitmap never exists.
+              cacheWidth: _heroDecodeWidth(context),
               // While loading or if the photo fails, fall back to the graphite
               // backdrop so the hero never flashes raw/broken.
+              //
+              // HISTORY: this fallback used to be what ALWAYS rendered. The
+              // stored URL is a getPublicUrl() link, but the tour-broadcasts
+              // bucket was private live, so every uncredentialed fetch 400'd
+              // and the miss looked like a design choice rather than a
+              // failure. Fixed by migration 051, verified 2026-08-01:
+              // GET /object/public/tour-broadcasts/<file> with no credentials
+              // now returns 200 image/jpeg. Keep the fallback anyway — it
+              // still covers a slow network and a genuinely missing object.
               loadingBuilder: (ctx, child, progress) => progress == null
                   ? child
                   : UgamBusBackdrop(seed: tour.id, label: _routeInitials(tour)),
