@@ -282,10 +282,9 @@ void main() {
       expect(plan.deltas, isEmpty);
     });
 
-    test('no delta is raised for a same-bus move, only a re-stamped seat', () {
-      // Seat changed within bus 1 (rear → front), so the row must follow the
-      // seat or the rider reads "not collected" on their new seat — but this is
-      // not worth interrupting the agent over.
+    test('same-bus move into a cheaper band emits return delta', () {
+      // Seat changed within bus 1 (rear ₹1500 → front ₹1300): cash follows and
+      // the agent must see ₹200 to return — same-bus is not always silent.
       final p = _rider(
         'p1',
         seats: const [SeatAssignment(busId: 'bus1', seatId: 'bus1_A')],
@@ -305,7 +304,7 @@ void main() {
       );
       expect(plan.updates.single.seatId, 'bus1_A');
       expect(plan.updates.single.amountDue, 1300);
-      expect(plan.deltas, isEmpty, reason: 'same bus — no band surprise');
+      expect(plan.deltas.single.toReturn, 200);
     });
 
     test('re-running against its own output changes nothing', () {
@@ -405,6 +404,101 @@ void main() {
       final moved = plan.updates.single;
       expect(moved.busId, 'bus1', reason: 'same-bus seat preferred over a jump');
       expect(moved.seatId, 'bus1_A');
+      // Repriced 1500 → 1300 on the same bus: return-due, not silent.
+      expect(plan.deltas.single.toReturn, 200);
+    });
+  });
+
+  group('Wave A explicit band deltas', () {
+    test('₹1600 bus1 → ₹2000 bus2 collects ₹400', () {
+      final busCheap = _bus(id: 'bus1', name: 'Bus 1', row0: 1600, row1: 1600);
+      final busDear = _bus(id: 'bus2', name: 'Bus 2', row0: 2000, row1: 2000);
+      final p = _rider(
+        'p1',
+        seats: const [SeatAssignment(busId: 'bus2', seatId: 'bus2_A')],
+      );
+      final plan = CollectionReconciler.plan(
+        tour: _tour(buses: [busCheap, busDear], passengers: [p]),
+        passengerIds: const ['p1'],
+        collections: [
+          _row(
+            passengerId: 'p1',
+            busId: 'bus1',
+            seatId: 'bus1_A',
+            due: 1600,
+            received: 1600,
+          ),
+        ],
+      );
+      expect(plan.updates.single.stillToCollect, 400);
+      expect(plan.deltas.single.toCollect, 400);
+    });
+
+    test('₹1600 bus1 → ₹1400 bus2 returns ₹200', () {
+      final busA = _bus(id: 'bus1', name: 'Bus 1', row0: 1600, row1: 1600);
+      final busB = _bus(id: 'bus2', name: 'Bus 2', row0: 1400, row1: 1400);
+      final p = _rider(
+        'p1',
+        seats: const [SeatAssignment(busId: 'bus2', seatId: 'bus2_A')],
+      );
+      final plan = CollectionReconciler.plan(
+        tour: _tour(buses: [busA, busB], passengers: [p]),
+        passengerIds: const ['p1'],
+        collections: [
+          _row(
+            passengerId: 'p1',
+            busId: 'bus1',
+            seatId: 'bus1_A',
+            due: 1600,
+            received: 1600,
+          ),
+        ],
+      );
+      expect(plan.deltas.single.toReturn, 200);
+      expect(plan.updates.single.amountRefunded, 0);
+    });
+
+    test('same-bus move into dearer band emits collect delta', () {
+      final p = _rider(
+        'p1',
+        seats: const [SeatAssignment(busId: 'bus1', seatId: 'bus1_B')],
+      );
+      final plan = CollectionReconciler.plan(
+        tour: _tour(buses: [bus1, bus2], passengers: [p]),
+        passengerIds: const ['p1'],
+        collections: [
+          _row(
+            passengerId: 'p1',
+            busId: 'bus1',
+            seatId: 'bus1_A',
+            due: 1300,
+            received: 1300,
+          ),
+        ],
+      );
+      expect(plan.updates, isNotEmpty);
+      expect(plan.deltas, isNotEmpty);
+      expect(plan.deltas.single.toCollect, 200);
+    });
+
+    test('same-bus same-band seat move stays silent (no delta)', () {
+      final p = _rider(
+        'p1',
+        seats: const [SeatAssignment(busId: 'bus1', seatId: 'bus1_C')],
+      );
+      final plan = CollectionReconciler.plan(
+        tour: _tour(buses: [bus1, bus2], passengers: [p]),
+        passengerIds: const ['p1'],
+        collections: [
+          _row(
+            passengerId: 'p1',
+            busId: 'bus1',
+            seatId: 'bus1_B',
+            due: 1500,
+            received: 1500,
+          ),
+        ],
+      );
       expect(plan.deltas, isEmpty);
     });
   });

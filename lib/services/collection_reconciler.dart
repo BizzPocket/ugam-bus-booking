@@ -7,9 +7,9 @@ import '../models/tour.dart';
 
 /// One passenger's money position after their seats moved.
 ///
-/// Reported ONLY when the move crossed buses (or otherwise re-priced the
-/// passenger), because that is the case the agent has to act on: the cash was
-/// taken at the OLD bus's band and the NEW bus bills a different one.
+/// Reported when the move crossed buses OR re-priced the passenger on a
+/// different band, because that is the case the agent has to act on: the cash
+/// was taken at the OLD price and the NEW seat bills a different one.
 ///
 /// [paid] is real cash in hand (`amount_received - amount_refunded`) summed
 /// across every collection row the passenger holds on this tour. [due] is the
@@ -30,6 +30,12 @@ class SeatMoveMoneyDelta {
   /// Bus names the passenger now sits on.
   final List<String> toBusNames;
 
+  /// Bus ids matching [fromBusNames] — for deep-linking into collection.
+  final List<String> fromBusIds;
+
+  /// Bus ids matching [toBusNames] — destination drawer after the move.
+  final List<String> toBusIds;
+
   const SeatMoveMoneyDelta({
     required this.passengerId,
     required this.passengerName,
@@ -37,6 +43,8 @@ class SeatMoveMoneyDelta {
     required this.due,
     required this.fromBusNames,
     required this.toBusNames,
+    this.fromBusIds = const [],
+    this.toBusIds = const [],
   });
 
   /// +ve = collect this much more; -ve = return this much to the customer.
@@ -203,24 +211,51 @@ class CollectionReconciler {
       if (changed) updates.add(priced);
     }
 
-    // Only report a delta when a row genuinely crossed buses — that is the
-    // case where the fare band changed under the passenger and the agent has
-    // to collect or return the difference. Same-bus re-pricing already shows
-    // up on the collection screen without interrupting anyone.
-    if (rehomedFromBus.isEmpty) return (updates: updates, delta: null);
-
     // Cash position is passenger-wide: sum EVERY row (including any left
     // stranded), because that is the money physically taken from this person.
     final paid = rows.fold<double>(0, (s, r) => s + r.netCollected);
+    final outstanding = totalDue - paid;
+    final isSquare = outstanding.abs() <= Collection.kMoneyEpsilon;
+
+    // Surfaced when the agent must act: crossed buses, OR same-bus band
+    // reprice that leaves a collect/return gap. Same-band seat shuffle that
+    // stays square stays silent.
+    final dueRepriced = updates.any((u) {
+      final original = rows.firstWhereOrNull((o) => o.id == u.id);
+      if (original == null) return false;
+      return (original.amountDue - u.amountDue).abs() > Collection.kMoneyEpsilon;
+    });
+    final shouldReport =
+        !isSquare && (rehomedFromBus.isNotEmpty || dueRepriced);
+    if (!shouldReport) return (updates: updates, delta: null);
+
     final toBusNames = <String>[];
+    final toBusIds = <String>[];
     for (final s in seats) {
-      final n = busById[s.busId]?.name;
-      if (n != null && !toBusNames.contains(n)) toBusNames.add(n);
+      if (!toBusIds.contains(s.busId)) {
+        toBusIds.add(s.busId);
+        final n = busById[s.busId]?.name;
+        if (n != null) toBusNames.add(n);
+      }
     }
+    final fromBusIds = <String>[];
     final fromBusNames = <String>[];
-    for (final id in rehomedFromBus) {
-      final n = busById[id]?.name;
-      if (n != null && !fromBusNames.contains(n)) fromBusNames.add(n);
+    if (rehomedFromBus.isNotEmpty) {
+      for (final id in rehomedFromBus) {
+        fromBusIds.add(id);
+        final n = busById[id]?.name;
+        if (n != null) fromBusNames.add(n);
+      }
+    } else {
+      // Same-bus band change: origin is the bus(es) the updated rows sat on.
+      for (final u in updates) {
+        final original = rows.firstWhereOrNull((o) => o.id == u.id);
+        final id = original?.busId ?? u.busId;
+        if (fromBusIds.contains(id)) continue;
+        fromBusIds.add(id);
+        final n = busById[id]?.name;
+        if (n != null) fromBusNames.add(n);
+      }
     }
 
     return (
@@ -232,6 +267,8 @@ class CollectionReconciler {
         due: totalDue,
         fromBusNames: fromBusNames,
         toBusNames: toBusNames,
+        fromBusIds: fromBusIds,
+        toBusIds: toBusIds,
       ),
     );
   }
