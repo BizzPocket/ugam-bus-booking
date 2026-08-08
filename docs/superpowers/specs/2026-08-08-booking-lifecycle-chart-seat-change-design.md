@@ -172,5 +172,5 @@ Instant self-move without approval; auto UPI refund to bank; changing another pe
 
 ## Implementation plans
 
-- Wave A: `docs/superpowers/plans/2026-08-08-booking-lifecycle-wave-a-admin-move-money.md`
+- Wave A: `docs/superpowers/plans/2026-08-08-booking-lifecycle-wave-a-admin-move-money.md` — **implemented 2026-08-08** (reconciler same-bus deltas, collection highlight, notice actions, booking-settings help)
 - Wave C / B: separate plans after Wave A ships
