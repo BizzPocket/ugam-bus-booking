@@ -18,6 +18,9 @@ import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/tour_capacity.dart';
+import '../utils/tour_detail_cockpit.dart';
+import '../widgets/tour_detail/tour_money_tab.dart';
+import '../widgets/tour_detail/tour_overview_cockpit.dart';
 import 'add_bus_screen.dart';
 import 'add_return_ticket_sheet.dart';
 import 'edit_tour_screen.dart';
@@ -53,6 +56,7 @@ class TourDetailScreen extends StatefulWidget {
 
 class _TourDetailScreenState extends State<TourDetailScreen> {
   int _tabIndex = 0;
+  bool _heroCollapsed = false;
 
   @override
   void initState() {
@@ -98,62 +102,106 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
       final hasHeroImage = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
       return UgamScaffold(
         extendBody: true,
-        body: RefreshIndicator(
-          color: c.accent,
-          onRefresh: tourCtrl.refreshTours,
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics(),
-            ),
-            slivers: [
-              SliverToBoxAdapter(
-                child: _HeroSection(
-                  tour: tour,
-                  onBack: () => AppNav.pop(context),
-                  onEdit: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => EditTourScreen(tourId: widget.tourId),
+        body: NotificationListener<ScrollNotification>(
+          onNotification: (n) {
+            if (!hasHeroImage) return false;
+            if (n.metrics.axis != Axis.vertical) return false;
+            final collapsed = n.metrics.pixels > 140;
+            if (collapsed != _heroCollapsed) {
+              setState(() => _heroCollapsed = collapsed);
+            }
+            return false;
+          },
+          child: Stack(
+            children: [
+              RefreshIndicator(
+                color: c.accent,
+                onRefresh: tourCtrl.refreshTours,
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: _HeroSection(
+                        tour: tour,
+                        onBack: () => AppNav.pop(context),
+                        onEdit: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                EditTourScreen(tourId: widget.tourId),
+                          ),
+                        ),
+                        onDelete: () =>
+                            _confirmDelete(context, tourCtrl, tour),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          UgamSpacing.gutter,
+                          hasHeroImage ? UgamSpacing.huge : UgamSpacing.lg,
+                          UgamSpacing.gutter,
+                          UgamSpacing.lg,
+                        ),
+                        child: _TabBar(
+                          index: _tabIndex,
+                          counts: [
+                            null,
+                            tour.passengerCount == 0
+                                ? null
+                                : tour.passengerCount,
+                            tour.buses.isEmpty ? null : tour.buses.length,
+                            null,
+                            null,
+                          ],
+                          onChanged: (i) => setState(() => _tabIndex = i),
+                        ),
+                      ),
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(
+                        UgamSpacing.gutter,
+                        0,
+                        UgamSpacing.gutter,
+                        UgamSpacing.dockClearance,
+                      ),
+                      sliver: _buildTabBody(tour, c),
+                    ),
+                  ],
+                ),
+              ),
+              if (hasHeroImage)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(
+                    ignoring: !_heroCollapsed,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 180),
+                      opacity: _heroCollapsed ? 1 : 0,
+                      child: _CollapsedTourChrome(
+                        tour: tour,
+                        c: c,
+                        onBack: () => AppNav.pop(context),
+                        onMore: () {
+                          // Reuse hero overflow by pushing edit sheet via a
+                          // throwaway hero section actions — open EditTour.
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  EditTourScreen(tourId: widget.tourId),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ),
-                  onDelete: () => _confirmDelete(context, tourCtrl, tour),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Padding(
-                  // Image hero: the summary card overlaps downward (-28), so it
-                  // needs the larger top gap. Compact header: no overlap, tabs
-                  // sit closer.
-                  padding: EdgeInsets.fromLTRB(
-                    UgamSpacing.gutter,
-                    hasHeroImage ? UgamSpacing.huge : UgamSpacing.lg,
-                    UgamSpacing.gutter,
-                    UgamSpacing.lg,
-                  ),
-                  child: _TabBar(
-                    index: _tabIndex,
-                    counts: [
-                      null,
-                      tour.passengerCount == 0 ? null : tour.passengerCount,
-                      tour.buses.isEmpty ? null : tour.buses.length,
-                      null,
-                    ],
-                    onChanged: (i) => setState(() => _tabIndex = i),
-                  ),
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(
-                  UgamSpacing.gutter,
-                  0,
-                  UgamSpacing.gutter,
-                  UgamSpacing.dockClearance,
-                ),
-                sliver: _buildTabBody(tour, c),
-              ),
             ],
           ),
         ),
-        // Sticky tab action bar.
         bottomNavigationBar: _StickyAction(
           tour: tour,
           tab: _tabIndex,
@@ -190,6 +238,8 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
       case 2:
         return _BusesTab(tour: tour, c: c);
       case 3:
+        return TourMoneyTab(tour: tour, c: c);
+      case 4:
         return _ActivityTab(tour: tour, c: c);
       case 0:
       default:
@@ -199,6 +249,87 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
           onSwitchTab: (i) => setState(() => _tabIndex = i),
         );
     }
+  }
+}
+
+
+/// Sticky compact chrome shown when the tall image hero has scrolled away.
+class _CollapsedTourChrome extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  final VoidCallback onBack;
+  final VoidCallback onMore;
+
+  const _CollapsedTourChrome({
+    required this.tour,
+    required this.c,
+    required this.onBack,
+    required this.onMore,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final top = MediaQuery.of(context).padding.top;
+    return Material(
+      color: c.bg.withValues(alpha: 0.96),
+      elevation: 0,
+      child: Container(
+        padding: EdgeInsets.fromLTRB(
+          UgamSpacing.gutter,
+          top + UgamSpacing.sm,
+          UgamSpacing.gutter,
+          UgamSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: c.border)),
+        ),
+        child: Row(
+          children: [
+            UgamIconButton(
+              icon: Icons.arrow_back_rounded,
+              onTap: onBack,
+              semanticLabel: tr('app.action.back'),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tour.title,
+                    style: UgamText.titleS.copyWith(color: c.ink),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  UgamStatusDot(
+                    label: tour.status.displayName,
+                    tone: _toneFor(tour.status),
+                  ),
+                ],
+              ),
+            ),
+            if ((tour.broadcastImageUrl ?? '').trim().isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.network(
+                  tour.broadcastImageUrl!,
+                  width: 36,
+                  height: 36,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(width: 36, height: 36),
+                ),
+              ),
+            const SizedBox(width: UgamSpacing.sm),
+            UgamIconButton(
+              icon: Icons.more_vert_rounded,
+              onTap: onMore,
+              semanticLabel: tr('tour_detail.actions_title'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -342,33 +473,7 @@ class _HeroSection extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: UgamSpacing.md),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.md,
-                  vertical: UgamSpacing.sm,
-                ),
-                decoration: BoxDecoration(
-                  color: c.accentFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.input),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      Formatters.formatMoneyInr(tour.pricePerSeat),
-                      style: UgamText.tabular(
-                        UgamText.titleM.copyWith(color: c.accent),
-                      ),
-                    ),
-                    Text(
-                      tr('tour_detail.per_seat'),
-                      style: UgamText.caption
-                          .copyWith(color: c.accent, fontSize: 10),
-                    ),
-                  ],
-                ),
-              ),
+              TourHeroChipBadge(tour: tour, c: c),
             ],
           ),
         ],
@@ -555,31 +660,7 @@ class _HeroSection extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: UgamSpacing.sm),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: UgamSpacing.md,
-                      vertical: UgamSpacing.sm,
-                    ),
-                    decoration: BoxDecoration(
-                      color: c.accentFill,
-                      borderRadius: BorderRadius.circular(UgamRadius.input),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          Formatters.formatMoneyInr(tour.pricePerSeat),
-                          style: UgamText.tabular(
-                            UgamText.titleM.copyWith(color: c.accent),
-                          ),
-                        ),
-                        Text(tr('tour_detail.per_seat'),
-                            style: UgamText.caption
-                                .copyWith(color: c.accent, fontSize: 10)),
-                      ],
-                    ),
-                  ),
+                  TourHeroChipBadge(tour: tour, c: c),
                 ],
               ),
             ),
@@ -701,6 +782,7 @@ class _TabBar extends StatelessWidget {
       tr('tour_detail.tab_overview'),
       tr('tour_detail.tab_passengers'),
       tr('tour_detail.tab_buses'),
+      tr('tour_detail.tab_money'),
       tr('tour_detail.tab_activity'),
     ];
     return UgamTabPills(
@@ -739,19 +821,129 @@ class _OverviewTab extends StatelessWidget {
           onSwitchTab: onSwitchTab,
         ),
         const SizedBox(height: UgamSpacing.lg),
-        // Full actions grid — every per-tour workspace (Requests / Buses /
-        // Seats / Money / Groups / Lock-Send) in one clean labeled surface,
-        // with the Next-Action card above as the highlighted "do this next".
-        // (Restored at the user's request; the earlier BUG-001 slim that
-        // dropped Seats/Buses/Requests removed shortcuts the agent relies on.)
-        _ActionsGrid(tour: tour, c: c),
-        const SizedBox(height: UgamSpacing.xl),
+        TourOverviewVitals(tour: tour, c: c, onSwitchTab: onSwitchTab),
+        const SizedBox(height: UgamSpacing.lg),
+        _OverviewToolsRow(tour: tour, c: c, onSwitchTab: onSwitchTab),
+        const SizedBox(height: UgamSpacing.lg),
+        TourNeedsAttention(
+          tour: tour,
+          c: c,
+          onSwitchTab: onSwitchTab,
+          onOpenManageBuses: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ManageBusesScreen(tourId: tour.id),
+            ),
+          ),
+        ),
+        const SizedBox(height: UgamSpacing.md),
         _BroadcastCard(tour: tour, c: c),
       ]),
     );
   }
 
 }
+
+/// Compact tools row: Money · Broadcast · More (expander with secondary tools).
+class _OverviewToolsRow extends StatelessWidget {
+  final Tour tour;
+  final UgamColorSet c;
+  final ValueChanged<int> onSwitchTab;
+
+  const _OverviewToolsRow({
+    required this.tour,
+    required this.c,
+    required this.onSwitchTab,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(tr('tour_detail.tools_section'),
+            style: UgamText.micro.copyWith(color: c.ink3)),
+        const SizedBox(height: UgamSpacing.sm),
+        Row(
+          children: [
+            Expanded(
+              child: _ToolTile(
+                c: c,
+                icon: Icons.account_balance_wallet_rounded,
+                label: tr('tour_detail.tool_money'),
+                onTap: () => onSwitchTab(3),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: _ToolTile(
+                c: c,
+                icon: Icons.campaign_rounded,
+                label: tr('tour_detail.tool_broadcast'),
+                onTap: () => _TourBroadcast.copy(tour),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: _ToolTile(
+                c: c,
+                icon: Icons.apps_rounded,
+                label: tr('tour_detail.tool_more'),
+                onTap: () {
+                  // Scroll affordance: expand more tools via existing grid sheet.
+                  UgamSheet.show<void>(
+                    context,
+                    title: tr('tour_detail.more_tools'),
+                    builder: (_) => _ActionsGrid(tour: tour, c: c),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ToolTile extends StatelessWidget {
+  final UgamColorSet c;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ToolTile({
+    required this.c,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCard.plain(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(
+        vertical: UgamSpacing.md,
+        horizontal: UgamSpacing.sm,
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 22, color: c.accent),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: UgamText.caption.copyWith(color: c.ink),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── NEXT ACTION ──────────────────────────────────────────────────────
 
 class _NextActionCard extends StatelessWidget {
   final Tour tour;
@@ -1027,14 +1219,24 @@ class _BroadcastCardState extends State<_BroadcastCard> {
 
 // ─── PASSENGERS TAB ───────────────────────────────────────────────────
 
-class _PassengersTab extends StatelessWidget {
+class _PassengersTab extends StatefulWidget {
   final Tour tour;
   final UgamColorSet c;
 
   const _PassengersTab({required this.tour, required this.c});
 
   @override
+  State<_PassengersTab> createState() => _PassengersTabState();
+}
+
+class _PassengersTabState extends State<_PassengersTab> {
+  TravelerFilter _filter = TravelerFilter.all;
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
+    final tour = widget.tour;
+    final c = widget.c;
     final all = tour.passengers;
 
     if (all.isEmpty) {
@@ -1046,13 +1248,15 @@ class _PassengersTab extends StatelessWidget {
       );
     }
 
+    final filtered = filterTravelers(
+      all,
+      filter: _filter,
+      query: _query,
+    );
+    final needsSeatCount = all.where(passengerNeedsSeat).length;
+
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        // Slim roster header: the riders themselves are the hero of this tab,
-        // so the per-tour requests manager is demoted from a full-width card to
-        // a compact "+ Add" affordance on the right. Tapping Add — or any row's
-        // Edit action — still lands on the dedicated RequestsScreen, which owns
-        // all add / edit / waitlist management; this tab stays read-only.
         _RosterHeader(
           count: all.length,
           c: c,
@@ -1062,16 +1266,104 @@ class _PassengersTab extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: UgamSpacing.sm),
+        UgamSearchField(
+          hint: tr('tour_detail.search_travelers_hint'),
+          onChanged: (v) => setState(() => _query = v),
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _FilterChip(
+                label: tr('tour_detail.filter_all'),
+                count: all.length,
+                selected: _filter == TravelerFilter.all,
+                c: c,
+                onTap: () => setState(() => _filter = TravelerFilter.all),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: tr('tour_detail.filter_needs_seat'),
+                count: needsSeatCount,
+                selected: _filter == TravelerFilter.needsSeat,
+                c: c,
+                onTap: () => setState(() => _filter = TravelerFilter.needsSeat),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: tr('tour_detail.filter_sl'),
+                selected: _filter == TravelerFilter.single,
+                c: c,
+                onTap: () => setState(() => _filter = TravelerFilter.single),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: tr('tour_detail.filter_dl'),
+                selected: _filter == TravelerFilter.double_,
+                c: c,
+                onTap: () => setState(() => _filter = TravelerFilter.double_),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: UgamSpacing.md),
-        // Full roster, unfiltered. Each row is now tappable → a quick-action
-        // sheet (WhatsApp / Call / Edit request) so the agent can act on a
-        // rider without leaving the tour.
-        for (var i = 0; i < all.length; i++) ...[
-          _PassengerRow(passenger: all[i], tour: tour, c: c),
-          if (i != all.length - 1)
-            const SizedBox(height: UgamSpacing.tight),
-        ],
+        if (filtered.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xl),
+            child: UgamEmpty(
+              icon: Icons.search_off_rounded,
+              title: tr('tour_detail.no_matches_title'),
+              body: tr('tour_detail.no_matches_body'),
+            ),
+          )
+        else
+          for (var i = 0; i < filtered.length; i++) ...[
+            _PassengerRow(passenger: filtered[i], tour: tour, c: c),
+            if (i != filtered.length - 1)
+              const SizedBox(height: UgamSpacing.tight),
+          ],
       ]),
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  final String label;
+  final int? count;
+  final bool selected;
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.c,
+    required this.onTap,
+    this.count,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = count == null ? label : '$label $count';
+    return Material(
+      color: selected ? c.accent : c.cardElev,
+      borderRadius: BorderRadius.circular(UgamRadius.chip),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            text,
+            style: UgamText.caption.copyWith(
+              color: selected ? c.onAccent : c.ink2,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1465,8 +1757,56 @@ class _BusesTab extends StatelessWidget {
     // ONE add-bus affordance per screen: the sticky bottom CTA owns "Add
     // another bus" (see _StickyAction case 2). The previously-duplicated inline
     // _AddBusTile is intentionally omitted here so the entry isn't doubled.
+    final occupied = tour.occupiedBerths;
+    final capacity = tour.totalBusSeats;
+    final fillPct = capacity == 0 ? 0 : ((occupied * 100) / capacity).round();
+    final driversSet = tour.buses.where((b) => b.driverName.trim().isNotEmpty).length;
+
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
+        Row(
+          children: [
+            Expanded(
+              child: UgamCard.plain(
+                padding: const EdgeInsets.all(UgamSpacing.md),
+                child: Column(
+                  children: [
+                    Text(
+                      tr('tour_detail.fleet_filled_pct', namedArgs: {'n': '$fillPct'}),
+                      style: UgamText.tabular(UgamText.titleM.copyWith(color: c.ink)),
+                    ),
+                    Text(tr('tour_detail.fleet_filled_label'),
+                        style: UgamText.micro.copyWith(color: c.ink3)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: UgamCard.plain(
+                padding: const EdgeInsets.all(UgamSpacing.md),
+                child: Column(
+                  children: [
+                    Text(
+                      tr('tour_detail.fleet_drivers', namedArgs: {
+                        'set': '$driversSet',
+                        'total': '${tour.buses.length}',
+                      }),
+                      style: UgamText.tabular(
+                        UgamText.titleM.copyWith(
+                          color: driversSet == tour.buses.length ? c.ink : c.danger,
+                        ),
+                      ),
+                    ),
+                    Text(tr('tour_detail.fleet_drivers_label'),
+                        style: UgamText.micro.copyWith(color: c.ink3)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.md),
         for (var i = 0; i < tour.buses.length; i++) ...[
           _BusListItem(
             bus: tour.buses[i],
@@ -1552,6 +1892,18 @@ class _BusListItem extends StatelessWidget {
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: LinearProgressIndicator(
+                      value: bus.totalSeats == 0
+                          ? 0
+                          : (filled / bus.totalSeats).clamp(0.0, 1.0),
+                      minHeight: 5,
+                      backgroundColor: c.cardElev,
+                      color: filled >= bus.totalSeats ? c.good : c.accent,
+                    ),
                   ),
                   if (bus.driverPhone.trim().isNotEmpty)
                     Padding(
@@ -1640,31 +1992,78 @@ class _BusListItem extends StatelessWidget {
 
 // ─── ACTIVITY TAB ─────────────────────────────────────────────────────
 
-class _ActivityTab extends StatelessWidget {
+class _ActivityTab extends StatefulWidget {
   final Tour tour;
   final UgamColorSet c;
 
   const _ActivityTab({required this.tour, required this.c});
 
   @override
+  State<_ActivityTab> createState() => _ActivityTabState();
+}
+
+class _ActivityTabState extends State<_ActivityTab> {
+  ActivityEventCategory? _filter; // null = all
+
+  @override
   Widget build(BuildContext context) {
-    final events = _buildEvents(tour);
+    final c = widget.c;
+    final events = _buildTourTimelineEvents(widget.tour);
+    final visible = _filter == null
+        ? events
+        : events.where((e) => e.category == _filter).toList();
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
         _SectionEyebrow(label: tr('tour_detail.timeline'), c: c),
+        const SizedBox(height: UgamSpacing.sm),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _FilterChip(
+                label: tr('tour_detail.activity_filter_all'),
+                selected: _filter == null,
+                c: c,
+                onTap: () => setState(() => _filter = null),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: tr('tour_detail.activity_filter_seats'),
+                selected: _filter == ActivityEventCategory.seats,
+                c: c,
+                onTap: () => setState(() => _filter = ActivityEventCategory.seats),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: tr('tour_detail.activity_filter_buses'),
+                selected: _filter == ActivityEventCategory.buses,
+                c: c,
+                onTap: () => setState(() => _filter = ActivityEventCategory.buses),
+              ),
+              const SizedBox(width: 6),
+              _FilterChip(
+                label: tr('tour_detail.activity_filter_money'),
+                selected: _filter == ActivityEventCategory.money,
+                c: c,
+                onTap: () => setState(() => _filter = ActivityEventCategory.money),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: UgamSpacing.md),
-        for (var i = 0; i < events.length; i++)
+        for (var i = 0; i < visible.length; i++)
           _TimelineRow(
-            event: events[i],
+            event: visible[i],
             isFirst: i == 0,
-            isLast: i == events.length - 1,
+            isLast: i == visible.length - 1,
             c: c,
           ),
       ]),
     );
   }
+}
 
-  List<_TimelineEvent> _buildEvents(Tour t) {
+List<_TimelineEvent> _buildTourTimelineEvents(Tour t) {
     final events = <_TimelineEvent>[];
 
     events.add(_TimelineEvent(
@@ -1672,6 +2071,7 @@ class _ActivityTab extends StatelessWidget {
       title: tr('tour_detail.event_tour_created'),
       time: t.createdAt,
       tone: UgamStatusTone.neutral,
+      category: ActivityEventCategory.system,
     ));
 
     if (t.passengers.isNotEmpty) {
@@ -1688,7 +2088,8 @@ class _ActivityTab extends StatelessWidget {
             namedArgs: {'name': first.name}),
         time: earliest,
         tone: UgamStatusTone.accent,
-      ));
+      category: ActivityEventCategory.requests,
+    ));
 
       if (t.passengers.length > 1) {
         final latestReq = t.passengers
@@ -1701,7 +2102,8 @@ class _ActivityTab extends StatelessWidget {
                 namedArgs: {'n': '${t.passengers.length}'}),
             time: latestReq,
             tone: UgamStatusTone.accent,
-          ));
+      category: ActivityEventCategory.requests,
+    ));
         }
       }
     }
@@ -1718,7 +2120,8 @@ class _ActivityTab extends StatelessWidget {
                 namedArgs: {'n': '${t.buses.length}'}),
         time: earliestBus,
         tone: UgamStatusTone.accent,
-      ));
+      category: ActivityEventCategory.buses,
+    ));
     }
 
     if (t.totalSeatsAssigned > 0) {
@@ -1730,7 +2133,8 @@ class _ActivityTab extends StatelessWidget {
                 namedArgs: {'n': '${t.totalSeatsAssigned}'}),
         time: t.updatedAt,
         tone: UgamStatusTone.accent,
-      ));
+      category: ActivityEventCategory.seats,
+    ));
     }
 
     if (t.allSeatsAssigned) {
@@ -1739,7 +2143,8 @@ class _ActivityTab extends StatelessWidget {
         title: tr('tour_detail.event_all_seats_assigned'),
         time: t.updatedAt,
         tone: UgamStatusTone.good,
-      ));
+      category: ActivityEventCategory.seats,
+    ));
     }
 
     if (t.status == TourStatus.locked || t.status == TourStatus.completed) {
@@ -1748,7 +2153,8 @@ class _ActivityTab extends StatelessWidget {
         title: tr('tour_detail.event_tour_locked'),
         time: t.updatedAt,
         tone: UgamStatusTone.good,
-      ));
+      category: ActivityEventCategory.system,
+    ));
     }
 
     if (t.status == TourStatus.completed) {
@@ -1757,12 +2163,12 @@ class _ActivityTab extends StatelessWidget {
         title: tr('tour_detail.event_trip_completed'),
         time: t.updatedAt,
         tone: UgamStatusTone.neutral,
-      ));
+      category: ActivityEventCategory.system,
+    ));
     }
 
     events.sort((a, b) => a.time.compareTo(b.time));
     return events;
-  }
 }
 
 class _TimelineEvent {
@@ -1770,11 +2176,13 @@ class _TimelineEvent {
   final String title;
   final DateTime time;
   final UgamStatusTone tone;
+  final ActivityEventCategory category;
   const _TimelineEvent({
     required this.icon,
     required this.title,
     required this.time,
     required this.tone,
+    this.category = ActivityEventCategory.system,
   });
 }
 
@@ -1915,7 +2323,7 @@ class _StickyAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (tab == 3) {
+    if (tab == 4) {
       // Activity tab → no sticky action (back button is enough).
       return const SizedBox.shrink();
     }
@@ -2029,6 +2437,7 @@ void _runKind(
       );
       break;
     case _NextActionKind.lockAndNotify:
+    case _NextActionKind.renotify:
       // Push the tour-scoped Notify screen for THIS tour.
       Navigator.of(context).push(
         MaterialPageRoute(
@@ -2158,6 +2567,9 @@ class _ActionsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final locked = tour.status == TourStatus.locked;
+    final needsRenotify = locked &&
+        tour.passengers.any((p) =>
+            p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified);
     final readyToLock = !locked &&
         tour.passengers.isNotEmpty &&
         tour.allSeatsAssigned &&
@@ -2209,10 +2621,19 @@ class _ActionsGrid extends StatelessWidget {
       onTap: () => push(TourGroupsScreen(tourId: tour.id)),
     );
     final lockSend = _TourToolRow(
-      icon: locked ? Icons.send_rounded : Icons.lock_rounded,
-      label: locked ? tr('notify.title') : tr('tour_detail.tool_lock'),
+      icon: needsRenotify
+          ? Icons.chat_rounded
+          : locked
+              ? Icons.send_rounded
+              : Icons.lock_rounded,
+      label: needsRenotify
+          ? tr('tour_detail.action_renotify_cta')
+          : locked
+              ? tr('notify.title')
+              : tr('tour_detail.tool_lock'),
       c: c,
       highlight: readyToLock || locked,
+      warmHighlight: needsRenotify,
       onTap: () => push(NotifyScreen(tourId: tour.id)),
     );
 
@@ -2236,7 +2657,7 @@ class _ActionsGrid extends StatelessWidget {
         UgamExpander(
           title: tr('tour_detail.more_tools'),
           icon: Icons.apps_rounded,
-          initiallyExpanded: readyToLock || locked,
+          initiallyExpanded: readyToLock || needsRenotify || locked,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2265,12 +2686,16 @@ class _TourToolRow extends StatelessWidget {
   /// ready to lock or already locked, so the next step stands out.
   final bool highlight;
 
+  /// When true with [highlight], uses warm (re-notify) instead of good.
+  final bool warmHighlight;
+
   const _TourToolRow({
     required this.icon,
     required this.label,
     required this.onTap,
     required this.c,
     this.highlight = false,
+    this.warmHighlight = false,
   });
 
   @override
@@ -2279,8 +2704,17 @@ class _TourToolRow extends StatelessWidget {
     // ink) so the only champagne signal on the Overview is the single next
     // action card / sticky CTA. The "good" highlight (ready-to-lock / locked)
     // is a distinct semantic green, not the rationed gold, so it stays.
-    final iconColor = highlight ? c.good : c.ink;
-    final fill = highlight ? c.goodFill : c.cardElev;
+    // Warm is for post-lock re-notify urgency.
+    final iconColor = !highlight
+        ? c.ink
+        : warmHighlight
+            ? c.warm
+            : c.good;
+    final fill = !highlight
+        ? c.cardElev
+        : warmHighlight
+            ? c.warmFill
+            : c.goodFill;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -2335,6 +2769,7 @@ enum _NextActionKind {
   assignSeats,
   pickHandler,
   lockAndNotify,
+  renotify,
   completeGoLeg,
   addReturnTicket,
   markCompleted,
@@ -2431,6 +2866,25 @@ _NextAction _nextActionFor(Tour tour) {
       icon: Icons.lock_rounded,
       tone: UgamStatusTone.good,
     );
+  }
+  // Post-lock seat edits that haven't been WhatsApp'd yet outrank leg
+  // completion — passengers are sitting on wrong-confirmed seats until then.
+  if (tour.status == TourStatus.locked) {
+    final changed = tour.passengers
+        .where((p) =>
+            p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified)
+        .length;
+    if (changed > 0) {
+      return _NextAction(
+        kind: _NextActionKind.renotify,
+        title: tr('tour_detail.action_renotify_title'),
+        subtitle: tr('tour_detail.action_renotify_subtitle',
+            namedArgs: {'n': '$changed'}),
+        ctaLabel: tr('tour_detail.action_renotify_cta'),
+        icon: Icons.chat_rounded,
+        tone: UgamStatusTone.warm,
+      );
+    }
   }
   if (tour.status == TourStatus.locked &&
       tour.passengers.any(
