@@ -105,6 +105,14 @@ class _BookingSettingsSheetState extends State<_BookingSettingsSheet> {
           const SizedBox(height: UgamSpacing.xs),
           _modeCard(c, BookingMode.chart),
 
+          Padding(
+            padding: const EdgeInsets.only(top: UgamSpacing.sm),
+            child: Text(
+              tr('booking_settings.move_money_help'),
+              style: UgamText.micro.copyWith(color: c.ink3),
+            ),
+          ),
+
           if (_modeLocked)
             Padding(
               padding: const EdgeInsets.only(top: UgamSpacing.sm),

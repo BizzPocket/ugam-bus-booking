@@ -2747,6 +2747,7 @@
     "money": "Money",
     "mode_locked": "This tour already has bookings, so the mode is fixed.",
     "needs_bus": "Add a bus with a seat layout before customers can pick berths.",
+    "move_money_help": "Moving a paid rider to another bus or price band keeps money already taken and only asks for the difference.",
     "vpa_label": "UPI ID for collections",
     "vpa_help": "Customers scan a QR that pays into this. UPI is zero MDR by law, so nothing is deducted.",
     "payee_label": "Name shown to the payer",
