@@ -8,11 +8,15 @@ import '../models/collection.dart';
 import '../models/expense.dart';
 import '../models/income_entry.dart';
 import '../models/bus_handover.dart';
+import '../models/ledger_bus_rollup.dart';
 import '../models/money_summary.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
+import '../models/payment_claim.dart';
 import '../models/tour.dart';
 import '../services/collection_reconciler.dart';
+import '../services/ledger_money_source.dart';
+import '../services/supabase_service.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
 import 'finance_controller.dart';
@@ -20,7 +24,8 @@ import 'tour_controller.dart';
 
 /// Loads & persists the money tables (`collections`, `expenses`,
 /// `bus_handovers`, `incomes`) for a single tour via [SyncService], and
-/// exposes aggregation summaries built from the locally held rows.
+/// exposes aggregation summaries from the finance ledger when available
+/// (legacy row lists remain the write/edit surface).
 ///
 /// CRUD follows the same shape as [TourController]: mutate local state
 /// optimistically so the UI feels instant, await the server write, and on
@@ -30,10 +35,19 @@ import 'tour_controller.dart';
 /// column). Their policies validate via the tour-owner join, so we just
 /// send the row's `toMap()` (which already carries `tour_id`/`bus_id`).
 class MoneyController extends GetxController {
+  MoneyController({LedgerMoneySource? ledgerSource})
+      : _ledgerSource = ledgerSource ?? LedgerMoneySource();
+
+  final LedgerMoneySource _ledgerSource;
+
   final collections = <Collection>[].obs;
   final expenses = <Expense>[].obs;
   final handovers = <BusHandover>[].obs;
   final incomes = <IncomeEntry>[].obs;
+  final paymentClaims = <PaymentClaim>[].obs;
+
+  /// Pending chart soft-holds (advance checkout). Cleared on each tour load.
+  final pendingSeatHolds = <Map<String, dynamic>>[].obs;
   final isLoading = false.obs;
 
   /// True when the last [loadForTour] could not reach the server (offline or a
@@ -47,6 +61,12 @@ class MoneyController extends GetxController {
   /// True once at least one load has genuinely succeeded for the current tour, so
   /// consumers can distinguish "never loaded" from "loaded and empty".
   final loadedOnce = false.obs;
+
+  /// When true, [summaryForBus] / [tourSummary] prefer ledger rollups over
+  /// recomputing from legacy row lists.
+  bool _ledgerReady = false;
+  final Map<String, LedgerBusRollup> _ledgerByBus = {};
+  final Map<String, double> _riderOwes = {};
 
   /// Which tour the lists currently hold data for. Used to scope cache
   /// keys and to know what to refetch on refresh.
@@ -62,13 +82,11 @@ class MoneyController extends GetxController {
 
   /// Tells the cross-tour P&L its cached totals are out of date.
   ///
-  /// [FinanceController] aggregates the SAME `collections` / `expenses` /
-  /// `incomes` rows this controller writes, but from its own independent fetch.
-  /// Without this hook its `ensureLoaded()` permanently no-ops after the first
-  /// success, so the Settings card and the Finance report kept showing
-  /// pre-write figures while the per-tour money board moved — two surfaces
-  /// disagreeing about the same money. Only marks stale (no refetch): the next
-  /// visit to a finance surface pays for the reload, not every keystroke here.
+  /// [FinanceController] aggregates ledger bus rollups independently. Without
+  /// this hook its `ensureLoaded()` permanently no-ops after the first success,
+  /// so the Settings card and Finance report kept showing pre-write figures
+  /// while the per-tour money board moved. Only marks stale (no refetch): the
+  /// next visit to a finance surface pays for the reload.
   /// Guarded on registration so money still saves in tests/flows where the
   /// finance controller was never put.
   void _invalidateFinance() {
@@ -110,7 +128,10 @@ class MoneyController extends GetxController {
       expenses.clear();
       handovers.clear();
       incomes.clear();
+      paymentClaims.clear();
+      pendingSeatHolds.clear();
       loadedOnce.value = false;
+      _clearLedgerCache();
     }
     _loadedTourId = tourId;
     isLoading.value = true;
@@ -158,8 +179,18 @@ class MoneyController extends GetxController {
         handovers.assignAll(results[2].rows.map(BusHandover.fromMap).toList());
         incomes.assignAll(results[3].rows.map(IncomeEntry.fromMap).toList());
         loadedOnce.value = true;
+        await _loadPaymentClaims(tourId);
+        await _loadPendingSeatHolds(tourId);
       }
       loadFailed.value = failed;
+
+      // Ledger summaries (source of truth for totals). Failure marks the load
+      // failed so the UI can retry — we do not silently keep pretending legacy
+      // recomputes are ledger truth. Row lists above still support edit/delete.
+      if (!failed) {
+        final ledgerOk = await _loadLedgerForTour(tourId);
+        if (!ledgerOk) loadFailed.value = true;
+      }
     } catch (e, st) {
       // Leave whatever we already hold in place — a transient fetch
       // failure shouldn't blank the money screen.
@@ -171,6 +202,147 @@ class MoneyController extends GetxController {
     } finally {
       isLoading.value = false;
     }
+  }
+
+  void _clearLedgerCache() {
+    _ledgerReady = false;
+    _ledgerByBus.clear();
+    _riderOwes.clear();
+  }
+
+  /// Returns false when the ledger views could not be read.
+  Future<bool> _loadLedgerForTour(String tourId) async {
+    try {
+      final rollups = await _ledgerSource.fetchBusRollups(tourId);
+      final riders = await _ledgerSource.fetchRiderOwesRupees(tourId);
+      _ledgerByBus
+        ..clear()
+        ..addEntries([
+          for (final r in rollups)
+            if (r.busId != null && r.busId!.isNotEmpty) MapEntry(r.busId!, r),
+        ]);
+      _riderOwes
+        ..clear()
+        ..addAll(riders);
+      _ledgerReady = true;
+      return true;
+    } catch (e, st) {
+      dev.log(
+        'ledger load failed for $tourId: $e\n$st',
+        name: 'MoneyController',
+      );
+      _clearLedgerCache();
+      return false;
+    }
+  }
+
+  Future<void> _loadPaymentClaims(String tourId) async {
+    try {
+      final raw = await SupabaseService.instance.client
+          .from('payment_claims')
+          .select()
+          .eq('tour_id', tourId)
+          .order('claimed_at', ascending: false);
+      paymentClaims.assignAll([
+        for (final r in (raw as List))
+          PaymentClaim.fromMap(Map<String, dynamic>.from(r as Map)),
+      ]);
+    } catch (e, st) {
+      // Claims table may be undeployed — keep empty, don't fail the board.
+      dev.log(
+        'payment_claims load failed for $tourId: $e\n$st',
+        name: 'MoneyController',
+      );
+      paymentClaims.clear();
+    }
+  }
+
+  Future<void> _loadPendingSeatHolds(String tourId) async {
+    try {
+      final raw = await SupabaseService.instance.client.rpc(
+        'tour_pending_seat_holds',
+        params: {'p_tour_id': tourId},
+      );
+      if (raw is! List) {
+        pendingSeatHolds.clear();
+        return;
+      }
+      pendingSeatHolds.assignAll([
+        for (final r in raw)
+          if (r is Map) Map<String, dynamic>.from(r),
+      ]);
+    } catch (e, st) {
+      dev.log(
+        'pending seat holds load failed for $tourId: $e\n$st',
+        name: 'MoneyController',
+      );
+      pendingSeatHolds.clear();
+    }
+  }
+
+  /// Admin: lock held seats without waiting for UPI confirm (pay on bus).
+  Future<void> payLaterFinalizeHold(String holdId) async {
+    await SupabaseService.instance.client.rpc(
+      'chart_finalize_hold',
+      params: {'p_hold_id': holdId},
+    );
+    final tourId = _loadedTourId;
+    if (tourId != null) {
+      await refreshForTour(tourId);
+      if (Get.isRegistered<TourController>()) {
+        await Get.find<TourController>().refreshTours();
+      }
+    }
+  }
+
+  List<PaymentClaim> get pendingClaims =>
+      paymentClaims.where((c) => c.isPending).toList();
+
+  /// Confirmed UPI advances for a passenger (rupees). Pending claims are
+  /// excluded so collect never treats an unverified assertion as paid.
+  double confirmedAdvanceForPassenger(String passengerId) => paymentClaims
+      .where((c) => c.passengerId == passengerId && c.isConfirmed)
+      .fold(0.0, (sum, c) => sum + c.amountRupees);
+
+  PaymentClaim? pendingClaimForPassenger(String passengerId) =>
+      paymentClaims.firstWhereOrNull(
+        (c) => c.passengerId == passengerId && c.isPending,
+      );
+
+  /// Live seat fare minus confirmed advances (never below 0).
+  double dueAfterAdvances({
+    required String passengerId,
+    required double liveFare,
+  }) {
+    final due = liveFare - confirmedAdvanceForPassenger(passengerId);
+    return due < 0 ? 0 : due;
+  }
+
+  Future<void> confirmPaymentClaim(String claimId, {String? note}) async {
+    await SupabaseService.instance.client.rpc(
+      'confirm_payment_claim',
+      params: {
+        'p_claim_id': claimId,
+        'p_note': ?note,
+      },
+    );
+    final tourId = _loadedTourId;
+    if (tourId != null) {
+      await refreshForTour(tourId);
+    }
+    _invalidateFinance();
+  }
+
+  Future<void> rejectPaymentClaim(String claimId, {String? note}) async {
+    await SupabaseService.instance.client.rpc(
+      'reject_payment_claim',
+      params: {
+        'p_claim_id': claimId,
+        'p_note': ?note,
+      },
+    );
+    final tourId = _loadedTourId;
+    if (tourId != null) await _loadPaymentClaims(tourId);
   }
 
   /// Force a fresh fetch by invalidating the three per-tour cache keys
@@ -213,6 +385,23 @@ class MoneyController extends GetxController {
     for (final id in tourIds) {
       if (id == _loadedTourId) continue;
       if (settlementByTour.containsKey(id)) continue;
+
+      // Prefer ledger outstanding (sum of cash.handler per bus).
+      try {
+        final rollups = await _ledgerSource.fetchBusRollups(id);
+        settlementByTour[id] = rollups.fold<double>(
+          0,
+          (sum, r) => sum + r.outstandingHandover,
+        );
+        changed = true;
+        continue;
+      } catch (e, st) {
+        dev.log(
+          'settlement ledger snapshot failed for $id: $e\n$st',
+          name: 'MoneyController',
+        );
+      }
+
       final results = await Future.wait([
         _sync.smartFetch(
           table: 'collections',
@@ -630,19 +819,105 @@ class MoneyController extends GetxController {
     return Get.find<TourController>().getTour(tourId)?.passengers ?? const [];
   }
 
-  BusMoneySummary summaryForBus(String busId) => BusMoneySummary.compute(
-    busId: busId,
-    collections: collections.toList(),
-    expenses: expenses.toList(),
-    handovers: handovers.toList(),
-    incomes: incomes.toList(),
-    busRent: _busRents()[busId] ?? 0,
-    revenueBilled: _billedRevenues()[busId] ?? 0,
-    passengers: _tourPassengers(),
-    dueForSeat: _busById()[busId]?.amountDueForSeat,
-  );
+  BusMoneySummary summaryForBus(String busId) {
+    if (_ledgerReady) {
+      final rollup = _ledgerByBus[busId];
+      if (rollup != null) {
+        final ar = _arForBus(busId);
+        return BusMoneySummary(
+          busId: busId,
+          collected: rollup.collected,
+          revenueBilled: rollup.billed,
+          expensesTotal: rollup.expensesTotal,
+          handedOver: rollup.handedOver,
+          toReturnTotal: ar.toReturn,
+          toCollectTotal: ar.toCollect,
+          income: rollup.income,
+          busRent: rollup.rent,
+        );
+      }
+      // Ledger loaded but no lines for this bus yet — zeros, not legacy recompute.
+      return BusMoneySummary(
+        busId: busId,
+        collected: 0,
+        revenueBilled: _billedRevenues()[busId] ?? 0,
+        expensesTotal: _busRents()[busId] ?? 0,
+        handedOver: 0,
+        toReturnTotal: 0,
+        toCollectTotal: _arForBus(busId).toCollect,
+        income: 0,
+        busRent: _busRents()[busId] ?? 0,
+      );
+    }
+    return BusMoneySummary.compute(
+      busId: busId,
+      collections: collections.toList(),
+      expenses: expenses.toList(),
+      handovers: handovers.toList(),
+      incomes: incomes.toList(),
+      busRent: _busRents()[busId] ?? 0,
+      revenueBilled: _billedRevenues()[busId] ?? 0,
+      passengers: _tourPassengers(),
+      dueForSeat: _busById()[busId]?.amountDueForSeat,
+    );
+  }
+
+  /// Attribute each rider's AR to their primary seated bus (first assignment)
+  /// so multi-bus tours never double-count the same owes_minor.
+  ({double toCollect, double toReturn}) _arForBus(String busId) {
+    var toCollect = 0.0;
+    var toReturn = 0.0;
+    for (final p in _tourPassengers()) {
+      if (_primaryBusId(p) != busId) continue;
+      final owes = _riderOwes[p.id] ?? 0;
+      if (owes > 0.005) {
+        toCollect += owes;
+      } else if (owes < -0.005) {
+        toReturn += -owes;
+      }
+    }
+    return (toCollect: toCollect, toReturn: toReturn);
+  }
+
+  String? _primaryBusId(Passenger p) {
+    if (p.assignedSeats.isEmpty) return null;
+    return p.assignedSeats.first.busId;
+  }
 
   TourMoneySummary tourSummary() {
+    if (_ledgerReady) {
+      final busById = _busById();
+      final ids = busById.isEmpty ? _ledgerByBus.keys : busById.keys;
+      final buses = summariesForBuses(ids);
+      var toCollect = 0.0;
+      var toReturn = 0.0;
+      for (final s in buses) {
+        toCollect += s.toCollectTotal;
+        toReturn += s.toReturnTotal;
+      }
+      // Unseated riders with AR still count on the tour total.
+      for (final p in _tourPassengers()) {
+        if (p.assignedSeats.isNotEmpty) continue;
+        final owes = _riderOwes[p.id] ?? 0;
+        if (owes > 0.005) toCollect += owes;
+        if (owes < -0.005) toReturn += -owes;
+      }
+      return TourMoneySummary(
+        totalCollected: buses.fold(0.0, (s, b) => s + b.collected),
+        totalRevenueBilled: buses.fold(0.0, (s, b) => s + b.revenueBilled),
+        totalExpenses: buses.fold(0.0, (s, b) => s + b.expensesTotal),
+        totalHandedOver: buses.fold(0.0, (s, b) => s + b.handedOver),
+        totalToReturn: toReturn,
+        totalToCollect: toCollect,
+        totalIncome: buses.fold(0.0, (s, b) => s + b.income),
+        totalBusRent: buses.fold(0.0, (s, b) => s + b.busRent),
+        totalDetachedCash: _detachedCash(
+          collections,
+          (p) => p.assignedSeats.isNotEmpty,
+        ),
+      );
+    }
+
     // Roll to-collect up from the per-bus summaries so the tour total counts
     // seated-but-uncollected riders exactly the same way each bus row does —
     // admin, handler and tour totals then all agree. Fall back to the recorded
@@ -705,30 +980,9 @@ class MoneyController extends GetxController {
   /// Pure aggregation over the currently held rows — no fetch. Used by the
   /// tour money board to render one row per bus without each row recomputing
   /// the same `where` scans against the shared lists.
-  List<BusMoneySummary> summariesForBuses(Iterable<String> busIds) {
-    final cols = collections.toList();
-    final exps = expenses.toList();
-    final hands = handovers.toList();
-    final incs = incomes.toList();
-    final rents = _busRents();
-    final billed = _billedRevenues();
-    final busById = _busById();
-    final passengers = _tourPassengers();
-    return [
-      for (final id in busIds)
-        BusMoneySummary.compute(
-          busId: id,
-          collections: cols,
-          expenses: exps,
-          handovers: hands,
-          incomes: incs,
-          busRent: rents[id] ?? 0,
-          revenueBilled: billed[id] ?? 0,
-          passengers: passengers,
-          dueForSeat: busById[id]?.amountDueForSeat,
-        ),
-    ];
-  }
+  List<BusMoneySummary> summariesForBuses(Iterable<String> busIds) => [
+        for (final id in busIds) summaryForBus(id),
+      ];
 
   /// Per-handler money rollups for the loaded tour. A handler runs whole buses
   /// ([Bus.handlerPassengerId]), so each handler's P&L is the sum of their

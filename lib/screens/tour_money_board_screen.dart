@@ -7,7 +7,9 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/money_summary.dart';
+import '../models/payment_claim.dart';
 import '../models/tour.dart';
+import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../widgets/money_loading_skeleton.dart';
 import 'bus_money_screen.dart';
@@ -158,6 +160,23 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                         onTap: _openPnl,
                         c: c,
                       ),
+                      if (_money.pendingClaims.isNotEmpty) ...[
+                        const SizedBox(height: UgamSpacing.md),
+                        _UpiClaimsCard(
+                          claims: _money.pendingClaims,
+                          tour: tour,
+                          money: _money,
+                          c: c,
+                        ),
+                      ],
+                      if (_money.pendingSeatHolds.isNotEmpty) ...[
+                        const SizedBox(height: UgamSpacing.md),
+                        _SeatHoldsCard(
+                          holds: _money.pendingSeatHolds.toList(),
+                          money: _money,
+                          c: c,
+                        ),
+                      ],
                       const SizedBox(height: UgamSpacing.md),
                       Text(
                         tr('tour_money_board.per_bus'),
@@ -205,6 +224,188 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
             }),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Pending chart soft-holds — Pay later locks seats without UPI confirm.
+class _SeatHoldsCard extends StatelessWidget {
+  final List<Map<String, dynamic>> holds;
+  final MoneyController money;
+  final UgamColorSet c;
+
+  const _SeatHoldsCard({
+    required this.holds,
+    required this.money,
+    required this.c,
+  });
+
+  Future<void> _payLater(Map<String, dynamic> hold) async {
+    final id = hold['id']?.toString();
+    if (id == null || id.isEmpty) return;
+    try {
+      await money.payLaterFinalizeHold(id);
+      AppSnackBar.success(tr('tour_money_board.holds_finalized'));
+    } catch (_) {
+      AppSnackBar.error(tr('tour_money_board.holds_finalize_failed'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCard.plain(
+      tone: UgamCardTone.warm,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('tour_money_board.holds_pending_title'),
+            style: UgamText.bodyStrong.copyWith(color: c.ink),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            tr('tour_money_board.holds_pending_body'),
+            style: UgamText.caption.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          for (final hold in holds) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        (hold['name']?.toString().trim().isNotEmpty ?? false)
+                            ? hold['name'].toString()
+                            : (hold['phone']?.toString() ?? '—'),
+                        style: UgamText.bodyStrong.copyWith(color: c.ink),
+                      ),
+                      Text(
+                        hold['phone']?.toString() ?? '',
+                        style: UgamText.caption.copyWith(color: c.ink2),
+                      ),
+                    ],
+                  ),
+                ),
+                UgamButton(
+                  label: tr('tour_money_board.holds_pay_later'),
+                  kind: UgamButtonKind.tonal,
+                  onPressed: () => _payLater(hold),
+                ),
+              ],
+            ),
+            if (hold != holds.last) const SizedBox(height: UgamSpacing.md),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Pending UPI advance claims — confirm posts ledger money; reject leaves fare due.
+class _UpiClaimsCard extends StatelessWidget {
+  final List<PaymentClaim> claims;
+  final Tour tour;
+  final MoneyController money;
+  final UgamColorSet c;
+
+  const _UpiClaimsCard({
+    required this.claims,
+    required this.tour,
+    required this.money,
+    required this.c,
+  });
+
+  String _labelFor(PaymentClaim claim) {
+    if (claim.passengerId != null) {
+      final p = tour.passengers.firstWhereOrNull((x) => x.id == claim.passengerId);
+      if (p != null) return p.name;
+    }
+    final name = claim.payerName?.trim();
+    if (name != null && name.isNotEmpty) return name;
+    final phone = claim.payerPhone?.trim();
+    if (phone != null && phone.isNotEmpty) return phone;
+    return tr('tour_money_board.upi_unknown_payer');
+  }
+
+  Future<void> _confirm(BuildContext context, PaymentClaim claim) async {
+    try {
+      await money.confirmPaymentClaim(claim.id);
+      AppSnackBar.success(tr('tour_money_board.upi_confirmed'));
+    } catch (e) {
+      AppSnackBar.error(tr('tour_money_board.upi_confirm_failed'));
+    }
+  }
+
+  Future<void> _reject(BuildContext context, PaymentClaim claim) async {
+    try {
+      await money.rejectPaymentClaim(claim.id);
+      AppSnackBar.info(tr('tour_money_board.upi_rejected'));
+    } catch (e) {
+      AppSnackBar.error(tr('tour_money_board.upi_reject_failed'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCard.plain(
+      tone: UgamCardTone.warm,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('tour_money_board.upi_pending_title'),
+            style: UgamText.bodyStrong.copyWith(color: c.ink),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            tr('tour_money_board.upi_pending_body'),
+            style: UgamText.caption.copyWith(color: c.ink2),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+          for (final claim in claims) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _labelFor(claim),
+                        style: UgamText.bodyStrong.copyWith(color: c.ink),
+                      ),
+                      Text(
+                        [
+                          Formatters.formatMoneyInr(claim.amountRupees),
+                          if (claim.upiRef != null && claim.upiRef!.isNotEmpty)
+                            tr('tour_money_board.upi_ref',
+                                namedArgs: {'ref': claim.upiRef!}),
+                        ].join(' · '),
+                        style: UgamText.caption.copyWith(color: c.ink2),
+                      ),
+                    ],
+                  ),
+                ),
+                UgamButton(
+                  label: tr('tour_money_board.upi_confirm'),
+                  kind: UgamButtonKind.goodTonal,
+                  onPressed: () => _confirm(context, claim),
+                ),
+                const SizedBox(width: UgamSpacing.sm),
+                UgamButton(
+                  label: tr('tour_money_board.upi_reject'),
+                  kind: UgamButtonKind.ghost,
+                  onPressed: () => _reject(context, claim),
+                ),
+              ],
+            ),
+            if (claim != claims.last) const SizedBox(height: UgamSpacing.md),
+          ],
+        ],
       ),
     );
   }

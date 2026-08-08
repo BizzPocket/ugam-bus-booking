@@ -99,8 +99,82 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
     final requestId = const Uuid().v4();
     final phone = normalisePhone(_phone.text.trim());
     final name = _name.text.trim();
+    final useHold = widget.tour.collectsAdvance;
 
     try {
+      if (useHold) {
+        final hold = await _service.hold(
+          requestId: requestId,
+          tourId: widget.tour.id,
+          busId: widget.bus.id,
+          phone: phone,
+          name: name,
+          leg: widget.leg,
+          picks: widget.picks,
+          gender: _gender,
+          note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+          pickupLocationId: _pickup?.id,
+          pickupLocationName: _pickup?.name,
+        );
+
+        if (!mounted) return;
+
+        if (!hold.ok) {
+          setState(() => _saving = false);
+          if (hold.lostSeats) {
+            AppSnackBar.error(
+              tr('seat_confirm.err_seats_gone', namedArgs: {
+                'seats': hold.conflicts.join(', '),
+              }),
+            );
+            Navigator.of(context).pop(false);
+          } else {
+            AppSnackBar.error(
+              hold.errorMessage ?? tr('seat_confirm.err_failed'),
+            );
+          }
+          return;
+        }
+
+        await CustomerRequestsStore().upsert(
+          CustomerRequestEntry(
+            id: requestId,
+            tourId: widget.tour.id,
+            tourTitle: widget.tour.title,
+            tourFromCity: widget.tour.fromCity,
+            tourToCity: widget.tour.toCity,
+            tourDepartureDate: widget.tour.departureDate,
+            tourPricePerSeat: widget.tour.pricePerSeat,
+            customerName: name,
+            customerPhone: phone,
+            partySize: _berths,
+            doubleSofa: 0,
+            singleSofa: 0,
+            note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+            pickupLocationId: _pickup?.id,
+            pickupLocationName: _pickup?.name,
+            tripType: widget.leg,
+            status: 'pending',
+            isConfirmed: false,
+            organiserPhone: widget.tour.createdBy,
+            createdAt: DateTime.now(),
+          ),
+        );
+
+        if (!mounted) return;
+        setState(() => _saving = false);
+
+        await _offerAdvance(
+          requestId: requestId,
+          name: name,
+          holdId: hold.holdId,
+        );
+        if (!mounted) return;
+        AppSnackBar.success(tr('seat_confirm.success_held'));
+        Navigator.of(context).pop(true);
+        return;
+      }
+
       final result = await _service.claim(
         requestId: requestId,
         tourId: widget.tour.id,
@@ -120,7 +194,6 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
       if (!result.ok) {
         setState(() => _saving = false);
         if (result.lostSeats) {
-          // KEEP THE FORM. Name what was lost and send them back to re-pick.
           AppSnackBar.error(
             tr('seat_confirm.err_seats_gone', namedArgs: {
               'seats': result.conflicts.join(', '),
@@ -135,7 +208,6 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
         return;
       }
 
-      // Keep a device-local ticket so "My Tickets" can track it.
       await CustomerRequestsStore().upsert(
         CustomerRequestEntry(
           id: requestId,
@@ -164,12 +236,6 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
 
-      // The seat is already theirs. If the tour asks for an advance, offer the
-      // QR now — but the booking stands whether or not they pay here.
-      if (widget.tour.collectsAdvance) {
-        await _offerAdvance(requestId, name);
-      }
-      if (!mounted) return;
       AppSnackBar.success(tr('seat_confirm.success'));
       Navigator.of(context).pop(true);
     } catch (e) {
@@ -180,16 +246,19 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
     }
   }
 
-  Future<void> _offerAdvance(String requestId, String name) async {
+  Future<void> _offerAdvance({
+    required String requestId,
+    required String name,
+    String? holdId,
+  }) async {
     final tour = widget.tour;
     final perBerth = tour.advancePerBerthPaise ?? 0;
-    // A policy of 0 means "the whole amount due"; otherwise it's per berth.
     final paise = perBerth > 0
         ? perBerth * _berths
         : (widget.totalRupees * 100).round();
     if (paise <= 0) return;
 
-    await showUpiPaymentSheet(
+    final claim = await showUpiPaymentSheet(
       context,
       request: collectPayment(
         vpa: tour.collectVpa!,
@@ -206,7 +275,29 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
               'total': Formatters.formatMoneyInr(widget.totalRupees),
             })
           : null,
+      askConfirmation: true,
     );
+
+    if (claim == null) return;
+
+    final claimId = holdId != null
+        ? await CustomerRequestsStore().claimUpiAdvanceForHold(
+            holdId: holdId,
+            amountPaise: paise,
+            reference: claim.reference,
+          )
+        : await CustomerRequestsStore().claimUpiAdvance(
+            requestId: requestId,
+            amountPaise: paise,
+            reference: claim.reference,
+          );
+
+    if (!mounted) return;
+    if (claimId == null) {
+      AppSnackBar.error(tr('upi.claim_failed'));
+    } else {
+      AppSnackBar.success(tr('upi.claim_saved'));
+    }
   }
 
   Future<void> _pickPickup() async {

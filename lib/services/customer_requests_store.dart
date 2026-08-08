@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as dev;
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -304,6 +305,10 @@ class CustomerRequestEntry {
 class CustomerRequestsStore {
   static const _key = 'customer_requests_v1';
 
+  /// The last mobile number a seat lookup succeeded with — see
+  /// [lastSeatLookupPhone].
+  static const _lastPhoneKey = 'find_my_seat_last_phone_v1';
+
   static final CustomerRequestsStore _instance =
       CustomerRequestsStore._internal();
   factory CustomerRequestsStore() => _instance;
@@ -558,6 +563,27 @@ class CustomerRequestsStore {
         .toList();
   }
 
+  /// The mobile number that last resolved to a seat on this device, if any.
+  ///
+  /// A manually-added passenger has no local booking journal entry, so their
+  /// number is the ONLY thing the app can remember about them. Persisting it
+  /// turns the second visit into a single tap: the home-screen field and the
+  /// lookup screen both open pre-filled, and the lookup runs itself.
+  Future<String?> lastSeatLookupPhone() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_lastPhoneKey)?.trim();
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  /// Remembers [phone] as the number to pre-fill next time. Only ever called
+  /// after a lookup actually returned something, so a typo is never sticky.
+  Future<void> rememberSeatLookupPhone(String phone) async {
+    final trimmed = phone.trim();
+    if (trimmed.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastPhoneKey, trimmed);
+  }
+
   /// "Find my seat by phone": resolves every seat held under [phone] on a
   /// LOCKED/completed tour, with the bus diagram(s) to draw them — bypassing
   /// booking_requests entirely so manually-added passengers (who have no in-app
@@ -626,6 +652,68 @@ class CustomerRequestsStore {
     );
     if (result == null) return null;
     return HandlerManifest.fromJson(Map<String, dynamic>.from(result as Map));
+  }
+
+  /// Records the customer's assertion that they paid a UPI advance for
+  /// [requestId] (migration 060).
+  ///
+  /// This is NOT a payment confirmation. The QR is a direct UPI deep-link to
+  /// the organiser's own VPA — zero-MDR precisely because no gateway sits in
+  /// the middle, so nothing ever calls the app back to say the transfer
+  /// landed. The agent verifies it against their bank statement before it
+  /// becomes money.
+  ///
+  /// Recording it unverified is still the fix for the real defect: without any
+  /// record at all, the handler's collect sheet prices from the fare alone and
+  /// charges the advance a SECOND time on the bus. A pending claim is visible
+  /// to both the agent and the handler immediately.
+  ///
+  /// Returns the claim id, or null when the server refused (unknown booking,
+  /// rate limit, implausible amount). Never throws — a failed claim must not
+  /// block a booking that has already succeeded.
+  Future<String?> claimUpiAdvance({
+    required String requestId,
+    required int amountPaise,
+    String? reference,
+  }) async {
+    try {
+      final result = await Supabase.instance.client.rpc(
+        'claim_upi_advance',
+        params: {
+          'p_request_id': requestId,
+          'p_amount_paise': amountPaise,
+          'p_upi_ref': reference,
+        },
+      );
+      return result?.toString();
+    } catch (e) {
+      dev.log('claimUpiAdvance failed for $requestId — $e',
+          name: 'CustomerRequestsStore');
+      return null;
+    }
+  }
+
+  /// UPI claim against a soft seat hold (advance chart flow) — no passenger yet.
+  Future<String?> claimUpiAdvanceForHold({
+    required String holdId,
+    required int amountPaise,
+    String? reference,
+  }) async {
+    try {
+      final result = await Supabase.instance.client.rpc(
+        'claim_upi_advance_for_hold',
+        params: {
+          'p_hold_id': holdId,
+          'p_amount_paise': amountPaise,
+          'p_upi_ref': reference,
+        },
+      );
+      return result?.toString();
+    } catch (e) {
+      dev.log('claimUpiAdvanceForHold failed for $holdId — $e',
+          name: 'CustomerRequestsStore');
+      return null;
+    }
   }
 
   /// Inserts or updates a passenger [Collection] for the handler's tour via a

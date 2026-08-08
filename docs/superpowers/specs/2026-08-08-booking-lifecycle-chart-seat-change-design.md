@@ -173,4 +173,5 @@ Instant self-move without approval; auto UPI refund to bank; changing another pe
 ## Implementation plans
 
 - Wave A: `docs/superpowers/plans/2026-08-08-booking-lifecycle-wave-a-admin-move-money.md` — **implemented 2026-08-08** (reconciler same-bus deltas, collection highlight, notice actions, booking-settings help)
-- Wave C / B: separate plans after Wave A ships
+- Wave C: `docs/superpowers/plans/2026-08-08-booking-lifecycle-wave-c-chart-hold-mode.md` — **in progress 2026-08-08** (mode unlock + `064` seat_holds + Flutter hold/pay-later path). **Deploy migration `064_seat_holds_chart_finalize.sql` on Supabase before testing holds.**
+- Wave B: separate plan after Wave C ships

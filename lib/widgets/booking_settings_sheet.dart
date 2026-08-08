@@ -43,9 +43,9 @@ class _BookingSettingsSheetState extends State<_BookingSettingsSheet> {
   bool _saving = false;
   String? _vpaError;
 
-  /// A tour that already has bookings keeps its mode: switching midway would
-  /// change the rules under people who have already booked.
-  bool get _modeLocked => widget.tour.passengers.isNotEmpty;
+  bool get _modeChanged => _mode != widget.tour.bookingMode;
+
+  bool get _hasExistingBookings => widget.tour.passengers.isNotEmpty;
 
   @override
   void dispose() {
@@ -61,6 +61,27 @@ class _BookingSettingsSheetState extends State<_BookingSettingsSheet> {
       setState(() => _vpaError = tr('booking_settings.err_vpa'));
       return;
     }
+
+    if (_mode.isChart && widget.tour.chartNeedsBus) {
+      AppSnackBar.error(tr('booking_settings.needs_bus'));
+      return;
+    }
+
+    if (_modeChanged && _hasExistingBookings) {
+      final ok = await UgamDialog.confirm(
+        context,
+        title: tr('booking_settings.mode_switch_confirm_title'),
+        message: tr(
+          'booking_settings.mode_switch_confirm_body',
+          namedArgs: {'mode': _mode.displayName},
+        ),
+        confirmLabel: tr('booking_settings.mode_switch_confirm_action'),
+        cancelLabel: tr('app.action.cancel'),
+      );
+      if (!ok) return;
+      if (!mounted) return;
+    }
+
     setState(() {
       _vpaError = null;
       _saving = true;
@@ -70,7 +91,7 @@ class _BookingSettingsSheetState extends State<_BookingSettingsSheet> {
     try {
       await Get.find<TourController>().updateBookingSettings(
         widget.tour.id,
-        bookingMode: _modeLocked ? null : _mode,
+        bookingMode: _modeChanged ? _mode : null,
         advancePerBerthPaise: rupees != null && rupees > 0 ? rupees * 100 : null,
         clearAdvance: rupees == null || rupees <= 0,
         collectVpa: vpa,
@@ -113,11 +134,11 @@ class _BookingSettingsSheetState extends State<_BookingSettingsSheet> {
             ),
           ),
 
-          if (_modeLocked)
+          if (_hasExistingBookings)
             Padding(
               padding: const EdgeInsets.only(top: UgamSpacing.sm),
               child: Text(
-                tr('booking_settings.mode_locked'),
+                tr('booking_settings.mode_switch_existing_note'),
                 style: UgamText.micro.copyWith(color: c.ink3),
               ),
             )
@@ -183,45 +204,42 @@ class _BookingSettingsSheetState extends State<_BookingSettingsSheet> {
   Widget _modeCard(UgamColorSet c, BookingMode mode) {
     final on = _mode == mode;
     return GestureDetector(
-      onTap: _modeLocked ? null : () => setState(() => _mode = mode),
-      child: Opacity(
-        opacity: _modeLocked && !on ? 0.4 : 1,
-        child: Container(
-          padding: const EdgeInsets.all(UgamSpacing.md),
-          decoration: BoxDecoration(
-            color: on ? c.accentFill : c.cardElev,
-            borderRadius: BorderRadius.circular(UgamRadius.card),
-            border: Border.all(color: on ? c.accent : c.border),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                on
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_off_rounded,
-                size: 18,
-                color: on ? c.accent : c.ink3,
+      onTap: () => setState(() => _mode = mode),
+      child: Container(
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        decoration: BoxDecoration(
+          color: on ? c.accentFill : c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+          border: Border.all(color: on ? c.accent : c.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              on
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_off_rounded,
+              size: 18,
+              color: on ? c.accent : c.ink3,
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    mode.displayName,
+                    style: UgamText.bodyStrong.copyWith(color: c.ink),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    mode.description,
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                  ),
+                ],
               ),
-              const SizedBox(width: UgamSpacing.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      mode.displayName,
-                      style: UgamText.bodyStrong.copyWith(color: c.ink),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      mode.description,
-                      style: UgamText.caption.copyWith(color: c.ink2),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

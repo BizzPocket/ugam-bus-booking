@@ -4,6 +4,7 @@ import '../models/bus_details.dart';
 import '../models/trip_type.dart';
 import '../utils/chart_seat_availability.dart';
 import '../utils/chart_selection.dart';
+import '../utils/tour_public_summary.dart';
 
 /// Outcome of a `chart_claim_seats` call.
 ///
@@ -64,6 +65,53 @@ class SeatChartBookingService {
         .toList();
   }
 
+  /// Everything the PUBLIC tour page may say about a tour's inventory: the
+  /// "from" price, how many berths exist, and how many are still free.
+  ///
+  /// Reads the 052 twins (`public_tour_buses` / `public_tour_availability`)
+  /// rather than [tourBuses] / [availability], because those are gated on
+  /// `chart_tour_open()` — chart mode AND not yet locked — and would return
+  /// nothing for a request-mode tour, which is most of them. Gate here is
+  /// `is_public` alone: describing a tour is not booking one.
+  ///
+  /// Returns [TourPublicSummary.pending] on ANY failure — including 052 not
+  /// being deployed yet. That is "we don't know", not "there is nothing", so
+  /// the page hides the price and seat count instead of asserting a false
+  /// "0 seats left" or flipping a chart tour's CTA to "seats open soon".
+  Future<TourPublicSummary> publicSummary(String tourId) async {
+    try {
+      final results = await Future.wait([
+        _client.rpc('public_tour_buses', params: {'p_tour_id': tourId}),
+        _client.rpc('public_tour_availability', params: {'p_tour_id': tourId}),
+      ]);
+
+      final busRows = results[0];
+      final occRows = results[1];
+      if (busRows is! List) return TourPublicSummary.pending;
+
+      final buses = busRows
+          .whereType<Map>()
+          .map((m) => Bus.fromMap(Map<String, dynamic>.from(m)))
+          .toList();
+
+      final occupancy = occRows is List
+          ? availabilityByKey(
+              occRows
+                  .whereType<Map>()
+                  .map(
+                    (m) => SeatAvailability.fromMap(
+                      Map<String, dynamic>.from(m),
+                    ),
+                  ),
+            )
+          : const <String, SeatAvailability>{};
+
+      return summariseTourForPublic(buses: buses, availability: occupancy);
+    } catch (_) {
+      return TourPublicSummary.pending;
+    }
+  }
+
   /// Anonymised per-seat occupancy, keyed by `busId|seatId`.
   ///
   /// Seats absent from the map are wholly free — the server only emits occupied
@@ -119,19 +167,59 @@ class SeatChartBookingService {
           'p_pickup_location_name': pickupLocationName,
         },
       );
+      return _parseClaimResult(result);
+    } on PostgrestException catch (e) {
+      return ChartClaimResult(ok: false, errorMessage: e.message);
+    }
+  }
+
+  /// Soft-hold seats for 5 minutes (advance tours). Does NOT write
+  /// `assigned_seats` until [finalizeHold] / claim confirm / pay-later.
+  Future<ChartHoldResult> hold({
+    required String requestId,
+    required String tourId,
+    required String busId,
+    required String phone,
+    required String name,
+    required TripType leg,
+    required List<ChartPick> picks,
+    String? gender,
+    String? note,
+    String? pickupLocationId,
+    String? pickupLocationName,
+  }) async {
+    try {
+      final result = await _client.rpc(
+        'chart_hold_seats',
+        params: {
+          'p_request_id': requestId,
+          'p_tour_id': tourId,
+          'p_bus_id': busId,
+          'p_phone': phone,
+          'p_name': name,
+          'p_leg': leg.storageKey,
+          'p_seats': claimPayload(picks),
+          'p_gender': gender,
+          'p_note': note,
+          'p_pickup_location_id': pickupLocationId,
+          'p_pickup_location_name': pickupLocationName,
+        },
+      );
       if (result is! Map) {
-        return const ChartClaimResult(ok: false);
+        return const ChartHoldResult(ok: false);
       }
       final map = Map<String, dynamic>.from(result);
       if (map['ok'] == true) {
-        return ChartClaimResult(
+        return ChartHoldResult(
           ok: true,
+          holdId: map['hold_id']?.toString(),
           requestId: map['request_id']?.toString(),
-          passengerId: map['passenger_id']?.toString(),
-          berths: (map['berths'] as num?)?.toInt() ?? 0,
+          expiresAt: map['expires_at'] != null
+              ? DateTime.tryParse(map['expires_at'].toString())
+              : null,
         );
       }
-      return ChartClaimResult(
+      return ChartHoldResult(
         ok: false,
         conflicts: (map['conflicts'] as List?)
                 ?.map((e) => e.toString())
@@ -139,9 +227,81 @@ class SeatChartBookingService {
             const [],
       );
     } on PostgrestException catch (e) {
-      // The RPC raises check_violation for a closed tour / bad leg / >6 seats.
-      // Surface its message — it is written to be shown to a customer.
+      return ChartHoldResult(ok: false, errorMessage: e.message);
+    }
+  }
+
+  /// Owner/admin: turn a pending hold into a final passenger booking.
+  Future<ChartClaimResult> finalizeHold(String holdId) async {
+    try {
+      final result = await _client.rpc(
+        'chart_finalize_hold',
+        params: {'p_hold_id': holdId},
+      );
+      return _parseClaimResult(result);
+    } on PostgrestException catch (e) {
       return ChartClaimResult(ok: false, errorMessage: e.message);
     }
   }
+
+  /// Pending holds for the organiser money board.
+  Future<List<Map<String, dynamic>>> pendingHolds(String tourId) async {
+    try {
+      final result = await _client.rpc(
+        'tour_pending_seat_holds',
+        params: {'p_tour_id': tourId},
+      );
+      if (result is! List) return const [];
+      return result
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  ChartClaimResult _parseClaimResult(dynamic result) {
+    if (result is! Map) {
+      return const ChartClaimResult(ok: false);
+    }
+    final map = Map<String, dynamic>.from(result);
+    if (map['ok'] == true) {
+      return ChartClaimResult(
+        ok: true,
+        requestId: map['request_id']?.toString(),
+        passengerId: map['passenger_id']?.toString(),
+        berths: (map['berths'] as num?)?.toInt() ?? 0,
+      );
+    }
+    return ChartClaimResult(
+      ok: false,
+      conflicts: (map['conflicts'] as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      errorMessage: map['error']?.toString(),
+    );
+  }
+}
+
+/// Outcome of `chart_hold_seats`.
+class ChartHoldResult {
+  final bool ok;
+  final String? holdId;
+  final String? requestId;
+  final DateTime? expiresAt;
+  final List<String> conflicts;
+  final String? errorMessage;
+
+  const ChartHoldResult({
+    required this.ok,
+    this.holdId,
+    this.requestId,
+    this.expiresAt,
+    this.conflicts = const [],
+    this.errorMessage,
+  });
+
+  bool get lostSeats => !ok && conflicts.isNotEmpty;
 }
