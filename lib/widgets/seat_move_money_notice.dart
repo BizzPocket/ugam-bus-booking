@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../design/ugam.dart';
+import '../models/bus_details.dart';
+import '../models/tour.dart';
+import '../screens/collection_screen.dart';
 import '../services/collection_reconciler.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 
-/// Tells the agent what a cross-bus move just did to a paid rider's balance.
+/// Tells the agent what a seat move just did to a paid rider's balance.
 ///
 /// Buses price by their own bands, so carrying a paid rider from a ₹1,500 band
 /// into a ₹2,000 one leaves ₹500 to collect — and the reverse leaves money to
@@ -21,18 +24,27 @@ class SeatMoveMoneyNotice {
   const SeatMoveMoneyNotice._();
 
   /// Show the deltas from a move. Riders whose fare happened to match on both
-  /// buses are dropped — an unchanged balance is not worth interrupting for.
-  static Future<void> show(List<SeatMoveMoneyDelta> deltas) async {
+  /// sides are dropped — an unchanged balance is not worth interrupting for.
+  ///
+  /// [onCollectNow] / [onReturnLater] are injectable for tests; defaults open
+  /// [CollectionScreen] / show a reminder toast.
+  static Future<void> show(
+    List<SeatMoveMoneyDelta> deltas, {
+    required Tour tour,
+    void Function(SeatMoveMoneyDelta d)? onCollectNow,
+    VoidCallback? onReturnLater,
+  }) async {
     final notable = deltas.where((d) => !d.isSquare).toList();
     if (notable.isEmpty) return;
 
     final ctx = Get.context;
     if (ctx == null || !ctx.mounted) {
-      // No overlay to draw into (a headless or backgrounded write). Fall back
-      // to a toast rather than dropping the number silently.
       AppSnackBar.warning(_summaryLine(notable));
       return;
     }
+
+    final hasCollect = notable.any((d) => d.isCollectMore);
+    final hasReturn = notable.any((d) => d.isReturnDue);
 
     await UgamDialog.show<void>(
       ctx,
@@ -49,11 +61,61 @@ class SeatMoveMoneyNotice {
         ],
       ),
       actions: (c) => [
+        if (hasCollect)
+          UgamButton(
+            label: tr('seat_move_money.action_collect'),
+            onPressed: () {
+              Navigator.of(c).pop();
+              final target = notable.firstWhere((d) => d.isCollectMore);
+              if (onCollectNow != null) {
+                onCollectNow(target);
+              } else {
+                _openCollection(tour, target);
+              }
+            },
+          ),
+        if (hasReturn)
+          UgamButton(
+            label: tr('seat_move_money.action_return_later'),
+            kind: UgamButtonKind.neutral,
+            onPressed: () {
+              Navigator.of(c).pop();
+              if (onReturnLater != null) {
+                onReturnLater();
+              } else {
+                AppSnackBar.info(tr('seat_move_money.return_later_toast'));
+              }
+            },
+          ),
         UgamButton(
-          label: tr('app.action.ok'),
+          label: tr('seat_move_money.action_dismiss'),
+          kind: UgamButtonKind.neutral,
           onPressed: () => Navigator.of(c).pop(),
         ),
       ],
+    );
+  }
+
+  static void _openCollection(Tour tour, SeatMoveMoneyDelta delta) {
+    Bus? bus;
+    for (final id in delta.toBusIds) {
+      bus = tour.buses.firstWhereOrNull((b) => b.id == id);
+      if (bus != null) break;
+    }
+    bus ??= tour.buses.firstWhereOrNull(
+      (b) => delta.toBusNames.contains(b.name),
+    );
+    if (bus == null) {
+      AppSnackBar.warning(_summaryLine([delta]));
+      return;
+    }
+    Get.to(
+      () => CollectionScreen(
+        tour: tour,
+        bus: bus!,
+        highlightPassengerId: delta.passengerId,
+      ),
+      transition: Transition.cupertino,
     );
   }
 
@@ -90,8 +152,6 @@ class _DeltaRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    // Collecting more is the action-needed case (accent); handing money back is
-    // the softer warm tone the collection screen already uses for "return".
     final isCollect = delta.isCollectMore;
     final tone = isCollect ? c.accent : c.warm;
     final fill = isCollect ? c.accentFill : c.warmFill;
@@ -110,8 +170,6 @@ class _DeltaRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              // Name wraps to 2 lines before ellipsising — app-wide rule, the
-              // amount is the chrome that yields.
               Flexible(
                 child: Text(
                   delta.passengerName,

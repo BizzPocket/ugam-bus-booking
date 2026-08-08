@@ -2,6 +2,9 @@
   "actions": {
     "retry": "Retry"
   },
+  "seat_leg": {
+    "half_label": "{leg} ½"
+  },
   "pickup": {
     "form_label": "Pickup point",
     "form_placeholder": "Select pickup point (optional)",
@@ -206,23 +209,18 @@
     "bus_to_be_confirmed": "Bus to be confirmed",
     "tap_to_book": "Tap to book →",
     "header_explore": "Explore tours",
-    "search_hint": "Search by route or destination…",
     "group_upcoming": "Upcoming",
     "group_later": "Later",
     "pull_to_refresh": "Pull down to refresh — new trips appear here.",
-    "no_matches_title": "No matches",
-    "no_matches_body": "No tours match \"{q}\".",
     "chip_full": "FULL",
     "chip_left": "{n} LEFT",
     "chip_open": "OPEN",
     "chip_from_price": "FROM ₹{price}",
-    "book_button": "Book"
+    "book_button": "Book",
+    "chip_closed": "CLOSED"
   },
   "customer_more": {
     "title": "More",
-    "section_my_trip": "Your trip",
-    "find_seat": "Find my seat",
-    "find_seat_subtitle": "See your seat by mobile number",
     "section_preferences": "Preferences",
     "language": "Language",
     "section_about_legal": "About & Legal",
@@ -268,11 +266,13 @@
     "attention_unassigned": "{n} seat(s) not yet assigned",
     "attention_pick_handler": "All seats assigned · pick a handler",
     "attention_ready_lock": "Ready to lock & notify",
+    "attention_renotify": "{n} seat change(s) need WhatsApp again",
     "cta_add_bus": "Add bus",
     "cta_assign": "Assign",
     "cta_decide": "Decide",
     "cta_pick": "Pick",
     "cta_lock": "Lock",
+    "cta_renotify": "Re-notify",
     "countdown_now": "NOW",
     "countdown_minutes": "IN {n}M",
     "countdown_hours": "IN {n}H",
@@ -289,6 +289,7 @@
     "qa_create": "Create",
     "qa_tours": "Tours",
     "qa_settings": "Settings",
+    "qa_finance": "Finance",
     "this_week": "THIS WEEK",
     "no_seats_sold": "No seats sold this week",
     "seats_sold": "{n} seat(s) sold across active tours",
@@ -368,7 +369,7 @@
     "title": "Requests",
     "filter": {
       "new": "NEW",
-      "confirmed": "CONFIRM",
+      "confirmed": "ACCEPT",
       "waitlist": "WAIT",
       "assigned": "ALLOTTED"
     },
@@ -396,6 +397,7 @@
     },
     "action": {
       "confirm": "Confirm",
+      "accept": "Accept",
       "assign_seats": "Assign Seats",
       "view_assignment": "View Assignment",
       "send_wa_ack": "Send WhatsApp Ack",
@@ -407,7 +409,7 @@
       "mark_priority": "Mark priority",
       "remove_priority": "Remove priority",
       "edit_request": "Edit request",
-      "confirm_and_seat": "Confirm & seat",
+      "confirm_and_seat": "Accept & seat",
       "add_to_group": "Add to group",
       "change_group": "Change group",
       "approve_cancel": "Approve cancellation",
@@ -440,8 +442,8 @@
       "body": "Once you assign seats to a passenger, they show up here."
     },
     "empty_confirmed": {
-      "title": "No confirmed passengers yet",
-      "body": "Confirm a request to move it here — the customer gets a WhatsApp confirmation."
+      "title": "No accepted passengers yet",
+      "body": "Accept a request to move it here — the customer gets a WhatsApp confirmation."
     },
     "sheet": {
       "title": "Add Request",
@@ -491,7 +493,7 @@
       "cancel_approved_wa_failed": "Approved, but couldn't open WhatsApp to notify them.",
       "cancel_dismissed_title": "Request dismissed",
       "cancel_dismissed_body": "{name} kept on this tour.",
-      "confirm_wa_failed": "Confirmed, but couldn't send the WhatsApp confirmation."
+      "confirm_wa_failed": "Accepted, but couldn't send the WhatsApp confirmation."
     },
     "bulk": {
       "waitlist": "Waitlist",
@@ -505,9 +507,10 @@
       "decline_body": "This permanently removes {n} selected requests. This cannot be undone.",
       "decline_confirm": "Decline",
       "confirm": "Confirm",
-      "confirmed": "Confirmed {n} requests",
-      "confirmed_sent": "Confirmed {n} · messaged {sent}",
-      "confirmed_sent_partial": "Confirmed {n} · messaged {sent}, {failed} failed"
+      "accept": "Accept",
+      "confirmed": "Accepted {n} requests",
+      "confirmed_sent": "Accepted {n} · messaged {sent}",
+      "confirmed_sent_partial": "Accepted {n} · messaged {sent}, {failed} failed"
     },
     "capacity": {
       "requested": "Requested",
@@ -560,7 +563,13 @@
     "your_seats": "Your seats: {seats}",
     "layout_unavailable": "The bus diagram isn't available yet.",
     "driver": "Driver",
-    "manage_as_handler": "Manage as handler"
+    "manage_as_handler": "Manage as handler",
+    "handler_hint": "You are the handler for this bus.",
+    "home_subtitle": "Already booked? See your seat",
+    "home_action": "Find",
+    "showing_for": "Seats for {phone}",
+    "change_number": "Change",
+    "try_another": "Try another number"
   },
   "customer_my_requests": {
     "title": "My Requests",
@@ -949,6 +958,7 @@
     "err_no_seats": "Pick at least one seat",
     "err_save_failed": "Could not save your request — try again.",
     "err_bookings_closed": "Bookings are closed for this tour — seats are finalized.",
+    "err_pickup_required": "Please choose a pickup point before sending.",
     "success_sent_wa": "Request sent. Tap Send in WhatsApp to confirm.",
     "success_sent_no_wa": "Request saved. The organiser will reach out shortly.",
     "success_saved_wa_failed": "Request saved, but WhatsApp didn't open. The organiser still has your request and will reach out.",
@@ -1071,7 +1081,15 @@
     "chip_open_requests": "OPEN FOR REQUESTS",
     "chip_bookings_closed": "BOOKINGS CLOSED",
     "cta_pick_seats": "Pick your berth",
-    "cta_seats_not_open": "Seats open soon"
+    "cta_seats_not_open": "Seats open soon",
+    "section_journey": "JOURNEY",
+    "from_price_value": "from ₹{price}",
+    "departs_today": "Departs today",
+    "departs_tomorrow": "Departs tomorrow",
+    "departs_in_days": "Departs in {n} days",
+    "label_seats": "Seats",
+    "seats_free_of_total": "{free} of {total} free",
+    "label_destination": "Destination"
   },
   "edit_tour": {
     "title": "Edit Tour",
@@ -1193,6 +1211,11 @@
     "load_failed": "Couldn't load messages.",
     "photo": "📷 Photo",
     "document": "📎 Document",
+    "audio": "🎤 Voice message",
+    "video": "🎥 Video",
+    "open_attachment": "Tap to open",
+    "media_unavailable": "Attachment couldn't be downloaded",
+    "media_open_failed": "Couldn't open this attachment",
     "you": "You",
     "new_label": "New",
     "card_unread": "{count} unread"
@@ -1226,6 +1249,11 @@
     "cat_waitlist": "Waitlist",
     "action_hold": "Hold",
     "action_edit": "Edit request",
+    "action_approve_share": "Approve share",
+    "approve_share_title": "Share this double sofa?",
+    "approve_share_body": "Place {name} on the same Double Sofa as the other passenger. Confirm only if you are OK with them sharing.",
+    "approve_share_missing": "That sofa is no longer free — open the chart to place them.",
+    "approve_share_done": "{name} seated on {seat} (shared).",
     "group_label": "Group {label}",
     "nothing_placed_title": "Nothing placed yet",
     "nothing_placed_body": "These passengers are not seated yet — fill or assign them to a bus first, then open the chart.",
@@ -1302,6 +1330,8 @@
     "tally_total_seats": "{count} Total Seats",
     "tally_assigned": "{count} Assigned",
     "add_bus": "Add Bus",
+    "layout_locked_title": "Buses locked",
+    "layout_locked_body": "This tour is locked — you can still move seats, but you can't add, edit, or delete buses.",
     "empty_title": "No buses yet",
     "empty_body": "Once your bus owner confirms, tap \"Add Bus\" to enter the driver and seat details.",
     "bus_number": "Bus #{number}",
@@ -1338,7 +1368,7 @@
     "no_seats_assigned": "No seats assigned yet",
     "seat_label": "Seat {seats}",
     "lock_gate_title": "LOCK BEFORE NOTIFYING",
-    "lock_gate_body": "Lock this tour to freeze seat assignments. Once locked, confirmations can be sent — and no further seat changes are allowed without unlocking.",
+    "lock_gate_body": "Lock closes new bookings and freezes buses. You can still move seats after lock — just re-notify anyone whose seat changed.",
     "check_has_passengers": "At least one passenger on the tour",
     "check_all_assigned": "All passengers fully assigned to seats",
     "check_has_handler": "A handler has been picked",
@@ -1637,8 +1667,11 @@
     "action_pick_handler_title": "Pick a handler before locking",
     "action_pick_handler_subtitle": "Choose one passenger to handle on-trip coordination.",
     "action_lock_title": "Ready to lock and notify",
-    "action_lock_subtitle": "All seats placed and a handler is set.",
+    "action_lock_subtitle": "All seats placed and a handler is set. Lock closes bookings; seats stay editable.",
     "action_lock_cta": "Go to Notify",
+    "action_renotify_title": "Seat changes need WhatsApp",
+    "action_renotify_subtitle": "{n} passenger(s) moved since the last send",
+    "action_renotify_cta": "Re-notify",
     "action_complete_title": "Mark the trip completed",
     "action_complete_subtitle": "Locked and notified. Close it out once the trip is done.",
     "action_complete_go_title": "Complete the GO leg",
@@ -1945,6 +1978,7 @@
     "chip_due": "Due {amount}",
     "chip_paid": "Paid",
     "chip_not_collected": "Not collected",
+    "upi_pending_chip": "UPI claim {n}",
     "seat_label": "Seat {seat}",
     "phone_seat_label": "{phone} · Seat {seat}",
     "metric_due": "Due",
@@ -1994,6 +2028,7 @@
     "no_mobile": "No mobile",
     "no_phone": "No phone number",
     "call": "Call",
+    "collect_action": "Collect",
     "call_semantic": "Call {phone}",
     "whatsapp_semantic": "Message {phone} on WhatsApp",
     "seat_shared_title": "Seat {seat} · shared",
@@ -2294,7 +2329,17 @@
     "orphan_body": "This is counted in the trip totals but belongs to a bus that is no longer on this tour, so it shows on no bus above.",
     "orphan_expenses": "Expenses {n}",
     "orphan_collected": "Collected {n}",
-    "orphan_income": "Income {n}"
+    "orphan_income": "Income {n}",
+    "upi_pending_title": "Pending UPI advances",
+    "upi_pending_body": "Customer said they paid — confirm only after you see it in your bank. Pending is NOT collected yet.",
+    "upi_confirm": "Confirm",
+    "upi_reject": "Reject",
+    "upi_ref": "ref {ref}",
+    "upi_unknown_payer": "Unknown payer",
+    "upi_confirmed": "Advance confirmed",
+    "upi_rejected": "Claim rejected",
+    "upi_confirm_failed": "Couldn't confirm claim",
+    "upi_reject_failed": "Couldn't reject claim"
   },
   "tour_overview": {
     "tour_not_found": "Tour not found.",
@@ -2409,7 +2454,7 @@
       "collecting_desc": "Collecting seat requests from passengers",
       "bus_booked_desc": "Bus booked — add bus details from the owner",
       "assigning_desc": "Assign seats to each passenger",
-      "locked_desc": "Seats locked — passengers have been notified",
+      "locked_desc": "Locked — bookings closed; seats still editable",
       "completed_desc": "Trip completed"
     },
     "age_group": {
@@ -2595,7 +2640,7 @@
     "row_expenses": "EXPENSES",
     "row_margin": "MARGIN",
     "empty_title": "No trips with money yet",
-    "empty_body": "Once you collect cash or log an expense on a trip, its profit or loss lands here — across every trip you run.",
+    "empty_body": "Nothing in this period. Try All time, or collect cash / log an expense on a trip — profit and loss land here.",
     "error_title": "Couldn't load finances",
     "error_retry": "Retry",
     "card_eyebrow": "PROFIT & LOSS",
@@ -2631,20 +2676,30 @@
     "detached_cash_trip": "{n} of this cash is from riders who no longer hold a seat on this trip."
   },
   "seat_move_money": {
-    "title": "Fare changed with the bus",
-    "subtitle": "The money already collected moved across with the passenger. This is what is left to settle at the new bus's price.",
+    "title": "Fare changed with the seat",
+    "subtitle": "Money already collected stays credited. Settle only the difference at the new price.",
     "line_collect": "Collect the difference — paid {paid} on {from}, now {due} on {to}.",
     "line_return": "Return the difference — paid {paid} on {from}, now {due} on {to}.",
     "toast_collect": "Seat move: {amount} still to collect at the new fare.",
     "toast_return": "Seat move: {amount} to return at the new fare.",
-    "toast_both": "Seat move: {collect} to collect, {give} to return at the new fares."
+    "toast_both": "Seat move: {collect} to collect, {give} to return at the new fares.",
+    "action_collect": "Collect now",
+    "action_return_later": "Mark return later",
+    "action_dismiss": "Dismiss",
+    "return_later_toast": "Return due stays on the collection list until you record the handover."
   },
   "upi": {
     "scan_hint": "Scan with any UPI app — GPay, PhonePe, Paytm",
     "open_app": "Open UPI app",
     "copied": "UPI ID copied",
     "err_no_app": "No UPI app found on this phone. Scan the QR instead.",
-    "err_invalid": "This payment is missing a UPI ID or an amount."
+    "err_invalid": "This payment is missing a UPI ID or an amount.",
+    "claim_hint": "Paid already? Tell us, so you're not asked for it again on the bus.",
+    "claim_ref_label": "UPI reference (optional)",
+    "claim_ref_hint": "e.g. 447112345678",
+    "claim_done": "I've paid",
+    "claim_saved": "Thanks — your payment is noted and will be checked.",
+    "claim_failed": "Couldn't record that payment. Please tell the organiser."
   },
   "seat_pick": {
     "title": "Pick berths",

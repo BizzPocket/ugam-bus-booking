@@ -38,6 +38,10 @@ import 'money_controller.dart';
 class TourController extends GetxController {
   final tours = <Tour>[].obs;
   final isLoading = false.obs;
+  /// Monotonic load generation — a stale in-flight fetch must not paint
+  /// [hasError] over a newer success (cold-start auth reload + online ever
+  /// can overlap the first attempt).
+  int _loadGeneration = 0;
   final hasError = false.obs;
   final errorMessage = ''.obs;
 
@@ -192,8 +196,35 @@ class TourController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    _loadTours();
+    // ignore: unawaited_futures
+    _bootstrapLoad();
     _subscribeToChanges();
+  }
+
+  /// Cold-start entry: wait for [AuthController.whenRestored] so the first
+  /// fetch runs with JWT + admin owner scope, then load. If that still fails
+  /// with an empty list, automatically retry once — the same action the user
+  /// was forced to take on every launch when connectivity/auth raced.
+  Future<void> _bootstrapLoad() async {
+    await _awaitAuthRestored();
+    await _loadTours();
+    if (hasError.value && tours.isEmpty) {
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (hasError.value && tours.isEmpty) {
+        await _loadTours();
+      }
+    }
+  }
+
+  Future<void> _awaitAuthRestored() async {
+    if (!Get.isRegistered<AuthController>()) return;
+    try {
+      await Get.find<AuthController>().whenRestored.timeout(
+        const Duration(seconds: 12),
+      );
+    } on TimeoutException {
+      // Same bound as splash — proceed with whatever auth state we have.
+    }
   }
 
   @override
@@ -399,6 +430,7 @@ class TourController extends GetxController {
   }
 
   Future<void> _loadTours() async {
+    final gen = ++_loadGeneration;
     isLoading.value = true;
     hasError.value = false;
     try {
@@ -426,6 +458,8 @@ class TourController extends GetxController {
         maxAge: 120000,
       );
 
+      if (gen != _loadGeneration) return;
+
       // smartFetch returns [] on BOTH "no tours" and "refresh failed". If it
       // (still) failed, don't let the empty result blank an already-loaded
       // list — keep what we have and warn, or raise the hard error only when we
@@ -433,7 +467,12 @@ class TourController extends GetxController {
       if (result.failed) {
         if (tours.isEmpty) {
           hasError.value = true;
-          errorMessage.value = tr('errors.load_tours');
+          // Show the SERVER's reason when there is one. The generic
+          // "check your connection" line is right for an offline device and
+          // actively misleading for anything else — a client filter on a
+          // column the live DB lacked made every read 400, and this screen
+          // still blamed the network on a perfectly good one.
+          errorMessage.value = result.error ?? tr('errors.load_tours');
         } else {
           AppSnackBar.warning(tr('errors.refresh_showing_saved'));
         }
@@ -448,6 +487,7 @@ class TourController extends GetxController {
       // and returned without them. Otherwise the freshly-created tour
       // would vanish under the user.
       final pendingIds = await _sync.pendingEntityIdsForTable('tours');
+      if (gen != _loadGeneration) return;
       final serverIds = loaded.map((t) => t.id).toSet();
       final preserved = tours
           .where((t) => !serverIds.contains(t.id) && pendingIds.contains(t.id))
@@ -470,15 +510,16 @@ class TourController extends GetxController {
 
       // Restore remembered priority for returning customers.
       await _applyRememberedPriority();
-    } catch (_) {
+    } catch (e) {
+      if (gen != _loadGeneration) return;
       if (tours.isEmpty) {
         hasError.value = true;
-        errorMessage.value = tr('errors.load_tours');
+        errorMessage.value = SyncService.describeReadError(e);
       } else {
         AppSnackBar.warning(tr('errors.refresh_showing_cached'));
       }
     }
-    isLoading.value = false;
+    if (gen == _loadGeneration) isLoading.value = false;
   }
 
   /// Auto-ARCHIVES tours whose trip has been over for more than a day so the
@@ -1319,7 +1360,9 @@ class TourController extends GetxController {
           ],
         );
       } on RpcUnavailableException {
-        // Migration 011 not deployed yet — fall back to per-passenger writes.
+        // Migration 011 not deployed yet — fall back to per-passenger writes,
+        // but STOP on the first failure so we never leave a half-applied plan
+        // (DI-2). Refresh then surfaces server truth.
         final updated = getTour(tourId);
         for (final c in changes) {
           final p = updated?.passengers.firstWhereOrNull(
@@ -1609,7 +1652,7 @@ class TourController extends GetxController {
         passengerIds: passengerIds,
         crossedBus: crossedBus,
       );
-      await SeatMoveMoneyNotice.show(deltas);
+      await SeatMoveMoneyNotice.show(deltas, tour: tour);
     } catch (e, st) {
       // Best-effort really is best-effort: the seat move is already persisted
       // and drawn, so nothing here may propagate and unwind it. The money
@@ -1862,16 +1905,9 @@ class TourController extends GetxController {
   ///
   /// Local state is mutated in one synchronous pass so the UI never
   /// shows a halfway state where both passengers appear to hold the
-  /// same seat. The two server updates run sequentially; if the second
-  /// fails we pull fresh state so neither side ends up out of sync.
-  ///
-  /// CAVEAT (DI-1): the two writes are NOT a single transaction. A crash or
-  /// connectivity loss between them leaves the server with A on B's seat while
-  /// B still holds it — a realtime event in that window would deliver a
-  /// double-booked berth to other devices. The complete fix is a SECURITY
-  /// DEFINER Postgres RPC `swap_passenger_seats(...)` that updates both rows in
-  /// one transaction; this client path is the best-effort mitigation until
-  /// that backend function is deployed.
+  /// same seat. Persistence prefers the atomic `swap_passenger_seats`
+  /// RPC (migration 011); if that RPC is undeployed we fall back to two
+  /// sequential writes and refresh on failure.
   ///
   /// [busBId] defaults to [busId] (both passengers on one bus). Pass a
   /// different [busBId] to swap ACROSS buses: A lands on B's bus/seat and B on
@@ -2502,6 +2538,12 @@ class TourController extends GetxController {
 
   // Bus Management
   Future<void> addBus(String tourId, Bus bus) async {
+    final tourGate = getTour(tourId);
+    if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
+      AppSnackBar.info(tr('manage_buses.layout_locked_body'),
+          title: tr('manage_buses.layout_locked_title'));
+      return;
+    }
     final boundBus = bus.copyWith(tourId: tourId);
     final busData = {
       ...boundBus.toMap(),
@@ -2525,42 +2567,61 @@ class TourController extends GetxController {
     }
   }
 
-  Future<void> updateBus(String tourId, Bus bus) => _write(
-    optimistic: () => _updateTourLocal(
-      tourId,
-      (t) => t.copyWith(
-        buses: t.buses.map((b) => b.id == bus.id ? bus : b).toList(),
+  Future<void> updateBus(String tourId, Bus bus) async {
+    final tourGate = getTour(tourId);
+    if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
+      AppSnackBar.info(tr('manage_buses.layout_locked_body'),
+          title: tr('manage_buses.layout_locked_title'));
+      return;
+    }
+    await _write(
+      optimistic: () => _updateTourLocal(
+        tourId,
+        (t) => t.copyWith(
+          buses: t.buses.map((b) => b.id == bus.id ? bus : b).toList(),
+        ),
       ),
-    ),
-    persist: () =>
-        _sync.smartUpdate(table: 'buses', entityId: bus.id, data: bus.toMap()),
-    failure: tr('errors.update_bus'),
-  );
+      persist: () => _sync.smartUpdate(
+        table: 'buses',
+        entityId: bus.id,
+        data: bus.toMap(),
+      ),
+      failure: tr('errors.update_bus'),
+    );
+  }
 
-  Future<void> removeBus(String tourId, String busId) => _write(
-    optimistic: () => _updateTourLocal(
-      tourId,
-      (t) => t.copyWith(
-        buses: t.buses.where((b) => b.id != busId).toList(),
-        busId: t.busId == busId ? null : t.busId,
+  Future<void> removeBus(String tourId, String busId) async {
+    final tourGate = getTour(tourId);
+    if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
+      AppSnackBar.info(tr('manage_buses.layout_locked_body'),
+          title: tr('manage_buses.layout_locked_title'));
+      return;
+    }
+    await _write(
+      optimistic: () => _updateTourLocal(
+        tourId,
+        (t) => t.copyWith(
+          buses: t.buses.where((b) => b.id != busId).toList(),
+          busId: t.busId == busId ? null : t.busId,
+        ),
       ),
-    ),
-    persist: () async {
-      await _sync.smartDelete(table: 'buses', entityId: busId);
-      // Persist the tour's busId clear in the SAME guarded write, so a
-      // failure here also rolls back (was previously an unguarded trailing
-      // write — audit M3).
-      final tour = getTour(tourId);
-      if (tour != null) {
-        await _sync.smartUpdate(
-          table: 'tours',
-          entityId: tourId,
-          data: tour.toMap(),
-        );
-      }
-    },
-    failure: tr('errors.remove_bus'),
-  );
+      persist: () async {
+        await _sync.smartDelete(table: 'buses', entityId: busId);
+        // Persist the tour's busId clear in the SAME guarded write, so a
+        // failure here also rolls back (was previously an unguarded trailing
+        // write — audit M3).
+        final tour = getTour(tourId);
+        if (tour != null) {
+          await _sync.smartUpdate(
+            table: 'tours',
+            entityId: tourId,
+            data: tour.toMap(),
+          );
+        }
+      },
+      failure: tr('errors.remove_bus'),
+    );
+  }
 
   // Queries
   List<Tour> toursByStatus(TourStatus status) =>
