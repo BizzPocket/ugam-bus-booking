@@ -9,6 +9,7 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/passenger.dart';
+import '../models/payment_claim.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
 import '../utils/formatters.dart';
@@ -35,7 +36,16 @@ class CollectionScreen extends StatefulWidget {
   final Tour tour;
   final Bus bus;
 
-  const CollectionScreen({super.key, required this.tour, required this.bus});
+  /// When set, opens on the To collect / To return filter for this rider so a
+  /// seat-move money notice can deep-link straight to who needs settling.
+  final String? highlightPassengerId;
+
+  const CollectionScreen({
+    super.key,
+    required this.tour,
+    required this.bus,
+    this.highlightPassengerId,
+  });
 
   @override
   State<CollectionScreen> createState() => _CollectionScreenState();
@@ -46,6 +56,9 @@ class _CollectionScreenState extends State<CollectionScreen> {
 
   /// 0 = All, 1 = To return, 2 = To collect
   int _filter = 0;
+
+  /// Applies [highlightPassengerId] once after the first non-loading frame.
+  bool _highlightApplied = false;
 
   /// True only when the money load failed AND nothing is already held — so a
   /// transient read failure shows a retry instead of a roster that falsely reads
@@ -89,6 +102,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
             seatId: seatId,
             due: due,
             col: controller.collectionFor(p.id, widget.bus.id, seatId),
+            pendingClaim: controller.pendingClaimForPassenger(p.id),
           ),
         );
       }
@@ -106,6 +120,33 @@ class _CollectionScreenState extends State<CollectionScreen> {
       default:
         return true;
     }
+  }
+
+  /// Pick To collect / To return when deep-linking a rider after a seat move.
+  void _applyHighlightIfNeeded() {
+    if (_highlightApplied) return;
+    final id = widget.highlightPassengerId;
+    if (id == null || id.isEmpty) {
+      _highlightApplied = true;
+      return;
+    }
+    final mine = _seatLines.where((l) => l.passenger.id == id).toList();
+    if (mine.isEmpty) {
+      // Roster not ready yet (or rider not on this bus) — try again next frame.
+      return;
+    }
+    _highlightApplied = true;
+    final next = mine.any((l) => l.isShortfall)
+        ? 2
+        : mine.any((l) => l.isReturnDue)
+            ? 1
+            : 0;
+    if (next == _filter) return;
+    // Never setState during Obx build — schedule after this frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _filter == next) return;
+      setState(() => _filter = next);
+    });
   }
 
   @override
@@ -135,6 +176,8 @@ class _CollectionScreenState extends State<CollectionScreen> {
                     onRetry: () => controller.loadForTour(widget.tour.id),
                   );
                 }
+
+                _applyHighlightIfNeeded();
 
                 final s = controller.summaryForBus(widget.bus.id);
                 final lines = _seatLines.where(_passesFilter).toList();
@@ -438,11 +481,15 @@ class _SeatCollectionLine {
 
   final Collection? col;
 
+  /// Unverified UPI assertion — show as warm hint; never treat as paid.
+  final PaymentClaim? pendingClaim;
+
   const _SeatCollectionLine({
     required this.passenger,
     required this.seatId,
     required this.due,
     required this.col,
+    this.pendingClaim,
   });
 
   /// Cash actually held for this seat (`received − refunded`).
@@ -761,6 +808,20 @@ class _PassengerRow extends StatelessWidget {
               ),
               const SizedBox(width: UgamSpacing.sm),
               UgamReqChip(label: chipLabel, variant: chipVariant),
+              if (line.pendingClaim != null) ...[
+                const SizedBox(width: UgamSpacing.sm),
+                UgamReqChip(
+                  label: tr(
+                    'collection.upi_pending_chip',
+                    namedArgs: {
+                      'n': Formatters.formatMoneyInr(
+                        line.pendingClaim!.amountRupees,
+                      ),
+                    },
+                  ),
+                  variant: UgamChipVariant.warm,
+                ),
+              ],
             ],
           ),
           const SizedBox(height: UgamSpacing.sm),
