@@ -30,9 +30,9 @@ writing:
 
 | Finding | Status | Evidence |
 |---|---|---|
-| **C1** confirmed UPI advance credited twice | Written, **not applied** | [`067_online_payment_single_post.sql`](../../../supabase/migrations/067_online_payment_single_post.sql) |
-| **C2 / D1–D4** three independent fare formulas | Written, **not applied** | [`068_one_fare_formula.sql`](../../../supabase/migrations/068_one_fare_formula.sql) |
-| **H1** cancelled rider's fare never reversed | Written, **not applied** | 067 §5 `finance_repair_cancelled_fares()` |
+| **C1** confirmed UPI advance credited twice | Written, **not applied** | [`069_online_payment_single_post.sql`](../../../supabase/migrations/069_online_payment_single_post.sql) |
+| **C2 / D1–D4** three independent fare formulas | Written, **not applied** | [`070_one_fare_formula.sql`](../../../supabase/migrations/070_one_fare_formula.sql) |
+| **H1** cancelled rider's fare never reversed | Written, **not applied** | 069 §5 `finance_repair_cancelled_fares()` |
 | **F1** rider AR dumped on `assignedSeats.first.busId` | Fixed, uncommitted | [`money_controller.dart:964`](../../../lib/controllers/money_controller.dart#L964) `_arShareByBus` |
 | **E1** orphan-bus money dropped from trip total | Fixed, uncommitted | [`money_controller.dart:1017`](../../../lib/controllers/money_controller.dart#L1017) |
 | **E2** empty ledger hard-zeroes every money screen | Fixed, uncommitted | [`money_controller.dart:919`](../../../lib/controllers/money_controller.dart#L919) |
@@ -42,10 +42,13 @@ writing:
 | **A3** rent missing from ledger for pre-062 buses | **Open** — operational | 058 §3f never run |
 | **B1** four bottom lines, three still unlabelled | **Open** | Trip P&L, tour money board, bus money |
 
-Two migrations were renamed mid-session by the concurrent agent
-(065→067, 066→068), resolving a numbering collision with
-`065_protect_bus_layout.sql` / `066_customer_memory.sql`. Any instruction that
-still says 065/066 for these two means 067/068.
+These two migrations have been renumbered twice mid-session by the concurrent
+agent working in the same checkout — first 065/066 → 067/068 to clear a
+collision with `065_protect_bus_layout.sql` / `066_customer_memory.sql`, then
+067/068 → **069/070** to clear a second collision with
+`067_chart_hold_status_lookup.sql`. Any instruction that says 065/066 or 067/068
+for these two means **069 and 070**. Confirm the filenames on disk before
+applying anything — `ls supabase/migrations/ | tail`.
 
 **Net: S1 is a deploy-and-prove job plus two small gaps, not a rewrite.**
 
@@ -58,13 +61,13 @@ established process on this project. Nothing here is automated, and no step
 rewrites history on its own: both repairs report by default and only mutate when
 passed `true`.
 
-**Order is load-bearing.** 067 must precede 068: 067 adds
+**Order is load-bearing.** 069 must precede 070: 069 adds
 `collections.amount_online` and makes the collections trigger the single ledger
-poster, and 068's `finance_resync_all_fares()` re-posts fares through that
-trigger path. Running 068 first re-prices against a double-posting trigger.
+poster, and 070's `finance_resync_all_fares()` re-posts fares through that
+trigger path. Running 070 first re-prices against a double-posting trigger.
 
-1. Apply [`067_online_payment_single_post.sql`](../../../supabase/migrations/067_online_payment_single_post.sql).
-2. Apply [`068_one_fare_formula.sql`](../../../supabase/migrations/068_one_fare_formula.sql).
+1. Apply [`069_online_payment_single_post.sql`](../../../supabase/migrations/069_online_payment_single_post.sql).
+2. Apply [`070_one_fare_formula.sql`](../../../supabase/migrations/070_one_fare_formula.sql).
 3. Report, then repair, in this order:
    ```sql
    select * from public.finance_repair_online_double_post();      -- C1, dry run
@@ -94,11 +97,11 @@ run one block at a time:
 | 6 · bus rent missing | **zero rows** |
 | 7 · fare formula divergence | **zero rows** |
 | 8 · money on off-tour buses | rows allowed — must match what the UI shows as orphan money, not vanish |
-| 9 · `trip_type` contradicts request lines | rows still allowed; 068 makes them stop affecting price |
-| 10 · `#`-suffixed seat ids | rows allowed; 068 makes them price correctly |
+| 9 · `trip_type` contradicts request lines | rows still allowed; 070 makes them stop affecting price |
+| 10 · `#`-suffixed seat ids | rows allowed; 070 makes them price correctly |
 
 Checks 9 and 10 are *data untidiness*, not defects, and are expected to keep
-returning rows. The point of 068 is that they no longer change what anyone is
+returning rows. The point of 070 is that they no longer change what anyone is
 charged. Recording that explicitly here so a future reader does not chase them.
 
 ### Risk and rollback
@@ -118,12 +121,23 @@ non-zero delta after one run means something outside C1's shape.
 Four screens headline a "net" and each computes it differently. Individually
 defensible; side by side, with nothing naming the basis, any two look broken.
 
-| Screen | Headline | Basis | State |
+| Screen | Headline | Basis | Now reads |
 |---|---|---|---|
-| Finance (cross-tour) | `FinanceTotals.net` | **cash** | labelled — [`finance_screen.dart:356`](../../../lib/screens/finance_screen.dart#L356) |
-| Trip P&L | `totalNetBilled` [`trip_pnl_screen.dart:226`](../../../lib/screens/trip_pnl_screen.dart#L226) | **billed** | unlabelled |
-| Tour money board | `totalNet` [`tour_money_board_screen.dart:963`](../../../lib/screens/tour_money_board_screen.dart#L963) | **cash** | unlabelled |
-| Bus money | `totalNet` [`bus_money_screen.dart:1347`](../../../lib/screens/bus_money_screen.dart#L1347) | **cash** | unlabelled |
+| Finance (cross-tour) | `FinanceTotals.net` | **cash** | `money.basis_cash` caption |
+| Trip P&L hero | `totalNetBilled` | **billed** | `money.basis_billed` caption |
+| Tour money board · P&L card | `totalNetBilled` | **billed** | `money.basis_billed` caption |
+| Tour money board · sticky pill | `totalNet` | **cash** | label reads **"NET (CASH)"** |
+| Bus money · tour rollup | `totalNet` | **cash** | `money.basis_cash` caption |
+
+Five headlines, not four: the tour money board carries **both** bases on one
+screen — a BILLED P&L card and a CASH pill — which is the sharpest case of the
+whole finding and was invisible until the labels went on.
+
+The pill gets its basis in the label rather than a caption because it is a
+thumb-strip chip with no room for a second line. Two dead keys were removed with
+their last call sites: `finance.basis_note` and `bus_money.rollup_net_caption`
+(the latter said "Across the whole tour", restating the "Tour totals" label
+directly above it).
 
 **Change.** Two shared translation keys, applied as a caption under each of the
 three unlabelled headlines, matching the existing `finance.basis_note` treatment

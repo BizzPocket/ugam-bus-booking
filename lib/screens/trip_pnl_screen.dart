@@ -250,6 +250,14 @@ class _TripTotalCard extends StatelessWidget {
             tr('trip_pnl.true_billed'),
             style: UgamText.caption.copyWith(color: c.ink3),
           ),
+          // This hero is BILLED; the Finance report's headline is CASH. Both are
+          // right and they will not match. Naming the basis is what stops the
+          // two screens looking like they contradict each other.
+          const SizedBox(height: 2),
+          Text(
+            tr('money.basis_billed'),
+            style: UgamText.micro.copyWith(color: c.ink3),
+          ),
           const SizedBox(height: UgamSpacing.lg),
           _NetLine(
             label: tr('trip_pnl.cash_collected'),

@@ -94,10 +94,20 @@ class BusMoneySummary {
   /// while the handler shows the full billed revenue. Mirrors
   /// [HandlerBusMoney.compute] exactly (seat-AGNOSTIC: a rider with ANY row on
   /// this bus is already covered by the recorded shortfall, so they are skipped
-  /// regardless of which seat that row names) so admin and handler can never
-  /// disagree. When [dueForSeat] is null (e.g. the handler's own call, which does
-  /// its own seated-uncollected pass) to-collect stays the recorded shortfalls
-  /// alone — no double-count.
+  /// regardless of which seat that row names). When [dueForSeat] is null (e.g.
+  /// the handler's own call, which does its own seated-uncollected pass)
+  /// to-collect stays the recorded shortfalls alone — no double-count.
+  ///
+  /// SCOPE OF THAT AGREEMENT (audit finding F2). "Admin and handler can never
+  /// disagree" holds for THIS path — both sides computing from the same rows
+  /// with the same [dueForSeat]. It does NOT hold once the admin reads the
+  /// LEDGER: `MoneyController.summaryForBus` then takes to-collect from
+  /// `finance_rider_balance` (via `_arShareByBus`), which is the ledger's own
+  /// arithmetic over posted `ar.rider` lines, while the handler still prices
+  /// seated riders here from the live Dart fare. The two agree only while the
+  /// ledger's fare formula and `Bus.amountDueForSeat` agree — which is what
+  /// migration 070 exists to guarantee, and what check 7 in
+  /// supabase/diagnostics/finance_audit_checks.sql verifies on live data.
   factory BusMoneySummary.compute({
     required String busId,
     required List<Collection> collections,

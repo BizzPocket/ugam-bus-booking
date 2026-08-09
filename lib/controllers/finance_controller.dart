@@ -23,6 +23,30 @@ class FinanceController extends GetxController {
   final loadFailed = false.obs;
   final loadedOnce = false.obs;
 
+  /// How many bus rollups the last successful load returned. Reactive so
+  /// [ledgerEmpty] recomputes inside an `Obx` without a manual refresh.
+  final _rollupCount = 0.obs;
+
+  /// True when a load SUCCEEDED and returned nothing at all, while the agent
+  /// has at least one bus on at least one tour.
+  ///
+  /// That combination is provably a broken ledger rather than an empty
+  /// business: a bus always carries an owner rent (`buses.bus_price`), which
+  /// posts as an `expense.rent` line the moment 062's trigger or 058's backfill
+  /// runs. So buses with no ledger rows anywhere means the write-through
+  /// migrations were never applied — and this report, which reads ONLY
+  /// `finance_bus_summary`, would otherwise render a confident "from 1 tour"
+  /// badge over ₹0 with [loadFailed] false, because nothing threw.
+  ///
+  /// Deliberately NOT [loadFailed]: a read failure has its own retry surface,
+  /// and this state survives a retry — retrying an empty view returns empty.
+  /// The screen shows an explanatory banner instead.
+  bool get ledgerEmpty =>
+      loadedOnce.value &&
+      !loadFailed.value &&
+      _rollupCount.value == 0 &&
+      _tours.tours.any((t) => t.buses.isNotEmpty);
+
   // Net cash collected and total expenses, keyed by tour id.
   final Map<String, double> _revenueByTour = {};
   final Map<String, double> _expensesByTour = {};
@@ -98,6 +122,7 @@ class FinanceController extends GetxController {
       _incomeByTour
         ..clear()
         ..addAll(income);
+      _rollupCount.value = rollups.length;
       loadedOnce.value = true;
       _stale = false;
     } catch (e, st) {

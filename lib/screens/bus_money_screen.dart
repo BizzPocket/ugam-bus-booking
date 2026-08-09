@@ -1350,7 +1350,10 @@ class _TourRollupCard extends StatelessWidget {
       label: tr('bus_money.tour_totals'),
       value: Formatters.formatMoneyInr(net),
       tone: netTone,
-      secondary: tr('bus_money.rollup_net_caption'),
+      // Was "Across the whole tour", which restated the "Tour totals" label
+      // directly above it. The scarce caption line buys more as the basis: this
+      // net is CASH, and the trip's own P&L headlines the BILLED one.
+      secondary: tr('money.basis_cash'),
       breakdown: [
         HeroStatLine(
           tr('bus_money.rollup_total_collected'),

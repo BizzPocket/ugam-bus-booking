@@ -616,6 +616,12 @@
     "chip_confirmed": "पुष्टि हुई",
     "chip_cancelled": "रद्द",
     "chip_pending": "लंबित",
+    "chip_held": "सीटें रोकी",
+    "chip_hold_expired": "समय समाप्त",
+    "hold_left_suffix": "एडवांस भरने के लिए बाकी",
+    "hold_expired_note": "आपकी सीटें छूट गईं। फिर से बुक करें।",
+    "hold_pay": "{amount} भरें",
+    "hold_rebook": "फिर से बुक करें",
     "view_full_chart": "पूरा बस चार्ट देखें",
     "chip_edited": "संपादित",
     "chip_oneway_out": "एक तरफ · जाना",
@@ -1184,6 +1190,7 @@
     "driver_label": "ड्राइवर",
     "edit_seats": "सीटें संपादित करें",
     "no_layout": "इस बस के लिए अभी सीट लेआउट नहीं है.",
+    "layout_loading": "सीट मैप लोड हो रहा है…",
     "sheet_bus": "बस",
     "sheet_seats": "इस बस में सीटें",
     "empty": {
@@ -1982,7 +1989,6 @@
     "rollup_total_income": "कुल आय",
     "rollup_net": "शुद्ध",
     "rollup_to_return": "लौटाना है",
-    "rollup_net_caption": "पूरे दौरे का कुल",
     "expense_details": "विवरण",
     "bus_owner_rent": "बस मालिक का किराया",
     "delete_expense_title": "यह खर्च हटाएँ?",
@@ -2036,6 +2042,7 @@
     "expand_chart": "फुल स्क्रीन चार्ट",
     "error_load": "बस चार्ट लोड नहीं हो सका। कृपया पुनः प्रयास करें।",
     "error_load_title": "चार्ट लोड नहीं हुआ",
+    "error_refresh": "रिफ़्रेश नहीं हो सका — पिछले ज्ञात आँकड़े दिखा रहे हैं।",
     "no_bus_chart_title": "अभी बस चार्ट नहीं",
     "no_bus_chart_body": "एजेंट इस टूर के लिए बसें सेट कर लेने पर सीट चार्ट यहाँ दिखेगा।",
     "no_seat_layout": "इस बस पर अभी सीट लेआउट नहीं है।",
@@ -2352,7 +2359,7 @@
     "tour_not_found": "टूर नहीं मिला.",
     "per_bus": "प्रति बस",
     "tour_totals": "टूर कुल",
-    "net": "नेट",
+    "net_cash": "नेट (नकद)",
     "collected": "एकत्रित",
     "handover": "सौंपना",
     "to_collect": "एकत्र करना है",
@@ -2389,6 +2396,8 @@
     "holds_pending_title": "होल्ड पर सीटें",
     "holds_pending_body": "ग्राहक ने सीट चुनी है और 5 मिनट में भुगतान करना है। UPI क्लेम कन्फ़र्म करें, या बाद में भुगतान से बिना एडवांस सीट लॉक करें।",
     "holds_pay_later": "बाद में भुगतान",
+    "holds_berths": "{n} सीटें",
+    "holds_time_left": "{time} बाकी",
     "holds_finalized": "सीट लॉक — बस में वसूलें।",
     "holds_finalize_failed": "सीट लॉक नहीं हुई। होल्ड खत्म हो सकता है।"
   },
@@ -2664,6 +2673,10 @@
       "who_body": "Ugam Foj, Occubit Solution द्वारा प्रकाशित है।\n\nवेब: devam.org\nईमेल: zeel.shiyani68@gmail.com"
     }
   },
+  "money": {
+    "basis_cash": "नकद आधार पर — वास्तव में मिला पैसा, बिल किया गया नहीं।",
+    "basis_billed": "बिल आधार पर — सीटों का मूल्य, वसूली गई रकम नहीं।"
+  },
   "finance": {
     "eyebrow": "वित्त",
     "title": "लाभ और हानि",
@@ -2674,7 +2687,7 @@
     "net_loss": "शुद्ध हानि",
     "from_tours_one": "{n} टूर से",
     "from_tours_other": "{n} टूर से",
-    "revenue": "आय",
+    "revenue": "प्राप्त नकद",
     "expenses": "खर्च",
     "stat_tours": "टूर",
     "stat_avg": "औसत / टूर",
@@ -2687,7 +2700,7 @@
     "profit": "लाभ",
     "loss": "हानि",
     "row_revenue": "आय",
-    "row_revenue_value": "आय {n}",
+    "row_revenue_value": "नकद {n}",
     "row_expenses": "खर्च",
     "row_margin": "मार्जिन",
     "empty_title": "अभी तक किसी टूर में पैसा नहीं",
@@ -2700,7 +2713,9 @@
     "card_failed": "लोड नहीं हो सका",
     "card_failed_hint": "फिर कोशिश करने के लिए टैप करें",
     "row_state_completed": "पूरा हुआ",
-    "row_state_running": "चालू"
+    "row_state_running": "चालू",
+    "ledger_empty_title": "यह रिपोर्ट अधूरी है",
+    "ledger_empty_body": "वित्तीय बहीखाते में अभी कोई रिकॉर्ड नहीं है, इसलिए जहाँ पैसा चला भी है वहाँ ये कुल ₹0 दिखते हैं। सही आंकड़ों के लिए यात्रा का पैसा बोर्ड खोलें।"
   },
   "trip_pnl": {
     "eyebrow": "पैसा",

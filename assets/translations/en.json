@@ -616,6 +616,12 @@
     "chip_confirmed": "Confirmed",
     "chip_cancelled": "Cancelled",
     "chip_pending": "Pending",
+    "chip_held": "Seats held",
+    "chip_hold_expired": "Hold expired",
+    "hold_left_suffix": "left to pay the advance",
+    "hold_expired_note": "Your seats were released. Book again.",
+    "hold_pay": "Pay {amount}",
+    "hold_rebook": "Book again",
     "view_full_chart": "View full bus chart",
     "chip_edited": "EDITED",
     "chip_oneway_out": "ONE-WAY OUT",
@@ -1184,6 +1190,7 @@
     "driver_label": "Driver",
     "edit_seats": "Edit seats",
     "no_layout": "No seat layout yet for this bus.",
+    "layout_loading": "Loading seat map…",
     "sheet_bus": "Bus",
     "sheet_seats": "Seats on this bus",
     "empty": {
@@ -1984,7 +1991,6 @@
     "rollup_total_income": "Total income",
     "rollup_net": "Net",
     "rollup_to_return": "To return",
-    "rollup_net_caption": "Across the whole tour",
     "expense_details": "Details",
     "bus_owner_rent": "Bus owner rent",
     "delete_expense_title": "Delete this expense?",
@@ -2038,6 +2044,7 @@
     "expand_chart": "Full screen chart",
     "error_load": "We couldn't load the bus chart. Please try again.",
     "error_load_title": "Couldn't load chart",
+    "error_refresh": "Couldn't refresh — showing your last known figures.",
     "no_bus_chart_title": "No bus chart yet",
     "no_bus_chart_body": "The seat chart will appear here once the agent has set up the buses for this tour.",
     "no_seat_layout": "This bus has no seat layout yet.",
@@ -2354,7 +2361,7 @@
     "tour_not_found": "Tour not found.",
     "per_bus": "PER BUS",
     "tour_totals": "TOUR TOTALS",
-    "net": "NET",
+    "net_cash": "NET (CASH)",
     "collected": "COLLECTED",
     "handover": "HANDOVER",
     "to_collect": "TO COLLECT",
@@ -2387,6 +2394,8 @@
     "holds_pending_title": "Seats on hold",
     "holds_pending_body": "Customer picked seats and has 5 minutes to pay. Confirm their UPI claim, or Pay later to lock seats without advance.",
     "holds_pay_later": "Pay later",
+    "holds_berths": "{n} berths",
+    "holds_time_left": "{time} left",
     "holds_finalized": "Seats locked — collect on the bus.",
     "holds_finalize_failed": "Couldn't lock those seats. They may have expired.",
     "upi_confirmed": "Advance confirmed",
@@ -2666,6 +2675,10 @@
       "who_body": "Ugam Foj is published by Occubit Solution.\n\nWeb: devam.org\nEmail: zeel.shiyani68@gmail.com"
     }
   },
+  "money": {
+    "basis_cash": "Cash basis - money actually received, not what was billed.",
+    "basis_billed": "Billed basis - what the seats are worth, not what has been collected."
+  },
   "finance": {
     "eyebrow": "FINANCES",
     "title": "Profit & Loss",
@@ -2676,7 +2689,7 @@
     "net_loss": "NET LOSS",
     "from_tours_one": "from {n} tour",
     "from_tours_other": "from {n} tours",
-    "revenue": "Revenue",
+    "revenue": "Cash collected",
     "expenses": "Expenses",
     "stat_tours": "Tours",
     "stat_avg": "Avg / tour",
@@ -2689,7 +2702,7 @@
     "profit": "Profit",
     "loss": "Loss",
     "row_revenue": "REVENUE",
-    "row_revenue_value": "Rev {n}",
+    "row_revenue_value": "Cash {n}",
     "row_expenses": "EXPENSES",
     "row_margin": "MARGIN",
     "empty_title": "No trips with money yet",
@@ -2702,7 +2715,9 @@
     "card_failed": "Couldn't load",
     "card_failed_hint": "Tap to retry",
     "row_state_completed": "Completed",
-    "row_state_running": "Running"
+    "row_state_running": "Running",
+    "ledger_empty_title": "This report is incomplete",
+    "ledger_empty_body": "The finance ledger has no records yet, so these totals read ₹0 even where money has moved. Open a tour’s money board for its real figures."
   },
   "trip_pnl": {
     "eyebrow": "Money",

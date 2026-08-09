@@ -9,6 +9,7 @@ import '../models/bus_details.dart';
 import '../models/money_summary.dart';
 import '../models/payment_claim.dart';
 import '../models/tour.dart';
+import '../services/chart_hold_status.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../widgets/money_loading_skeleton.dart';
@@ -286,6 +287,45 @@ class _SeatHoldsCard extends StatelessWidget {
                       Text(
                         hold['phone']?.toString() ?? '',
                         style: UgamText.caption.copyWith(color: c.ink2),
+                      ),
+                      // WHICH berths this hold is blocking, and for how much
+                      // longer. Without it "Pay later" was a decision made
+                      // blind — the card showed only a name and a number.
+                      Builder(
+                        builder: (_) {
+                          final seats = summariseHoldSeats(hold['seats']);
+                          final until = DateTime.tryParse(
+                            hold['expires_at']?.toString() ?? '',
+                          );
+                          final left = until == null
+                              ? null
+                              : until.difference(DateTime.now());
+                          final parts = <String>[
+                            if (seats.seatIds.isNotEmpty)
+                              seats.seatIds.join(', '),
+                            if (seats.berths > 0)
+                              tr(
+                                'tour_money_board.holds_berths',
+                                namedArgs: {'n': '${seats.berths}'},
+                              ),
+                            if (left != null && !left.isNegative)
+                              tr(
+                                'tour_money_board.holds_time_left',
+                                namedArgs: {
+                                  'time': '${left.inMinutes}:'
+                                      '${left.inSeconds.remainder(60).toString().padLeft(2, '0')}',
+                                },
+                              ),
+                          ];
+                          if (parts.isEmpty) return const SizedBox.shrink();
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              parts.join(' · '),
+                              style: UgamText.micro.copyWith(color: c.ink3),
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -589,6 +629,15 @@ class _PnlEntryCard extends StatelessWidget {
                     Text(
                       tr('trip_pnl.entry_sub'),
                       style: UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                    // This card headlines BILLED net while the sticky capsule at
+                    // the foot of the same screen headlines CASH net. Two right
+                    // answers to two different questions — but unlabelled, one
+                    // screen appeared to disagree with itself.
+                    const SizedBox(height: 2),
+                    Text(
+                      tr('money.basis_billed'),
+                      style: UgamText.micro.copyWith(color: c.ink3),
                     ),
                   ],
                 ),
@@ -959,7 +1008,10 @@ class _TotalsCapsule extends StatelessWidget {
             const SizedBox(width: UgamSpacing.sm),
             Flexible(
               child: _CapsulePill(
-                label: tr('tour_money_board.net'),
+                // "NET (CASH)", not "NET": the P&L card higher up this same
+                // screen headlines the BILLED net. The pill is too small for a
+                // caption, so the basis rides in the label itself.
+                label: tr('tour_money_board.net_cash'),
                 value: Formatters.formatMoneyInr(summary.totalNet),
                 c: c,
               ),

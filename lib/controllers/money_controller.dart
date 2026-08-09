@@ -350,25 +350,21 @@ class MoneyController extends GetxController {
   List<PaymentClaim> get pendingClaims =>
       paymentClaims.where((c) => c.isPending).toList();
 
-  /// Confirmed UPI advances for a passenger (rupees). Pending claims are
-  /// excluded so collect never treats an unverified assertion as paid.
-  double confirmedAdvanceForPassenger(String passengerId) => paymentClaims
-      .where((c) => c.passengerId == passengerId && c.isConfirmed)
-      .fold(0.0, (sum, c) => sum + c.amountRupees);
-
+  /// The rider's UNVERIFIED claim, if any — "I paid you, here's the reference".
+  /// Surfaced on the collect sheet so the agent can confirm or reject it; it is
+  /// deliberately NOT money until they do.
+  ///
+  /// There is intentionally no `confirmedAdvanceForPassenger` / `dueAfterAdvances`
+  /// counterpart. Confirming a claim writes a real `collections` row
+  /// (`confirm_payment_claim`, migration 060/069), so a confirmed advance is
+  /// already inside `netCollectedOf` and every balance derived from it. A helper
+  /// that subtracted it a SECOND time would reproduce, client-side, exactly the
+  /// double-count that migration 069 removes from the ledger — so the pair was
+  /// deleted rather than left lying around unused.
   PaymentClaim? pendingClaimForPassenger(String passengerId) =>
       paymentClaims.firstWhereOrNull(
         (c) => c.passengerId == passengerId && c.isPending,
       );
-
-  /// Live seat fare minus confirmed advances (never below 0).
-  double dueAfterAdvances({
-    required String passengerId,
-    required double liveFare,
-  }) {
-    final due = liveFare - confirmedAdvanceForPassenger(passengerId);
-    return due < 0 ? 0 : due;
-  }
 
   Future<void> confirmPaymentClaim(String claimId, {String? note}) async {
     await SupabaseService.instance.client.rpc(
@@ -920,18 +916,21 @@ class MoneyController extends GetxController {
           busRent: rollup.rent,
         );
       }
-      // Ledger loaded but no lines for this bus yet — zeros, not legacy recompute.
-      return BusMoneySummary(
-        busId: busId,
-        collected: 0,
-        revenueBilled: _billedRevenues()[busId] ?? 0,
-        expensesTotal: _busRents()[busId] ?? 0,
-        handedOver: 0,
-        toReturnTotal: 0,
-        toCollectTotal: _arForBus(busId).toCollect,
-        income: 0,
-        busRent: _busRents()[busId] ?? 0,
-      );
+      // Ledger loaded but holding no lines for this bus — fall through to the
+      // legacy recompute below.
+      //
+      // An empty answer is NOT proof the bus has no money. The write-through
+      // triggers (062) may not be deployed, or the backfill (058) never run, in
+      // which case the ledger is simply blank while the legacy tables — already
+      // fetched, sitting in the obs lists right here — hold the real cash. This
+      // used to return hard zeros, which is what rendered a ₹0 Profit & Loss
+      // for a tour with money on it, and worse than an obviously-broken board:
+      // rent still came through from the in-memory tour, so the trip read as a
+      // clean rent-sized LOSS rather than as a failure.
+      //
+      // When the bus genuinely has nothing, the legacy compute returns the same
+      // zeros (plus rent and billed revenue), so falling back is never worse
+      // than the figure it replaces.
     }
     return BusMoneySummary.compute(
       busId: busId,
@@ -946,14 +945,52 @@ class MoneyController extends GetxController {
     );
   }
 
-  /// Attribute each rider's AR to their primary seated bus (first assignment)
-  /// so multi-bus tours never double-count the same owes_minor.
+  /// How much of a rider's ledger AR belongs to each bus they sit on, as
+  /// fractions summing to 1.
+  ///
+  /// `finance_rider_balance` is passenger-scoped — `ar.rider` lines deliberately
+  /// carry no `bus_id` (see 063's header) — so a per-bus figure has to be
+  /// reconstructed here. The honest split is by what each bus BILLED them:
+  /// a rider going out on a ₹1,000 bus and back on a ₹3,000 one owes those
+  /// buses in a 1:3 ratio, not 1:0.
+  ///
+  /// This used to hand the WHOLE balance to `assignedSeats.first.busId`, which
+  /// left the second bus of a cross-bus rider reading "nothing to collect" for
+  /// someone its handler is physically carrying.
+  ///
+  /// Only buses the tour currently lists are apportioned over, so the shares
+  /// still sum to exactly 1 across [summariesForBuses] and no rider is counted
+  /// twice in the trip total.
+  Map<String, double> _arShareByBus(Passenger p) {
+    final busById = _busById();
+    final seatedBusIds = <String>{
+      for (final a in p.assignedSeats)
+        if (busById.containsKey(a.busId)) a.busId,
+    };
+    if (seatedBusIds.isEmpty) return const {};
+
+    final billed = {
+      for (final id in seatedBusIds) id: busById[id]!.amountDueFor(p),
+    };
+    final total = billed.values.fold(0.0, (sum, v) => sum + v);
+    // Nothing priced yet (the agent hasn't entered fares): any allocation is
+    // arbitrary, so share it evenly — that at least surfaces the rider on every
+    // bus carrying them instead of hiding them from all but one.
+    if (total <= 0) {
+      final share = 1 / seatedBusIds.length;
+      return {for (final id in seatedBusIds) id: share};
+    }
+    return {for (final e in billed.entries) e.key: e.value / total};
+  }
+
+  /// This bus's share of every rider's ledger AR (see [_arShareByBus]).
   ({double toCollect, double toReturn}) _arForBus(String busId) {
     var toCollect = 0.0;
     var toReturn = 0.0;
     for (final p in _tourPassengers()) {
-      if (_primaryBusId(p) != busId) continue;
-      final owes = _riderOwes[p.id] ?? 0;
+      final share = _arShareByBus(p)[busId];
+      if (share == null || share == 0) continue;
+      final owes = (_riderOwes[p.id] ?? 0) * share;
       if (owes > 0.005) {
         toCollect += owes;
       } else if (owes < -0.005) {
@@ -963,15 +1000,29 @@ class MoneyController extends GetxController {
     return (toCollect: toCollect, toReturn: toReturn);
   }
 
-  String? _primaryBusId(Passenger p) {
-    if (p.assignedSeats.isEmpty) return null;
-    return p.assignedSeats.first.busId;
-  }
-
   TourMoneySummary tourSummary() {
     if (_ledgerReady) {
       final busById = _busById();
-      final ids = busById.isEmpty ? _ledgerByBus.keys : busById.keys;
+      final knownIds = busById.keys.toSet();
+      // Buses the LEDGER carries money for that the tour no longer lists. Their
+      // cash is real and must stay inside the trip total — dropping it (which
+      // is what iterating `busById.keys` alone did) makes money silently vanish
+      // from the books with nothing on screen to explain the gap. They are
+      // summed in below AND broken out as `orphan*` so the arithmetic still
+      // reconciles, exactly as the legacy path does.
+      //
+      // Only meaningful when we actually resolved a fleet: an empty `busById`
+      // means the tour/controller wasn't available, NOT that the tour has no
+      // buses, so every ledger bus would look orphaned.
+      final orphanIds = knownIds.isEmpty
+          ? const <String>[]
+          : [
+              for (final id in _ledgerByBus.keys)
+                if (!knownIds.contains(id)) id,
+            ];
+      final ids = knownIds.isEmpty
+          ? _ledgerByBus.keys.toList()
+          : [...knownIds, ...orphanIds];
       final buses = summariesForBuses(ids);
       var toCollect = 0.0;
       var toReturn = 0.0;
@@ -979,13 +1030,25 @@ class MoneyController extends GetxController {
         toCollect += s.toCollectTotal;
         toReturn += s.toReturnTotal;
       }
-      // Unseated riders with AR still count on the tour total.
+      // Riders whose AR lands on no current bus — unseated, or seated only on a
+      // bus the tour has since dropped — still owe the trip.
       for (final p in _tourPassengers()) {
-        if (p.assignedSeats.isNotEmpty) continue;
+        if (_arShareByBus(p).isNotEmpty) continue;
         final owes = _riderOwes[p.id] ?? 0;
         if (owes > 0.005) toCollect += owes;
         if (owes < -0.005) toReturn += -owes;
       }
+
+      var orphanCollected = 0.0;
+      var orphanExpenses = 0.0;
+      var orphanIncome = 0.0;
+      for (final id in orphanIds) {
+        final r = _ledgerByBus[id]!;
+        orphanCollected += r.collected;
+        orphanExpenses += r.expensesTotal;
+        orphanIncome += r.income;
+      }
+
       return TourMoneySummary(
         totalCollected: buses.fold(0.0, (s, b) => s + b.collected),
         totalRevenueBilled: buses.fold(0.0, (s, b) => s + b.revenueBilled),
@@ -995,6 +1058,9 @@ class MoneyController extends GetxController {
         totalToCollect: toCollect,
         totalIncome: buses.fold(0.0, (s, b) => s + b.income),
         totalBusRent: buses.fold(0.0, (s, b) => s + b.busRent),
+        orphanCollected: orphanCollected,
+        orphanExpenses: orphanExpenses,
+        orphanIncome: orphanIncome,
         totalDetachedCash: _detachedCash(
           collections,
           (p) => p.assignedSeats.isNotEmpty,

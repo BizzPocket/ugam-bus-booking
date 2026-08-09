@@ -117,6 +117,13 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       UgamSpacing.xxl,
                     ),
                     children: [
+                      // A silent ₹0 is the one thing this report must never
+                      // show: it reads as "you made nothing", not "I could not
+                      // find out". See FinanceController.ledgerEmpty.
+                      if (_finance.ledgerEmpty) ...[
+                        const _LedgerEmptyNotice(),
+                        const SizedBox(height: UgamSpacing.md),
+                      ],
                       _HeroCard(totals: totals, c: c),
                       const SizedBox(height: UgamSpacing.md),
                       _StatTriple(totals: totals),
@@ -180,6 +187,56 @@ String _compactSigned(num v) {
 
 String _dateLabel(BuildContext context, DateTime d) =>
     Formatters.formatDateMedium(d, locale: context.locale.languageCode);
+
+// ── Incomplete-ledger notice ─────────────────────────────────────────────────
+
+/// Shown when the finance ledger answered with nothing while the agent
+/// demonstrably has buses (see [FinanceController.ledgerEmpty]).
+///
+/// Deliberately a warm NOTICE and not [UgamEmpty.error]: this is not a failed
+/// fetch, so there is nothing to retry — the report really did load, and what
+/// it loaded is empty. Saying so is the whole point; a bare ₹0 reads as "you
+/// earned nothing" rather than "I could not find out", and that is the reading
+/// this closes.
+class _LedgerEmptyNotice extends StatelessWidget {
+  const _LedgerEmptyNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      decoration: BoxDecoration(
+        color: c.warmFill,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 18, color: c.warm),
+          const SizedBox(width: UgamSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr('finance.ledger_empty_title'),
+                  style: UgamText.titleS.copyWith(color: c.ink),
+                ),
+                const SizedBox(height: UgamSpacing.xs),
+                Text(
+                  tr('finance.ledger_empty_body'),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ── Hero net card ────────────────────────────────────────────────────────────
 
@@ -289,6 +346,15 @@ class _HeroCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+          // This report is CASH basis (FinanceController sums `collected`),
+          // while a trip's own P&L headlines the BILLED net. Both are right;
+          // comparing them without knowing which is which is what makes the app
+          // look like it cannot add up. Naming the basis costs one line.
+          const SizedBox(height: UgamSpacing.sm),
+          Text(
+            tr('money.basis_cash'),
+            style: UgamText.micro.copyWith(color: c.ink3),
           ),
         ],
       ),
