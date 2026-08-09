@@ -68,7 +68,8 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
     // (opening a live tour) costs nothing.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      Get.find<TourController>().ensureTourHydrated(widget.tourId);
+      // Roster + seat layouts (layouts are deferred on cold start for 2G).
+      Get.find<TourController>().ensureTourReadyForSeating(widget.tourId);
     });
   }
 
@@ -100,11 +101,15 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
       // the compact header. The summary card only overlaps in the image case,
       // so the tab gap adapts below.
       final hasHeroImage = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
+      // Overview keeps the tall hero. Work tabs (Travelers/Buses/Money/
+      // Activity) force the compact header so the roster owns the screen.
+      final workTab = _tabIndex != 0;
+      final showCollapsedChrome = hasHeroImage && (_heroCollapsed || workTab);
       return UgamScaffold(
         extendBody: true,
         body: NotificationListener<ScrollNotification>(
           onNotification: (n) {
-            if (!hasHeroImage) return false;
+            if (!hasHeroImage || workTab) return false;
             if (n.metrics.axis != Axis.vertical) return false;
             final collapsed = n.metrics.pixels > 140;
             if (collapsed != _heroCollapsed) {
@@ -125,6 +130,7 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
                     SliverToBoxAdapter(
                       child: _HeroSection(
                         tour: tour,
+                        forceCompact: workTab,
                         onBack: () => AppNav.pop(context),
                         onEdit: () => Navigator.of(context).push(
                           MaterialPageRoute(
@@ -140,9 +146,11 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(
                           UgamSpacing.gutter,
-                          hasHeroImage ? UgamSpacing.huge : UgamSpacing.lg,
+                          hasHeroImage && !workTab
+                              ? UgamSpacing.huge
+                              : UgamSpacing.md,
                           UgamSpacing.gutter,
-                          UgamSpacing.lg,
+                          UgamSpacing.sm,
                         ),
                         child: _TabBar(
                           index: _tabIndex,
@@ -155,7 +163,10 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
                             null,
                             null,
                           ],
-                          onChanged: (i) => setState(() => _tabIndex = i),
+                          onChanged: (i) => setState(() {
+                            _tabIndex = i;
+                            if (i == 0) _heroCollapsed = false;
+                          }),
                         ),
                       ),
                     ),
@@ -171,23 +182,21 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
                   ],
                 ),
               ),
-              if (hasHeroImage)
+              if (hasHeroImage && !workTab)
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
                   child: IgnorePointer(
-                    ignoring: !_heroCollapsed,
+                    ignoring: !showCollapsedChrome,
                     child: AnimatedOpacity(
                       duration: const Duration(milliseconds: 180),
-                      opacity: _heroCollapsed ? 1 : 0,
+                      opacity: showCollapsedChrome ? 1 : 0,
                       child: _CollapsedTourChrome(
                         tour: tour,
                         c: c,
                         onBack: () => AppNav.pop(context),
                         onMore: () {
-                          // Reuse hero overflow by pushing edit sheet via a
-                          // throwaway hero section actions — open EditTour.
                           Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (context) =>
@@ -206,7 +215,10 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
           tour: tour,
           tab: _tabIndex,
           c: c,
-          onSwitchTab: (i) => setState(() => _tabIndex = i),
+          onSwitchTab: (i) => setState(() {
+            _tabIndex = i;
+            if (i == 0) _heroCollapsed = false;
+          }),
         ),
       );
     });
@@ -340,12 +352,14 @@ class _HeroSection extends StatelessWidget {
   final VoidCallback onBack;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final bool forceCompact;
 
   const _HeroSection({
     required this.tour,
     required this.onBack,
     required this.onEdit,
     required this.onDelete,
+    this.forceCompact = false,
   });
 
   /// Bottom sheet of tour-level actions (edit / delete), opened from the single
@@ -496,7 +510,8 @@ class _HeroSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasImage = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
     // The 99% case: no photo → compact header, no wasted illustration.
-    if (!hasImage) return _buildCompactHeader(context);
+    // Work tabs also force compact so Travelers/Buses keep the roster visible.
+    if (!hasImage || forceCompact) return _buildCompactHeader(context);
 
     final c = UgamColors.of(context);
     final topInset = MediaQuery.of(context).padding.top;
@@ -1248,12 +1263,20 @@ class _PassengersTabState extends State<_PassengersTab> {
       );
     }
 
-    final filtered = filterTravelers(
+    final needsSeatCount = all.where(passengerNeedsSeat).length;
+    final seatedCount = all.length - needsSeatCount;
+    var filtered = filterTravelers(
       all,
       filter: _filter,
       query: _query,
     );
-    final needsSeatCount = all.where(passengerNeedsSeat).length;
+    // Needs-seat first so the agent sees work before the completed roster.
+    if (_filter == TravelerFilter.all && _query.trim().isEmpty) {
+      filtered = [
+        ...filtered.where(passengerNeedsSeat),
+        ...filtered.where((p) => !passengerNeedsSeat(p)),
+      ];
+    }
 
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
@@ -1266,6 +1289,15 @@ class _PassengersTabState extends State<_PassengersTab> {
             ),
           ),
         ),
+        if (needsSeatCount > 0) ...[
+          const SizedBox(height: UgamSpacing.sm),
+          _TravelersProgressStrip(
+            c: c,
+            seated: seatedCount,
+            open: needsSeatCount,
+            total: all.length,
+          ),
+        ],
         const SizedBox(height: UgamSpacing.sm),
         UgamSearchField(
           hint: tr('tour_detail.search_travelers_hint'),
@@ -1289,7 +1321,8 @@ class _PassengersTabState extends State<_PassengersTab> {
                 count: needsSeatCount,
                 selected: _filter == TravelerFilter.needsSeat,
                 c: c,
-                onTap: () => setState(() => _filter = TravelerFilter.needsSeat),
+                onTap: () =>
+                    setState(() => _filter = TravelerFilter.needsSeat),
               ),
               const SizedBox(width: 6),
               _FilterChip(
@@ -1322,9 +1355,56 @@ class _PassengersTabState extends State<_PassengersTab> {
           for (var i = 0; i < filtered.length; i++) ...[
             _PassengerRow(passenger: filtered[i], tour: tour, c: c),
             if (i != filtered.length - 1)
-              const SizedBox(height: UgamSpacing.tight),
+              const SizedBox(height: 6),
           ],
       ]),
+    );
+  }
+}
+
+class _TravelersProgressStrip extends StatelessWidget {
+  final UgamColorSet c;
+  final int seated;
+  final int open;
+  final int total;
+
+  const _TravelersProgressStrip({
+    required this.c,
+    required this.seated,
+    required this.open,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = total == 0 ? 0.0 : seated / total;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            tr('tour_detail.travelers_progress', namedArgs: {
+              'seated': '$seated',
+              'open': '$open',
+            }),
+            style: UgamText.caption.copyWith(color: c.ink2),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.sm),
+        SizedBox(
+          width: 72,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: progress.clamp(0.0, 1.0),
+              minHeight: 4,
+              backgroundColor: c.cardElev,
+              color: c.accent,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1619,90 +1699,147 @@ class _PassengerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tone = _passengerTone(passenger);
-    return UgamCard.plain(
-      elev: true,
-      radius: UgamRadius.row,
-      onTap: () => _showPassengerActions(context, passenger, tour, c),
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      child: Row(
-        children: [
-          Container(
-            // Matches the shared UgamPersonRow avatar (36) instead of running
-            // 4px larger than the identical avatar elsewhere in the app.
-            width: UgamScale.px(context, 36),
-            height: UgamScale.px(context, 36),
-            decoration: BoxDecoration(
-              color: c.card,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              _initials(passenger.name),
-              style: UgamText.bodyStrong.copyWith(color: c.ink),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
+    final needsSeat = passengerNeedsSeat(passenger);
+    final seated = passenger.isFullyAssigned;
+
+    return Material(
+      color: needsSeat ? c.accentFill : c.card,
+      borderRadius: BorderRadius.circular(UgamRadius.row),
+      child: InkWell(
+        onTap: () => _showPassengerActions(context, passenger, tour, c),
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 52),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: needsSeat
+              ? BoxDecoration(
+                  borderRadius: BorderRadius.circular(UgamRadius.row),
+                  border: Border.all(color: c.accent.withValues(alpha: 0.35)),
+                )
+              : null,
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: needsSeat ? c.accent.withValues(alpha: 0.18) : c.cardElev,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _initials(passenger.name),
+                  style: UgamText.micro.copyWith(
+                    color: needsSeat ? c.accent : c.ink,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Expanded(
-                      child: Text(
-                        passenger.name,
-                        style: UgamText.bodyStrong
-                            .copyWith(color: c.ink, fontSize: 13),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
                     Text(
-                      _ago(passenger.createdAt),
-                      style: UgamText.tabular(
-                        UgamText.caption.copyWith(color: c.ink3),
-                      ),
+                      passenger.name,
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.ink, fontSize: 13),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            _seatMeta(passenger, tour),
+                            style: UgamText.caption.copyWith(
+                              color: c.ink2,
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          seated
+                              ? '✓ ${passenger.totalSeatsAssigned}/${passenger.seatBerths}'
+                              : passenger.progressLabel,
+                          style: UgamText.tabular(
+                            UgamText.micro.copyWith(
+                              color: seated
+                                  ? c.good
+                                  : needsSeat
+                                      ? c.accent
+                                      : c.ink3,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        passenger.requestSummary,
-                        style: UgamText.caption.copyWith(color: c.ink2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                _ago(passenger.createdAt),
+                style: UgamText.tabular(
+                  UgamText.micro.copyWith(color: c.ink3),
+                ),
+              ),
+              if (needsSeat) ...[
+                const SizedBox(width: 6),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => SeatsScreen(
+                          tourId: tour.id,
+                          initialMode: SeatsMode.summary,
+                        ),
+                      ),
+                    );
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 6,
+                    ),
+                    child: Text(
+                      tr('tour_detail.assign_row'),
+                      style: UgamText.micro.copyWith(
+                        color: c.accent,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(width: UgamSpacing.sm),
-                    // Was a hand-rolled 5px dot + 4px gap + forked 11/w700
-                    // label; the shared component owns this everywhere else.
-                    UgamStatusDot(
-                      label: passenger.progressLabel,
-                      tone: tone,
-                    ),
-                  ],
+                  ),
                 ),
-              ],
-            ),
+              ] else
+                Icon(Icons.chevron_right_rounded, size: 16, color: c.ink3),
+            ],
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          // Affordance hint that the row is tappable (opens the rider sheet).
-          Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
-        ],
+        ),
       ),
     );
   }
 
-  UgamStatusTone _passengerTone(Passenger p) {
-    if (p.isFullyAssigned) return UgamStatusTone.good;
-    if (p.isPartiallyAssigned) return UgamStatusTone.accent;
-    if (p.isWaitlisted) return UgamStatusTone.warm;
-    return UgamStatusTone.neutral;
+  String _seatMeta(Passenger p, Tour tour) {
+    final req = p.requestSummary;
+    if (p.assignedSeats.isEmpty) {
+      return '$req · ${tr('tour_detail.seat_meta_none')}';
+    }
+    final seatIds = p.assignedSeats.map((a) => a.seatId).join(', ');
+    final busId = p.assignedSeats.first.busId;
+    final bus = tour.buses.where((b) => b.id == busId).firstOrNull;
+    final busLabel = bus?.displayLabel;
+    if (busLabel != null && busLabel.isNotEmpty) {
+      return '$req · $busLabel · $seatIds';
+    }
+    return '$req · ${tr('tour_detail.seat_meta_placed', namedArgs: {'seats': seatIds})}';
   }
 
   String _initials(String name) {

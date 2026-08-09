@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:occubusbooking/controllers/tour_controller.dart';
@@ -506,11 +508,37 @@ void main() {
     expect(ctrl.hasError.value, isTrue);
     expect(ctrl.tours, isEmpty);
   });
+
+  // A slow first fetch that fails after a second refresh already succeeded
+  // used to flip hasError back on and leave Home on Retry despite good data.
+  test('a stale failed load does not blank a newer successful load', () async {
+    final sync = _GatedFailThenOkSync();
+    Get.put<SyncService>(sync);
+    Get.put<AuthController>(_NoInitAuth());
+    final ctrl = TourController();
+
+    final first = ctrl.refreshTours();
+    await pumpEventQueue();
+    await ctrl.refreshTours();
+
+    expect(ctrl.hasError.value, isFalse);
+    expect(ctrl.tours.map((t) => t.id), ['t1']);
+
+    sync.releaseFirst();
+    await first;
+
+    expect(ctrl.hasError.value, isFalse,
+        reason: 'stale failure must not overwrite the newer success');
+    expect(ctrl.tours.map((t) => t.id), ['t1']);
+  });
 }
 
 /// SyncService whose reads are scripted by table name so a test can make one
 /// table fail while another succeeds. [onInit] is a no-op so it doesn't start
 /// the real connectivity listener.
+///
+/// Progressive cold start calls [fetchTourRows] + [fetchRelationsForTours]
+/// (not smartFetch for tours), so those are scripted too.
 class _ScriptedSync extends SyncService {
   _ScriptedSync(this._resultFor);
 
@@ -522,7 +550,40 @@ class _ScriptedSync extends SyncService {
   void onInit() {}
 
   @override
-  Future<({List<Map<String, dynamic>> rows, bool failed})> smartFetch({
+  Future<List<Map<String, dynamic>>> fetchTourRows({
+    Map<String, String>? filters,
+    String? orderBy,
+  }) async {
+    await Future<void>.delayed(Duration.zero);
+    final r = _resultFor('tours');
+    if (r.failed) {
+      throw Exception('tours fetch failed');
+    }
+    return r.rows;
+  }
+
+  @override
+  Future<
+      ({
+        List<Map<String, dynamic>> passengers,
+        List<Map<String, dynamic>> buses,
+        List<Map<String, dynamic>> groups,
+      })> fetchRelationsForTours(List<String> tourIds) async {
+    await Future<void>.delayed(Duration.zero);
+    return (
+      passengers: const <Map<String, dynamic>>[],
+      buses: const <Map<String, dynamic>>[],
+      groups: const <Map<String, dynamic>>[],
+    );
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchBusLayouts(List<String> busIds) async =>
+      const [];
+
+  @override
+  Future<({List<Map<String, dynamic>> rows, bool failed, String? error})>
+  smartFetch({
     required String table,
     required String cacheKey,
     String? select,
@@ -532,7 +593,9 @@ class _ScriptedSync extends SyncService {
   }) async {
     // Yield to the event loop so concurrent reads genuinely interleave.
     await Future<void>.delayed(Duration.zero);
-    return _resultFor(table);
+    // The scripts only care about rows/failed; widen to smartFetch's record.
+    final r = _resultFor(table);
+    return (rows: r.rows, failed: r.failed, error: null);
   }
 
   @override
@@ -546,4 +609,74 @@ class _NoInitAuth extends AuthController {
   @override
   // ignore: must_call_super
   void onInit() {}
+
+  @override
+  Future<void> get whenRestored => Future.value();
+}
+
+/// First tour-header fetch hangs until [releaseFirst], then fails; later calls
+/// succeed. Pins the load-generation guard used on cold-start overlapping
+/// refreshes.
+class _GatedFailThenOkSync extends SyncService {
+  final _firstGate = Completer<void>();
+  var _calls = 0;
+
+  void releaseFirst() {
+    if (!_firstGate.isCompleted) _firstGate.complete();
+  }
+
+  @override
+  // ignore: must_call_super
+  void onInit() {}
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchTourRows({
+    Map<String, String>? filters,
+    String? orderBy,
+  }) async {
+    _calls++;
+    if (_calls == 1) {
+      await _firstGate.future;
+      throw Exception('stale tours fetch failed');
+    }
+    return [_tourWith(const []).toMap()];
+  }
+
+  @override
+  Future<
+      ({
+        List<Map<String, dynamic>> passengers,
+        List<Map<String, dynamic>> buses,
+        List<Map<String, dynamic>> groups,
+      })> fetchRelationsForTours(List<String> tourIds) async {
+    return (
+      passengers: const <Map<String, dynamic>>[],
+      buses: const <Map<String, dynamic>>[],
+      groups: const <Map<String, dynamic>>[],
+    );
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchBusLayouts(List<String> busIds) async =>
+      const [];
+
+  @override
+  Future<({List<Map<String, dynamic>> rows, bool failed, String? error})>
+  smartFetch({
+    required String table,
+    required String cacheKey,
+    String? select,
+    Map<String, String>? filters,
+    String? orderBy,
+    int maxAge = 300000,
+  }) async {
+    return (
+      rows: [_tourWith(const []).toMap()],
+      failed: false,
+      error: null,
+    );
+  }
+
+  @override
+  Future<void> invalidateCache(String key) async {}
 }

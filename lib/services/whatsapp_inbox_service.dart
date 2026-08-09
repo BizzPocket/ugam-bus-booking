@@ -58,6 +58,41 @@ class WhatsAppInboxService {
         );
   }
 
+  /// Storage bucket holding inbound WhatsApp attachments (migration 059).
+  static const _mediaBucket = 'wa-media';
+
+  /// How long a media link stays valid. Long enough to open a document in an
+  /// external viewer, short enough that a link leaked from a screenshot or a
+  /// share sheet stops working — the bucket is private precisely because these
+  /// are customers' photos, voice notes and payment screenshots.
+  static const _signedUrlTtl = Duration(hours: 1);
+
+  final Map<String, String> _signedUrlCache = {};
+
+  /// Exchanges a stored [mediaPath] for a temporary signed URL.
+  ///
+  /// Cached per path for the life of the app process: a chat rebuilds its
+  /// bubbles on every realtime tick, and minting a fresh URL each time would
+  /// fire one storage round-trip per visible attachment per rebuild — and make
+  /// [Image.network] re-download the picture, because the URL is the cache key.
+  ///
+  /// Returns null when the object is gone or the caller isn't allowed to read
+  /// it; the caller shows the "attachment unavailable" state rather than an
+  /// error, because from the admin's point of view those are the same thing.
+  Future<String?> mediaUrl(String mediaPath) async {
+    final cached = _signedUrlCache[mediaPath];
+    if (cached != null) return cached;
+    try {
+      final url = await _client.storage
+          .from(_mediaBucket)
+          .createSignedUrl(mediaPath, _signedUrlTtl.inSeconds);
+      _signedUrlCache[mediaPath] = url;
+      return url;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Clears a thread's unread badge via the owner-scoped `wa_mark_read` RPC.
   Future<void> markRead(String conversationId) async {
     await _client.rpc(
@@ -89,6 +124,23 @@ class WhatsAppInboxService {
         );
       }
       return WaReplyResult(ok: false, error: 'Unexpected reply: $data');
+    } on FunctionException catch (e) {
+      // `invoke` THROWS on any non-2xx, so wa-reply's own 401/403/404/500 bodies
+      // ("Not authenticated", "Not your conversation", "Conversation not found",
+      // "WHATSAPP_TOKEN … not configured") arrive here rather than as data.
+      // Left to `e.toString()` they reached the agent as
+      // "FunctionException(status: 403, details: {error: ...})" — technically
+      // the reason, practically unreadable. Unwrap the body's own message.
+      final details = e.details;
+      final message = details is Map
+          ? (details['error'] ?? details['message'])?.toString()
+          : details?.toString();
+      return WaReplyResult(
+        ok: false,
+        error: (message == null || message.trim().isEmpty)
+            ? 'HTTP ${e.status}${e.reasonPhrase == null ? '' : ' ${e.reasonPhrase}'}'
+            : message.trim(),
+      );
     } catch (e) {
       return WaReplyResult(ok: false, error: e.toString());
     }

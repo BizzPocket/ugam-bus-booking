@@ -45,6 +45,8 @@ class UserController extends GetxController {
   /// network call per booking.
   final _adminIdByPhone = <String, String>{};
 
+  Future<void>? _ensureLoadedInFlight;
+
   UserService get _userService => Get.find<UserService>();
   ContactSyncService get _contactSync => ContactSyncService();
   AuthController get _auth => Get.find<AuthController>();
@@ -64,6 +66,19 @@ class UserController extends GetxController {
   /// then runs an incremental phonebook sync in the background. Safe to
   /// call repeatedly — does nothing on a passenger session.
   Future<void> ensureLoadedForCurrentAdmin() async {
+    if (_ensureLoadedInFlight != null) return _ensureLoadedInFlight!;
+    final future = _ensureLoadedBody();
+    _ensureLoadedInFlight = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_ensureLoadedInFlight, future)) {
+        _ensureLoadedInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _ensureLoadedBody() async {
     if (!_auth.isAdmin) {
       reset();
       return;

@@ -46,6 +46,15 @@ class BusStatusScreen extends StatefulWidget {
 
 class _BusStatusScreenState extends State<BusStatusScreen> {
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Get.find<TourController>().ensureTourReadyForSeating(widget.tourId);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
     final c = UgamColors.of(context);

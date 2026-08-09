@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../models/customer_memory.dart';
 import '../models/priority_status.dart';
 import '../models/tour.dart';
+import '../services/sync_read_projections.dart';
 import '../services/sync_service.dart';
 import '../utils/phone_normalize.dart';
 import 'auth_controller.dart';
@@ -27,8 +28,16 @@ class CustomerMemoryController extends GetxController {
   /// NOT a blocking error/retry UI ("never block the app on it").
   final loadFailed = false.obs;
 
+  /// Set when PostgREST reports the table is not in the schema cache
+  /// (migration not applied). Further loads / reconnect retries are skipped —
+  /// a missing table will never heal by waiting for Wi‑Fi.
+  bool tableUnavailable = false;
+
   /// normalised phone → memory, rebuilt on every load/upsert for O(1) lookups.
   final _byPhone = <String, CustomerMemory>{};
+
+  int _loadGeneration = 0;
+  Future<void>? _loadInFlight;
 
   SyncService get _sync => Get.find<SyncService>();
   AuthController get _auth => Get.find<AuthController>();
@@ -39,21 +48,43 @@ class CustomerMemoryController extends GetxController {
   @override
   void onInit() {
     super.onInit();
-    load();
+    // Defer past the Home cold-start wave so customer_memory never contends
+    // with tour headers/rosters on 2G. Auth restore may also call [load];
+    // coalesce + generation keep overlapping calls safe.
+    Future<void>.delayed(const Duration(milliseconds: 2200), () {
+      if (isClosed) return;
+      load();
+    });
     // Best-effort self-heal: a first-launch load that failed (offline / timed
     // out) re-runs once connectivity returns, so returning-customer priority and
     // companion suggestions become available without any user action. Mirrors
     // TourController's reaction to isOnline; guarded on [loadFailed] so we don't
     // re-fetch on every connectivity flap once a load has succeeded.
     ever(_sync.isOnline, (online) {
-      if (online && loadFailed.value) load();
+      if (online && loadFailed.value && !tableUnavailable) load();
     });
   }
 
   /// (Re)load the current admin's memory rows. No-op on a non-admin session.
   Future<void> load() async {
+    if (tableUnavailable) return;
+    if (_loadInFlight != null) return _loadInFlight!;
+    final future = _loadBody();
+    _loadInFlight = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_loadInFlight, future)) {
+        _loadInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _loadBody() async {
+    final gen = ++_loadGeneration;
     final adminId = _adminId;
     if (!_auth.isAdmin || adminId == null) {
+      if (gen != _loadGeneration) return;
       memories.clear();
       _byPhone.clear();
       loadFailed.value = false;
@@ -63,10 +94,12 @@ class CustomerMemoryController extends GetxController {
       final result = await _sync.smartFetch(
         table: 'customer_memory',
         cacheKey: _cacheKey,
+        select: SyncReadProjections.customerMemorySelect,
         filters: {'owner_id': adminId},
         orderBy: 'updated_at',
         maxAge: 120000,
       );
+      if (gen != _loadGeneration) return;
       // smartFetch returns `[]` on any failure (with result.failed set), so a
       // blind assignAll would wipe the returning-customer index on a transient
       // timeout. Distinguish a real load failure from a genuinely-empty result:
@@ -74,6 +107,11 @@ class CustomerMemoryController extends GetxController {
       // (result.failed is this call's OWN outcome — a missing `customer_memory`
       // table failing here can no longer bleed into a concurrent tours load.)
       if (result.failed) {
+        if (SyncReadProjections.isMissingTableError(result.error)) {
+          tableUnavailable = true;
+          loadFailed.value = false;
+          return;
+        }
         loadFailed.value = true;
         return;
       }
@@ -82,6 +120,7 @@ class CustomerMemoryController extends GetxController {
       _rebuildIndex();
       loadFailed.value = false;
     } catch (_) {
+      if (gen != _loadGeneration) return;
       // Best-effort — memory is an enhancement, never block the app on it.
       // Keep held memories; just surface the failure for the reconnect retry.
       loadFailed.value = true;
@@ -112,7 +151,7 @@ class CustomerMemoryController extends GetxController {
   /// Best-effort: a failed row is skipped, the rest still save.
   Future<void> captureFromTour(Tour tour) async {
     final adminId = _adminId;
-    if (!_auth.isAdmin || adminId == null) return;
+    if (!_auth.isAdmin || adminId == null || tableUnavailable) return;
 
     // groupId → normalised phones of its members (for the companions snapshot).
     final groupMembers = <String, List<String>>{};

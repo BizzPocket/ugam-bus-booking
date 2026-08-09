@@ -260,72 +260,77 @@ class _AmountSheetBodyState extends State<_AmountSheetBody> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (widget.due != null) ...[
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: UgamSpacing.lg,
-              vertical: UgamSpacing.md,
-            ),
-            decoration: BoxDecoration(
-              color: c.accentFill,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-              border: Border.all(color: c.accent.withValues(alpha: 0.28)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  (widget.dueLabel ?? 'Due').toUpperCase(),
-                  style: UgamText.micro.copyWith(color: c.accent),
-                ),
-                Text(
-                  '${widget.due}',
-                  style: UgamText.tabular(
-                    UgamText.bodyStrong.copyWith(color: c.accent),
+    // Scroll when due + hero + status + numpad + details exceed the sheet's
+    // max height (common on short phones / large text). Matches the expense
+    // / income sheet bodies so the confirm CTA stays reachable.
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.due != null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.lg,
+                vertical: UgamSpacing.md,
+              ),
+              decoration: BoxDecoration(
+                color: c.accentFill,
+                borderRadius: BorderRadius.circular(UgamRadius.input),
+                border: Border.all(color: c.accent.withValues(alpha: 0.28)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    (widget.dueLabel ?? 'Due').toUpperCase(),
+                    style: UgamText.micro.copyWith(color: c.accent),
                   ),
-                ),
-              ],
+                  Text(
+                    '${widget.due}',
+                    style: UgamText.tabular(
+                      UgamText.bodyStrong.copyWith(color: c.accent),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: UgamSpacing.xl),
-        ],
-        ValueListenableBuilder<String>(
-          valueListenable: _value,
-          builder: (context, v, child) =>
-              UgamAmountHero(amount: v.isEmpty ? '0' : v),
-        ),
-        if (widget.statusBuilder != null) ...[
-          const SizedBox(height: UgamSpacing.md),
+            const SizedBox(height: UgamSpacing.xl),
+          ],
           ValueListenableBuilder<String>(
             valueListenable: _value,
             builder: (context, v, child) =>
-                widget.statusBuilder!(context, _parsed()),
+                UgamAmountHero(amount: v.isEmpty ? '0' : v),
+          ),
+          if (widget.statusBuilder != null) ...[
+            const SizedBox(height: UgamSpacing.md),
+            ValueListenableBuilder<String>(
+              valueListenable: _value,
+              builder: (context, v, child) =>
+                  widget.statusBuilder!(context, _parsed()),
+            ),
+          ],
+          const SizedBox(height: UgamSpacing.xl),
+          UgamNumpad(value: _value),
+          if (widget.details != null) ...[
+            const SizedBox(height: UgamSpacing.lg),
+            UgamExpander(title: 'Details', child: widget.details!(context)),
+          ],
+          const SizedBox(height: UgamSpacing.xl),
+          ValueListenableBuilder<String>(
+            valueListenable: _value,
+            builder: (context, v, child) {
+              final amount = _parsed();
+              return UgamCTA(
+                label: widget.confirmLabel,
+                onPressed: amount > 0
+                    ? () => Navigator.of(context).pop<num>(amount)
+                    : null,
+              );
+            },
           ),
         ],
-        const SizedBox(height: UgamSpacing.xl),
-        UgamNumpad(value: _value),
-        if (widget.details != null) ...[
-          const SizedBox(height: UgamSpacing.lg),
-          UgamExpander(title: 'Details', child: widget.details!(context)),
-        ],
-        const SizedBox(height: UgamSpacing.xl),
-        ValueListenableBuilder<String>(
-          valueListenable: _value,
-          builder: (context, v, child) {
-            final amount = _parsed();
-            return UgamCTA(
-              label: widget.confirmLabel,
-              onPressed: amount > 0
-                  ? () => Navigator.of(context).pop<num>(amount)
-                  : null,
-            );
-          },
-        ),
-      ],
+      ),
     );
   }
 }

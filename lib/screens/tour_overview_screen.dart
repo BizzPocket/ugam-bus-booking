@@ -70,6 +70,15 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
 
   TourController get _ctrl => Get.find<TourController>();
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ctrl.ensureTourReadyForSeating(widget.tourId);
+    });
+  }
+
   Future<void> _fill() async {
     if (_filling) return;
     // First fill on a tour runs immediately. Every RE-generate (seats already

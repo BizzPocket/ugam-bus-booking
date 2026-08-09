@@ -89,6 +89,11 @@ enum TourStatus {
       this != TourStatus.locked && this != TourStatus.completed;
 
   /// Whether bus layout editing is allowed in this status.
+  ///
+  /// Seat reassignment stays allowed after [locked] (and even [completed] via
+  /// the live chart until history takes over). Bus add/edit/duplicate/delete
+  /// and layout rebuild stop once the tour is locked — bookings are closed and
+  /// the chart that was notified must not silently change shape.
   bool get allowsLayoutEdit =>
       this == TourStatus.planning ||
       this == TourStatus.collecting ||

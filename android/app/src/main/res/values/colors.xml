@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FBF3EC</color>
+
+    <!-- The native launch window's ground, painted by the OS before Flutter has
+         booted. MUST equal the Flutter page background (UgamColors.light.bg in
+         tokens.dart), or a cold start flashes one colour and then repaints in
+         another. The dark value lives in values-night/colors.xml. -->
+    <color name="launch_background">#FFFFFF</color>
 </resources>

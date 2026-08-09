@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as dev;
+import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:get/get.dart';
@@ -17,6 +18,7 @@ import '../models/tour.dart';
 import '../services/collection_reconciler.dart';
 import '../services/ledger_money_source.dart';
 import '../services/supabase_service.dart';
+import '../services/sync_read_projections.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
 import 'finance_controller.dart';
@@ -72,6 +74,17 @@ class MoneyController extends GetxController {
   /// keys and to know what to refetch on refresh.
   String? _loadedTourId;
 
+  /// Bumps on every [loadForTour] so a slow response for tour A cannot
+  /// overwrite a newer load for tour B (dashboard hero switch / money tab).
+  int _loadGeneration = 0;
+
+  /// Coalesces concurrent [loadForTour] calls for the SAME tour id.
+  Future<void>? _loadInFlight;
+  String? _loadInFlightTourId;
+
+  /// Coalesces dashboard settlement snapshot passes.
+  Future<void>? _settlementInFlight;
+
   /// The tour id whose money rows (`collections`/`expenses`/`handovers`/
   /// `incomes`) are currently held. Summaries (`tourSummary`, …) only
   /// describe THIS tour, so callers that read settlement state for a
@@ -102,6 +115,27 @@ class MoneyController extends GetxController {
   // ── Load / refresh ────────────────────────────────────────
 
   Future<void> loadForTour(String tourId) async {
+    if (tourId.isEmpty) return;
+    // Same-tour concurrent callers share one in-flight request (hero + money
+    // tab + collection screen all fire loadForTour on open).
+    if (_loadInFlight != null && _loadInFlightTourId == tourId) {
+      return _loadInFlight!;
+    }
+    final future = _loadForTourBody(tourId);
+    _loadInFlight = future;
+    _loadInFlightTourId = tourId;
+    try {
+      await future;
+    } finally {
+      if (_loadInFlightTourId == tourId) {
+        _loadInFlight = null;
+        _loadInFlightTourId = null;
+      }
+    }
+  }
+
+  Future<void> _loadForTourBody(String tourId) async {
+    final gen = ++_loadGeneration;
     // A genuine tour SWITCH must never render the previous tour's rows. Clear
     // the four cached lists up-front, BEFORE the fetch, so tour B can never show
     // tour A's collections + rent even if B's read fails (loadFailed then drives
@@ -141,28 +175,33 @@ class MoneyController extends GetxController {
         _sync.smartFetch(
           table: 'collections',
           cacheKey: _collectionsKey(tourId),
+          select: SyncReadProjections.collectionsSelect,
           filters: {'tour_id': tourId},
           orderBy: 'created_at',
         ),
         _sync.smartFetch(
           table: 'expenses',
           cacheKey: _expensesKey(tourId),
+          select: SyncReadProjections.expensesSelect,
           filters: {'tour_id': tourId},
           orderBy: 'created_at',
         ),
         _sync.smartFetch(
           table: 'bus_handovers',
           cacheKey: _handoversKey(tourId),
+          select: SyncReadProjections.handoversSelect,
           filters: {'tour_id': tourId},
           orderBy: 'created_at',
         ),
         _sync.smartFetch(
           table: 'incomes',
           cacheKey: _incomesKey(tourId),
+          select: SyncReadProjections.incomesSelect,
           filters: {'tour_id': tourId},
           orderBy: 'created_at',
         ),
       ]);
+      if (gen != _loadGeneration || _loadedTourId != tourId) return;
 
       // smartFetch never throws — it returns [] with a per-call `failed` flag on
       // any failure or when offline. The four reads run concurrently; this load
@@ -179,19 +218,22 @@ class MoneyController extends GetxController {
         handovers.assignAll(results[2].rows.map(BusHandover.fromMap).toList());
         incomes.assignAll(results[3].rows.map(IncomeEntry.fromMap).toList());
         loadedOnce.value = true;
-        await _loadPaymentClaims(tourId);
-        await _loadPendingSeatHolds(tourId);
-      }
-      loadFailed.value = failed;
 
-      // Ledger summaries (source of truth for totals). Failure marks the load
-      // failed so the UI can retry — we do not silently keep pretending legacy
-      // recomputes are ledger truth. Row lists above still support edit/delete.
-      if (!failed) {
-        final ledgerOk = await _loadLedgerForTour(tourId);
+        // Claims + holds + ledger are independent — run in parallel instead of
+        // three sequential round-trips on 2G.
+        final secondary = await Future.wait([
+          _loadPaymentClaims(tourId),
+          _loadPendingSeatHolds(tourId),
+          _loadLedgerForTour(tourId),
+        ]);
+        if (gen != _loadGeneration || _loadedTourId != tourId) return;
+        final ledgerOk = secondary[2] as bool;
         if (!ledgerOk) loadFailed.value = true;
       }
+      if (gen != _loadGeneration || _loadedTourId != tourId) return;
+      loadFailed.value = failed || loadFailed.value;
     } catch (e, st) {
+      if (gen != _loadGeneration || _loadedTourId != tourId) return;
       // Leave whatever we already hold in place — a transient fetch
       // failure shouldn't blank the money screen.
       dev.log(
@@ -200,7 +242,7 @@ class MoneyController extends GetxController {
       );
       loadFailed.value = true;
     } finally {
-      isLoading.value = false;
+      if (gen == _loadGeneration) isLoading.value = false;
     }
   }
 
@@ -213,8 +255,13 @@ class MoneyController extends GetxController {
   /// Returns false when the ledger views could not be read.
   Future<bool> _loadLedgerForTour(String tourId) async {
     try {
-      final rollups = await _ledgerSource.fetchBusRollups(tourId);
-      final riders = await _ledgerSource.fetchRiderOwesRupees(tourId);
+      final results = await Future.wait([
+        _ledgerSource.fetchBusRollups(tourId),
+        _ledgerSource.fetchRiderOwesRupees(tourId),
+      ]);
+      if (_loadedTourId != tourId) return false;
+      final rollups = results[0] as List<LedgerBusRollup>;
+      final riders = results[1] as Map<String, double>;
       _ledgerByBus
         ..clear()
         ..addEntries([
@@ -227,6 +274,7 @@ class MoneyController extends GetxController {
       _ledgerReady = true;
       return true;
     } catch (e, st) {
+      if (_loadedTourId != tourId) return false;
       dev.log(
         'ledger load failed for $tourId: $e\n$st',
         name: 'MoneyController',
@@ -240,14 +288,16 @@ class MoneyController extends GetxController {
     try {
       final raw = await SupabaseService.instance.client
           .from('payment_claims')
-          .select()
+          .select(SyncReadProjections.paymentClaimsSelect)
           .eq('tour_id', tourId)
           .order('claimed_at', ascending: false);
+      if (_loadedTourId != tourId) return;
       paymentClaims.assignAll([
         for (final r in (raw as List))
           PaymentClaim.fromMap(Map<String, dynamic>.from(r as Map)),
       ]);
     } catch (e, st) {
+      if (_loadedTourId != tourId) return;
       // Claims table may be undeployed — keep empty, don't fail the board.
       dev.log(
         'payment_claims load failed for $tourId: $e\n$st',
@@ -263,6 +313,7 @@ class MoneyController extends GetxController {
         'tour_pending_seat_holds',
         params: {'p_tour_id': tourId},
       );
+      if (_loadedTourId != tourId) return;
       if (raw is! List) {
         pendingSeatHolds.clear();
         return;
@@ -272,6 +323,7 @@ class MoneyController extends GetxController {
           if (r is Map) Map<String, dynamic>.from(r),
       ]);
     } catch (e, st) {
+      if (_loadedTourId != tourId) return;
       dev.log(
         'pending seat holds load failed for $tourId: $e\n$st',
         name: 'MoneyController',
@@ -379,75 +431,106 @@ class MoneyController extends GetxController {
   /// instead of re-fetching four tables per tour on every unrelated update),
   /// and any failed read (left uncached so a later call can retry it).
   Future<void> loadSettlementSnapshots(Iterable<String> tourIds) async {
+    if (_settlementInFlight != null) return _settlementInFlight!;
+    final future = _loadSettlementSnapshotsBody(tourIds);
+    _settlementInFlight = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_settlementInFlight, future)) {
+        _settlementInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _loadSettlementSnapshotsBody(Iterable<String> tourIds) async {
     final tourCtrl =
         Get.isRegistered<TourController>() ? Get.find<TourController>() : null;
     var changed = false;
-    for (final id in tourIds) {
-      if (id == _loadedTourId) continue;
-      if (settlementByTour.containsKey(id)) continue;
+    final pending = tourIds
+        .where((id) => id != _loadedTourId && !settlementByTour.containsKey(id))
+        .toList();
 
-      // Prefer ledger outstanding (sum of cash.handler per bus).
-      try {
-        final rollups = await _ledgerSource.fetchBusRollups(id);
-        settlementByTour[id] = rollups.fold<double>(
-          0,
-          (sum, r) => sum + r.outstandingHandover,
-        );
-        changed = true;
-        continue;
-      } catch (e, st) {
-        dev.log(
-          'settlement ledger snapshot failed for $id: $e\n$st',
-          name: 'MoneyController',
-        );
-      }
-
-      final results = await Future.wait([
-        _sync.smartFetch(
-          table: 'collections',
-          cacheKey: _collectionsKey(id),
-          filters: {'tour_id': id},
-          orderBy: 'created_at',
-        ),
-        _sync.smartFetch(
-          table: 'expenses',
-          cacheKey: _expensesKey(id),
-          filters: {'tour_id': id},
-          orderBy: 'created_at',
-        ),
-        _sync.smartFetch(
-          table: 'bus_handovers',
-          cacheKey: _handoversKey(id),
-          filters: {'tour_id': id},
-          orderBy: 'created_at',
-        ),
-        _sync.smartFetch(
-          table: 'incomes',
-          cacheKey: _incomesKey(id),
-          filters: {'tour_id': id},
-          orderBy: 'created_at',
-        ),
-      ]);
-      if (results.any((r) => r.failed)) continue;
-      final tour = tourCtrl?.getTour(id);
-      final busRentsTotal =
-          tour == null ? 0.0 : tour.buses.fold<double>(0, (s, b) => s + b.busPrice);
-      final totalRevenueBilled = tour == null
-          ? 0.0
-          : tour.buses.fold<double>(
+    // Parallel batches of 3 — sequential N tours on 2G stacks latency; unbounded
+    // parallelism floods a weak radio. Three keeps the air moving without
+    // saturating the sync retry budget.
+    const batchSize = 3;
+    for (var i = 0; i < pending.length; i += batchSize) {
+      final chunk = pending.sublist(i, math.min(i + batchSize, pending.length));
+      final results = await Future.wait(chunk.map((id) async {
+        try {
+          final rollups = await _ledgerSource.fetchBusRollups(id);
+          return MapEntry(
+            id,
+            rollups.fold<double>(
               0,
-              (s, b) => s + tour.passengers.fold<double>(0, (ps, p) => ps + b.amountDueFor(p)),
-            );
-      final summary = TourMoneySummary.compute(
-        collections: results[0].rows.map(Collection.fromMap).toList(),
-        expenses: results[1].rows.map(Expense.fromMap).toList(),
-        handovers: results[2].rows.map(BusHandover.fromMap).toList(),
-        incomes: results[3].rows.map(IncomeEntry.fromMap).toList(),
-        busRentsTotal: busRentsTotal,
-        totalRevenueBilled: totalRevenueBilled,
-      );
-      settlementByTour[id] = summary.totalOutstandingHandover;
-      changed = true;
+              (sum, r) => sum + r.outstandingHandover,
+            ),
+          );
+        } catch (e, st) {
+          dev.log(
+            'settlement ledger snapshot failed for $id: $e\n$st',
+            name: 'MoneyController',
+          );
+        }
+
+        final results = await Future.wait([
+          _sync.smartFetch(
+            table: 'collections',
+            cacheKey: _collectionsKey(id),
+            select: SyncReadProjections.collectionsSelect,
+            filters: {'tour_id': id},
+            orderBy: 'created_at',
+          ),
+          _sync.smartFetch(
+            table: 'expenses',
+            cacheKey: _expensesKey(id),
+            select: SyncReadProjections.expensesSelect,
+            filters: {'tour_id': id},
+            orderBy: 'created_at',
+          ),
+          _sync.smartFetch(
+            table: 'bus_handovers',
+            cacheKey: _handoversKey(id),
+            select: SyncReadProjections.handoversSelect,
+            filters: {'tour_id': id},
+            orderBy: 'created_at',
+          ),
+          _sync.smartFetch(
+            table: 'incomes',
+            cacheKey: _incomesKey(id),
+            select: SyncReadProjections.incomesSelect,
+            filters: {'tour_id': id},
+            orderBy: 'created_at',
+          ),
+        ]);
+        if (results.any((r) => r.failed)) return null;
+        final tour = tourCtrl?.getTour(id);
+        final busRentsTotal =
+            tour == null ? 0.0 : tour.buses.fold<double>(0, (s, b) => s + b.busPrice);
+        final totalRevenueBilled = tour == null
+            ? 0.0
+            : tour.buses.fold<double>(
+                0,
+                (s, b) =>
+                    s + tour.passengers.fold<double>(0, (ps, p) => ps + b.amountDueFor(p)),
+              );
+        final summary = TourMoneySummary.compute(
+          collections: results[0].rows.map(Collection.fromMap).toList(),
+          expenses: results[1].rows.map(Expense.fromMap).toList(),
+          handovers: results[2].rows.map(BusHandover.fromMap).toList(),
+          incomes: results[3].rows.map(IncomeEntry.fromMap).toList(),
+          busRentsTotal: busRentsTotal,
+          totalRevenueBilled: totalRevenueBilled,
+        );
+        return MapEntry(id, summary.totalOutstandingHandover);
+      }));
+
+      for (final entry in results) {
+        if (entry == null) continue;
+        settlementByTour[entry.key] = entry.value;
+        changed = true;
+      }
     }
     if (changed) settlementByTour.refresh();
   }
@@ -554,6 +637,7 @@ class MoneyController extends GetxController {
       final res = await _sync.smartFetch(
         table: 'collections',
         cacheKey: _collectionsKey(tour.id),
+        select: SyncReadProjections.collectionsSelect,
         filters: {'tour_id': tour.id},
         orderBy: 'created_at',
       );

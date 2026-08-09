@@ -4,23 +4,42 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../design/ugam.dart';
+import '../models/bus_details.dart';
 import '../models/tour.dart';
+import '../services/seat_chart_booking_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
-import '../utils/formatters.dart';
 import '../utils/time_format.dart';
+import '../utils/tour_public_summary.dart';
 import 'customer_booking_request_screen.dart';
 import 'seat_selection_screen.dart';
 
-/// Public-facing tour detail — image-5 fidelity.
+/// Public-facing tour detail — the page that has to sell the trip.
 ///
-/// Layout mirrors the admin `tour_detail_screen.dart`:
-///   [Hero (320 px) — UgamBusBackdrop + back chevron + share chevron]
-///   [Overlay summary card (title / route header / date / price / seats)]
-///   [Tab pills (About / Schedule)]
-///   [Body — switches per tab]
-///   [Sticky bottom CTA — "Request to book" / "Booked" / "Tour full"]
+///   [Header — photo strip when the tour has one, otherwise nothing at all]
+///   [Summary card — title / route / countdown / price / availability]
+///   [Journey rail — departure and return, always visible]
+///   [About / Bus / Contact]
+///   [Sticky CTA]
+///
+/// THREE things this layout deliberately does NOT do, each of which it used to:
+///
+/// 1. **No 320px illustration.** The hero was a fixed-height generated bus
+///    backdrop that carried no information, so the price and the CTA started
+///    below the fold on every phone. A real photo earns its space; a
+///    placeholder does not. Same call the admin page already made.
+/// 2. **No tabs.** An About/Schedule split hid three rows behind a tap, and the
+///    Schedule tab's only unique row was an "arrive in {city}" event with no
+///    time — a fabricated fact. The rail is now always visible.
+/// 3. **No repeated facts.** Route and date appeared three times (hero
+///    monogram, summary card, trip-summary table) and the return date twice.
+///    The card is the glance, the rail is the detail, and the trip-summary
+///    table is gone.
+///
+/// Price and availability come from [SeatChartBookingService.publicSummary],
+/// NOT from `tour.buses` — that list is always empty for an anonymous customer,
+/// which is why this page showed no price and a permanent "open for requests".
 class CustomerTourDetailScreen extends StatefulWidget {
   final Tour tour;
 
@@ -32,12 +51,32 @@ class CustomerTourDetailScreen extends StatefulWidget {
 }
 
 class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
-  int _tabIndex = 0;
+  TourPublicSummary _summary = TourPublicSummary.pending;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSummary();
+  }
+
+  /// Never throws: [SeatChartBookingService.publicSummary] answers
+  /// [TourPublicSummary.pending] on any failure, so an offline customer or an
+  /// environment without migration 052 simply sees the page without a price
+  /// and seat count rather than an error.
+  Future<void> _loadSummary() async {
+    final summary = await SeatChartBookingService().publicSummary(
+      widget.tour.id,
+    );
+    if (!mounted) return;
+    setState(() => _summary = summary);
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final t = widget.tour;
+    final hasDescription = (t.description ?? '').trim().isNotEmpty;
+    final hasOrganiser = (t.createdBy ?? '').trim().isNotEmpty;
 
     return UgamScaffold(
       extendBody: true,
@@ -45,27 +84,14 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
         physics: const BouncingScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
-            child: _HeroSection(
+            child: _Header(
               tour: t,
+              summary: _summary,
               onBack: () => AppNav.pop(context),
               onShare: () async {
                 HapticFeedback.lightImpact();
                 await WhatsAppService().copyAnnouncementToClipboard(tour: t);
               },
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.gutter,
-                UgamSpacing.huge,
-                UgamSpacing.gutter,
-                UgamSpacing.lg,
-              ),
-              child: _TabBar(
-                index: _tabIndex,
-                onChanged: (i) => setState(() => _tabIndex = i),
-              ),
             ),
           ),
           SliverPadding(
@@ -75,289 +101,250 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
               UgamSpacing.gutter,
               UgamSpacing.dockClearance,
             ),
-            sliver: _tabIndex == 0
-                ? _AboutTab(tour: t, c: c)
-                : _ScheduleTab(tour: t, c: c),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate.fixed([
+                // Order is deliberate and set by the operator: describe the
+                // trip, state its facts, offer a way to ASK about it, and only
+                // then lay out when it runs. Contact sits above the timeline on
+                // purpose — a customer with a question should reach the
+                // organiser before scrolling past the itinerary, not after it.
+                if (hasDescription) ...[
+                  _SectionEyebrow(
+                    label: tr('customer_tour_detail.section_about_tour'),
+                    c: c,
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(UgamSpacing.lg),
+                    decoration: BoxDecoration(
+                      color: c.cardElev,
+                      borderRadius: BorderRadius.circular(UgamRadius.card),
+                    ),
+                    child: Text(
+                      t.description!.trim(),
+                      style: UgamText.body.copyWith(
+                        color: c.ink,
+                        fontSize: 14,
+                        height: 1.55,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: UgamSpacing.xl),
+                ],
+                _SectionEyebrow(
+                  label: tr('customer_tour_detail.section_journey'),
+                  c: c,
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                _JourneyBlock(tour: t, c: c),
+                if (hasOrganiser) ...[
+                  const SizedBox(height: UgamSpacing.xl),
+                  _SectionEyebrow(
+                    label: tr('customer_tour_detail.section_contact'),
+                    c: c,
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  _ContactOrganiserButton(tour: t, c: c),
+                ],
+                // Buses come from the public RPC, never from `tour.buses` —
+                // that list is empty for anon, which is why this section never
+                // rendered for a customer before.
+                if (_summary.hasBuses) ...[
+                  const SizedBox(height: UgamSpacing.xl),
+                  _SectionEyebrow(
+                    label: tr('customer_tour_detail.section_bus'),
+                    c: c,
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  for (final bus in _summary.buses) ...[
+                    _BusCard(bus: bus, c: c),
+                    if (bus != _summary.buses.last)
+                      const SizedBox(height: UgamSpacing.sm),
+                  ],
+                ],
+              ]),
+            ),
           ),
         ],
       ),
-      bottomNavigationBar: _StickyBookCta(tour: t),
+      bottomNavigationBar: _StickyBookCta(tour: t, summary: _summary),
     );
   }
 }
 
-// ─── HERO ─────────────────────────────────────────────────────────────
+// ─── HEADER ───────────────────────────────────────────────────────────
 
-class _HeroSection extends StatelessWidget {
+/// Photo strip + summary card, or — when the tour has no photo — just the
+/// summary card under a bare chrome row.
+class _Header extends StatelessWidget {
   final Tour tour;
+  final TourPublicSummary summary;
   final VoidCallback onBack;
   final VoidCallback onShare;
 
-  const _HeroSection({
+  const _Header({
     required this.tour,
+    required this.summary,
     required this.onBack,
     required this.onShare,
   });
 
+  /// Decode the photo at the width we actually paint. The picker stores at
+  /// maxWidth 1600, so without this a 200pt strip decodes a ~6.8 MB bitmap.
+  /// Same guard the admin hero uses.
+  static int _decodeWidth(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final physical = (mq.size.width * mq.devicePixelRatio).round();
+    if (physical <= 0) return 800;
+    return physical > 1600 ? 1600 : physical;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
     final topInset = MediaQuery.of(context).padding.top;
-    final capacity = tour.totalBusSeats;
-    final seatsLeft = capacity - tour.totalSeatsAssigned;
-    // Lock is the single gate (Tour.acceptsBookings) and MUST win over the
-    // seats/open badge — otherwise a locked tour whose buses aren't set yet
-    // (capacity == 0) falsely reads "OPEN FOR REQUESTS" while the CTA below
-    // already says "Bookings closed". Mirror the CTA's locked > full > open order.
-    final locked = !tour.acceptsBookings;
+    final hasPhoto = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
+    final card = _SummaryCard(tour: tour, summary: summary);
 
-    return SizedBox(
-      height: 320,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned.fill(
-            child: UgamBusBackdrop(
-              seed: tour.id,
-              label: _routeInitials(tour.fromCity, tour.toCity),
-            ),
-          ),
-          // Dark gradient for legibility.
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withValues(alpha: 0.45),
-                    Colors.transparent,
-                    Colors.black.withValues(alpha: 0.35),
-                  ],
-                  stops: const [0.0, 0.45, 1.0],
+    if (!hasPhoto) {
+      // The 99% case. No photo means no illustration — a generated backdrop
+      // conveys nothing and costs the whole top of the screen, so the card
+      // starts right under the chrome and the price is above the fold.
+      return Padding(
+        padding: EdgeInsets.fromLTRB(
+          UgamSpacing.gutter,
+          topInset + UgamSpacing.sm,
+          UgamSpacing.gutter,
+          UgamSpacing.lg,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _ChromeRow(onBack: onBack, onShare: onShare, onPhoto: false),
+            const SizedBox(height: UgamSpacing.lg),
+            card,
+          ],
+        ),
+      );
+    }
+
+    final photoHeight = UgamScale.px(context, 200);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: photoHeight,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.network(
+                tour.broadcastImageUrl!.trim(),
+                fit: BoxFit.cover,
+                cacheWidth: _decodeWidth(context),
+                // While loading, or if the object is missing, fall back to the
+                // backdrop so the strip never flashes raw or broken.
+                loadingBuilder: (ctx, child, progress) => progress == null
+                    ? child
+                    : UgamBusBackdrop(
+                        seed: tour.id,
+                        label: _routeInitials(tour.fromCity, tour.toCity),
+                      ),
+                errorBuilder: (_, _, _) => UgamBusBackdrop(
+                  seed: tour.id,
+                  label: _routeInitials(tour.fromCity, tour.toCity),
                 ),
               ),
-            ),
-          ),
-          // Top chrome row.
-          Positioned(
-            left: UgamSpacing.gutter,
-            right: UgamSpacing.gutter,
-            top: topInset + UgamSpacing.sm,
-            child: Row(
-              children: [
-                _ChromeCircle(icon: Icons.arrow_back_rounded, onTap: onBack),
-                const Spacer(),
-                // Flexible + ellipsis so a long gu/hi status word (e.g.
-                // "assigning" → સીટ ગોઠવી રહ્યા છીએ) can't push past the two
-                // Spacers and overflow the chrome row on small screens.
-                Flexible(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: UgamSpacing.md,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
-                      borderRadius: BorderRadius.circular(UgamRadius.chip),
-                    ),
-                    child: Text(
-                      tour.status.displayName.toUpperCase(),
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.ellipsis,
-                      style: UgamText.micro.copyWith(
-                        color: Colors.white,
-                        fontSize: 10,
-                      ),
-                    ),
+              // Scrim only where the chrome sits — enough to keep the back and
+              // share controls legible over any photo.
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x8C000000), Color(0x00000000)],
+                    stops: [0.0, 0.55],
                   ),
                 ),
-                const Spacer(),
-                _ChromeCircle(icon: Icons.ios_share_rounded, onTap: onShare),
-              ],
-            ),
+              ),
+              Positioned(
+                left: UgamSpacing.gutter,
+                right: UgamSpacing.gutter,
+                top: topInset + UgamSpacing.sm,
+                child: _ChromeRow(
+                  onBack: onBack,
+                  onShare: onShare,
+                  onPhoto: true,
+                ),
+              ),
+            ],
           ),
-          // Overlay summary card overhanging the hero bottom.
-          Positioned(
-            left: UgamSpacing.gutter,
-            right: UgamSpacing.gutter,
-            bottom: -28,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.lg,
-                UgamSpacing.md,
-                UgamSpacing.md,
-                UgamSpacing.md,
-              ),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.card),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x14000000),
-                    blurRadius: 12,
-                    offset: Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          tour.title,
-                          style: UgamText.titleM.copyWith(
-                            color: c.ink,
-                            fontSize: 18,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(Icons.south_east_rounded, size: 12, color: c.ink2),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          '${tour.fromCity} → ${tour.toCity}',
-                          style: UgamText.caption.copyWith(
-                            color: c.ink2,
-                            fontSize: 12,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: UgamSpacing.sm),
-                      Text(
-                        '·',
-                        style: UgamText.caption.copyWith(
-                          color: c.ink3,
-                          fontSize: 11,
-                        ),
-                      ),
-                      const SizedBox(width: UgamSpacing.sm),
-                      Text(
-                        _formatDate(tour.departureDate),
-                        style: UgamText.tabular(
-                          UgamText.caption.copyWith(
-                            color: c.ink2,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (tour.pricePerSeat > 0) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      tr(
-                        'customer_tour_detail.price_per_seat_value',
-                        namedArgs: {
-                          'price': Formatters.formatMoneyInr(
-                            tour.pricePerSeat,
-                          ).replaceFirst('₹', ''),
-                        },
-                      ),
-                      style: UgamText.tabular(
-                        UgamText.bodyStrong.copyWith(
-                          color: c.ink,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (locked)
-                        UgamReqChip(
-                          label: tr(
-                            'customer_tour_detail.chip_bookings_closed',
-                          ),
-                          variant: UgamChipVariant.warm,
-                        )
-                      else if (capacity > 0)
-                        UgamReqChip(
-                          label: seatsLeft <= 0
-                              ? tr('customer_tour_detail.chip_tour_full')
-                              : tr(
-                                  'customer_tour_detail.chip_seats_left',
-                                  namedArgs: {'n': '$seatsLeft'},
-                                ),
-                          variant: seatsLeft <= 0
-                              ? UgamChipVariant.warm
-                              : UgamChipVariant.good,
-                        )
-                      else
-                        UgamReqChip(
-                          label: tr('customer_tour_detail.chip_open_requests'),
-                          variant: UgamChipVariant.accent,
-                        ),
-                    ],
-                  ),
-                ],
-              ),
+        ),
+        // Pulled up so the card reads as one unit with the photo. Transform
+        // does not affect layout, so the Column still reserves the card's full
+        // height and the pull simply becomes the gap below it — no overlap
+        // with the body, and no magic clearance constant to keep in sync.
+        Transform.translate(
+          offset: const Offset(0, -UgamSpacing.xl),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: UgamSpacing.gutter,
             ),
+            child: card,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
-
-  static String _formatDate(DateTime d) {
-    return '${d.day} ${_monthShort(d.month)}';
-  }
 }
 
-/// Shared localized 3-letter month abbreviation used across customer screens.
-String _monthShort(int month) {
-  const keys = [
-    'app.month.short.jan',
-    'app.month.short.feb',
-    'app.month.short.mar',
-    'app.month.short.apr',
-    'app.month.short.may',
-    'app.month.short.jun',
-    'app.month.short.jul',
-    'app.month.short.aug',
-    'app.month.short.sep',
-    'app.month.short.oct',
-    'app.month.short.nov',
-    'app.month.short.dec',
-  ];
-  return tr(keys[month - 1]);
-}
+class _ChromeRow extends StatelessWidget {
+  final VoidCallback onBack;
+  final VoidCallback onShare;
 
-/// Route monogram for the bus backdrop, e.g. "S→M" from "Surat"/"Mumbai".
-/// Empty when neither city is set so the backdrop shows just the bus motif.
-String _routeInitials(String from, String to) {
-  String first(String s) {
-    final t = s.trim();
-    return t.isEmpty ? '' : t.characters.first.toUpperCase();
+  /// Over a photo the controls need a dark scrim and white glyphs; on the page
+  /// they take the card fill and normal ink, or they read as floating blobs.
+  final bool onPhoto;
+
+  const _ChromeRow({
+    required this.onBack,
+    required this.onShare,
+    required this.onPhoto,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _ChromeCircle(
+          icon: Icons.arrow_back_rounded,
+          onTap: onBack,
+          onPhoto: onPhoto,
+        ),
+        const Spacer(),
+        _ChromeCircle(
+          icon: Icons.ios_share_rounded,
+          onTap: onShare,
+          onPhoto: onPhoto,
+        ),
+      ],
+    );
   }
-
-  final f = first(from);
-  final t = first(to);
-  if (f.isEmpty && t.isEmpty) return '';
-  return '$f→$t';
 }
 
 class _ChromeCircle extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _ChromeCircle({required this.icon, required this.onTap});
+  final bool onPhoto;
+
+  const _ChromeCircle({
+    required this.icon,
+    required this.onTap,
+    required this.onPhoto,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     return GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
@@ -368,145 +355,426 @@ class _ChromeCircle extends StatelessWidget {
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.45),
+          color: onPhoto ? const Color(0x73000000) : c.cardElev,
           shape: BoxShape.circle,
         ),
         alignment: Alignment.center,
-        child: Icon(icon, size: 19, color: Colors.white),
+        child: Icon(
+          icon,
+          size: 19,
+          color: onPhoto ? Colors.white : c.ink,
+        ),
       ),
     );
   }
 }
 
-// ─── TAB BAR ──────────────────────────────────────────────────────────
+// ─── SUMMARY CARD ─────────────────────────────────────────────────────
 
-class _TabBar extends StatelessWidget {
-  final int index;
-  final ValueChanged<int> onChanged;
+/// The glance: what it is, where and when it goes, and whether there is room.
+/// Everything a customer needs to decide whether to keep reading, in one card
+/// above the fold.
+///
+/// No price. This operator settles the fare over WhatsApp, so the page states
+/// what the trip IS and leaves what it costs to the conversation.
+class _SummaryCard extends StatelessWidget {
+  final Tour tour;
+  final TourPublicSummary summary;
 
-  const _TabBar({required this.index, required this.onChanged});
+  const _SummaryCard({required this.tour, required this.summary});
 
   @override
   Widget build(BuildContext context) {
-    return UgamTabPills(
-      currentIndex: index,
-      onChanged: onChanged,
-      items: [
-        UgamTabItem(label: tr('customer_tour_detail.tab_about')),
-        UgamTabItem(label: tr('customer_tour_detail.tab_schedule')),
-      ],
+    final c = UgamColors.of(context);
+    final countdown = departureCountdownLabel(tour.departureDate);
+
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            tour.title,
+            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
+            // Two lines before ellipsing: a tour title carries the festival
+            // name AND the date, and truncating it to one line loses which
+            // trip this is.
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${tour.fromCity} → ${tour.toCity}',
+            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (countdown != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              countdown,
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
+              ),
+            ),
+          ],
+          const SizedBox(height: UgamSpacing.tight),
+          // Left-anchored. There is nothing to balance it against now that the
+          // price is gone, so a Row with a trailing Spacer would only push it
+          // into dead space.
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _AvailabilityChip(tour: tour, summary: summary),
+          ),
+        ],
+      ),
+    );
+  }
+
+}
+
+/// The ONE status signal on this page.
+///
+/// There used to be two that could disagree: a lifecycle chip in the top chrome
+/// (which truncated to "સીટ ગોઠવ…" in Gujarati and told the customer nothing)
+/// and an availability chip in the card. Lock beats sold-out beats a live seat
+/// count beats the generic open state — the same order the CTA resolves in, so
+/// the chip and the button can never contradict each other.
+class _AvailabilityChip extends StatelessWidget {
+  final Tour tour;
+  final TourPublicSummary summary;
+
+  const _AvailabilityChip({required this.tour, required this.summary});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!tour.acceptsBookings) {
+      return UgamReqChip(
+        label: tr('customer_tour_detail.chip_bookings_closed'),
+        variant: UgamChipVariant.warm,
+      );
+    }
+    if (summary.isSoldOut) {
+      return UgamReqChip(
+        label: tr('customer_tour_detail.chip_tour_full'),
+        variant: UgamChipVariant.warm,
+      );
+    }
+    if (summary.hasSeatCount) {
+      final left = summary.berthsFree;
+      return UgamReqChip(
+        label: tr(
+          'customer_tour_detail.chip_seats_left',
+          namedArgs: {'n': '$left'},
+        ),
+        // Scarcity is worth saying out loud, but it is availability, not
+        // "this is yours" — so it borrows the warm tone, never the accent.
+        variant: left <= 5 ? UgamChipVariant.warm : UgamChipVariant.good,
+      );
+    }
+    return UgamReqChip(
+      label: tr('customer_tour_detail.chip_open_requests'),
+      variant: UgamChipVariant.accent,
     );
   }
 }
 
-// ─── ABOUT TAB ────────────────────────────────────────────────────────
+// ─── JOURNEY BLOCK ────────────────────────────────────────────────────
 
-class _AboutTab extends StatelessWidget {
+/// The whole journey in ONE block: where it leaves from, where it goes, and
+/// when it comes back — cities and schedule together.
+///
+/// This replaced a label/value "trip summary" table sitting directly above a
+/// timeline that restated the same dates. Neither was wrong on its own; having
+/// both meant the page said everything twice. The rail carries the cities now,
+/// so it is the single place the journey is described.
+class _JourneyBlock extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
-  const _AboutTab({required this.tour, required this.c});
+
+  const _JourneyBlock({required this.tour, required this.c});
 
   @override
   Widget build(BuildContext context) {
-    return SliverList(
-      delegate: SliverChildListDelegate.fixed([
-        _SectionEyebrow(
-          label: tr('customer_tour_detail.section_trip_summary'),
-          c: c,
+    final stops = <_JourneyStop>[
+      _JourneyStop(
+        icon: Icons.directions_bus_rounded,
+        label: tr('customer_tour_detail.label_departure'),
+        place: tour.fromCity,
+        date: tour.departureDate,
+        timeLabel: formatHhMm(tour.departureTime),
+      ),
+      _JourneyStop(
+        icon: Icons.place_rounded,
+        label: tr('customer_tour_detail.label_destination'),
+        place: tour.toCity,
+        // Deliberately no date or time. An arrival time is never recorded, and
+        // inventing one is exactly how the old "arrive in {city}" row came to
+        // state a fact the app does not have. As a WAYPOINT it needs no clock.
+      ),
+      if (tour.returnDate != null)
+        _JourneyStop(
+          icon: Icons.flag_rounded,
+          label: tr('customer_tour_detail.label_return'),
+          place: tour.fromCity,
+          date: tour.returnDate!,
+          timeLabel: formatHhMm(tour.returnTime),
         ),
-        const SizedBox(height: UgamSpacing.md),
-        _InfoCard(
-          c: c,
-          rows: [
-            (
-              tr('customer_tour_detail.label_route'),
-              '${tour.fromCity} → ${tour.toCity}',
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.lg,
+        vertical: UgamSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var i = 0; i < stops.length; i++)
+            _JourneyStopRow(
+              stop: stops[i],
+              isFirst: i == 0,
+              isLast: i == stops.length - 1,
+              c: c,
             ),
-            (
-              tr('customer_tour_detail.label_departure'),
-              _dateWithTime(tour.departureDate, tour.departureTime),
-            ),
-            if (tour.returnDate != null)
-              (
-                tr('customer_tour_detail.label_return'),
-                _dateWithTime(tour.returnDate!, tour.returnTime),
-              ),
-            if (tour.pricePerSeat > 0)
-              (
-                tr('customer_tour_detail.label_price'),
-                tr(
-                  'customer_tour_detail.price_per_seat_value',
-                  namedArgs: {
-                    'price': Formatters.formatMoneyInr(
-                      tour.pricePerSeat,
-                    ).replaceFirst('₹', ''),
-                  },
-                ),
-              ),
-          ],
-        ),
-        if (tour.description != null && tour.description!.isNotEmpty) ...[
-          const SizedBox(height: UgamSpacing.xl),
-          _SectionEyebrow(
-            label: tr('customer_tour_detail.section_about_tour'),
-            c: c,
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Container(
-            padding: const EdgeInsets.all(UgamSpacing.lg),
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.card),
-            ),
-            child: Text(
-              tour.description!,
-              style: UgamText.body.copyWith(
-                color: c.ink,
-                fontSize: 14,
-                height: 1.55,
-              ),
-            ),
-          ),
         ],
-        if (tour.buses.isNotEmpty) ...[
-          const SizedBox(height: UgamSpacing.xl),
-          _SectionEyebrow(label: tr('customer_tour_detail.section_bus'), c: c),
-          const SizedBox(height: UgamSpacing.md),
-          _BusCard(tour: tour, c: c),
-        ],
-        if (tour.createdBy != null && tour.createdBy!.trim().isNotEmpty) ...[
-          const SizedBox(height: UgamSpacing.xl),
-          _SectionEyebrow(
-            label: tr('customer_tour_detail.section_contact'),
-            c: c,
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          _ContactOrganiserButton(tour: tour, c: c),
-        ],
-      ]),
+      ),
     );
-  }
-
-  static String _formatLongDate(DateTime d) {
-    return '${d.day} ${_monthShort(d.month)} ${d.year}';
-  }
-
-  /// Long date with the optional time-of-day appended ("14 Jun 2026 · 9:00 PM").
-  /// Falls back to date-only when no time is set.
-  static String _dateWithTime(DateTime d, String? hhmm) {
-    final time = formatHhMm(hhmm);
-    final date = _formatLongDate(d);
-    return time != null ? '$date · $time' : date;
   }
 }
 
-/// Tappable "Contact organiser on WhatsApp" row shown on a tour's About tab
-/// when the tour carries an organiser number ([Tour.createdBy]) — the same
-/// number the booking flow sends requests to. Opens a WhatsApp chat with a
-/// tour-aware greeting. Hidden entirely when the tour has no organiser number.
+class _JourneyStop {
+  final IconData icon;
+
+  /// Eyebrow above the place — "Departure" / "Destination" / "Return".
+  final String label;
+
+  /// The city. This is the headline of the row: the journey is a sequence of
+  /// PLACES, and the dates qualify them.
+  final String place;
+
+  /// Null for the destination waypoint, which has no recorded schedule.
+  final DateTime? date;
+  final String? timeLabel;
+
+  const _JourneyStop({
+    required this.icon,
+    required this.label,
+    required this.place,
+    this.date,
+    this.timeLabel,
+  });
+}
+
+/// One stop: node and connector on the left, eyebrow / place / when on the
+/// right.
+///
+/// The node sits near the TOP of its row rather than centred, so it lines up
+/// with the eyebrow no matter how tall the row grows when a long city name
+/// wraps. The connector is a fixed stub above the node plus a flexible run
+/// below it, which keeps the line continuous between rows of unequal height.
+class _JourneyStopRow extends StatelessWidget {
+  final _JourneyStop stop;
+  final bool isFirst;
+  final bool isLast;
+  final UgamColorSet c;
+
+  const _JourneyStopRow({
+    required this.stop,
+    required this.isFirst,
+    required this.isLast,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 28,
+            child: Column(
+              children: [
+                SizedBox(
+                  height: 10,
+                  child: isFirst
+                      ? null
+                      : Center(
+                          child: Container(width: 2, height: 10, color: c.border),
+                        ),
+                ),
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color: c.accentFill,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: c.accent, width: 1.5),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(stop.icon, size: 13, color: c.accent),
+                ),
+                if (!isLast)
+                  Expanded(child: Container(width: 2, color: c.border)),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: UgamSpacing.xs,
+                bottom: isLast ? UgamSpacing.xs : UgamSpacing.lg,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    stop.label,
+                    style: UgamText.micro.copyWith(color: c.ink3),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    stop.place,
+                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 16),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (stop.date != null) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      _whenLabel(stop),
+                      style: UgamText.tabular(
+                        UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _whenLabel(_JourneyStop s) {
+    final date = _formatLongDate(s.date!);
+    return s.timeLabel != null ? '$date · ${s.timeLabel}' : date;
+  }
+}
+
+
+// ─── BUS CARD ─────────────────────────────────────────────────────────
+
+/// One bus, as the customer may see it. Fed from `public_tour_buses`, so the
+/// driver/owner phones and the owner's rent are never in this object at all.
+class _BusCard extends StatelessWidget {
+  final Bus bus;
+  final UgamColorSet c;
+
+  const _BusCard({required this.bus, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final departure = _busDeparture(bus.boardingPoint, bus.departureTime);
+    return Container(
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            bus.customerLabel,
+            style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            bus.busType,
+            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+          ),
+          if (departure != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.place_outlined, size: 12, color: c.ink3),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    departure,
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontSize: 12,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: UgamSpacing.sm),
+          Row(
+            children: [
+              if (bus.isAC) ...[
+                UgamReqChip(label: tr('customer_tour_detail.bus_ac')),
+                const SizedBox(width: 5),
+              ],
+              UgamReqChip(
+                label: tr(
+                  'customer_tour_detail.chip_seats',
+                  namedArgs: {'count': bus.totalSeats.toString()},
+                ),
+                variant: UgamChipVariant.neutral,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Per-bus boarding place + departure time as `<place> · <time>`. Either part
+  /// is omitted when empty; null when both are, so the caller hides the line.
+  static String? _busDeparture(String boardingPoint, String? departureTime) {
+    final place = boardingPoint.trim();
+    final time = formatHhMm(departureTime);
+    final parts = [
+      if (place.isNotEmpty) place,
+      ?time,
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+}
+
+// ─── CONTACT ──────────────────────────────────────────────────────────
+
+/// Tappable "Contact organiser on WhatsApp" row, shown when the tour carries an
+/// organiser number ([Tour.createdBy]) — the same number the booking flow sends
+/// requests to. Hidden entirely when the tour has none.
 class _ContactOrganiserButton extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
+
   const _ContactOrganiserButton({required this.tour, required this.c});
 
   Future<void> _open() async {
@@ -593,387 +861,46 @@ class _ContactOrganiserButton extends StatelessWidget {
   }
 }
 
-class _BusCard extends StatelessWidget {
-  final Tour tour;
-  final UgamColorSet c;
-  const _BusCard({required this.tour, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    final bus = tour.buses.first;
-    final departure = _busDeparture(bus.boardingPoint, bus.departureTime);
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.md - 2),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(UgamRadius.photo),
-            child: SizedBox(
-              width: 84,
-              height: 84,
-              child: UgamBusBackdrop(
-                seed: '${bus.id}-bus',
-                label: _routeInitials(tour.fromCity, tour.toCity),
-              ),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  bus.customerLabel,
-                  style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  bus.busType,
-                  style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-                ),
-                if (departure != null) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.place_outlined,
-                        size: 12,
-                        color: c.ink3,
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          departure,
-                          style: UgamText.caption.copyWith(
-                            color: c.ink2,
-                            fontSize: 12,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: UgamSpacing.sm),
-                Row(
-                  children: [
-                    if (bus.isAC) ...[
-                      UgamReqChip(label: tr('customer_tour_detail.bus_ac')),
-                      const SizedBox(width: 5),
-                    ],
-                    UgamReqChip(
-                      label: tr(
-                        'customer_tour_detail.chip_seats',
-                        namedArgs: {'count': bus.totalSeats.toString()},
-                      ),
-                      variant: UgamChipVariant.neutral,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Per-bus boarding place + departure time, joined as `<place> · <time>` per
-  /// the surfacing rule. Either part is omitted when empty/null; returns null
-  /// when both are empty so the caller can hide the line entirely. Per-bus
-  /// values override tour-level / chart-footer values.
-  static String? _busDeparture(String boardingPoint, String? departureTime) {
-    final place = boardingPoint.trim();
-    final time = formatHhMm(departureTime);
-    final parts = [
-      if (place.isNotEmpty) place,
-      ?time,
-    ];
-    return parts.isEmpty ? null : parts.join(' · ');
-  }
-}
-
-// ─── SCHEDULE TAB ─────────────────────────────────────────────────────
-
-class _ScheduleTab extends StatelessWidget {
-  final Tour tour;
-  final UgamColorSet c;
-  const _ScheduleTab({required this.tour, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    final events = _events();
-    return SliverList(
-      delegate: SliverChildListDelegate.fixed([
-        _SectionEyebrow(
-          label: tr('customer_tour_detail.section_timeline'),
-          c: c,
-        ),
-        const SizedBox(height: UgamSpacing.md),
-        for (var i = 0; i < events.length; i++)
-          _TimelineRow(
-            event: events[i],
-            isFirst: i == 0,
-            isLast: i == events.length - 1,
-            c: c,
-          ),
-      ]),
-    );
-  }
-
-  List<_ScheduleEvent> _events() {
-    final out = <_ScheduleEvent>[
-      _ScheduleEvent(
-        icon: Icons.directions_bus_rounded,
-        title: tr(
-          'customer_tour_detail.schedule_departure_from',
-          namedArgs: {'city': tour.fromCity},
-        ),
-        time: tour.departureDate,
-        timeLabel: formatHhMm(tour.departureTime),
-      ),
-      _ScheduleEvent(
-        icon: Icons.location_on_rounded,
-        title: tr(
-          'customer_tour_detail.schedule_arrive_in',
-          namedArgs: {'city': tour.toCity},
-        ),
-        time: tour.departureDate,
-      ),
-    ];
-    if (tour.returnDate != null) {
-      out.add(
-        _ScheduleEvent(
-          icon: Icons.flag_rounded,
-          title: tr(
-            'customer_tour_detail.schedule_return_to',
-            namedArgs: {'city': tour.fromCity},
-          ),
-          time: tour.returnDate!,
-          timeLabel: formatHhMm(tour.returnTime),
-        ),
-      );
-    }
-    return out;
-  }
-}
-
-class _ScheduleEvent {
-  final IconData icon;
-  final String title;
-  final DateTime time;
-
-  /// Optional time-of-day label ('9:00 PM') appended after the date. Null for
-  /// events with no set time (e.g. arrival, or a tour created without times).
-  final String? timeLabel;
-  const _ScheduleEvent({
-    required this.icon,
-    required this.title,
-    required this.time,
-    this.timeLabel,
-  });
-}
-
-class _TimelineRow extends StatelessWidget {
-  final _ScheduleEvent event;
-  final bool isFirst;
-  final bool isLast;
-  final UgamColorSet c;
-
-  const _TimelineRow({
-    required this.event,
-    required this.isFirst,
-    required this.isLast,
-    required this.c,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 36,
-            child: Column(
-              children: [
-                if (isFirst)
-                  const SizedBox(height: 8)
-                else
-                  Expanded(child: Container(width: 2, color: c.cardElev)),
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: c.accentFill,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: c.accent, width: 1.5),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(event.icon, size: 13, color: c.accent),
-                ),
-                if (isLast)
-                  const SizedBox(height: 8)
-                else
-                  Expanded(child: Container(width: 2, color: c.cardElev)),
-              ],
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: UgamSpacing.sm),
-              child: Container(
-                padding: const EdgeInsets.all(UgamSpacing.md),
-                decoration: BoxDecoration(
-                  color: c.cardElev,
-                  borderRadius: BorderRadius.circular(UgamRadius.row),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      event.title,
-                      style: UgamText.bodyStrong.copyWith(
-                        color: c.ink,
-                        fontSize: 13,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      event.timeLabel != null
-                          ? '${_formatDate(event.time)} · ${event.timeLabel}'
-                          : _formatDate(event.time),
-                      style: UgamText.tabular(
-                        UgamText.caption.copyWith(color: c.ink3, fontSize: 11),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _formatDate(DateTime d) {
-    return '${d.day} ${_monthShort(d.month)} ${d.year}';
-  }
-}
-
-// ─── INFO CARD ────────────────────────────────────────────────────────
-
-class _InfoCard extends StatelessWidget {
-  final UgamColorSet c;
-  final List<(String, String)> rows;
-  const _InfoCard({required this.c, required this.rows});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(UgamSpacing.lg),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final (label, value) in rows) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 90,
-                  child: Text(
-                    label,
-                    style: UgamText.caption.copyWith(color: c.ink3),
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    value,
-                    style: UgamText.bodyStrong.copyWith(color: c.ink),
-                  ),
-                ),
-              ],
-            ),
-            if (label != rows.last.$1) const SizedBox(height: UgamSpacing.sm),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionEyebrow extends StatelessWidget {
-  final String label;
-  final UgamColorSet c;
-  const _SectionEyebrow({required this.label, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(label, style: UgamText.micro.copyWith(color: c.ink3));
-  }
-}
-
 // ─── STICKY CTA ───────────────────────────────────────────────────────
 
 class _StickyBookCta extends StatelessWidget {
   final Tour tour;
-  const _StickyBookCta({required this.tour});
+  final TourPublicSummary summary;
+
+  const _StickyBookCta({required this.tour, required this.summary});
 
   @override
   Widget build(BuildContext context) {
-    final capacity = tour.totalBusSeats;
-    final seatsLeft = capacity - tour.totalSeatsAssigned;
-    final full = capacity > 0 && seatsLeft <= 0;
-    final locked = !tour.acceptsBookings;
-
     final String label;
     final IconData icon;
     final VoidCallback? onTap;
 
-    if (locked) {
+    // Same precedence as _AvailabilityChip: locked > sold out > open.
+    if (!tour.acceptsBookings) {
       label = tr('customer_tour_detail.cta_bookings_closed');
       icon = Icons.lock_outline_rounded;
       onTap = null;
-    } else if (tour.bookingMode.isChart) {
-      // Chart mode: the customer taps their own berth instead of sending a
-      // request for the organiser to fulfil.
-      //
-      // Deliberately NOT gated on `tour.chartNeedsBus`. That getter reads
-      // `tour.buses`, and `buses` has NO anon SELECT policy (owner-only, which
-      // is exactly why chart_tour_buses exists as a SECURITY DEFINER RPC) — so
-      // customer-side `tour.buses` is ALWAYS empty and the gate could never
-      // pass. Whether a chart is sellable is a question only the server can
-      // answer; SeatSelectionScreen asks it via the RPC and shows its own
-      // "seats open once the organiser adds a bus" empty state.
-      label = tr('customer_tour_detail.cta_pick_seats');
-      icon = Icons.event_seat_rounded;
-      onTap = () => Get.to(
-        () => SeatSelectionScreen(tour: tour),
-        transition: Transition.cupertino,
-      );
-    } else if (full) {
+    } else if (tour.bookingMode.isChart && summary.loaded && !summary.hasBuses) {
+      // Chart mode with no sellable bus. Only asserted once the RPC has
+      // ANSWERED — while pending we let the customer through to
+      // SeatSelectionScreen, which has its own empty state. Note this gate
+      // reads the public RPC, never `tour.chartNeedsBus`: that getter reads
+      // `tour.buses`, which is always empty for anon, so it could never pass.
+      label = tr('customer_tour_detail.cta_seats_not_open');
+      icon = Icons.event_seat_outlined;
+      onTap = null;
+    } else if (summary.isSoldOut) {
       label = tr('customer_tour_detail.cta_join_waitlist');
       icon = Icons.hourglass_top_rounded;
       onTap = () => Get.to(
         () => CustomerBookingRequestScreen(tour: tour),
+        transition: Transition.cupertino,
+      );
+    } else if (tour.bookingMode.isChart) {
+      label = tr('customer_tour_detail.cta_pick_seats');
+      icon = Icons.event_seat_rounded;
+      onTap = () => Get.to(
+        () => SeatSelectionScreen(tour: tour),
         transition: Transition.cupertino,
       );
     } else {
@@ -989,4 +916,82 @@ class _StickyBookCta extends StatelessWidget {
       child: UgamCTA(label: label, leadingIcon: icon, onPressed: onTap),
     );
   }
+}
+
+// ─── SHARED BITS ──────────────────────────────────────────────────────
+
+class _SectionEyebrow extends StatelessWidget {
+  final String label;
+  final UgamColorSet c;
+
+  const _SectionEyebrow({required this.label, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(label, style: UgamText.micro.copyWith(color: c.ink3));
+  }
+}
+
+/// Localized 3-letter month abbreviation, shared across customer screens.
+String _monthShort(int month) {
+  const keys = [
+    'app.month.short.jan',
+    'app.month.short.feb',
+    'app.month.short.mar',
+    'app.month.short.apr',
+    'app.month.short.may',
+    'app.month.short.jun',
+    'app.month.short.jul',
+    'app.month.short.aug',
+    'app.month.short.sep',
+    'app.month.short.oct',
+    'app.month.short.nov',
+    'app.month.short.dec',
+  ];
+  return tr(keys[month - 1]);
+}
+
+String _formatLongDate(DateTime d) =>
+    '${d.day} ${_monthShort(d.month)} ${d.year}';
+
+/// Route monogram for the backdrop fallback, e.g. "S→M" from "Surat"/"Mumbai".
+/// Empty when neither city is set, so the backdrop shows just the bus motif.
+String _routeInitials(String from, String to) {
+  String first(String s) {
+    final t = s.trim();
+    return t.isEmpty ? '' : t.characters.first.toUpperCase();
+  }
+
+  final f = first(from);
+  final t = first(to);
+  if (f.isEmpty && t.isEmpty) return '';
+  return '$f→$t';
+}
+
+/// Whole CALENDAR DAYS until departure; negative once it is behind us.
+///
+/// Calendar days, not elapsed hours, on purpose: a bus leaving at 5 AM tomorrow
+/// is "tomorrow" when read at 11 PM tonight, but that is only 6 hours away and
+/// `Duration.inDays` would floor it to 0 and say "departs today". Normalising
+/// both ends to midnight first is what makes the answer match the calendar the
+/// customer is looking at.
+///
+/// [now] is injectable so this is testable without a clock.
+@visibleForTesting
+int daysUntilDeparture(DateTime departure, {DateTime? now}) {
+  DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+  return dateOnly(departure).difference(dateOnly(now ?? DateTime.now())).inDays;
+}
+
+/// "Departs today" / "Departs tomorrow" / "Departs in 10 days", or null once
+/// the departure is behind us.
+String? departureCountdownLabel(DateTime departure, {DateTime? now}) {
+  final days = daysUntilDeparture(departure, now: now);
+  if (days < 0) return null;
+  if (days == 0) return tr('customer_tour_detail.departs_today');
+  if (days == 1) return tr('customer_tour_detail.departs_tomorrow');
+  return tr(
+    'customer_tour_detail.departs_in_days',
+    namedArgs: {'n': '$days'},
+  );
 }

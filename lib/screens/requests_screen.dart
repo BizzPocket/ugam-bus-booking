@@ -34,7 +34,7 @@ import 'main_shell.dart';
 /// Layout top → bottom:
 ///   [Title + circle search + groups + circle "+"]
 ///   [Collapsible search bar]
-///   [Tour selector pills (active solid accent)]
+///   [Tour selector pills (active tonal accent)]
 ///   [Collapsible capacity banner (_CapacityBanner)]
 ///   [Four status tabs (UgamTabPills): New / Waitlist / Confirmed / Assigned]
 ///   [Passenger list — dense _RequestCard: name + phone/time + one chip Wrap + action row]
@@ -377,11 +377,21 @@ class _RequestsScreenState extends State<RequestsScreen> {
   }
 
   /// Default ordering: newest request first. The sort control was removed —
-  /// agents triage top-down, and a stable newest-first order is the one that
-  /// matches how requests arrive.
-  List<Passenger> _orderNewestFirst(List<Passenger> list) {
-    final out = List<Passenger>.from(list)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  /// Newest-first for New/Waitlist/Assigned. On Confirmed, partially assigned
+  /// riders (still owing berths) float above unseated accepts so remaining
+  /// seats aren't buried.
+  List<Passenger> _orderForFilter(List<Passenger> list) {
+    final out = List<Passenger>.from(list);
+    if (_filter == _RequestFilter.confirmed) {
+      out.sort((a, b) {
+        final ap = a.isPartiallyAssigned ? 0 : 1;
+        final bp = b.isPartiallyAssigned ? 0 : 1;
+        if (ap != bp) return ap - bp;
+        return b.createdAt.compareTo(a.createdAt);
+      });
+    } else {
+      out.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
     return out;
   }
 
@@ -406,9 +416,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
       rightIcon = Icons.grid_view_rounded;
       onRight = act.openAssignment;
     } else {
-      // New / waitlisted: right-swipe CONFIRMS (and fires the WhatsApp
+      // New / waitlisted: right-swipe ACCEPTS (and fires the WhatsApp
       // confirmation) but does NOT open the seat grid, so the icon is a check,
-      // not a seat — matching the relabelled "Confirm" primary on the card.
+      // not a seat — matching the Accept primary on the card.
       rightIcon = Icons.check_circle_rounded;
       onRight = act.confirmAndSeat;
     }
@@ -606,7 +616,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                     p.phone.toLowerCase().contains(q),
               )
               .toList();
-    final passengers = _orderNewestFirst(filtered);
+    final passengers = _orderForFilter(filtered);
 
     return Column(
       children: [
@@ -1176,7 +1186,7 @@ class _BulkActionBar extends StatelessWidget {
               Expanded(
                 child: UgamButton(
                   icon: Icons.verified_rounded,
-                  label: tr('requests.bulk.confirm'),
+                  label: tr('requests.bulk.accept'),
                   // The ONE accent in the bulk bar (per accent-rationing).
                   kind: UgamButtonKind.primary,
                   expand: true,
@@ -2153,12 +2163,10 @@ class _CardActions extends StatelessWidget {
         declineItem,
       ];
     } else if (isWaitlisted) {
-      // WAITLIST — the primary is a plain "Confirm": it clears the waitlist flag
-      // (via setConfirmed) and fires the seat_allocation confirmation WhatsApp,
-      // then STAYS on the list. It does NOT jump into the seat grid — the old
-      // "Confirm & seat" navigation was deliberately removed; seating happens
-      // later, once the rider shows in Confirmed. The circle drops back to New.
-      primaryLabel = tr('requests.action.confirm');
+      // WAITLIST — primary Accept clears waitlist + fires confirmation WhatsApp,
+      // then STAYS on the list. Seating happens later on Confirmed. Circle drops
+      // back to New.
+      primaryLabel = tr('requests.action.accept');
       primaryIcon = Icons.verified_rounded;
       primaryAction = _confirmAndSeat;
       secondary = UgamIconButton(
@@ -2169,24 +2177,24 @@ class _CardActions extends StatelessWidget {
       menu = [
         editItem,
         groupItem,
-        // No separate "Confirm" here — the primary already confirms + notifies.
+        // No separate Accept here — the primary already accepts + notifies.
         declineItem,
       ];
     } else {
-      // NEW — the primary is a plain "Confirm": it moves the request to
-      // Confirmed and fires the seat_allocation confirmation WhatsApp, then
-      // STAYS on the list. It does NOT open the seat grid — the old "Confirm &
-      // seat" promised a jump that was deliberately removed. Seating is the
-      // secondary circle: "Assign seats" routes to the grid and auto-confirms +
-      // notifies on placement — surfaced on the card so it is no longer buried
-      // only in the overflow. Move-to-waitlist drops into the overflow.
-      primaryLabel = tr('requests.action.confirm');
+      // NEW — primary Accept moves to Confirmed + WhatsApp greeting, stays on
+      // the list. Assign seats is a second labeled tonal button (not icon-only)
+      // so seating is not buried. Waitlist lives in the overflow.
+      primaryLabel = tr('requests.action.accept');
       primaryIcon = Icons.verified_rounded;
       primaryAction = _confirmAndSeat;
-      secondary = UgamIconButton(
-        icon: Icons.grid_view_rounded,
-        onTap: _openAssignment,
-        semanticLabel: tr('requests.action.assign_seats'),
+      secondary = Expanded(
+        child: UgamButton(
+          label: tr('requests.action.assign_seats'),
+          icon: Icons.grid_view_rounded,
+          kind: UgamButtonKind.tonal,
+          expand: true,
+          onPressed: _openAssignment,
+        ),
       );
       menu = [
         editItem,

@@ -8,6 +8,7 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
+import '../models/tour_status.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
@@ -20,6 +21,9 @@ import 'bus_status_screen.dart';
 /// List of buses attached to a tour. Topbar + capacity stat tiles +
 /// photo-anchored bus cards (matching image-5 list pattern) + sticky
 /// bottom CTA to add a new bus.
+///
+/// Post-lock (and completed): seat edits stay allowed elsewhere, but bus
+/// layout add/edit/duplicate/delete is frozen — see [TourStatus.allowsLayoutEdit].
 class ManageBusesScreen extends StatelessWidget {
   final String tourId;
 
@@ -27,8 +31,11 @@ class ManageBusesScreen extends StatelessWidget {
 
   TourController get _tourCtrl => Get.find<TourController>();
 
+  bool _layoutEditable(Tour tour) => tour.status.allowsLayoutEdit;
+
   /// Opens a sheet with the per-bus actions: edit, call the driver, delete.
   void _openBusMenu(BuildContext context, Tour tour, Bus bus) {
+    final canEditLayout = _layoutEditable(tour);
     UgamSheet.show<void>(
       context,
       title: bus.displayLabel,
@@ -38,37 +45,40 @@ class ManageBusesScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _BusMenuTile(
-              c: c,
-              icon: Icons.edit_rounded,
-              label: tr('manage_buses.menu_edit'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => AddBusScreen(tourId: tourId, existing: bus),
-                  ),
-                );
-              },
-            ),
+            if (canEditLayout)
+              _BusMenuTile(
+                c: c,
+                icon: Icons.edit_rounded,
+                label: tr('manage_buses.menu_edit'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          AddBusScreen(tourId: tourId, existing: bus),
+                    ),
+                  );
+                },
+              ),
             // Duplicate: open the add wizard seeded from this bus as a template
             // (capacity, layout, pricing, boarding, departure, AC all carry
             // over) but STAY in add mode, so save creates a new bus in the next
             // slot. The plate and driver are left blank for the new vehicle.
-            _BusMenuTile(
-              c: c,
-              icon: Icons.copy_all_rounded,
-              label: tr('manage_buses.menu_duplicate'),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        AddBusScreen(tourId: tourId, templateBus: bus),
-                  ),
-                );
-              },
-            ),
+            if (canEditLayout)
+              _BusMenuTile(
+                c: c,
+                icon: Icons.copy_all_rounded,
+                label: tr('manage_buses.menu_duplicate'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          AddBusScreen(tourId: tourId, templateBus: bus),
+                    ),
+                  );
+                },
+              ),
             // Driver phone lives here now (moved off the dense card meta line):
             // a one-tap call, with the number shown as the tile subtitle.
             if (bus.driverPhone.trim().isNotEmpty)
@@ -82,17 +92,18 @@ class ManageBusesScreen extends StatelessWidget {
                   PhoneDialer.call(bus.driverPhone);
                 },
               ),
-            _BusMenuTile(
-              c: c,
-              icon: Icons.delete_outline_rounded,
-              label: tr('manage_buses.menu_delete'),
-              tint: c.danger,
-              danger: true,
-              onTap: () {
-                Navigator.of(ctx).pop();
-                _confirmDelete(context, tour, bus);
-              },
-            ),
+            if (canEditLayout)
+              _BusMenuTile(
+                c: c,
+                icon: Icons.delete_outline_rounded,
+                label: tr('manage_buses.menu_delete'),
+                tint: c.danger,
+                danger: true,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _confirmDelete(context, tour, bus);
+                },
+              ),
           ],
         );
       },
@@ -204,6 +215,9 @@ class ManageBusesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    // Layouts deferred on cold start for 2G — coalesced / idempotent.
+    // ignore: unawaited_futures
+    _tourCtrl.ensureTourReadyForSeating(tourId);
 
     return UgamScaffold(
       body: SafeArea(
@@ -293,18 +307,25 @@ class ManageBusesScreen extends StatelessWidget {
           );
         }),
       ),
-      // Add-bus CTA.
-      bottomNavigationBar: UgamStickyCTA(
-        child: UgamCTA(
-          label: tr('manage_buses.add_bus'),
-          leadingIcon: Icons.add_rounded,
-          onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => AddBusScreen(tourId: tourId),
+      // Add-bus CTA — hidden once the tour is locked/completed (seats still
+      // editable elsewhere; bus layout is frozen).
+      bottomNavigationBar: Obx(() {
+        final tour = _tourCtrl.getTour(tourId);
+        if (tour == null || !_layoutEditable(tour)) {
+          return const SizedBox.shrink();
+        }
+        return UgamStickyCTA(
+          child: UgamCTA(
+            label: tr('manage_buses.add_bus'),
+            leadingIcon: Icons.add_rounded,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => AddBusScreen(tourId: tourId),
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      }),
     );
   }
 }

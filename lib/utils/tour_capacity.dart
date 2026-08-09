@@ -324,7 +324,37 @@ TourCapacity computeTourCapacity(Tour tour) {
         retOccupied: busRet[b.id] ?? 0,
       ),
   };
+
+  // 2G cold-start: Phase 2 ships buses WITHOUT layout jsonb. Until Phase 3 /
+  // ensureBusLayouts fills grids, the loops above see empty grids and would
+  // report free=0 on a 40-seat bus — a false "full" on Home. Fall back to the
+  // legacy total_seats column + assigned seat entries for those buses only.
+  for (final b in tour.buses) {
+    if (b.layout != null) continue;
+    final capBerths = b.totalSeats;
+    if (capBerths <= 0) continue;
+    var placed = 0;
+    for (final p in tour.passengers) {
+      for (final a in p.assignedSeats) {
+        if (a.busId == b.id) placed++;
+      }
+    }
+    placed = placed.clamp(0, capBerths);
+    free += capBerths - placed;
+    occupied += placed;
+    goOccupied += placed;
+    retOccupied += placed;
+    busCapTotal[b.id] = capBerths;
+    byBus[b.id] = BusCapacity(
+      busId: b.id,
+      capacity: capBerths,
+      goOccupied: placed,
+      retOccupied: placed,
+    );
+  }
+
   occupied = occupied.clamp(0, capacity);
+  free = free.clamp(0, capacity);
 
   final needsDecision = _decisionFilter(plan, tour).length;
 

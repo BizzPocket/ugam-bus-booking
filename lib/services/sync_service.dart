@@ -8,6 +8,7 @@ import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'supabase_service.dart';
+import 'sync_read_projections.dart';
 import 'sync_retry_policy.dart' as retry;
 
 /// Fetch every row by paging through [fetchPage] (a Supabase `.range(from,to)`
@@ -86,14 +87,15 @@ List<String> coldStartHydrationScope(List<Map<String, dynamic>> tourRows) {
 }
 
 class SyncService extends GetxService {
-  // Read timeout budget. Raised from 8s to 12s: a single slow moment on
-  // cellular used to blow the 8s budget and blank the whole screen. Applied
-  // PER PAGE (X-5) — each individual .range() round trip inside a paginated
-  // read gets its own 12s, rather than one aggregate cap over the whole
-  // multi-page read (see smartFetch below). That way a large roster that
-  // needs several round trips isn't killed by a budget sized for one, while
-  // each round trip is still bounded.
-  static const _readTimeout = Duration(seconds: 12);
+  // Read timeout budget. Raised from 8s → 12s (wifi) and 28s (cellular):
+  // measured EDGE cold-start of a scoped roster is ~10.7s payload alone before
+  // TLS/query; a 12s cap blanks Home on real 2G. Applied PER PAGE (X-5) — each
+  // individual .range() round trip inside a paginated read gets its own budget,
+  // rather than one aggregate cap over the whole multi-page read (see smartFetch
+  // below). That way a large roster that needs several round trips isn't killed
+  // by a budget sized for one, while each round trip is still bounded.
+  static const _readTimeoutWifi = Duration(seconds: 12);
+  static const _readTimeoutCellular = Duration(seconds: 28);
   // Per-attempt write timeout. Writes are idempotent (keyed by entity id) so a
   // timeout that actually landed converges on retry — no need to inflate this.
   static const _writeTimeout = Duration(seconds: 12);
@@ -102,9 +104,44 @@ class SyncService extends GetxService {
   /// guarantee). Used to fail writes fast when plainly offline.
   final isOnline = true.obs;
 
+  /// True when the active interface looks cellular (or unknown). Drives the
+  /// longer read budget so 2G/3G agents aren't killed by a wifi-sized timeout.
+  final isCellular = true.obs;
+
+  /// Caps concurrent live reads so money/memory/inbox can't starve the Home
+  /// tour wave on a 2G radio. Wifi allows more parallelism.
+  static const _maxCellularReads = 2;
+  static const _maxWifiReads = 6;
+  int _inflightReads = 0;
+  final _readWaiters = <Completer<void>>[];
+
   StreamSubscription? _connectivitySub;
 
   SupabaseClient get _client => SupabaseService.instance.client;
+
+  /// Effective per-page read timeout for the current radio.
+  @visibleForTesting
+  Duration get readTimeout =>
+      isCellular.value ? _readTimeoutCellular : _readTimeoutWifi;
+
+  /// Serialises / bounds concurrent reads for the current radio.
+  Future<T> _withReadSlot<T>(Future<T> Function() action) async {
+    final max = isCellular.value ? _maxCellularReads : _maxWifiReads;
+    while (_inflightReads >= max) {
+      final gate = Completer<void>();
+      _readWaiters.add(gate);
+      await gate.future;
+    }
+    _inflightReads++;
+    try {
+      return await action();
+    } finally {
+      _inflightReads--;
+      if (_readWaiters.isNotEmpty) {
+        _readWaiters.removeAt(0).complete();
+      }
+    }
+  }
 
   @override
   void onInit() {
@@ -119,12 +156,20 @@ class SyncService extends GetxService {
   }
 
   void _monitorConnectivity() {
-    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+    void apply(List<ConnectivityResult> results) {
       isOnline.value = results.any((r) => r != ConnectivityResult.none);
-    });
-    Connectivity().checkConnectivity().then((results) {
-      isOnline.value = results.any((r) => r != ConnectivityResult.none);
-    });
+      // Prefer a longer budget whenever wifi/ethernet is NOT clearly present.
+      // `other` / empty / mobile / vpn-alone all get cellular headroom — better
+      // to wait than to blank Home on a flaky EDGE link.
+      final hasFastPipe = results.any(
+        (r) =>
+            r == ConnectivityResult.wifi || r == ConnectivityResult.ethernet,
+      );
+      isCellular.value = !hasFastPipe;
+    }
+
+    _connectivitySub = Connectivity().onConnectivityChanged.listen(apply);
+    Connectivity().checkConnectivity().then(apply);
   }
 
   // ── API-compat stubs ────────────────────────────────────────────────
@@ -160,9 +205,19 @@ class SyncService extends GetxService {
   /// read's failure bleed into another's result — a fast `customer_memory`
   /// PGRST205 (missing table) would flip a shared flag and blank a tours load
   /// that had actually succeeded. A per-call result can't be clobbered.
-  /// [cacheKey]/[select]/[maxAge] are retained for call-site compatibility and
-  /// are unused now.
-  Future<({List<Map<String, dynamic>> rows, bool failed})> smartFetch({
+  /// [cacheKey]/[maxAge] are retained for call-site compatibility and
+  /// are unused now. [select] IS used — pass a column list to avoid `select(*)`
+  /// on 2G (see [SyncReadProjections]).
+  /// [error] carries the SERVER's reason when [failed] is true, or null when
+  /// the failure was simply "offline".
+  ///
+  /// It exists because losing it cost a full debugging session: a client filter
+  /// on a column the live DB did not have made every read 400 with
+  /// `column tours.deleted_at does not exist`, and the only thing the user saw
+  /// was "check your connection" — on a healthy network. A schema error that
+  /// presents as a network error sends you looking in exactly the wrong place.
+  Future<({List<Map<String, dynamic>> rows, bool failed, String? error})>
+  smartFetch({
     required String table,
     required String cacheKey,
     String? select,
@@ -170,41 +225,99 @@ class SyncService extends GetxService {
     String? orderBy,
     int maxAge = 300000,
   }) async {
-    if (!isOnline.value) {
-      return (rows: const <Map<String, dynamic>>[], failed: true);
+    // Do NOT short-circuit on [isOnline]. connectivity_plus often reports
+    // `none` for a beat on cold start (or never emits a follow-up event after a
+    // false-negative checkConnectivity), which used to blank the home screen
+    // with "check your connection" even when Wi‑Fi was up — Retry then worked
+    // because the flag had corrected by the tap. Writes still fail-fast on
+    // [isOnline] below; reads must attempt the network and let a real socket
+    // / timeout failure surface instead.
+    return _withReadSlot(() async {
+      try {
+        // Reads are idempotent — retry transient failures (incl. timeout) so one
+        // slow moment on cellular no longer blanks the screen. Terminal errors
+        // (auth/RLS/missing-table) still surface immediately via [_isRetryable].
+        //
+        // timeout: null — a paginated read can be several sequential round
+        // trips (X-5); each one already carries its own readTimeout budget
+        // (applied inside the .range() closures in _fetchFromSupabase /
+        // _fetchToursWithRelations), so wrapping the WHOLE multi-page read in
+        // one more readTimeout here would let a genuinely large roster time
+        // out in full even though every individual round trip was healthy.
+        final rows = await _withRetry(
+          () => _fetchFromSupabase(table, filters, orderBy, select: select),
+          timeout: null,
+          label: '$table fetch',
+        );
+        return (rows: rows, failed: false, error: null);
+      } on PostgrestException catch (e, st) {
+        // 054 not applied yet: disarm the archive filter and read again, rather
+        // than reporting a schema gap to the user as a network failure. Fires at
+        // most once per process — see [_isMissingDeletedAt].
+        if (_disarmIfMissingDeletedAt(e)) {
+          try {
+            final rows = await _withRetry(
+              () => _fetchFromSupabase(table, filters, orderBy, select: select),
+              timeout: null,
+              label: '$table fetch (unfiltered)',
+            );
+            return (rows: rows, failed: false, error: null);
+          } catch (e2, st2) {
+            dev.log('FETCH FAILED $table — $e2\n$st2', name: 'SyncService');
+            return (
+              rows: const <Map<String, dynamic>>[],
+              failed: true,
+              error: describeReadError(e2),
+            );
+          }
+        }
+        dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
+        return (
+          rows: const <Map<String, dynamic>>[],
+          failed: true,
+          error: describeReadError(e),
+        );
+      } catch (e, st) {
+        dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
+        return (
+          rows: const <Map<String, dynamic>>[],
+          failed: true,
+          error: describeReadError(e),
+        );
+      }
+    });
+  }
+
+  /// A short, human-readable reason for a failed read.
+  ///
+  /// PostgrestException carries the useful part (`message`, plus a SQLSTATE in
+  /// `code`); everything else falls back to the exception's own toString. The
+  /// point is that whatever reaches the user names the ACTUAL fault — a missing
+  /// column, an RLS refusal — rather than being flattened into "network error".
+  static String describeReadError(Object e) {
+    if (e is PostgrestException) {
+      final code = e.code;
+      return code == null || code.isEmpty
+          ? e.message
+          : '${e.message} ($code)';
     }
-    try {
-      // Reads are idempotent — retry transient failures (incl. timeout) so one
-      // slow moment on cellular no longer blanks the screen. Terminal errors
-      // (auth/RLS/missing-table) still surface immediately via [_isRetryable].
-      //
-      // timeout: null — a paginated read can be several sequential round
-      // trips (X-5); each one already carries its own _readTimeout budget
-      // (applied inside the .range() closures in _fetchFromSupabase /
-      // _fetchToursWithRelations), so wrapping the WHOLE multi-page read in
-      // one more _readTimeout here would let a genuinely large roster time
-      // out in full even though every individual round trip was healthy.
-      final rows = await _withRetry(
-        () => _fetchFromSupabase(table, filters, orderBy),
-        timeout: null,
-        label: '$table fetch',
-      );
-      return (rows: rows, failed: false);
-    } catch (e, st) {
-      dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
-      return (rows: const <Map<String, dynamic>>[], failed: true);
-    }
+    return e.toString();
   }
 
   Future<List<Map<String, dynamic>>> _fetchFromSupabase(
     String table,
     Map<String, String>? filters,
-    String? orderBy,
-  ) async {
+    String? orderBy, {
+    String? select,
+  }) async {
     if (table == 'tours') return _fetchToursWithRelations(filters, orderBy);
 
-    final base = _client.from(table).select();
-    var filtered = base;
+    // Archived rows never reach the app (054). Applied before the caller's
+    // filters so it can't be dropped by a call site that builds its own.
+    // Prefer an explicit column projection when the caller supplies one —
+    // `select(*)` is what blew bus payloads on 2G (layout jsonb).
+    final columns = (select == null || select.isEmpty) ? '*' : select;
+    var filtered = _liveOnly(table, _client.from(table).select(columns));
     if (filters != null) {
       filters.forEach((k, v) {
         filtered = filtered.eq(k, v);
@@ -224,7 +337,7 @@ class SyncService extends GetxService {
       // Per-page timeout, not an aggregate one over the whole multi-page
       // read — see the comment on smartFetch's _withRetry call.
       final rows =
-          await _withTimeout(transform, _readTimeout, '$table page fetch');
+          await _withTimeout(transform, readTimeout, '$table page fetch');
       return List<Map<String, dynamic>>.from(
         (rows as List).map((r) => Map<String, dynamic>.from(r)),
       );
@@ -235,25 +348,7 @@ class SyncService extends GetxService {
     Map<String, String>? filters,
     String? orderBy,
   ) async {
-    final tourBase = _client.from('tours').select();
-    var tourQuery = tourBase;
-    if (filters != null) {
-      filters.forEach((k, v) {
-        tourQuery = tourQuery.eq(k, v);
-      });
-    }
-    final tours = await paginateRows<Map<String, dynamic>>((from, to) async {
-      // X-5: same stable-order requirement as the generic read above — order
-      // by 'id' (tours' PK, migrations/001_initial_schema.sql) when the
-      // caller supplied no orderBy.
-      final transform = orderBy != null
-          ? tourQuery.order(orderBy, ascending: false).range(from, to)
-          : tourQuery.order('id').range(from, to);
-      final rows = await _withTimeout(transform, _readTimeout, 'tours page fetch');
-      return List<Map<String, dynamic>>.from(
-        (rows as List).map((r) => Map<String, dynamic>.from(r)),
-      );
-    });
+    final tours = await fetchTourRows(filters: filters, orderBy: orderBy);
     if (tours.isEmpty) return [];
 
     // COLD-START SCOPE (2G).
@@ -271,10 +366,78 @@ class SyncService extends GetxService {
     // The 12s read budget is what the first one blows once TLS handshake and
     // query time are added on a 2G link.
     //
+    // Live admin probe (2026-08-09): bus `layout` jsonb is ~71% of owner-wide
+    // bus bytes. Cold start therefore pulls bus METADATA only; charts call
+    // [fetchBusLayouts] on demand / via TourController background prefetch.
+    //
     // An archived tour's roster is loaded on demand the moment it is opened —
     // see [fetchRelationsForTours] and TourController.ensureTourHydrated.
     final relations = await _fetchRelations(coldStartHydrationScope(tours));
     return _attachRelations(tours, relations);
+  }
+
+  /// Tour header rows only — no passengers/buses. Used so the UI can paint
+  /// titles on 2G before the heavier roster round-trips finish.
+  Future<List<Map<String, dynamic>>> fetchTourRows({
+    Map<String, String>? filters,
+    String? orderBy,
+  }) async {
+    return _withReadSlot(() async {
+      var tourQuery = _liveOnly('tours', _client.from('tours').select());
+      if (filters != null) {
+        filters.forEach((k, v) {
+          tourQuery = tourQuery.eq(k, v);
+        });
+      }
+      return paginateRows<Map<String, dynamic>>((from, to) async {
+        final transform = orderBy != null
+            ? tourQuery.order(orderBy, ascending: false).range(from, to)
+            : tourQuery.order('id').range(from, to);
+        final rows =
+            await _withTimeout(transform, readTimeout, 'tours page fetch');
+        return List<Map<String, dynamic>>.from(
+          (rows as List).map((r) => Map<String, dynamic>.from(r)),
+        );
+      });
+    });
+  }
+
+  /// Fetches `layout` jsonb for the given bus ids only. Chunked to keep URLs
+  /// short on slow links. Empty [busIds] → no request.
+  Future<List<Map<String, dynamic>>> fetchBusLayouts(
+    List<String> busIds,
+  ) async {
+    final ids = busIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) return const [];
+
+    return _withReadSlot(() async {
+      const chunkSize = 40;
+      final out = <Map<String, dynamic>>[];
+      for (var i = 0; i < ids.length; i += chunkSize) {
+        final chunk = ids.sublist(i, math.min(i + chunkSize, ids.length));
+        final page = await _withRetry(
+          () async {
+            final rows = await _withTimeout(
+              _liveOnly(
+                'buses',
+                _client
+                    .from('buses')
+                    .select(SyncReadProjections.busLayoutSelect),
+              ).inFilter('id', chunk),
+              readTimeout,
+              'bus layouts fetch',
+            );
+            return List<Map<String, dynamic>>.from(
+              (rows as List).map((r) => Map<String, dynamic>.from(r)),
+            );
+          },
+          timeout: null,
+          label: 'bus layouts',
+        );
+        out.addAll(page);
+      }
+      return out;
+    });
   }
 
   /// Fetches passengers + buses + groups for [tourIds] and attaches nothing —
@@ -306,6 +469,15 @@ class SyncService extends GetxService {
       );
     }
 
+    return _withReadSlot(() => _fetchRelationsUnlocked(tourIds));
+  }
+
+  Future<
+      ({
+        List<Map<String, dynamic>> passengers,
+        List<Map<String, dynamic>> buses,
+        List<Map<String, dynamic>> groups,
+      })> _fetchRelationsUnlocked(List<String> tourIds) async {
     // Passengers + buses are independent once we know tour ids — fetch
     // them in parallel. Previously these awaits ran sequentially, which
     // cost one full extra round-trip per tour load on cellular networks
@@ -323,13 +495,16 @@ class SyncService extends GetxService {
     final passengersFuture = paginateRows<Map<String, dynamic>>(
       (from, to) async {
         final rows = await _withTimeout(
-          _client
-              .from('passengers')
-              .select()
+          _liveOnly(
+            'passengers',
+            _client
+                .from('passengers')
+                .select(SyncReadProjections.passengerSelect),
+          )
               .inFilter('tour_id', tourIds)
               .order('id')
               .range(from, to),
-          _readTimeout,
+          readTimeout,
           'passengers page fetch',
         );
         return List<Map<String, dynamic>>.from(
@@ -339,16 +514,18 @@ class SyncService extends GetxService {
     );
     // Buses are joined by buses.tour_id (one-to-many). A tour can have
     // multiple buses; the legacy single tours.bus_id is no longer used.
+    // Cold start omits `layout` jsonb (measured ~71% of bus payload).
     final busesFuture = paginateRows<Map<String, dynamic>>(
       (from, to) async {
         final rows = await _withTimeout(
-          _client
-              .from('buses')
-              .select()
+          _liveOnly(
+            'buses',
+            _client.from('buses').select(SyncReadProjections.busListSelect),
+          )
               .inFilter('tour_id', tourIds)
               .order('id')
               .range(from, to),
-          _readTimeout,
+          readTimeout,
           'buses page fetch',
         );
         return List<Map<String, dynamic>>.from(
@@ -366,7 +543,7 @@ class SyncService extends GetxService {
               .inFilter('tour_id', tourIds)
               .order('id')
               .range(from, to),
-          _readTimeout,
+          readTimeout,
           'passenger_groups page fetch',
         );
         return List<Map<String, dynamic>>.from(
@@ -442,6 +619,97 @@ class SyncService extends GetxService {
       };
     }).toList();
   }
+
+  // ── Soft delete (migration 054) ─────────────────────────────────────
+
+  /// Tables that carry `deleted_at` and must therefore NEVER return archived
+  /// rows to the app (migration 054).
+  ///
+  /// The filter is applied HERE, in the one place every generic read passes
+  /// through, rather than at ~40 call sites — one missed call site would leak
+  /// a deleted tour's rows into a live money total, and the reader would have
+  /// no way to tell. Adding a table to this set is the whole opt-in.
+  ///
+  /// It is deliberately NOT enforced in RLS: the live policy set has diverged
+  /// from the migration files before (see the notes on 054), so rewriting
+  /// policies blind is the riskier half of the trade. The archive is reached
+  /// through explicit RPCs (`deleted_tours()`), never by relaxing this.
+  static const softDeletableTables = {
+    'tours',
+    'buses',
+    'passengers',
+    'collections',
+    'expenses',
+    'incomes',
+    'bus_handovers',
+  };
+
+  /// False once the server has told us `deleted_at` does not exist yet — i.e.
+  /// migration 054 has not been applied to this database.
+  ///
+  /// DEPLOY-ORDER SAFETY. Filtering on a column the live schema lacks makes
+  /// EVERY read of these seven tables 400, which presents to the user as a
+  /// connection failure on a healthy network. That is the exact trap this
+  /// codebase has already paid for once.
+  ///
+  /// Degrading to an unfiltered read is not a correctness compromise, it is
+  /// provably equivalent: with no `deleted_at` column, nothing can ever have
+  /// been archived, so "all rows" and "live rows" are the same set. The moment
+  /// 054 lands the probe stops firing and the filter is permanent.
+  static bool _softDeleteColumnLive = true;
+
+  /// True when the server accepts `deleted_at` filters (054 applied).
+  ///
+  /// Public because [FinanceController] runs the one money read that does not
+  /// pass through [smartFetch] and must arm/disarm its own filter in step —
+  /// otherwise the cross-tour P&L would be the single query still 400ing on a
+  /// database where 054 is pending.
+  static bool get softDeleteFilterActive => _softDeleteColumnLive;
+
+  @visibleForTesting
+  static void resetSoftDeleteProbe() => _softDeleteColumnLive = true;
+
+  /// Whether [e] is the server saying `deleted_at` does not exist.
+  ///
+  /// PURE — no side effects, so it can be tested directly. Both conditions are
+  /// required: an undefined-column error AND the column being `deleted_at`.
+  /// Matching on "does not exist" alone would let an unrelated schema gap
+  /// silently switch the archive filter off for the whole session.
+  @visibleForTesting
+  static bool isMissingDeletedAtError(Object e) {
+    if (e is! PostgrestException) return false;
+    final undefined = e.code == '42703' ||
+        e.message.toLowerCase().contains('does not exist');
+    return undefined && e.message.contains('deleted_at');
+  }
+
+  /// Recognises the "054 isn't applied yet" failure and disarms the filter.
+  /// Returns true when the caller should retry the read unfiltered.
+  static bool _disarmIfMissingDeletedAt(Object e) {
+    if (!isMissingDeletedAtError(e)) return false;
+    if (_softDeleteColumnLive) {
+      _softDeleteColumnLive = false;
+      dev.log(
+        'deleted_at is missing on the server — migration 054 has NOT been '
+        'applied. Falling back to unfiltered reads (safe: nothing can be '
+        'archived yet). Apply 054_soft_delete.sql.',
+        name: 'SyncService',
+      );
+    }
+    return true;
+  }
+
+  /// Restricts [query] to live rows when [table] is soft-deletable.
+  ///
+  /// Generic over the builder type so it composes with the paginated reads
+  /// below without forcing an early `.select()` materialisation.
+  static PostgrestFilterBuilder<T> _liveOnly<T>(
+    String table,
+    PostgrestFilterBuilder<T> query,
+  ) =>
+      (_softDeleteColumnLive && softDeletableTables.contains(table))
+          ? query.isFilter('deleted_at', null)
+          : query;
 
   // ── Writes (live, online-only) ──────────────────────────────────────
 
@@ -665,7 +933,24 @@ class SyncService extends GetxService {
         }
         break;
       case 'delete':
-        await _client.from(table).delete().eq('id', entityId);
+        // SOFT DELETE (054): money-bearing rows are archived, never destroyed.
+        // Routed here rather than at the ~8 call sites so no future delete can
+        // opt out by accident — the table set is the single switch.
+        //
+        // Idempotent like the hard delete it replaces: re-stamping deleted_at
+        // on an already-archived row is harmless, so a timed-out write that
+        // actually landed still converges on retry. `deleted_by` is only
+        // stamped when there is a signed-in admin; handler-initiated deletes
+        // record their own actor server-side in their RPCs.
+        if (softDeletableTables.contains(table)) {
+          final archive = <String, dynamic>{
+            'deleted_at': DateTime.now().toUtc().toIso8601String(),
+          };
+          if (authUid != null) archive['deleted_by'] = authUid;
+          await _client.from(table).update(archive).eq('id', entityId);
+        } else {
+          await _client.from(table).delete().eq('id', entityId);
+        }
         break;
     }
   }
@@ -685,7 +970,7 @@ class SyncService extends GetxService {
   ///
   /// [timeout] bounds each ATTEMPT of [action] as a whole. Pass `null` when
   /// [action] already bounds its own latency internally (X-5: a paginated
-  /// read applies [_readTimeout] to each individual page round trip) — that
+  /// read applies [readTimeout] to each individual page round trip) — that
   /// avoids double-bounding a multi-page read with one more aggregate
   /// timeout on top of its own per-page ones.
   Future<T> _withRetry<T>(

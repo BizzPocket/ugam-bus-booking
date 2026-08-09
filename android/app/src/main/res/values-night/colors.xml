@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Warm charcoal — must equal UgamColors.dark.bg in tokens.dart so the
+         native launch window and the Flutter splash are the same colour and the
+         handoff is invisible. -->
+    <color name="launch_background">#12100E</color>
+</resources>

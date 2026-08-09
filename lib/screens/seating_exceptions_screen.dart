@@ -4,9 +4,12 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
+import '../models/seat_assignment.dart';
 import '../routes/app_routes.dart';
 import '../services/seating_engine.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/passenger_display.dart';
+import '../utils/stranger_share_seat.dart';
 import '../utils/tour_capacity.dart';
 import '../widgets/edit_request_sheet.dart';
 
@@ -130,6 +133,57 @@ class SeatingExceptionsScreen extends StatelessWidget {
     EditRequestSheet.show(context: context, tour: tour, passenger: p);
   }
 
+  /// Agent confirms a stranger share on a half-double: place the blocked
+  /// passenger onto the free berth of the occupied double, locked so fillTour
+  /// won't undo it.
+  Future<void> _onApproveShare(
+    BuildContext context,
+    SeatingException ex,
+  ) async {
+    final pid = ex.passengerId;
+    if (pid == null) return;
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return;
+    final p = tour.passengers.firstWhereOrNull((x) => x.id == pid);
+    if (p == null) return;
+
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('seating_exceptions.approve_share_title'),
+      message: tr(
+        'seating_exceptions.approve_share_body',
+        namedArgs: {'name': p.displayName},
+      ),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('seating_exceptions.action_approve_share'),
+      confirmIcon: Icons.people_alt_rounded,
+    );
+    if (!ok) return;
+
+    final target = findStrangerShareSeat(tour, p);
+    if (target == null) {
+      // Seat state moved — fall back to the grid so the agent can place by hand.
+      AppSnackBar.info(tr('seating_exceptions.approve_share_missing'));
+      _onExceptionTap(ex);
+      return;
+    }
+
+    final existing = List<SeatAssignment>.from(p.assignedSeats);
+    existing.add(SeatAssignment(
+      busId: target.busId,
+      seatId: target.seatId,
+      locked: true,
+      leg: target.leg,
+    ));
+    await _ctrl.assignSeats(tourId, pid, existing);
+    AppSnackBar.success(
+      tr(
+        'seating_exceptions.approve_share_done',
+        namedArgs: {'name': p.displayName, 'seat': target.seatId},
+      ),
+    );
+  }
+
   /// Resolve a passenger id to a display name via the tour roster. Falls
   /// back to null when the id is absent or unknown — callers then lean on
   /// the engine's own message text instead.
@@ -185,6 +239,10 @@ class SeatingExceptionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    // Layouts deferred on cold start — needed before share/hold actions that
+    // open the seat grid.
+    // ignore: unawaited_futures
+    _ctrl.ensureTourReadyForSeating(tourId);
     return UgamScaffold(
       body: SafeArea(
         bottom: false,
@@ -263,15 +321,26 @@ class SeatingExceptionsScreen extends StatelessWidget {
                             alert: ex.type ==
                                 SeatingExceptionType.priorityNoLowerBerth,
                             onTap: () => _onExceptionTap(ex),
-                            // Only overflow/waitlist items are resolvable
-                            // inline — edit the request to fit, or hold them.
+                            // Overflow: Hold / Edit. Stranger-share: Approve /
+                            // Hold / Edit so the agent can broker without
+                            // rediscovering the pair in the grid.
                             onEdit: ex.type ==
-                                    SeatingExceptionType.overflowWaitlist
+                                        SeatingExceptionType.overflowWaitlist ||
+                                    ex.type ==
+                                        SeatingExceptionType
+                                            .sharedDoubleNeedsReview
                                 ? () => _onEdit(context, ex)
                                 : null,
                             onHold: ex.type ==
-                                    SeatingExceptionType.overflowWaitlist
+                                        SeatingExceptionType.overflowWaitlist ||
+                                    ex.type ==
+                                        SeatingExceptionType
+                                            .sharedDoubleNeedsReview
                                 ? () => _onHold(ex)
+                                : null,
+                            onApproveShare: ex.type ==
+                                    SeatingExceptionType.sharedDoubleNeedsReview
+                                ? () => _onApproveShare(context, ex)
                                 : null,
                             c: c,
                           ),
@@ -434,6 +503,9 @@ class _ExceptionCard extends StatelessWidget {
   /// exception category (those are resolved elsewhere).
   final VoidCallback? onEdit;
   final VoidCallback? onHold;
+
+  /// Approve stranger share on a half-double (sharedDoubleNeedsReview only).
+  final VoidCallback? onApproveShare;
   final UgamColorSet c;
 
   const _ExceptionCard({
@@ -447,6 +519,7 @@ class _ExceptionCard extends StatelessWidget {
     this.alert = false,
     this.onEdit,
     this.onHold,
+    this.onApproveShare,
   });
 
   @override
@@ -528,32 +601,46 @@ class _ExceptionCard extends StatelessWidget {
                     leading: Icons.group_rounded,
                   ),
                 ],
-                if (onEdit != null || onHold != null) ...[
+                if (onEdit != null ||
+                    onHold != null ||
+                    onApproveShare != null) ...[
                   const SizedBox(height: UgamSpacing.md),
-                  Row(
-                    children: [
-                      if (onHold != null)
-                        Expanded(
-                          child: UgamButton(
-                            label: tr('seating_exceptions.action_hold'),
-                            icon: Icons.pause_circle_outline_rounded,
-                            kind: UgamButtonKind.neutral,
-                            onPressed: onHold,
+                  if (onApproveShare != null) ...[
+                    UgamButton(
+                      label: tr('seating_exceptions.action_approve_share'),
+                      icon: Icons.people_alt_rounded,
+                      kind: UgamButtonKind.tonal,
+                      expand: true,
+                      onPressed: onApproveShare,
+                    ),
+                    if (onHold != null || onEdit != null)
+                      const SizedBox(height: UgamSpacing.sm),
+                  ],
+                  if (onHold != null || onEdit != null)
+                    Row(
+                      children: [
+                        if (onHold != null)
+                          Expanded(
+                            child: UgamButton(
+                              label: tr('seating_exceptions.action_hold'),
+                              icon: Icons.pause_circle_outline_rounded,
+                              kind: UgamButtonKind.neutral,
+                              onPressed: onHold,
+                            ),
                           ),
-                        ),
-                      if (onHold != null && onEdit != null)
-                        const SizedBox(width: UgamSpacing.sm),
-                      if (onEdit != null)
-                        Expanded(
-                          child: UgamButton(
-                            label: tr('seating_exceptions.action_edit'),
-                            icon: Icons.edit_note_rounded,
-                            kind: UgamButtonKind.tonal,
-                            onPressed: onEdit,
+                        if (onHold != null && onEdit != null)
+                          const SizedBox(width: UgamSpacing.sm),
+                        if (onEdit != null)
+                          Expanded(
+                            child: UgamButton(
+                              label: tr('seating_exceptions.action_edit'),
+                              icon: Icons.edit_note_rounded,
+                              kind: UgamButtonKind.tonal,
+                              onPressed: onEdit,
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ],
             ),

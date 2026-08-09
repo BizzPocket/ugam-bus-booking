@@ -30,12 +30,10 @@ class FinanceScreen extends StatefulWidget {
 class _FinanceScreenState extends State<FinanceScreen> {
   FinanceController get _finance => Get.find<FinanceController>();
 
-  // Default the report to ALL TIME. "This month" filters on the trip's END
-  // date, so stacked on top of the old completed-only rule it opened empty for
-  // any agent whose trips didn't happen to finish this calendar month — the
-  // report read as broken. All time always has the agent's money in it; the
-  // month/year pills are still one tap away.
-  FinancePeriod _period = FinancePeriod.allTime;
+  // Default to this month — running trips are included in financesFor, so the
+  // report is no longer empty mid-season the way it was under completed-only.
+  // All-time / this-year remain one tap away.
+  FinancePeriod _period = FinancePeriod.thisMonth;
 
   @override
   void initState() {

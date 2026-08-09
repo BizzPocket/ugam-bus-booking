@@ -4,86 +4,74 @@ import 'package:get/get.dart';
 
 import '../models/tour_finance.dart';
 import '../models/tour_status.dart';
-import '../services/supabase_service.dart';
+import '../services/ledger_money_source.dart';
 import 'tour_controller.dart';
 
 /// Cross-tour Profit & Loss data source.
 ///
 /// Where [MoneyController] holds the money rows for a SINGLE tour, this loads
-/// the realised revenue & expense totals for EVERY tour the agent owns, so the
-/// finance report can show profit/loss across the whole history of completed
-/// trips. The tours themselves (titles, dates, status, passenger/bus counts)
-/// are read straight from the already-loaded [TourController]; only the per-tour
-/// money sums are fetched here.
-///
-/// Aggregation runs client-side: we page through `collections`, `expenses` and
-/// `incomes` (all RLS-scoped to the owner's tours) and fold them into per-tour
-/// maps.
-/// Paging past the [SyncService] 500-row cap keeps the totals correct once an
-/// agent has run enough trips to exceed it.
+/// ledger bus rollups for EVERY tour the agent owns, so the finance report can
+/// show profit/loss across the whole history of trips. Tour metadata comes from
+/// [TourController]; money totals come from `finance_bus_summary`.
 class FinanceController extends GetxController {
+  FinanceController({LedgerMoneySource? ledgerSource})
+      : _ledgerSource = ledgerSource ?? LedgerMoneySource();
+
+  final LedgerMoneySource _ledgerSource;
+
   final isLoading = false.obs;
   final loadFailed = false.obs;
   final loadedOnce = false.obs;
 
-  // Net cash collected (received − refunded) and total expenses, keyed by
-  // tour id. Plain maps — the screen rebuilds off [isLoading]/[loadedOnce]
-  // and the reactive [TourController.tours] list, not off these.
+  // Net cash collected and total expenses, keyed by tour id.
   final Map<String, double> _revenueByTour = {};
   final Map<String, double> _expensesByTour = {};
-
-  // Extra income (cabin/gallery/other) per tour — kept separate from revenue
-  // because it is not a billed passenger fare; it still adds to net profit.
   final Map<String, double> _incomeByTour = {};
+
+  Future<void>? _loadInFlight;
+  int _loadGeneration = 0;
 
   TourController get _tours => Get.find<TourController>();
 
-  static const int _pageSize = 1000;
-
-  /// Loads once. Safe to call from every screen that needs finance data —
-  /// it no-ops while already loading or after a first successful load.
-  ///
-  /// [markStale] re-arms it, so a money write elsewhere in the app makes the
-  /// NEXT visit refetch instead of showing a frozen number.
   Future<void> ensureLoaded() async {
-    if (loadedOnce.value || isLoading.value) return;
+    if (loadedOnce.value) return;
+    if (_loadInFlight != null) return _loadInFlight!;
     await load();
   }
 
   Future<void> reload() => load();
 
-  /// Invalidates the cached totals WITHOUT refetching.
-  ///
-  /// The cross-tour P&L is derived from the same `collections` / `expenses` /
-  /// `incomes` rows [MoneyController] writes, but the two controllers hold
-  /// independent copies. Without this, [ensureLoaded] permanently no-ops after
-  /// its first success and the Settings card keeps showing a pre-write figure
-  /// for the rest of the session while the per-tour money board moves — the
-  /// two surfaces silently disagree about the same money.
-  ///
-  /// Deliberately does NOT clear the held maps: the stale-but-close figure is a
-  /// far better thing to show than a flash of ₹0 while the refetch is in
-  /// flight. [loadedOnce] stays true for the same reason — it only gates the
-  /// first-load skeleton.
   void markStale() {
     if (!loadedOnce.value && !isLoading.value) return;
     _stale = true;
   }
 
-  /// Set by [markStale]; consumed by [refreshIfStale].
   bool _stale = false;
 
-  /// Refetches only when a money write has happened since the last load.
-  /// Screens call this on entry instead of [ensureLoaded] when they want to
-  /// stay current without paying for a fetch on every visit.
   Future<void> refreshIfStale() async {
     if (!loadedOnce.value) return ensureLoaded();
-    if (!_stale || isLoading.value) return;
+    if (!_stale || isLoading.value) {
+      if (_stale && _loadInFlight != null) return _loadInFlight!;
+      return;
+    }
     await load();
   }
 
   Future<void> load() async {
-    if (isLoading.value) return;
+    if (_loadInFlight != null) return _loadInFlight!;
+    final future = _loadBody();
+    _loadInFlight = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_loadInFlight, future)) {
+        _loadInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _loadBody() async {
+    final gen = ++_loadGeneration;
     isLoading.value = true;
     loadFailed.value = false;
     try {
@@ -91,54 +79,15 @@ class FinanceController extends GetxController {
       final expenses = <String, double>{};
       final income = <String, double>{};
 
-      await _pageThrough(
-        table: 'collections',
-        columns: 'tour_id, amount_received, amount_refunded',
-        onRow: (row) {
-          final tid = row['tour_id'] as String?;
-          if (tid == null) return;
-          final received = (row['amount_received'] as num?)?.toDouble() ?? 0;
-          final refunded = (row['amount_refunded'] as num?)?.toDouble() ?? 0;
-          revenue[tid] = (revenue[tid] ?? 0) + (received - refunded);
-        },
-      );
-      await _pageThrough(
-        table: 'expenses',
-        columns: 'tour_id, amount',
-        onRow: (row) {
-          final tid = row['tour_id'] as String?;
-          if (tid == null) return;
-          final amount = (row['amount'] as num?)?.toDouble() ?? 0;
-          expenses[tid] = (expenses[tid] ?? 0) + amount;
-        },
-      );
-      // Bus rent (`buses.bus_price`) is a real cost but is NEVER stored as an
-      // expense row — it's the single source of truth on the bus. The per-tour
-      // money board already folds it into expenses; fold it in here too, or the
-      // cross-tour P&L silently OVERSTATES profit by the total of all bus rents.
-      await _pageThrough(
-        table: 'buses',
-        columns: 'tour_id, bus_price',
-        onRow: (row) {
-          final tid = row['tour_id'] as String?;
-          if (tid == null) return;
-          final rent = (row['bus_price'] as num?)?.toDouble() ?? 0;
-          expenses[tid] = (expenses[tid] ?? 0) + rent;
-        },
-      );
-      await _pageThrough(
-        table: 'incomes',
-        columns: 'tour_id, amount',
-        onRow: (row) {
-          final tid = row['tour_id'] as String?;
-          if (tid == null) return;
-          final amount = (row['amount'] as num?)?.toDouble() ?? 0;
-          // Extra income (cabin/gallery/other) is real earned cash but is NOT a
-          // billed passenger fare — keep it in its own map so the report can show
-          // it as a distinct line, while it still folds into net profit.
-          income[tid] = (income[tid] ?? 0) + amount;
-        },
-      );
+      final rollups = await _ledgerSource.fetchAllBusRollups();
+      if (gen != _loadGeneration) return;
+      for (final r in rollups) {
+        final tid = r.tourId;
+        if (tid.isEmpty) continue;
+        revenue[tid] = (revenue[tid] ?? 0) + r.collected;
+        expenses[tid] = (expenses[tid] ?? 0) + r.expensesTotal;
+        income[tid] = (income[tid] ?? 0) + r.income;
+      }
 
       _revenueByTour
         ..clear()
@@ -152,48 +101,13 @@ class FinanceController extends GetxController {
       loadedOnce.value = true;
       _stale = false;
     } catch (e, st) {
+      if (gen != _loadGeneration) return;
       dev.log('finance load failed: $e\n$st', name: 'FinanceController');
       loadFailed.value = true;
     } finally {
-      isLoading.value = false;
+      if (gen == _loadGeneration) isLoading.value = false;
     }
   }
-
-  /// Pages through [table] (ordered by id for a stable window across the
-  /// separate round trips) until a page comes back EMPTY, invoking [onRow] per
-  /// row.
-  ///
-  /// Advances the cursor by the number of rows actually returned rather than by
-  /// [_pageSize], and stops only on an empty page. PostgREST caps every
-  /// response at the project's `db-max-rows`; if that cap is below [_pageSize],
-  /// the old "short page means the end" rule fired on the very FIRST page and
-  /// every finance total silently truncated to one page — an under-reported
-  /// profit with no error anywhere. Counting what arrived is correct for any
-  /// server cap, including one that changes between deploys.
-  Future<void> _pageThrough({
-    required String table,
-    required String columns,
-    required void Function(Map<String, dynamic> row) onRow,
-  }) async {
-    final client = SupabaseService.instance.client;
-    var from = 0;
-    while (true) {
-      final rows =
-          await client
-                  .from(table)
-                  .select(columns)
-                  .order('id', ascending: true)
-                  .range(from, from + _pageSize - 1)
-              as List;
-      if (rows.isEmpty) break;
-      for (final r in rows) {
-        onRow(Map<String, dynamic>.from(r as Map));
-      }
-      from += rows.length;
-    }
-  }
-
-  // ── Reports ───────────────────────────────────────────────
 
   /// Per-tour P&L for [period], newest trip first.
   ///
@@ -227,13 +141,8 @@ class FinanceController extends GetxController {
   FinanceTotals totalsFor(FinancePeriod period, {bool completedOnly = false}) =>
       FinanceTotals.from(financesFor(period, completedOnly: completedOnly));
 
-  /// Lifetime net across EVERY tour that has money on it — for the Settings
-  /// card. Includes running trips (see [financesFor]); the card is the agent's
-  /// "how am I doing" number, and it has to move as the season does.
   double get lifetimeNet => totalsFor(FinancePeriod.allTime).net;
 
-  /// Lifetime net across COMPLETED tours only — realised P&L, for surfaces that
-  /// specifically mean "trips that are finished and settled".
   double get lifetimeRealisedNet =>
       totalsFor(FinancePeriod.allTime, completedOnly: true).net;
 

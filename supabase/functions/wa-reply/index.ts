@@ -73,6 +73,27 @@ function buildComponents(bodyParams: string[]) {
   return components;
 }
 
+// Meta refuses a TEMPLATE PARAMETER containing a new-line, a tab, or more than
+// four consecutive spaces:
+//
+//   (#132000) Param text cannot have new-line/tab characters or more than 4
+//   consecutive spaces
+//
+// A reply typed in a chat composer is exactly the kind of text that trips this
+// — the agent presses Enter mid-message and the send fails with a Graph error
+// the UI reduced to "Couldn't send". The rule is NOT about the message being
+// long, and it does NOT apply to the free-text session path, where new-lines are
+// perfectly legal. So this collapses whitespace ONLY on the template branch,
+// mirroring WaTemplateParams.sanitize in lib/services/wa_template_params.dart
+// (same three rules, same order). Length is deliberately not truncated: cutting
+// the tail off an agent's reply is worse than reporting 132005.
+const sanitizeTemplateParam = (value: string): string =>
+  value
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\t+/g, " ")
+    .replace(/ {5,}/g, " ")
+    .trim();
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -164,12 +185,21 @@ Deno.serve(async (req: Request) => {
   const windowOpen =
     lastInbound !== null && Date.now() - lastInbound <= WINDOW_MS;
 
+  // What the customer will actually receive. The thread is logged with THIS,
+  // not the raw draft: if the template branch had to collapse the agent's line
+  // breaks, the chat history should show the message as it was delivered rather
+  // than a version the customer never saw.
+  const sentText = windowOpen ? text : sanitizeTemplateParam(text);
+  if (!sentText) {
+    return json({ ok: false, error: "Reply is empty after formatting" });
+  }
+
   const graphBody = windowOpen
     ? {
         messaging_product: "whatsapp",
         to,
         type: "text",
-        text: { body: text },
+        text: { body: sentText },
       }
     : {
         messaging_product: "whatsapp",
@@ -178,7 +208,7 @@ Deno.serve(async (req: Request) => {
         template: {
           name: BUS_MESSAGE_TEMPLATE,
           language: { code: TEMPLATE_LANGUAGE },
-          components: buildComponents([text]),
+          components: buildComponents([sentText]),
         },
       };
 
@@ -219,7 +249,7 @@ Deno.serve(async (req: Request) => {
       conversation_id: conversationId,
       wa_message_id: waMessageId,
       direction: "out",
-      body: text,
+      body: sentText,
       msg_type: "text",
       status: "sent",
     })
@@ -232,7 +262,7 @@ Deno.serve(async (req: Request) => {
   // --- Bump the conversation (and claim it if it was unassigned). ---
   const convoUpdate: Record<string, unknown> = {
     last_message_at: new Date().toISOString(),
-    last_message_preview: text,
+    last_message_preview: sentText,
     unread_count: 0,
   };
   if (claiming) convoUpdate.owner_id = uid;

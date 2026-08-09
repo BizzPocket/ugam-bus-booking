@@ -54,6 +54,27 @@ class _ChartsScreenState extends State<ChartsScreen> {
   /// the tour's first bus.
   String? _selectedBusId;
 
+  String? _layoutWarmTourId;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _warmLayouts());
+  }
+
+  void _warmLayouts([String? tourId]) {
+    final eligible = _eligibleTours();
+    final tour = tourId != null
+        ? eligible.firstWhereOrNull((t) => t.id == tourId) ??
+            _resolveTour(eligible)
+        : _resolveTour(eligible);
+    if (tour == null) return;
+    if (_layoutWarmTourId == tour.id) return;
+    _layoutWarmTourId = tour.id;
+    // ignore: unawaited_futures
+    tourCtrl.ensureTourReadyForSeating(tour.id);
+  }
+
   /// Active tours that carry at least one bus, soonest departure first — the
   /// only tours that can show a chart. A stable, defensively-copied sort.
   List<Tour> _eligibleTours() {
@@ -92,7 +113,9 @@ class _ChartsScreenState extends State<ChartsScreen> {
       _selectedTourId = tourId;
       // A fresh tour resets the bus pick so the new tour's first bus shows.
       _selectedBusId = null;
+      _layoutWarmTourId = null;
     });
+    _warmLayouts(tourId);
   }
 
   void _pickBus(String busId) {
@@ -134,6 +157,12 @@ class _ChartsScreenState extends State<ChartsScreen> {
         bottom: false,
         child: Obx(() {
           final eligible = _eligibleTours();
+          final resolved = _resolveTour(eligible);
+          if (resolved != null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _warmLayouts(resolved.id);
+            });
+          }
           if (eligible.isEmpty) {
             // No active tour has a bus yet — make the empty state actionable.
             // If an active tour exists, jump into adding a bus to the nearest

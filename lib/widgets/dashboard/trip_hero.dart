@@ -53,7 +53,14 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
     if (_moneyLoadedFor == tourId) return;
     _moneyLoadedFor = tourId;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Get.find<MoneyController>().loadForTour(tourId);
+      // Defer past the tour cold-start wave on 2G — hero money strip must not
+      // open 4–7 concurrent reads against the same radio as Phase 1/2.
+      Future<void>.delayed(const Duration(milliseconds: 1600), () {
+        if (!Get.isRegistered<MoneyController>()) return;
+        // Tour may have switched while we waited.
+        if (_moneyLoadedFor != tourId) return;
+        Get.find<MoneyController>().loadForTour(tourId);
+      });
     });
   }
 
@@ -76,6 +83,10 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
         }
       }
       _ensureMoney(tour.id);
+      // Layouts deferred on 2G cold start — warm the hero tour so the seat
+      // meter upgrades from the legacy approximation to the precise grid.
+      // ignore: unawaited_futures
+      tourCtrl.ensureTourReadyForSeating(tour.id);
       final cap = tourCtrl.capacityFor(tour);
 
       // Picker merged into the hero header — the separate picker card repeated
@@ -360,6 +371,20 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
             namedArgs: {'n': '${tour.pendingSeatsToAssign}'}),
         urgent: true,
       );
+    }
+    // Locked tours: never claim "ready to lock". Surface re-notify first.
+    if (tour.status == TourStatus.locked) {
+      final changed = tour.passengers
+          .where((p) =>
+              p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified)
+          .length;
+      if (changed > 0) {
+        return _HeroAction(
+          tr('dashboard.attention_renotify', namedArgs: {'n': '$changed'}),
+          urgent: true,
+        );
+      }
+      return _HeroAction(tour.status.displayName, urgent: false);
     }
     if (tour.allSeatsAssigned && tour.handlerId == null) {
       return _HeroAction(tr('dashboard.attention_pick_handler'), urgent: true);

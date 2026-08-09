@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Modify this file to customize your launch splash screen -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
+    <!-- Our ground, not the platform's. `?android:colorBackground` tracked dark
+         mode but resolved to the OEM's neutral black, which is a visibly cooler
+         and darker surface than the warm charcoal Flutter paints one frame
+         later. @color/launch_background resolves through values-night/. -->
+    <item android:drawable="@color/launch_background" />
 
     <!-- You can insert your own image assets here -->
     <!-- <item>

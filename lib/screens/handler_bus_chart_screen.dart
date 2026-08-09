@@ -69,9 +69,9 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   HandlerManifest? _manifest;
   String? _selectedBusId;
 
-  /// The visual seat Grid is the default view (a seat tap opens the collect
-  /// sheet, where money is entered); the Attendance tally sits alongside it.
-  _ViewMode _viewMode = _ViewMode.grid;
+  /// Attendance (list) is the default — handlers board/call by name first;
+  /// the seat Grid is one tap away when they need the chart.
+  _ViewMode _viewMode = _ViewMode.attendance;
 
   /// Local, mutable collection cache keyed by '"$passengerId|$busId"'.
   /// Seeded from the manifest once loaded; updated in-place after each save so
@@ -931,17 +931,18 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           child: UgamTabPills(
             items: [
               UgamTabItem(
-                label: tr('handler_chart.view_grid'),
-                icon: Icons.grid_view_rounded,
-              ),
-              UgamTabItem(
                 label: tr('handler_chart.view_attendance'),
                 icon: Icons.how_to_reg_rounded,
               ),
+              UgamTabItem(
+                label: tr('handler_chart.view_grid'),
+                icon: Icons.grid_view_rounded,
+              ),
             ],
-            currentIndex: _viewMode == _ViewMode.grid ? 0 : 1,
+            currentIndex: _viewMode == _ViewMode.attendance ? 0 : 1,
             onChanged: (i) => setState(
-              () => _viewMode = i == 0 ? _ViewMode.grid : _ViewMode.attendance,
+              () => _viewMode =
+                  i == 0 ? _ViewMode.attendance : _ViewMode.grid,
             ),
           ),
         ),
@@ -1414,8 +1415,7 @@ class _TripBadge extends StatelessWidget {
 /// toggle (mirroring the attendance view) switches between them, opening on the
 /// active leg by default. A non-divided seat (same riders on both legs, or all
 /// on one leg) lists everyone with no toggle. Each row carries phone + a Call
-/// button, so the handler picks whom to collect from / call before the collect
-/// sheet opens.
+/// button + a Collect button, so Call never opens the collect sheet.
 class _OccupantChooserSheet extends StatefulWidget {
   final String seatId;
 
@@ -1535,12 +1535,9 @@ class _LegSharedTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = passenger;
     final hasPhone = p.phone.trim().isNotEmpty;
-    // UgamCard.plain with `elev` + the row radius resolves to exactly the
-    // surface this row hand-rolled (cardElev / 14), and adds the press-scale
-    // feedback every other tappable card in the app has — tapping a rider on a
-    // four-person sofa now confirms before the sheet swaps.
+    // Call and Collect are separate actions — tapping Call must not open the
+    // collect sheet (the old full-card onTap combined them).
     return UgamCard.plain(
-      onTap: onPick,
       elev: true,
       radius: UgamRadius.row,
       padding: const EdgeInsets.all(UgamSpacing.md),
@@ -1553,8 +1550,6 @@ class _LegSharedTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 2 lines before ellipsis — app-wide name rule, see
-                // UgamRequestRow.
                 Text(
                   p.displayName,
                   style: UgamText.bodyStrong.copyWith(color: c.ink),
@@ -1575,8 +1570,13 @@ class _LegSharedTile extends StatelessWidget {
             const SizedBox(width: UgamSpacing.sm),
             _CallButton(phone: p.phone),
           ],
-          const SizedBox(width: UgamSpacing.xs),
-          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+          const SizedBox(width: UgamSpacing.sm),
+          UgamButton(
+            label: tr('handler_chart.collect_action'),
+            icon: Icons.payments_rounded,
+            kind: UgamButtonKind.tonal,
+            onPressed: onPick,
+          ),
         ],
       ),
     );

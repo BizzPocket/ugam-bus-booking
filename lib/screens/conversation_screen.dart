@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/inbox_controller.dart';
 import '../design/ugam.dart';
@@ -67,11 +68,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
     });
 
     var ok = false;
+    String? reason;
     try {
       final result = await _ctrl.sendReply(widget.conversation.id, text);
       ok = result.ok;
-    } catch (_) {
+      reason = result.error;
+    } catch (e) {
       ok = false;
+      reason = e.toString();
     }
 
     if (!mounted) return;
@@ -83,7 +87,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
         _sending = false;
         _hasText = true;
       });
-      AppSnackBar.error(tr('inbox.send_failed'));
+      // Show WHY. `sendReply` has always returned Meta's own reason — "template
+      // not found", "24h window closed", "invalid phone number" — and this
+      // screen threw it away and printed "Couldn't send" instead, which is how a
+      // broken reply path stayed undiagnosable from the field. The generic line
+      // is now the TITLE and the real cause sits under it.
+      final detail = reason?.trim();
+      if (detail == null || detail.isEmpty) {
+        AppSnackBar.error(tr('inbox.send_failed'));
+      } else {
+        debugPrint('wa reply failed — $detail');
+        AppSnackBar.error(detail, title: tr('inbox.send_failed'));
+      }
       return;
     }
 
@@ -162,20 +177,36 @@ class _ConversationScreenState extends State<ConversationScreen> {
 }
 
 /// One chat bubble. Inbound sits left on a neutral surface; outbound sits right
-/// on the accent surface (the "your side" signal). Non-text messages show a
-/// localized placeholder for the media kind.
+/// on the accent surface (the "your side" signal).
+///
+/// An attachment renders ABOVE the text: a photo inline, everything else as a
+/// tappable row that opens in the phone's own viewer. The text underneath is the
+/// customer's caption when they typed one, and only falls back to a "📷 Photo"
+/// style label when they didn't — a caption is often the whole point of the
+/// message ("here's the payment, ref 4471") and used to be discarded.
 class _MessageBubble extends StatelessWidget {
   final WaMessage message;
   final UgamColorSet c;
 
   const _MessageBubble({required this.message, required this.c});
 
+  /// The text line under an attachment. Empty means "the picture says it all" —
+  /// a photo with no caption shows no redundant "📷 Photo" label under it.
   String _bodyText() {
+    final caption = message.caption;
+    if (caption != null) return caption;
+    if (message.isText) return message.displayBody;
+    // Stored image: the thumbnail IS the content, so no label.
+    if (message.isImage && message.hasStoredMedia) return '';
     switch (message.msgType) {
       case 'image':
         return tr('inbox.photo');
       case 'document':
         return tr('inbox.document');
+      case 'audio':
+        return tr('inbox.audio');
+      case 'video':
+        return tr('inbox.video');
       default:
         return message.displayBody;
     }
@@ -193,6 +224,7 @@ class _MessageBubble extends StatelessWidget {
     final time = ml.formatTimeOfDay(
       TimeOfDay.fromDateTime(message.createdAt.toLocal()),
     );
+    final text = _bodyText();
 
     final radius = BorderRadius.only(
       topLeft: const Radius.circular(UgamRadius.row),
@@ -221,10 +253,15 @@ class _MessageBubble extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    _bodyText(),
-                    style: UgamText.body.copyWith(color: fg, fontSize: 15),
-                  ),
+                  if (message.hasAttachment) ...[
+                    _WaAttachment(message: message, fg: fg),
+                    if (text.isNotEmpty) const SizedBox(height: UgamSpacing.xs),
+                  ],
+                  if (text.isNotEmpty)
+                    Text(
+                      text,
+                      style: UgamText.body.copyWith(color: fg, fontSize: 15),
+                    ),
                   const SizedBox(height: 3),
                   Text(
                     time,
@@ -240,6 +277,183 @@ class _MessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The attachment half of a bubble.
+///
+/// A photo renders inline — that is the whole point of receiving one, and
+/// making the admin tap through to a viewer to find out whether a customer sent
+/// a payment screenshot or a selfie would defeat it. Audio, video and documents
+/// render as a compact row and open in the phone's own player/viewer on tap;
+/// building an in-app audio player and video surface is a far larger change than
+/// "media should arrive", and the OS handles every codec WhatsApp can send.
+///
+/// The bucket is private (059), so every URL here is a short-lived signed one
+/// fetched on demand. A null URL and a missing `media_path` collapse to the same
+/// muted "couldn't be downloaded" note: in both cases the admin knows something
+/// was sent and that they need to ask for it again.
+class _WaAttachment extends StatelessWidget {
+  final WaMessage message;
+  final Color fg;
+
+  const _WaAttachment({required this.message, required this.fg});
+
+  Future<void> _open(BuildContext context, String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!opened && context.mounted) {
+      AppSnackBar.error(tr('inbox.media_open_failed'));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.mediaMissing) return _note(tr('inbox.media_unavailable'));
+
+    final path = message.mediaPath!;
+    return FutureBuilder<String?>(
+      // Keyed by the path so a rebuild reuses the same future instead of
+      // re-signing (the service caches, but this also keeps the placeholder
+      // from flashing on every realtime tick).
+      key: ValueKey(path),
+      future: Get.find<InboxController>().mediaUrl(path),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return _frame(
+            child: const Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        }
+        final url = snap.data;
+        if (url == null) return _note(tr('inbox.media_unavailable'));
+
+        if (message.isImage) {
+          return GestureDetector(
+            onTap: () => _open(context, url),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: Image.network(
+                  url,
+                  fit: BoxFit.cover,
+                  // A decode cap: these come straight from a phone camera and an
+                  // undecoded 12MP JPEG in a scrolling list is an OOM on the
+                  // cheap Android handsets this app runs on.
+                  cacheWidth: 900,
+                  errorBuilder: (_, _, _) =>
+                      _note(tr('inbox.media_unavailable')),
+                  loadingBuilder: (_, child, progress) => progress == null
+                      ? child
+                      : _frame(
+                          child: const Center(
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        return _fileRow(context, url);
+      },
+    );
+  }
+
+  Widget _fileRow(BuildContext context, String url) {
+    final icon = message.isAudio
+        ? Icons.mic_rounded
+        : message.isVideo
+            ? Icons.play_circle_fill_rounded
+            : Icons.insert_drive_file_rounded;
+    final label = message.mediaFilename?.trim().isNotEmpty == true
+        ? message.mediaFilename!.trim()
+        : message.isAudio
+            ? tr('inbox.audio')
+            : message.isVideo
+                ? tr('inbox.video')
+                : tr('inbox.document');
+    final size = message.mediaSizeLabel;
+
+    return InkWell(
+      onTap: () => _open(context, url),
+      borderRadius: BorderRadius.circular(UgamRadius.chip),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 26, color: fg),
+            const SizedBox(width: UgamSpacing.sm),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: UgamText.body.copyWith(color: fg, fontSize: 14),
+                  ),
+                  Text(
+                    size == null
+                        ? tr('inbox.open_attachment')
+                        : '$size · ${tr('inbox.open_attachment')}',
+                    style: UgamText.micro.copyWith(
+                      color: fg.withValues(alpha: 0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _frame({required Widget child}) => SizedBox(
+        height: 120,
+        width: 180,
+        child: child,
+      );
+
+  Widget _note(String text) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xs),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              size: 18,
+              color: fg.withValues(alpha: 0.7),
+            ),
+            const SizedBox(width: UgamSpacing.xs),
+            Flexible(
+              child: Text(
+                text,
+                style: UgamText.micro.copyWith(
+                  color: fg.withValues(alpha: 0.7),
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
 }
 
 /// Subtle line above the composer telling the admin whether the free-form 24h

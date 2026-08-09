@@ -868,7 +868,9 @@ class SeatLegPill extends StatelessWidget {
         border: Border.all(color: tint.withValues(alpha: 0.85), width: 0.8),
       ),
       child: Text(
-        half ? '$label ½' : label,
+        half
+            ? tr('seat_leg.half_label', namedArgs: {'leg': label})
+            : label,
         style: UgamText.micro.copyWith(
           color: tint,
           fontSize: 7.5,

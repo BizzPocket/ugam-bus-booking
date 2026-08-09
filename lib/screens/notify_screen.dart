@@ -736,7 +736,7 @@ class _TourSelector extends StatelessWidget {
     final selectedIndex = tours.indexWhere((t) => t.id == selectedId);
     final currentIndex = selectedIndex < 0 ? 0 : selectedIndex;
 
-    // UgamTabPills is a fixed segmented control built for 2–4 segments. When
+    // UgamTabPills is a fixed segmented control built for 2–5 segments. When
     // there are more active tours than that, fall back to the shared scrolling
     // pill strip. This used to be a hand-rolled copy of [UgamSelectorPills]
     // that painted its ACTIVE pill flat `c.card` instead of the component's

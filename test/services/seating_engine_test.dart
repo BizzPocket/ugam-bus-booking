@@ -1617,6 +1617,106 @@ void main() {
     });
   });
 
+  // ── Mixed double permutations (operator audit L2 / L8) ───────────────────
+
+  group('mixed double sofa permutations', () {
+    test('same-group: one RT berth + GO + RET on the other berth — all three fit',
+        () {
+      // Operator mix: passenger A holds ONE berth of DU1 for the full trip;
+      // B takes the other berth GO-only; C takes the other berth RET-only.
+      // Same group → overlapping-leg co-seat on GO (A+B) is allowed.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a = _p('a_rt',
+          groupId: 'fam',
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final b = _p('b_go',
+          groupId: 'fam',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final c = _p('c_ret',
+          groupId: 'fam',
+          tripType: TripType.returnOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan =
+          SeatingEngine.propose(buses: buses, passengers: [a, b, c]);
+
+      expect(plan.exceptions, isEmpty,
+          reason: 'mixed RT-berth + GO/RET remainder must fit one double');
+      for (final id in ['a_rt', 'b_go', 'c_ret']) {
+        expect(plan.forPassenger(id).single.seatId, 'DU1');
+      }
+      final occ = plan.legOccupancy([a, b, c])['b1:DU1']!;
+      expect(occ.go, 2, reason: 'A RT + B GO occupy both GO berths');
+      expect(occ.ret, 2, reason: 'A RT + C RET occupy both RETURN berths');
+    });
+
+    test('two unrelated outboundOnly singles on one double → '
+        'sharedDoubleNeedsReview (not auto-paired)', () {
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a = _p('a_go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final b = _p('b_go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
+
+      // First GO can take a berth; second same-leg stranger must not auto-pair.
+      final placed = plan.forPassenger('a_go').length +
+          plan.forPassenger('b_go').length;
+      expect(placed, lessThanOrEqualTo(1),
+          reason: 'at most one stranger auto-placed on the double');
+      expect(
+        plan.exceptions.any(
+          (e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview,
+        ),
+        isTrue,
+        reason: 'second GO stranger must surface for agent confirm',
+      );
+    });
+
+    test('unrelated mix: RT berth + stranger GO on other berth → review', () {
+      final buses = [
+        _bus('b1', [
+          _seat(0, 3, SeatType.doubleSofa, SeatPosition.upper, 'DU1'),
+        ]),
+      ];
+      final a = _p('a_rt',
+          tripType: TripType.roundTrip,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final b = _p('b_go',
+          tripType: TripType.outboundOnly,
+          lines: [_line(SeatType.singleSofa, null, 1)]);
+      final plan = SeatingEngine.propose(buses: buses, passengers: [a, b]);
+
+      final bothOnDu1 = plan.forPassenger('a_rt').isNotEmpty &&
+          plan.forPassenger('b_go').isNotEmpty &&
+          plan.forPassenger('a_rt').every((x) => x.seatId == 'DU1') &&
+          plan.forPassenger('b_go').every((x) => x.seatId == 'DU1');
+      if (bothOnDu1) {
+        fail('strangers must not auto-share overlapping legs on a double');
+      }
+      expect(
+        plan.exceptions.any(
+          (e) => e.type == SeatingExceptionType.sharedDoubleNeedsReview,
+        ) ||
+            plan.forPassenger('b_go').isEmpty ||
+            plan.forPassenger('a_rt').isEmpty,
+        isTrue,
+        reason: 'engine refuses stranger overlapping-leg share or reviews it',
+      );
+    });
+  });
+
   // ── CHANGE 2: fill — no compatible seat left empty while waitlisting ──────
 
   group('fill completeness', () {

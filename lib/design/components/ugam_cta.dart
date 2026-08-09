@@ -116,13 +116,19 @@ class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
     );
 
     final body = Container(
-      // The `md` vertical padding above resolves to ~40.6pt, not the 44 the
-      // comment claims. This floor restores the real minimum tap target
-      // without changing the padding (so nothing reflows on taller labels).
-      constraints: const BoxConstraints(minHeight: 44),
+      // The `md` vertical padding above resolves to ~40.6pt on its own, so this
+      // floor is what actually sets the button height. 52 rather than the old
+      // 44: at the bare minimum tap target a full-width primary button reads as
+      // a squat lozenge, and 52 is where the reference booking apps sit.
+      constraints: const BoxConstraints(minHeight: 52),
       decoration: BoxDecoration(
         color: _enabled ? c.action : c.action.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
+        // `UgamRadius.button` (16), not `chip` (999). The pill radius made a
+        // full-width CTA read as one giant lozenge — the shape says "tag", not
+        // "button" — and the system already defines a button radius that
+        // nothing was using. Squaring it up is what lets the CTA carry its
+        // maximum-contrast fill without dominating the screen.
+        borderRadius: BorderRadius.circular(UgamRadius.button),
       ),
       child: inner,
     );

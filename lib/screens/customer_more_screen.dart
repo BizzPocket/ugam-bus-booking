@@ -9,7 +9,6 @@ import '../config/i18n_config.dart';
 import '../content/legal_content.dart';
 import '../design/ugam.dart';
 import '../widgets/language_picker_sheet.dart';
-import 'find_my_seat_screen.dart';
 import 'legal_document_screen.dart';
 
 /// Customer-facing "More" menu — opened from the explore-tours top bar.
@@ -44,29 +43,12 @@ class CustomerMoreScreen extends StatelessWidget {
                   _BrandHero(c: c),
                   const SizedBox(height: UgamSpacing.xl),
 
-                  // ── Your trip ──
-                  _SectionLabel(
-                    c: c,
-                    label: tr('customer_more.section_my_trip'),
-                  ),
-                  UgamCard.plain(
-                    padding: EdgeInsets.zero,
-                    child: _MoreRow(
-                      c: c,
-                      icon: Icons.event_seat_rounded,
-                      tone: UgamStatVariant.accent,
-                      title: tr('customer_more.find_seat'),
-                      subtitle: tr('customer_more.find_seat_subtitle'),
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        Get.to(
-                          () => const FindMySeatScreen(),
-                          transition: Transition.cupertino,
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: UgamSpacing.lg),
+                  // NOTE: "Find my seat" no longer lives here. It is the one
+                  // thing a rider who already booked opens the app to do, and
+                  // it sat four taps in, behind a menu they had no reason to
+                  // press. It is now a bar on the tour list itself — the first
+                  // screen. Re-adding a copy here would only give one flow two
+                  // doors and put the buried one back in play.
 
                   // ── Preferences ──
                   _SectionLabel(

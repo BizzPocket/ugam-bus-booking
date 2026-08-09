@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as dev;
+import 'dart:math' as math;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
@@ -22,6 +24,7 @@ import '../services/group_cascade.dart';
 import '../services/realtime_service.dart';
 import '../services/seating_engine.dart';
 import '../services/seating_plan_applier.dart';
+import '../services/sync_retry_policy.dart' as retry;
 import '../services/sync_service.dart';
 import '../services/whatsapp_outbound.dart';
 import '../utils/app_snackbar.dart';
@@ -167,9 +170,14 @@ class TourController extends GetxController {
   /// the UI would render "0 passengers" for a tour that has fifty.
   final _hydratedTourIds = <String>{};
 
+  /// Bus ids for which we have already attempted a layout fetch (including
+  /// buses whose layout is legitimately null). Prevents refetch loops on 2G.
+  final _layoutFetchedBusIds = <String>{};
+
   /// In-flight hydrations, so two widgets opening the same tour at once
   /// share one request instead of racing two down a 2G link.
   final _hydrationsInFlight = <String, Future<void>>{};
+  final _layoutFetchesInFlight = <String, Future<void>>{};
   Timer? _refreshDebounce;
 
   /// Microtask flag for coalescing burst notifications. Without this, a
@@ -434,82 +442,120 @@ class TourController extends GetxController {
     isLoading.value = true;
     hasError.value = false;
     try {
-      // Paint cached tours immediately on cold start so weak networks
-      // don't leave the whole app blank while the live fetch crawls.
-      if (tours.isEmpty) {
-        final cached = await _sync.getCachedList(_tourCacheKey);
-        if (cached != null && cached.isNotEmpty) {
-          tours.assignAll(cached.map((item) => Tour.fromMap(item)).toList());
-        }
-      }
-
-      // smartFetch now retries transient failures (timeouts, dropped sockets,
-      // 5xx) with exponential backoff internally, so the old bespoke cold-start
-      // retry loop is gone — a launch-time blip is absorbed in the sync layer
-      // before we ever see a failure here. The failure flag is per-call (part of
-      // the returned record, not a shared field on SyncService), so a concurrent
-      // read that fails — e.g. the cold-start `customer_memory` load hitting a
-      // missing table — can never mark THIS tours load as failed.
-      final result = await _sync.smartFetch(
-        table: 'tours',
-        cacheKey: _tourCacheKey,
-        filters: _tourFilters,
-        orderBy: 'created_at',
-        maxAge: 120000,
-      );
-
-      if (gen != _loadGeneration) return;
-
-      // smartFetch returns [] on BOTH "no tours" and "refresh failed". If it
-      // (still) failed, don't let the empty result blank an already-loaded
-      // list — keep what we have and warn, or raise the hard error only when we
-      // genuinely have nothing to show after the retries.
-      if (result.failed) {
+      // ── Phase 1: tour headers only ─────────────────────────────────
+      // On 2G the roster+layout payload dwarfs the tour list. Paint titles
+      // as soon as headers arrive so Home is never a blank spinner for the
+      // full relation round-trip.
+      List<Map<String, dynamic>> tourRows;
+      try {
+        tourRows = await _withTourReadRetry(
+          () => _sync.fetchTourRows(
+            filters: _tourFilters,
+            orderBy: 'created_at',
+          ),
+        );
+      } catch (e) {
+        if (gen != _loadGeneration) return;
         if (tours.isEmpty) {
           hasError.value = true;
-          // Show the SERVER's reason when there is one. The generic
-          // "check your connection" line is right for an offline device and
-          // actively misleading for anything else — a client filter on a
-          // column the live DB lacked made every read 400, and this screen
-          // still blamed the network on a perfectly good one.
-          errorMessage.value = result.error ?? tr('errors.load_tours');
+          errorMessage.value = SyncService.describeReadError(e);
         } else {
-          AppSnackBar.warning(tr('errors.refresh_showing_saved'));
+          AppSnackBar.warning(tr('errors.refresh_showing_cached'));
         }
         isLoading.value = false;
         return;
       }
+      if (gen != _loadGeneration) return;
 
-      final loaded = result.rows.map((item) => Tour.fromMap(item)).toList();
-
-      // Preserve local tours that have a pending insert op — they exist
-      // locally but the server fetch may have raced ahead of the write
-      // and returned without them. Otherwise the freshly-created tour
-      // would vanish under the user.
       final pendingIds = await _sync.pendingEntityIdsForTable('tours');
       if (gen != _loadGeneration) return;
-      final serverIds = loaded.map((t) => t.id).toSet();
+
+      final headerTours = tourRows.map(Tour.fromMap).toList();
+      final serverIds = headerTours.map((t) => t.id).toSet();
       final preserved = tours
           .where((t) => !serverIds.contains(t.id) && pendingIds.contains(t.id))
           .toList();
 
-      tours.assignAll([...loaded, ...preserved]);
+      // Keep already-loaded rosters for tours that are still on the server so a
+      // refresh doesn't blank the dashboard while Phase 2 runs.
+      final priorById = {for (final t in tours) t.id: t};
+      final mergedHeaders = [
+        for (final t in headerTours)
+          if (priorById[t.id] case final prior?)
+            t.copyWith(
+              passengers: prior.passengers,
+              buses: prior.buses,
+              groups: prior.groups,
+            )
+          else
+            t,
+        ...preserved,
+      ];
+      tours.assignAll(mergedHeaders);
+      // Headers are enough to leave the error/empty state — roster follows.
+      isLoading.value = false;
 
-      // Cold start hydrates rosters for RUNNING tours only (SyncService
-      // scopes the relation fetch — it is what makes launch viable on 2G).
-      // Record which tours actually came back hydrated, so opening an
-      // archived one can tell "not loaded yet" from "genuinely empty".
+      // ── Phase 2: passengers + buses (NO layout jsonb) ──────────────
+      final scope = coldStartHydrationScope(tourRows);
+      final rel = await _sync.fetchRelationsForTours(scope);
+      if (gen != _loadGeneration) return;
+
+      // ignore: invalid_use_of_protected_member
+      final raw = tours.value;
+      for (final tourId in scope) {
+        final idx = raw.indexWhere((t) => t.id == tourId);
+        if (idx < 0) continue;
+        final passengers = rel.passengers
+            .where((m) => m['tour_id'] == tourId && m['cancelled_at'] == null)
+            .map(Passenger.fromMap)
+            .toList();
+        final buses = rel.buses
+            .where((m) => m['tour_id'] == tourId)
+            .map(Bus.fromMap)
+            .toList();
+        final groups = rel.groups
+            .where((m) => m['tour_id'] == tourId)
+            .map(PassengerGroup.fromMap)
+            .toList();
+        // New bus rows from the server replace prior ones; clear layout-fetched
+        // marks for buses that disappeared so ids don't leak forever.
+        for (final b in raw[idx].buses) {
+          if (!buses.any((n) => n.id == b.id)) {
+            _layoutFetchedBusIds.remove(b.id);
+          }
+        }
+        // Preserve layouts we already paid for on a prior prefetch.
+        final withLayouts = [
+          for (final b in buses)
+            if (priorById[tourId]
+                    ?.buses
+                    .where((x) => x.id == b.id && x.layout != null)
+                    .firstOrNull
+                case final priorBus?)
+              b.copyWith(layout: priorBus.layout)
+            else
+              b,
+        ];
+        raw[idx] = raw[idx].copyWith(
+          passengers: passengers,
+          buses: withLayouts,
+          groups: groups,
+        );
+      }
+      _scheduleNotify();
+
       _hydratedTourIds
         ..clear()
-        ..addAll(
-          tours.where((t) => t.status != TourStatus.completed).map((t) => t.id),
-        );
+        ..addAll(scope);
 
-      // Archive (not delete) tours whose trip ended more than a day ago.
       await _archiveExpiredTours();
-
-      // Restore remembered priority for returning customers.
       await _applyRememberedPriority();
+
+      // ── Phase 3: layout jsonb in the background ────────────────────
+      // Dashboard capacity / charts need grids, but they must not gate first
+      // paint. Prefetch for hydrated (running) tours only.
+      // ignore: unawaited_futures
+      _prefetchLayoutsForHydratedTours();
     } catch (e) {
       if (gen != _loadGeneration) return;
       if (tours.isEmpty) {
@@ -520,6 +566,41 @@ class TourController extends GetxController {
       }
     }
     if (gen == _loadGeneration) isLoading.value = false;
+  }
+
+  /// Transient-safe wrapper around a single tour-header read (mirrors
+  /// smartFetch retry policy without the relations payload). Never retries
+  /// auth / missing-table / permanent PostgREST errors — those only burn the
+  /// 2G radio and delay the error UI.
+  Future<List<Map<String, dynamic>>> _withTourReadRetry(
+    Future<List<Map<String, dynamic>>> Function() action,
+  ) async {
+    Object? last;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await action();
+      } catch (e) {
+        last = e;
+        if (attempt == 2 ||
+            !retry.isRetryable(e, retryOnTimeout: true)) {
+          break;
+        }
+        await Future<void>.delayed(
+          Duration(milliseconds: (400 * math.pow(3, attempt)).round()),
+        );
+      }
+    }
+    Error.throwWithStackTrace(last!, StackTrace.current);
+  }
+
+  Future<void> _prefetchLayoutsForHydratedTours() async {
+    for (final id in _hydratedTourIds.toList()) {
+      try {
+        await ensureBusLayoutsForTour(id);
+      } catch (e, st) {
+        dev.log('layout prefetch failed for $id: $e\n$st', name: 'TourController');
+      }
+    }
   }
 
   /// Auto-ARCHIVES tours whose trip has been over for more than a day so the
@@ -1301,6 +1382,7 @@ class TourController extends GetxController {
   /// The returned [SeatingPlan] (also cached in [lastPlanByTour]) carries
   /// the exceptions the UI surfaces as "needs your decision".
   Future<SeatingPlan> fillTour(String tourId) async {
+    await ensureTourReadyForSeating(tourId);
     final tour = getTour(tourId);
     if (tour == null) {
       // Nothing to fill — hand back an empty plan so callers don't null-check.
@@ -2721,6 +2803,16 @@ class TourController extends GetxController {
     if (tourId.isEmpty || _hydratedTourIds.contains(tourId)) {
       return Future<void>.value();
     }
+    // Local roster already present (test seed, optimistic write, or a prior
+    // session that painted passengers/buses before the hydrate set was marked).
+    // Cold-start headers always land with BOTH lists empty, so an empty tour
+    // still pays the network hydrate when opened from archive.
+    final local = getTour(tourId);
+    if (local != null &&
+        (local.passengers.isNotEmpty || local.buses.isNotEmpty)) {
+      _hydratedTourIds.add(tourId);
+      return Future<void>.value();
+    }
     final existing = _hydrationsInFlight[tourId];
     if (existing != null) return existing;
 
@@ -2737,6 +2829,7 @@ class TourController extends GetxController {
     final idx = raw.indexWhere((t) => t.id == tourId);
     if (idx < 0) return;
 
+    final priorBuses = raw[idx].buses;
     final rel = await _sync.fetchRelationsForTours([tourId]);
 
     // Mirror the cold-start read: a customer-cancelled passenger stays in the
@@ -2748,13 +2841,95 @@ class TourController extends GetxController {
     final buses = rel.buses.map(Bus.fromMap).toList();
     final groups = rel.groups.map(PassengerGroup.fromMap).toList();
 
+    // Preserve layouts already paid for — hydrate must never throw away a
+    // chart the agent is looking at just because the roster refresh omitted
+    // the jsonb column.
+    final withLayouts = [
+      for (final b in buses)
+        if (priorBuses
+            .where((x) => x.id == b.id && x.layout != null)
+            .firstOrNull
+            case final prior?)
+          b.copyWith(layout: prior.layout)
+        else
+          b,
+    ];
+
     raw[idx] = raw[idx].copyWith(
       passengers: passengers,
-      buses: buses,
+      buses: withLayouts,
       groups: groups,
     );
     _hydratedTourIds.add(tourId);
     _scheduleNotify();
+
+    // Chart / capacity screens usually open next — pull layouts immediately
+    // for this one tour rather than waiting on the background prefetch queue.
+    await ensureBusLayoutsForTour(tourId);
+  }
+
+  /// Ensures every bus on [tourId] has had its `layout` jsonb fetched (or
+  /// confirmed absent). Idempotent and coalesces concurrent callers.
+  ///
+  /// Cold start deliberately omits layouts (~71% of bus payload on a live
+  /// probe). Call this before seating engine, seat charts, or manage-buses.
+  Future<void> ensureBusLayoutsForTour(String tourId) {
+    if (tourId.isEmpty) return Future<void>.value();
+    final existing = _layoutFetchesInFlight[tourId];
+    if (existing != null) return existing;
+    final future = _fetchLayoutsForTour(tourId).whenComplete(() {
+      _layoutFetchesInFlight.remove(tourId);
+    });
+    _layoutFetchesInFlight[tourId] = future;
+    return future;
+  }
+
+  Future<void> _fetchLayoutsForTour(String tourId) async {
+    final tour = getTour(tourId);
+    if (tour == null || tour.buses.isEmpty) return;
+
+    // Layouts already in memory (seed / prior prefetch / realtime full row)
+    // count as fetched — never re-pay the 2G cost for jsonb we hold.
+    for (final b in tour.buses) {
+      if (b.layout != null) _layoutFetchedBusIds.add(b.id);
+    }
+
+    final need = tour.buses
+        .where((b) => !_layoutFetchedBusIds.contains(b.id))
+        .map((b) => b.id)
+        .toList();
+    if (need.isEmpty) return;
+
+    final rows = await _sync.fetchBusLayouts(need);
+    final byId = {
+      for (final r in rows) r['id'] as String: r['layout'],
+    };
+
+    // ignore: invalid_use_of_protected_member
+    final raw = tours.value;
+    final idx = raw.indexWhere((t) => t.id == tourId);
+    if (idx < 0) return;
+
+    final updatedBuses = raw[idx].buses.map((b) {
+      _layoutFetchedBusIds.add(b.id);
+      if (!byId.containsKey(b.id)) return b;
+      final layoutVal = byId[b.id];
+      if (layoutVal == null) return b;
+      return Bus.fromMap({
+        ...b.toMap(),
+        'layout': layoutVal,
+      });
+    }).toList();
+
+    raw[idx] = raw[idx].copyWith(buses: updatedBuses);
+    _capacityCache.remove(tourId);
+    _scheduleNotify();
+  }
+
+  /// Roster + layouts — what chart / fill / manage-buses need before work.
+  Future<void> ensureTourReadyForSeating(String tourId) async {
+    await ensureTourHydrated(tourId);
+    await ensureBusLayoutsForTour(tourId);
   }
 
   List<Tour> get activeTours =>

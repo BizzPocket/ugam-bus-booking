@@ -479,6 +479,33 @@ class Bus {
   /// Round trip pays full; a single leg (outbound-only / return-only) pays half.
   static double tripFactor(TripType t) => t == TripType.roundTrip ? 1.0 : 0.5;
 
+  /// The CHEAPEST claimable berth on this bus for [leg] — the "from ₹X" figure.
+  ///
+  /// Scans the real, unreserved cells and prices each through [berthPriceFor],
+  /// so a banded bus quotes its cheapest band and never promises the dearest
+  /// berth. Returns null when the bus has no layout or no sellable seat, which
+  /// callers MUST treat as "no price to show" rather than as ₹0 — a tour whose
+  /// buses aren't priced yet must show nothing, not "from ₹0".
+  ///
+  /// Shared on purpose: the seat picker's leg pills and the public tour page
+  /// both read this, so the number a customer sees before they tap can never
+  /// disagree with the one they see after.
+  double? fromBerthPrice(TripType leg) {
+    final l = layout;
+    if (l == null) return null;
+    double? min;
+    for (final c in l.grid) {
+      if (!c.hasSeat || c.reserved || c.seatType == null) continue;
+      final p = berthPriceFor(c.seatType!, c.row) * tripFactor(leg);
+      if (min == null || p < min) min = p;
+    }
+    // A layout full of unpriced seats resolves to 0.0, which is a real answer
+    // ("free") only in theory — in practice it means the agent hasn't set the
+    // price yet, so report "unknown" and let the caller hide the row.
+    if (min == null || min <= 0) return null;
+    return min;
+  }
+
   /// Index of every seat cell on this bus by its seat ID (only real seats).
   Map<String, SeatCell> _cellsById() {
     final cellById = <String, SeatCell>{};

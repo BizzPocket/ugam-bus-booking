@@ -530,4 +530,31 @@ void main() {
       expect(s.total, 0, reason: 'both singles are taken round-trip');
     });
   });
+
+  group('computeTourCapacity — layout deferred (2G Phase 2)', () {
+    test('null layout uses total_seats so Home does not claim 0 free', () {
+      final tour = _tour([
+        Bus(
+          id: 'b1',
+          name: 'Bus 1',
+          busType: 'Sleeper',
+          totalSeatsLegacy: 40,
+          // layout deliberately null — cold-start projection
+        ),
+      ], [
+        _pSeated(
+          'A',
+          lines: [_line(SeatType.singleSofa, 1)],
+          seats: const [SeatAssignment(busId: 'b1', seatId: 'SU1')],
+        ),
+      ]);
+
+      final cap = computeTourCapacity(tour);
+      expect(cap.capacity, 40);
+      expect(cap.free, 39,
+          reason: 'must not report free=0 while layout jsonb is still loading');
+      expect(cap.byBus['b1']!.capacity, 40);
+      expect(cap.byBus['b1']!.free, 39);
+    });
+  });
 }

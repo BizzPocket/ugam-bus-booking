@@ -5,12 +5,13 @@ import 'package:get/get.dart';
 import '../../controllers/tour_controller.dart';
 import '../../design/ugam.dart';
 import '../../models/tour_status.dart';
+import '../../routes/app_routes.dart';
 import '../../screens/create_tour_screen.dart';
 import '../../screens/main_shell.dart';
 import '../../screens/tour_money_board_screen.dart';
 
-/// The dashboard quick-action row: Create · Requests · Money · Charts. Tiles
-/// that aren't a dock tab (Create, Money) push a screen; the rest switch tabs.
+/// The dashboard quick-action row: Create · Requests · Money · Finance. Tiles
+/// that aren't a dock tab push a screen; Requests switches the Requests tab.
 class DashboardQuickActions extends StatelessWidget {
   final UgamColorSet c;
   final ShellController shell;
@@ -53,7 +54,7 @@ class DashboardQuickActions extends StatelessWidget {
         Expanded(
           child: _QA(
             label: tr('dashboard.qa_requests'),
-            icon: Icons.inbox_rounded,
+            icon: Icons.person_add_alt_1_rounded,
             c: c,
             onTap: () => shell.switchTab(3),
           ),
@@ -70,10 +71,10 @@ class DashboardQuickActions extends StatelessWidget {
         const SizedBox(width: UgamSpacing.md),
         Expanded(
           child: _QA(
-            label: tr('main_shell.tab_charts'),
-            icon: Icons.table_chart_rounded,
+            label: tr('dashboard.qa_finance'),
+            icon: Icons.insights_rounded,
             c: c,
-            onTap: () => shell.switchTab(2),
+            onTap: () => Get.toNamed(AppRoutes.finance),
           ),
         ),
       ],
@@ -97,25 +98,33 @@ class _QA extends StatelessWidget {
   Widget build(BuildContext context) {
     return UgamCard.plain(
       onTap: onTap,
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
+      padding: const EdgeInsets.symmetric(
+        vertical: UgamSpacing.lg,
+        horizontal: UgamSpacing.xs,
+      ),
       child: Column(
         children: [
           Container(
-            width: 46,
-            height: 46,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
-              color: c.cardElev,
+              color: c.accentFill,
               borderRadius: BorderRadius.circular(UgamRadius.input),
+              border: Border.all(color: c.border),
             ),
             alignment: Alignment.center,
-            child: Icon(icon, size: 20, color: c.ink),
+            child: Icon(icon, size: 22, color: c.accent),
           ),
           const SizedBox(height: UgamSpacing.sm),
           Text(
             label,
-            style: UgamText.caption.copyWith(color: c.ink2),
+            style: UgamText.caption.copyWith(
+              color: c.ink,
+              fontWeight: FontWeight.w600,
+            ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
           ),
         ],
       ),

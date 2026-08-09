@@ -6,7 +6,6 @@ import 'package:get/get.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
-import '../utils/formatters.dart';
 import '../models/tour_status.dart';
 import '../routes/app_routes.dart';
 import '../services/customer_requests_store.dart';
@@ -14,13 +13,14 @@ import 'customer_booking_request_screen.dart';
 import 'customer_more_screen.dart';
 import 'customer_my_requests_screen.dart';
 import 'customer_tour_detail_screen.dart';
+import 'find_my_seat_screen.dart';
 import 'seat_selection_screen.dart';
 
 /// Public-facing tour list — image-5 fidelity.
 ///
 /// Layout:
-///   [Title row + circle search + circle filter]
-///   [Search field (collapsible)]
+///   [Title row + my-bookings + more]
+///   [Find my seat bar (expands to a number field)]
 ///   [Group: Upcoming]
 ///   [Group: Later]
 ///
@@ -28,6 +28,13 @@ import 'seat_selection_screen.dart';
 /// rows with backdrop thumbnail + route header + date pill + chips. No
 /// "+" button — customers don't create tours. No "Past" group — customers
 /// don't need history.
+///
+/// THERE IS NO SEARCH. It occupied the most valuable slot on the customer's
+/// first screen to filter a list that is two or three rows long — the whole
+/// list is already on screen, so the field could only ever hide rows. That
+/// slot now belongs to "Find my seat", which is what a customer who already
+/// booked actually opens the app to do, and which was previously buried three
+/// taps deep behind the More menu.
 class CustomerTourListScreen extends StatefulWidget {
   const CustomerTourListScreen({super.key});
 
@@ -36,20 +43,27 @@ class CustomerTourListScreen extends StatefulWidget {
 }
 
 class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
-  final _searchCtrl = TextEditingController();
-  bool _searchVisible = false;
-  String _query = '';
+  final _store = CustomerRequestsStore();
+  final _phoneCtrl = TextEditingController();
+  final _phoneFocus = FocusNode();
+
+  /// The find-my-seat bar starts as a one-line prompt and opens into a number
+  /// field on tap. Collapsed by default so the tours — the reason a NEW
+  /// visitor is here — stay at the top of the page.
+  bool _findOpen = false;
   int _myRequestCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadRequestCount();
+    _loadRememberedPhone();
   }
 
   @override
   void dispose() {
-    _searchCtrl.dispose();
+    _phoneCtrl.dispose();
+    _phoneFocus.dispose();
     super.dispose();
   }
 
@@ -57,11 +71,52 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
   /// read — no network) so the top-bar badge reflects how many bookings
   /// the customer can track.
   Future<void> _loadRequestCount() async {
-    final entries = await CustomerRequestsStore().list();
+    final entries = await _store.list();
     if (!mounted) return;
     // Only count live requests; past tours are history and should not
     // inflate the "My booking(s)" badge on the main screen.
     setState(() => _myRequestCount = entries.where((e) => !e.isPast).length);
+  }
+
+  /// Pre-fills the number the rider last found their seat with, so the bar
+  /// opens one tap away from the answer instead of on an empty field.
+  ///
+  /// [overwrite] is set when returning from the lookup screen: the rider may
+  /// have found their seat under a DIFFERENT number there, and only a number
+  /// that actually resolved is ever remembered — so it beats whatever is
+  /// sitting in the field.
+  Future<void> _loadRememberedPhone({bool overwrite = false}) async {
+    final remembered = await _store.lastSeatLookupPhone();
+    if (!mounted || remembered == null) return;
+    if (!overwrite && _phoneCtrl.text.isNotEmpty) return;
+    _phoneCtrl.text = remembered;
+  }
+
+  void _toggleFind() {
+    HapticFeedback.selectionClick();
+    setState(() => _findOpen = !_findOpen);
+    if (_findOpen) {
+      _phoneFocus.requestFocus();
+    } else {
+      _phoneFocus.unfocus();
+    }
+  }
+
+  /// Hands whatever is in the field to the lookup screen, which validates it,
+  /// runs the search and draws the chart. Deliberately forgiving about an
+  /// empty or half-typed number: the screen simply opens focused on the field,
+  /// so a mistap still lands somewhere useful instead of on an error.
+  Future<void> _openFindMySeat() async {
+    HapticFeedback.selectionClick();
+    _phoneFocus.unfocus();
+    await Get.to(
+      () => FindMySeatScreen(initialPhone: _phoneCtrl.text.trim()),
+      transition: Transition.cupertino,
+    );
+    if (!mounted) return;
+    setState(() => _findOpen = false);
+    // The rider may have looked up a different number while they were there.
+    _loadRememberedPhone(overwrite: true);
   }
 
   Future<void> _openMyRequests() async {
@@ -79,17 +134,6 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
     Get.to(() => const CustomerMoreScreen(), transition: Transition.cupertino);
   }
 
-  void _toggleSearch() {
-    HapticFeedback.selectionClick();
-    setState(() {
-      _searchVisible = !_searchVisible;
-      if (!_searchVisible) {
-        _searchCtrl.clear();
-        _query = '';
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
@@ -102,22 +146,17 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
           children: [
             _TopBar(
               c: c,
-              searchActive: _searchVisible,
-              onToggleSearch: _toggleSearch,
               myRequestCount: _myRequestCount,
               onMyRequests: _openMyRequests,
               onMore: _openMore,
             ),
-            AnimatedSize(
-              duration: UgamMotion.tab,
-              curve: UgamMotion.easeOut,
-              child: _searchVisible
-                  ? _SearchField(
-                      c: c,
-                      controller: _searchCtrl,
-                      onChanged: (v) => setState(() => _query = v.trim()),
-                    )
-                  : const SizedBox.shrink(),
+            _FindMySeatBar(
+              c: c,
+              open: _findOpen,
+              controller: _phoneCtrl,
+              focusNode: _phoneFocus,
+              onToggle: _toggleFind,
+              onSubmit: _openFindMySeat,
             ),
             Expanded(
               child: Obx(() {
@@ -156,22 +195,6 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                 }
 
                 final groups = _group(visible);
-                final hasMatches = groups.any((g) => g.tours.isNotEmpty);
-
-                if (_query.isNotEmpty && !hasMatches) {
-                  return _refreshable(
-                    c,
-                    tourCtrl,
-                    UgamEmpty(
-                      icon: Icons.search_off_rounded,
-                      title: tr('customer_tour_list.no_matches_title'),
-                      body: tr(
-                        'customer_tour_list.no_matches_body',
-                        namedArgs: {'q': _query},
-                      ),
-                    ),
-                  );
-                }
 
                 return RefreshIndicator(
                   color: c.accent,
@@ -293,21 +316,10 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
     final today = DateTime(now.year, now.month, now.day);
     final endOf30 = today.add(const Duration(days: 30));
 
-    final filtered = _query.isEmpty
-        ? all
-        : all
-              .where(
-                (t) =>
-                    t.title.toLowerCase().contains(_query.toLowerCase()) ||
-                    t.fromCity.toLowerCase().contains(_query.toLowerCase()) ||
-                    t.toCity.toLowerCase().contains(_query.toLowerCase()),
-              )
-              .toList();
-
     final upcoming = <Tour>[];
     final later = <Tour>[];
 
-    for (final t in filtered) {
+    for (final t in all) {
       if (!t.departureDate.isAfter(endOf30)) {
         upcoming.add(t);
       } else {
@@ -336,16 +348,12 @@ class _Group {
 
 class _TopBar extends StatelessWidget {
   final UgamColorSet c;
-  final bool searchActive;
-  final VoidCallback onToggleSearch;
   final VoidCallback onMore;
   final VoidCallback onMyRequests;
   final int myRequestCount;
 
   const _TopBar({
     required this.c,
-    required this.searchActive,
-    required this.onToggleSearch,
     required this.onMore,
     required this.onMyRequests,
     required this.myRequestCount,
@@ -380,23 +388,26 @@ class _TopBar extends StatelessWidget {
           Tooltip(
             message: tr('customer_tour_list.my_requests_tooltip'),
             child: _IconCircle(
-              icon: Icons.confirmation_number_outlined,
+              // Filled, not outlined. At 19 px the outlined ticket read as a
+              // generic rounded rectangle; the solid one is unmistakably a
+              // ticket stub, which is what "my bookings" is.
+              icon: Icons.confirmation_number_rounded,
               c: c,
               onTap: onMyRequests,
               badgeCount: myRequestCount,
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          _IconCircle(
-            icon: searchActive ? Icons.close_rounded : Icons.search_rounded,
-            c: c,
-            onTap: onToggleSearch,
-            active: searchActive,
-          ),
-          const SizedBox(width: UgamSpacing.sm),
           Tooltip(
             message: tr('customer_more.title'),
-            child: _IconCircle(icon: Icons.menu_rounded, c: c, onTap: onMore),
+            // Not a hamburger. Three stacked lines promise a slide-out drawer,
+            // and this app has none — the icon opens a short pushed list whose
+            // title is literally "More", so the ellipsis is the honest glyph.
+            child: _IconCircle(
+              icon: Icons.more_horiz_rounded,
+              c: c,
+              onTap: onMore,
+            ),
           ),
         ],
       ),
@@ -408,7 +419,6 @@ class _IconCircle extends StatelessWidget {
   final IconData icon;
   final UgamColorSet c;
   final VoidCallback onTap;
-  final bool active;
 
   /// When > 0, paints an accent badge in the top-right corner.
   final int badgeCount;
@@ -417,7 +427,6 @@ class _IconCircle extends StatelessWidget {
     required this.icon,
     required this.c,
     required this.onTap,
-    this.active = false,
     this.badgeCount = 0,
   });
 
@@ -433,11 +442,11 @@ class _IconCircle extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: active ? c.accentFill : c.cardElev,
+              color: c.cardElev,
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
-            child: Icon(icon, size: 19, color: active ? c.accent : c.ink),
+            child: Icon(icon, size: 19, color: c.ink),
           ),
           if (badgeCount > 0)
             Positioned(
@@ -472,15 +481,32 @@ class _IconCircle extends StatelessWidget {
   }
 }
 
-class _SearchField extends StatelessWidget {
+/// "Find my seat", promoted out of the More menu and onto the first screen.
+///
+/// Sits collapsed as one prompt line — a returning rider recognises it without
+/// reading, a first-time visitor loses ~56 px of tour list to it. Tapping it
+/// opens the number field IN PLACE; the actual lookup, its errors and the
+/// chart all stay in [FindMySeatScreen], so there is exactly one implementation
+/// of the flow and this bar is only its doorway.
+///
+/// The seat tile is accent-filled because a seat you hold is the canonical
+/// "this is yours"; the Find button is [UgamColorSet.action], because a control
+/// asking to be pressed never spends the brand hue.
+class _FindMySeatBar extends StatelessWidget {
   final UgamColorSet c;
+  final bool open;
   final TextEditingController controller;
-  final ValueChanged<String> onChanged;
+  final FocusNode focusNode;
+  final VoidCallback onToggle;
+  final VoidCallback onSubmit;
 
-  const _SearchField({
+  const _FindMySeatBar({
     required this.c,
+    required this.open,
     required this.controller,
-    required this.onChanged,
+    required this.focusNode,
+    required this.onToggle,
+    required this.onSubmit,
   });
 
   @override
@@ -493,34 +519,159 @@ class _SearchField extends StatelessWidget {
         UgamSpacing.md,
       ),
       child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+        padding: const EdgeInsets.all(UgamSpacing.sm + 2),
         decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.chip),
+          color: c.card,
+          borderRadius: BorderRadius.circular(UgamRadius.card),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search_rounded, size: 18, color: c.ink2),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                autofocus: true,
-                onChanged: onChanged,
-                style: UgamText.body.copyWith(color: c.ink, fontSize: 14),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  hintText: tr('customer_tour_list.search_hint'),
-                  hintStyle: UgamText.body.copyWith(
-                    color: c.ink3,
-                    fontSize: 14,
+            GestureDetector(
+              onTap: onToggle,
+              behavior: HitTestBehavior.opaque,
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: c.accentFill,
+                      borderRadius: BorderRadius.circular(UgamRadius.input),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(kFindMySeatIcon, size: 20, color: c.accent),
                   ),
-                ),
+                  const SizedBox(width: UgamSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          tr('find_seat.title'),
+                          style: UgamText.titleS.copyWith(
+                            color: c.ink,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          tr('find_seat.home_subtitle'),
+                          style: UgamText.caption.copyWith(
+                            color: c.ink3,
+                            fontSize: 12,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: UgamSpacing.sm),
+                  Icon(
+                    open
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: c.ink3,
+                  ),
+                ],
               ),
+            ),
+            AnimatedSize(
+              duration: UgamMotion.tab,
+              curve: UgamMotion.easeOut,
+              alignment: Alignment.topCenter,
+              child: open
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: UgamSpacing.sm + 2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              height: 44,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: UgamSpacing.md,
+                              ),
+                              decoration: BoxDecoration(
+                                color: c.cardElev,
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.chip,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.phone_iphone_rounded,
+                                    size: 16,
+                                    color: c.ink3,
+                                  ),
+                                  const SizedBox(width: UgamSpacing.sm),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: controller,
+                                      focusNode: focusNode,
+                                      keyboardType: TextInputType.phone,
+                                      textInputAction: TextInputAction.search,
+                                      onSubmitted: (_) => onSubmit(),
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.allow(
+                                          RegExp(r'[0-9+ ]'),
+                                        ),
+                                      ],
+                                      style: UgamText.tabular(
+                                        UgamText.body.copyWith(
+                                          color: c.ink,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                      decoration: InputDecoration(
+                                        isDense: true,
+                                        border: InputBorder.none,
+                                        enabledBorder: InputBorder.none,
+                                        focusedBorder: InputBorder.none,
+                                        hintText: tr('find_seat.phone_hint'),
+                                        hintStyle: UgamText.body.copyWith(
+                                          color: c.ink3,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: UgamSpacing.sm),
+                          GestureDetector(
+                            onTap: onSubmit,
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              height: 44,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: UgamSpacing.lg,
+                              ),
+                              decoration: BoxDecoration(
+                                color: c.action,
+                                borderRadius: BorderRadius.circular(
+                                  UgamRadius.chip,
+                                ),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                tr('find_seat.home_action'),
+                                style: UgamText.bodyStrong.copyWith(
+                                  color: c.onAction,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity),
             ),
           ],
         ),
@@ -580,18 +731,33 @@ class _TourRow extends StatelessWidget {
     required this.onBook,
   });
 
+  /// Decode the banner at the width we paint, not the width uploaded. The
+  /// picker stores at maxWidth 1600, so a full-bleed card banner would
+  /// otherwise decode a ~6.8 MB bitmap PER ROW.
+  static int _decodeWidth(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final physical = (mq.size.width * mq.devicePixelRatio).round();
+    if (physical <= 0) return 800;
+    return physical > 1600 ? 1600 : physical;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final capacity = tour.totalBusSeats;
-    final assigned = tour.totalSeatsAssigned;
-    final seatsLeft = capacity - assigned;
-    final hasCapacity = capacity > 0;
+    // NOTE: there is deliberately no seats-left chip here any more. It read
+    // `tour.totalBusSeats`, and `buses` has no anon SELECT policy — so on the
+    // customer side that sum is ALWAYS 0, `hasCapacity` was always false, and
+    // every row on every tour showed the same generic "open" chip. A count we
+    // cannot know is worse than no count; the detail screen fetches the real
+    // one through the public RPC and states it there.
+    final closed = !tour.acceptsBookings;
+    final countdown = departureCountdownLabel(tour.departureDate);
+    final hasPhoto = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
 
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.all(UgamSpacing.sm + 2),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: c.card,
           borderRadius: BorderRadius.circular(UgamRadius.card),
@@ -600,151 +766,137 @@ class _TourRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
-                // Photo-anchored 88-px thumbnail with date pill overlay.
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(UgamRadius.photo),
-                  child: SizedBox(
-                    width: 96,
-                    height: 88,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        UgamBusBackdrop(
-                          seed: tour.id,
-                          label: _routeInitials(tour.fromCity, tour.toCity),
-                        ),
-                        Positioned(
-                          left: 6,
-                          top: 6,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: c.cardElev,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              _formatDate(tour.departureDate),
-                              style: UgamText.tabular(
-                                UgamText.micro.copyWith(
-                                  color: c.ink,
-                                  fontSize: 9.5,
-                                ),
+            // The banner. This is the organiser's own uploaded broadcast photo
+            // — the same image that goes out on WhatsApp. The row used to draw
+            // a 96×88 generated backdrop and ignore `broadcastImageUrl`
+            // entirely, so a tour with a real photo still showed a placeholder
+            // monogram. Full-bleed because the photo IS the reason a customer
+            // recognises the trip.
+            SizedBox(
+              height: 148,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (hasPhoto)
+                    Image.network(
+                      tour.broadcastImageUrl!.trim(),
+                      fit: BoxFit.cover,
+                      cacheWidth: _decodeWidth(context),
+                      loadingBuilder: (ctx, child, progress) => progress == null
+                          ? child
+                          : UgamBusBackdrop(
+                              seed: tour.id,
+                              label: _routeInitials(
+                                tour.fromCity,
+                                tour.toCity,
                               ),
                             ),
-                          ),
-                        ),
-                      ],
+                      errorBuilder: (_, _, _) => UgamBusBackdrop(
+                        seed: tour.id,
+                        label: _routeInitials(tour.fromCity, tour.toCity),
+                      ),
+                    )
+                  else
+                    UgamBusBackdrop(
+                      seed: tour.id,
+                      label: _routeInitials(tour.fromCity, tour.toCity),
+                    ),
+                  // Scrim top and bottom only — enough to hold the date and
+                  // status badges over any photo without flattening it.
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0x8C000000),
+                          Color(0x00000000),
+                          Color(0x00000000),
+                          Color(0x66000000),
+                        ],
+                        stops: [0.0, 0.35, 0.65, 1.0],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: UgamSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                  Positioned(
+                    left: UgamSpacing.tight,
+                    top: UgamSpacing.tight,
+                    child: _BannerBadge(
+                      label: _formatDate(tour.departureDate),
+                      tabular: true,
+                    ),
+                  ),
+                  if (closed)
+                    Positioned(
+                      right: UgamSpacing.tight,
+                      top: UgamSpacing.tight,
+                      child: _BannerBadge(
+                        label: tr('customer_tour_list.chip_closed'),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(UgamSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tour.title,
+                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 16),
+                    // Two lines: these titles carry the festival name AND the
+                    // date, and one line cut every one of them mid-word.
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    // No leading arrow icon. A south-east glyph next to a route
+                    // encodes nothing — the "→" between the cities already says
+                    // which way the bus goes.
+                    '${tour.fromCity} → ${tour.toCity}',
+                    style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  Row(
                     children: [
-                      Text(
-                        tour.title,
-                        style: UgamText.titleS.copyWith(
-                          color: c.ink,
-                          fontSize: 15,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.south_east_rounded,
-                            size: 12,
-                            color: c.ink2,
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              '${tour.fromCity} → ${tour.toCity}',
-                              style: UgamText.caption.copyWith(
-                                color: c.ink2,
-                                fontSize: 12,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (tour.pricePerSeat > 0) ...[
-                            const SizedBox(width: UgamSpacing.sm),
-                            Text(
-                              '·',
-                              style: UgamText.caption.copyWith(
-                                color: c.ink3,
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(width: UgamSpacing.sm),
-                            Text(
-                              tr(
-                                'customer_tour_list.price_per_seat',
-                                namedArgs: {
-                                  'price': Formatters.formatMoneyInr(
-                                    tour.pricePerSeat,
-                                  ).replaceFirst('₹', ''),
-                                },
-                              ),
-                              style: UgamText.tabular(
-                                UgamText.caption.copyWith(
-                                  color: c.ink2,
-                                  fontSize: 12,
+                      // No price. It is withheld on the detail page — the fare
+                      // is settled over WhatsApp — and a figure here would
+                      // contradict that the moment the customer taps through.
+                      Expanded(
+                        child: countdown == null
+                            ? const SizedBox.shrink()
+                            : Text(
+                                countdown,
+                                style: UgamText.tabular(
+                                  UgamText.caption.copyWith(
+                                    color: c.ink3,
+                                    fontSize: 12,
+                                  ),
                                 ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ],
                       ),
-                      const SizedBox(height: UgamSpacing.sm + 2),
-                      Row(
-                        children: [
-                          if (hasCapacity)
-                            UgamReqChip(
-                              label: seatsLeft <= 0
-                                  ? tr('customer_tour_list.chip_full')
-                                  : tr(
-                                      'customer_tour_list.chip_left',
-                                      namedArgs: {'n': seatsLeft.toString()},
-                                    ),
-                              variant: seatsLeft <= 0
-                                  ? UgamChipVariant.warm
-                                  : UgamChipVariant.good,
-                            )
-                          else
-                            UgamReqChip(
-                              label: tr('customer_tour_list.chip_open'),
-                              variant: UgamChipVariant.neutral,
-                            ),
-                          const Spacer(),
-                          // One-tap Book pill — jumps straight to the booking
-                          // form (skips the detail screen). Has its own gesture
-                          // so it doesn't bubble up to the row's tap-to-detail.
-                          // Reads as a non-actionable arrow when the bus is full.
-                          _BookPill(
-                            c: c,
-                            full: hasCapacity && seatsLeft <= 0,
-                            closed: !tour.acceptsBookings,
-                            onTap: onBook,
-                          ),
-                        ],
+                      const SizedBox(width: UgamSpacing.sm),
+                      // One-tap Book pill — jumps straight to the booking step,
+                      // collapsing list → detail → form to a single nav. Its
+                      // own gesture, so it doesn't bubble to tap-to-detail.
+                      _BookPill(
+                        c: c,
+                        full: false,
+                        closed: closed,
+                        onTap: onBook,
                       ),
                     ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -768,6 +920,31 @@ class _TourRow extends StatelessWidget {
       'app.month.short.dec',
     ];
     return '${d.day.toString().padLeft(2, '0')} ${tr(keys[d.month - 1]).toUpperCase()}';
+  }
+}
+
+/// A small label that sits ON the card banner — the date, or the closed state.
+///
+/// Uses its own dark scrim and white ink rather than the theme's chip colours:
+/// the badge floats over an arbitrary photo, so it cannot rely on the page
+/// background for contrast the way `UgamReqChip` does.
+class _BannerBadge extends StatelessWidget {
+  final String label;
+  final bool tabular;
+
+  const _BannerBadge({required this.label, this.tabular = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final style = UgamText.micro.copyWith(color: Colors.white, fontSize: 10.5);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.sm, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0x99000000),
+        borderRadius: BorderRadius.circular(UgamRadius.chip),
+      ),
+      child: Text(label, style: tabular ? UgamText.tabular(style) : style),
+    );
   }
 }
 

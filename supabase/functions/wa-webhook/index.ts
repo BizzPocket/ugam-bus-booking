@@ -49,26 +49,73 @@ const json = (body: unknown, status = 200) =>
     headers: { ...CORS, "Content-Type": "application/json" },
   });
 
-// Human placeholder shown in the conversation list when a message has no text
-// body (media is not downloaded yet). Keeps last_message_preview meaningful.
+// Human placeholder shown in the conversation list when a message carries no
+// caption. Keeps last_message_preview meaningful.
 const previewForType = (msgType: string): string => {
   switch (msgType) {
     case "image":
-      return "[image]";
+      return "📷 Photo";
     case "document":
-      return "[document]";
+      return "📎 Document";
     case "audio":
-      return "[audio]";
+      return "🎤 Audio";
     case "video":
-      return "[video]";
+      return "🎥 Video";
+    case "sticker":
+      return "🙂 Sticker";
     default:
       return "[message]";
   }
 };
 
 // Meta's msg_type column only allows this closed set; anything else -> 'other'.
-const normalizeMsgType = (t: string): string =>
-  ["text", "image", "document", "audio", "video"].includes(t) ? t : "other";
+// 'sticker' and 'voice' are Meta message types that carry ordinary media, so
+// they are FOLDED rather than dropped: a voice note is audio and a sticker is an
+// image as far as storing and showing them goes. Without this they fell to
+// 'other' and their attachment was never fetched — which is how a voice note,
+// the single most common non-text message this inbox receives, went missing.
+const normalizeMsgType = (t: string): string => {
+  if (t === "voice") return "audio";
+  if (t === "sticker") return "image";
+  return ["text", "image", "document", "audio", "video"].includes(t)
+    ? t
+    : "other";
+};
+
+// Meta message types whose payload is a media object ({id, mime_type, ...}).
+const MEDIA_TYPES = [
+  "image",
+  "document",
+  "audio",
+  "voice",
+  "video",
+  "sticker",
+];
+
+// Pick a file extension from the mime type so a downloaded object is openable by
+// name. Meta's mime carries a codec suffix on voice notes
+// ("audio/ogg; codecs=opus"), so cut at the first ';'.
+const extForMime = (mime: string | null): string => {
+  const base = (mime ?? "").split(";")[0].trim().toLowerCase();
+  const known: Record<string, string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "audio/ogg": "ogg",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "audio/aac": "aac",
+    "audio/amr": "amr",
+    "video/mp4": "mp4",
+    "video/3gpp": "3gp",
+    "application/pdf": "pdf",
+  };
+  if (known[base]) return known[base];
+  const tail = base.split("/")[1] ?? "";
+  // Strip anything that would be unsafe or meaningless in an object path.
+  const cleaned = tail.replace(/[^a-z0-9]/g, "");
+  return cleaned.length > 0 && cleaned.length <= 8 ? cleaned : "bin";
+};
 
 // Unix-seconds string (Meta's m.timestamp) -> ISO string. Null if unparseable so
 // the caller can fall back to the column default.
@@ -184,6 +231,97 @@ Deno.serve(async (req: Request) => {
   });
 
   const pushSecret = Deno.env.get("PUSH_TRIGGER_SECRET");
+
+  // Media download needs the same Graph credentials bus-message / wa-reply use.
+  // Secrets are project-wide, so these are already set if outbound WhatsApp
+  // works at all; if they are missing we still record the message (with its
+  // media_id) rather than dropping it, and say so in the logs.
+  const waToken = Deno.env.get("WHATSAPP_TOKEN");
+  const rawGraphVersion = (Deno.env.get("WHATSAPP_GRAPH_VERSION") ?? "").trim();
+  const graphVersion = /^v\d+\.\d+$/.test(rawGraphVersion)
+    ? rawGraphVersion
+    : "v25.0";
+
+  // Fetches one inbound attachment from Meta and puts it in the `wa-media`
+  // bucket (migration 059). Returns the stored object path, or null if anything
+  // went wrong — the caller then still writes the message row, so a failed
+  // download costs the attachment, never the message.
+  //
+  // Two hops, both authenticated with the WhatsApp token:
+  //   1. GET /{version}/{media_id}  -> { url, mime_type, file_size }
+  //   2. GET that url               -> the bytes  (the url is short-lived and
+  //                                     ALSO requires the bearer token)
+  const downloadMedia = async (args: {
+    mediaId: string;
+    conversationId: string;
+    waMessageId: string;
+    mime: string | null;
+  }): Promise<{ path: string; mime: string | null; size: number | null } | null> => {
+    if (!waToken) {
+      console.warn("wa-webhook: WHATSAPP_TOKEN not set — media not downloaded");
+      return null;
+    }
+    try {
+      const metaRes = await fetch(
+        `https://graph.facebook.com/${graphVersion}/${args.mediaId}`,
+        { headers: { Authorization: `Bearer ${waToken}` } },
+      );
+      if (!metaRes.ok) {
+        console.error(
+          "wa-webhook: media metadata fetch failed",
+          metaRes.status,
+          await metaRes.text(),
+        );
+        return null;
+      }
+      const meta = await metaRes.json();
+      const fileUrl: string | null = meta?.url ?? null;
+      if (!fileUrl) {
+        console.error("wa-webhook: media metadata carried no url");
+        return null;
+      }
+
+      const binRes = await fetch(fileUrl, {
+        headers: { Authorization: `Bearer ${waToken}` },
+      });
+      if (!binRes.ok) {
+        console.error(
+          "wa-webhook: media download failed",
+          binRes.status,
+          await binRes.text(),
+        );
+        return null;
+      }
+      const bytes = new Uint8Array(await binRes.arrayBuffer());
+      const mime: string | null = meta?.mime_type ?? args.mime ?? null;
+
+      // Path is <conversation_id>/<wa_message_id>.<ext> — the first segment is
+      // what the 059 storage policy resolves back to the owning conversation, so
+      // it MUST stay the conversation id. wa_message_id is unique per message,
+      // which makes the whole path collision-free and the upload replayable.
+      const safeId = args.waMessageId.replace(/[^A-Za-z0-9_.=-]/g, "_");
+      const path = `${args.conversationId}/${safeId}.${extForMime(mime)}`;
+
+      const { error: upErr } = await db.storage
+        .from("wa-media")
+        .upload(path, bytes, {
+          contentType: mime ?? "application/octet-stream",
+          upsert: true,
+        });
+      if (upErr) {
+        console.error("wa-webhook: media upload failed", upErr.message);
+        return null;
+      }
+      return {
+        path,
+        mime,
+        size: typeof meta?.file_size === "number" ? meta.file_size : bytes.length,
+      };
+    } catch (e) {
+      console.error("wa-webhook: media handling threw", e);
+      return null;
+    }
+  };
 
   // Best-effort admin push for a new inbound message. Swallows every error —
   // a failed notification must never fail the webhook.
@@ -310,15 +448,28 @@ Deno.serve(async (req: Request) => {
           if (dupe) continue;
 
           const rawType: string = String(m?.type ?? "text");
-          let body: string | null;
-          let msgType: string;
-          if (rawType === "text") {
-            body = m?.text?.body ?? null;
-            msgType = "text";
-          } else {
-            body = null; // media download deferred
-            msgType = normalizeMsgType(rawType);
-          }
+          const msgType = rawType === "text" ? "text" : normalizeMsgType(rawType);
+
+          // Media payloads live under a key named after the type — m.image,
+          // m.audio, m.document … — and carry the caption when there is one. The
+          // caption IS the message body: dropping it (as this function used to)
+          // turned "here is the payment screenshot, ref 4471" into "[image]".
+          const mediaNode: Json = MEDIA_TYPES.includes(rawType)
+            ? m?.[rawType] ?? null
+            : null;
+          const mediaId: string | null = mediaNode?.id
+            ? String(mediaNode.id)
+            : null;
+          const declaredMime: string | null = mediaNode?.mime_type
+            ? String(mediaNode.mime_type)
+            : null;
+          const mediaFilename: string | null = mediaNode?.filename
+            ? String(mediaNode.filename)
+            : null;
+
+          const body: string | null = rawType === "text"
+            ? (m?.text?.body ?? null)
+            : (mediaNode?.caption ?? null);
 
           const msgIso = tsToIso(m?.timestamp);
 
@@ -332,6 +483,22 @@ Deno.serve(async (req: Request) => {
           const convo = await resolveConversation(from, contactName);
           if (!convo) continue;
 
+          // Pull the attachment down BEFORE inserting, so the row lands complete
+          // and a realtime subscriber never sees a message flicker from "no
+          // media" to "media". Meta expires inbound media in about 14 days and
+          // hands us nothing but an id, so this is the only chance to keep it.
+          let stored:
+            | { path: string; mime: string | null; size: number | null }
+            | null = null;
+          if (mediaId) {
+            stored = await downloadMedia({
+              mediaId,
+              conversationId: convo.id,
+              waMessageId,
+              mime: declaredMime,
+            });
+          }
+
           // Insert the inbound message. Omit created_at when we couldn't parse a
           // timestamp so the column default (now()) applies.
           const messageRow: Json = {
@@ -342,10 +509,41 @@ Deno.serve(async (req: Request) => {
             msg_type: msgType,
           };
           if (msgIso) messageRow.created_at = msgIso;
+          // media_id is recorded even when the download failed: with media_path
+          // still null that is exactly the "known attachment, not stored" state
+          // 059's partial index looks for, and the only handle for a re-fetch.
+          if (mediaId) messageRow.media_id = mediaId;
+          if (mediaFilename) messageRow.media_filename = mediaFilename;
+          if (declaredMime) messageRow.media_mime = declaredMime;
+          if (stored) {
+            messageRow.media_path = stored.path;
+            if (stored.mime) messageRow.media_mime = stored.mime;
+            if (stored.size !== null) messageRow.media_size = stored.size;
+          }
 
-          const { error: msgErr } = await db
+          let { error: msgErr } = await db
             .from("wa_messages")
             .insert(messageRow);
+
+          // Deploy-order safety net. PostgREST rejects the ENTIRE payload if one
+          // key has no column, so shipping this function before migration 059 is
+          // applied would take down the inbox completely — every inbound message
+          // lost, not just its attachment. If the media columns are not live yet,
+          // re-send the message without them: the text still arrives and the
+          // attachment is the only casualty.
+          if (msgErr && String(msgErr.message).includes("media_")) {
+            console.warn(
+              "wa-webhook: media columns missing (apply 059) — inserting text only",
+            );
+            const fallbackRow: Json = { ...messageRow };
+            for (const k of Object.keys(fallbackRow)) {
+              if (k.startsWith("media_")) delete fallbackRow[k];
+            }
+            ({ error: msgErr } = await db
+              .from("wa_messages")
+              .insert(fallbackRow));
+          }
+
           if (msgErr) {
             // Unique-violation on wa_message_id = another delivery beat us; fine.
             if (!String(msgErr.message).toLowerCase().includes("duplicate")) {
@@ -395,7 +593,9 @@ Deno.serve(async (req: Request) => {
             ownerId: convo.owner_id,
             conversationId: convo.id,
             title: displayName,
-            body: body ?? "Sent a photo",
+            // Same string the thread list shows. "Sent a photo" was hardcoded,
+            // so a voice note and a PDF both announced themselves as a photo.
+            body: preview,
           });
         } catch (e) {
           // Per-message isolation — one bad message never drops the batch.

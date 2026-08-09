@@ -19,8 +19,14 @@ class PickupController extends GetxController {
   /// Every row, in server order. The admin manager renders off this list.
   final RxList<PickupLocation> all = <PickupLocation>[].obs;
 
-  /// Whether the list has been fetched at least once (success OR handled error).
+  /// Whether the list has been fetched at least once successfully.
   final RxBool loadedOnce = false.obs;
+
+  /// True when the last refresh failed — [ensureLoaded] will retry.
+  final RxBool loadFailed = false.obs;
+
+  Future<void>? _refreshInFlight;
+  int _refreshGeneration = 0;
 
   SupabaseClient get _client => Supabase.instance.client;
 
@@ -45,33 +51,51 @@ class PickupController extends GetxController {
   }
 
   /// Loads the list once. Safe to call from every screen that needs it — it
-  /// no-ops after the first (successful or failed) load.
+  /// no-ops after the first successful load. Retries after a failed attempt.
   Future<void> ensureLoaded() async {
-    if (loadedOnce.value) return;
+    if (loadedOnce.value && !loadFailed.value) return;
     await refresh();
   }
 
   /// Reloads the full list from Supabase. On error the current list is left
-  /// untouched, but [loadedOnce] is still set so callers stop waiting.
+  /// untouched and [loadFailed] is set so [ensureLoaded] can retry.
   @override
   Future<void> refresh() async {
+    if (_refreshInFlight != null) return _refreshInFlight!;
+    final future = _refreshBody();
+    _refreshInFlight = future;
     try {
-      final rows =
-          await _client
-                  .from(_table)
-                  .select()
-                  .order('sort_order', ascending: true)
-                  .order('created_at', ascending: true)
-              as List;
+      await future;
+    } finally {
+      if (identical(_refreshInFlight, future)) {
+        _refreshInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _refreshBody() async {
+    final gen = ++_refreshGeneration;
+    try {
+      final rows = await _client
+          .from(_table)
+          .select(
+            'id,name,code,sort_order,is_active',
+          )
+          .order('sort_order', ascending: true)
+          .order('created_at', ascending: true) as List;
+      if (gen != _refreshGeneration) return;
       all.assignAll(
         rows.map(
           (r) => PickupLocation.fromMap(Map<String, dynamic>.from(r as Map)),
         ),
       );
-    } catch (e, st) {
-      dev.log('pickup refresh failed: $e\n$st', name: 'PickupController');
-    } finally {
       loadedOnce.value = true;
+      loadFailed.value = false;
+    } catch (e, st) {
+      if (gen != _refreshGeneration) return;
+      dev.log('pickup refresh failed: $e\n$st', name: 'PickupController');
+      loadFailed.value = true;
+      // Do NOT set loadedOnce on failure — ensureLoaded must retry.
     }
   }
 

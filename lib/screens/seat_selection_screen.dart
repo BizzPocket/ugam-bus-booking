@@ -196,18 +196,12 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
   /// What one whole berth costs on this bus, for the leg pills. Uses the
   /// cheapest cell so the pill reads as a "from" price rather than promising
   /// the dearest berth.
-  double _fromPriceFor(TripType leg) {
-    final b = _bus;
-    final layout = b?.layout;
-    if (b == null || layout == null) return 0;
-    double? min;
-    for (final c in layout.grid) {
-      if (!c.hasSeat || c.reserved) continue;
-      final p = b.berthPriceFor(c.seatType!, c.row) * Bus.tripFactor(leg);
-      if (min == null || p < min) min = p;
-    }
-    return min ?? 0;
-  }
+  ///
+  /// Delegates to [Bus.fromBerthPrice] — the same function the public tour page
+  /// quotes from, so the "from ₹X" a customer saw before opening the chart is
+  /// the one they see on the leg pills. Keeps the 0 fallback this call site
+  /// already relied on.
+  double _fromPriceFor(TripType leg) => _bus?.fromBerthPrice(leg) ?? 0;
 
   List<ChartPick> get _chartPicks {
     final layout = _bus?.layout;

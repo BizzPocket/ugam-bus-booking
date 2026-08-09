@@ -61,6 +61,11 @@ class InboxController extends GetxController {
   Future<WaReplyResult> sendReply(String conversationId, String text) =>
       _service.sendReply(conversationId: conversationId, text: text);
 
+  /// Short-lived signed URL for a stored attachment (`wa-media` is private —
+  /// migration 059). Null when the object is gone or unreadable; the bubble
+  /// shows the "couldn't be downloaded" note for both.
+  Future<String?> mediaUrl(String mediaPath) => _service.mediaUrl(mediaPath);
+
   /// Clears a thread's unread badge. The realtime update then re-emits the
   /// conversation with `unread_count = 0`, so [totalUnread] follows.
   Future<void> markRead(String conversationId) =>

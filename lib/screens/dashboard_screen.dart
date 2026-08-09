@@ -34,7 +34,7 @@ import 'tour_money_board_screen.dart';
 ///   2. Trip hero: a tour picker, then a "both, stacked" card —
 ///      route · phase / single most-urgent action / money strip /
 ///      pax · seats-left · open-trip footer.
-///   3. Quick actions (Create / Requests / Money / Charts)
+///   3. Quick actions (Create / Requests / Money / Finance)
 ///   4. "Needs attention" — tours blocked on agent action (incl. money
 ///      settlement), one accent CTA on the top item; else "All caught up".
 ///   5. Recent requests — last 5 new passengers across active tours.
@@ -83,8 +83,13 @@ class DashboardScreen extends StatelessWidget {
           // controller-side "already cached" guard keeps repeat calls (e.g.
           // when tours mutate for unrelated reasons) a cheap no-op.
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            Get.find<MoneyController>()
-                .loadSettlementSnapshots(tourCtrl.tours.map((t) => t.id));
+            // Defer settlement snapshots so they never compete with the cold-start
+            // roster/layout wave on 2G. Cached entries stay a no-op.
+            Future<void>.delayed(const Duration(milliseconds: 1200), () {
+              if (!Get.isRegistered<MoneyController>()) return;
+              Get.find<MoneyController>()
+                  .loadSettlementSnapshots(tourCtrl.tours.map((t) => t.id));
+            });
           });
 
           return RefreshIndicator(
@@ -210,13 +215,57 @@ class DashboardScreen extends StatelessWidget {
     final tourCtrl = Get.find<TourController>();
     final money = Get.find<MoneyController>();
     final relevant = tours
-        .where((t) =>
-            t.status != TourStatus.completed &&
-            t.status != TourStatus.locked)
+        .where((t) => t.status != TourStatus.completed)
         .toList()
       ..sort((a, b) => a.departureDate.compareTo(b.departureDate));
 
     for (final tour in relevant) {
+      // Locked tours: only surface post-lock duties (re-notify after seat
+      // edits, outstanding handler cash). Pre-lock blockers don't apply.
+      if (tour.status == TourStatus.locked) {
+        final changed = tour.passengers
+            .where((p) =>
+                p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified)
+            .length;
+        if (changed > 0) {
+          items.add(AttentionItem(
+            tour: tour,
+            reason: tr('dashboard.attention_renotify',
+                namedArgs: {'n': '$changed'}),
+            ctaLabel: tr('dashboard.cta_renotify'),
+            ctaIcon: Icons.chat_rounded,
+            tone: UgamStatusTone.warm,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => NotifyScreen(tourId: tour.id),
+              ),
+            ),
+          ));
+          continue;
+        }
+        final outstanding = money.outstandingHandoverFor(tour.id);
+        if (outstanding != null && outstanding > 0.005) {
+          final amount = Formatters.formatMoneyInr(outstanding);
+          final handler = tour.handler?.displayName;
+          items.add(AttentionItem(
+            tour: tour,
+            reason: handler != null && handler.isNotEmpty
+                ? tr('dashboard.settle_from_handler',
+                    namedArgs: {'amount': amount, 'handler': handler})
+                : tr('dashboard.settle_amount', namedArgs: {'amount': amount}),
+            ctaLabel: tr('dashboard.qa_money'),
+            ctaIcon: Icons.account_balance_wallet_rounded,
+            tone: UgamStatusTone.warm,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => TourMoneyBoardScreen(tourId: tour.id),
+              ),
+            ),
+          ));
+        }
+        continue;
+      }
+
       // Skip empty planning tours — no requests, no urgency
       if (tour.status == TourStatus.planning && tour.passengers.isEmpty) {
         continue;
@@ -400,17 +449,19 @@ class _MessagesCard extends StatelessWidget {
       // reports '/inbox', so a WhatsApp push arriving while the inbox was
       // open from here stacked a second identical inbox.
       onTap: () => Get.toNamed(AppRoutes.inbox),
+      tone: UgamCardTone.warm,
       child: Row(
         children: [
           Container(
             width: tile,
             height: tile,
             decoration: BoxDecoration(
-              color: c.accentFill,
+              color: c.warmFill,
               borderRadius: BorderRadius.circular(UgamRadius.chip),
+              border: Border.all(color: c.warm.withValues(alpha: 0.35)),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.forum_rounded, size: glyph, color: c.accent),
+            child: Icon(Icons.forum_rounded, size: glyph, color: c.warm),
           ),
           const SizedBox(width: UgamSpacing.md),
           Expanded(
@@ -425,28 +476,27 @@ class _MessagesCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   tr('inbox.card_unread', namedArgs: {'count': '$count'}),
-                  style: UgamText.micro.copyWith(color: c.ink3),
+                  style: UgamText.micro.copyWith(color: c.ink2),
                 ),
               ],
             ),
           ),
           Container(
-            constraints: BoxConstraints(minWidth: UgamScale.px(context, 22)),
-            height: UgamScale.px(context, 22),
+            constraints: BoxConstraints(minWidth: UgamScale.px(context, 26)),
+            height: UgamScale.px(context, 26),
             padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.sm),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              // Tonal, not a solid accent fill: this is a passive counter, and
-              // the dock's active-tab pill (app chrome, exempt) is already a
-              // solid copper on this screen. One solid accent per content area.
-              color: c.accentFill,
+              // Warm count matches the card tone — keeps champagne reserved for
+              // the top attention CTA on this screen.
+              color: c.warm,
               borderRadius: BorderRadius.circular(UgamRadius.chip),
             ),
             child: Text(
               count > 99 ? '99+' : '$count',
               style: UgamText.tabular(
                 UgamText.micro.copyWith(
-                  color: c.accent,
+                  color: Colors.white,
                   fontWeight: FontWeight.w800,
                 ),
               ),

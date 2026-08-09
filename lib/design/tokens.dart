@@ -3,10 +3,10 @@ import 'package:flutter/material.dart';
 /// Design tokens for the Ugam UI system — futuristic-simple rebuild.
 ///
 /// Single source of truth for color, radius, spacing, and motion. The brand
-/// is a single **warm copper** accent on **cool graphite** neutrals. The look
-/// is futuristic and minimal: soft surfaces that float on near-black, depth
-/// from light (a quiet copper `glow`) rather than borders. Dark is the primary
-/// mode; light is a clean mirror.
+/// is a single **cabin-lamp amber** accent on **warm charcoal** neutrals. The
+/// look is futuristic and minimal: soft surfaces that float on near-black,
+/// depth from light (a quiet amber `glow`) rather than borders. Dark is the
+/// primary mode; light is a clean mirror.
 ///
 /// Density: this is an operational tool — an agent scans status across many
 /// tours and acts fast, so the app is tuned for a **glanceable cockpit**, not a
@@ -30,7 +30,7 @@ class Brand {
   const Brand._();
 
   /// Cabin-lamp amber (dark mode). Bright enough to carry near-black
-  /// [UgamColorSet.onAccent] text on the indigo ground.
+  /// [UgamColorSet.onAccent] text on the warm charcoal ground.
   static const Color amber = Color(0xFFFFC24B);
 
   /// Deeper amber — the accent in light mode, where the bright cut would fail
@@ -41,22 +41,31 @@ class Brand {
 class UgamColors {
   const UgamColors._();
 
-  /// **Midnight** — the dark ground. Indigo is the coach window at night;
-  /// amber is the cabin lamp. Readable at 2am without the glare a white chart
-  /// throws.
+  /// **Midnight** — the dark ground: a WARM charcoal, not a blue one.
+  ///
+  /// The ground is brown-black (the coach cabin's dark), so the cabin-lamp
+  /// [Brand.amber] reads as the same family rather than an alien hue dropped on
+  /// navy. Every neutral below sits on the same warm axis; the semantic colours
+  /// (mint/rose/red) stay as they were, because they must NOT blend in.
+  ///
+  /// HISTORY: this was a deep indigo `#0C111F` (2026-08-01, seeded from the
+  /// Ola/Uber tokens). Rejected on device — the blue ground competed with the
+  /// amber, so the accent stopped reading as "this is yours". Re-grounded warm
+  /// against Rapido. The luminance ladder was matched to the old one on
+  /// purpose, so every existing ink/ground contrast ratio carries over.
   static const UgamColorSet dark = UgamColorSet(
-    bg: Color(0xFF0C111F), // Deep indigo ground — never pure black
-    card: Color(0xFF141A2B), // Floating surface
-    cardElev: Color(0xFF1F2740), // Elevated surface
+    bg: Color(0xFF12100E), // Warm charcoal ground — never pure black
+    card: Color(0xFF1C1917), // Floating surface
+    cardElev: Color(0xFF272220), // Elevated surface
     border: Color(0x1AFFFFFF), // White @ 10% — hairline, not shadow
-    ink: Color(0xFFEDF1FA), // Near-white with a cool cast
-    ink2: Color(0xFF959EBA), // Secondary
-    ink3: Color(0xFF5C6584), // Tertiary / meta
+    ink: Color(0xFFF7F3EE), // Near-white with a warm cast
+    ink2: Color(0xFFA19A93), // Secondary — 7.2:1 on bg
+    ink3: Color(0xFF6E655E), // Tertiary / meta — 3.5:1 on bg
     accent: Brand.amber, // "Yours" — the berth you picked. Nothing else.
     accentFill: Color(0x24FFC24B), // ~14% amber, tonal surfaces
     glow: Color(0x4DFFC24B), // ~30% amber — soft halos
-    action: Color(0xFFEDF1FA), // The button: max contrast, no brand hue
-    onAction: Color(0xFF0C111F), // Ground-coloured ink on the button
+    action: Color(0xFFF7F3EE), // The button: max contrast, no brand hue
+    onAction: Color(0xFF12100E), // Ground-coloured ink on the button
     good: Color(0xFF4ADE9A), // Mint — money received
     goodFill: Color(0x224ADE9A),
     warm: Color(0xFFF58BB8), // Rose — a lady is seated here

@@ -70,7 +70,8 @@ class _ScriptedSync extends SyncService {
   void onInit() {}
 
   @override
-  Future<({List<Map<String, dynamic>> rows, bool failed})> smartFetch({
+  Future<({List<Map<String, dynamic>> rows, bool failed, String? error})>
+  smartFetch({
     required String table,
     required String cacheKey,
     String? select,
@@ -78,7 +79,11 @@ class _ScriptedSync extends SyncService {
     String? orderBy,
     int maxAge = 300000,
   }) async {
-    return (rows: _rowsByCacheKey[cacheKey] ?? const [], failed: false);
+    return (
+      rows: _rowsByCacheKey[cacheKey] ?? const [],
+      failed: false,
+      error: null,
+    );
   }
 
   @override

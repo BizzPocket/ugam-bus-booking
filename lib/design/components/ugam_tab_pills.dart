@@ -4,9 +4,11 @@ import 'package:flutter/services.dart';
 import '../text_styles.dart';
 import '../tokens.dart';
 
-/// Segmented pill tabs. Up to 3 segments for visual balance. Active
-/// segment fills with surface card; inactive segments stay transparent
-/// on the cardElev container.
+/// Segmented pill tabs. Supports 2–5 segments. Active segment fills with
+/// surface card; inactive segments stay transparent on the cardElev container.
+///
+/// With 5 segments the row scrolls horizontally so Gujarati labels stay
+/// readable instead of being crushed by equal [Expanded] flex.
 class UgamTabPills extends StatelessWidget {
   final List<UgamTabItem> items;
   final int currentIndex;
@@ -17,32 +19,38 @@ class UgamTabPills extends StatelessWidget {
     required this.items,
     required this.currentIndex,
     required this.onChanged,
-  }) : assert(items.length >= 2 && items.length <= 4);
+  }) : assert(items.length >= 2 && items.length <= 5);
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final scrollable = items.length >= 5;
+    final segments = List.generate(items.length, (i) {
+      final active = i == currentIndex;
+      final segment = _TabSegment(
+        item: items[i],
+        active: active,
+        scrollable: scrollable,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onChanged(i);
+        },
+      );
+      return scrollable ? segment : Expanded(child: segment);
+    });
+
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.input),
       ),
-      child: Row(
-        children: List.generate(items.length, (i) {
-          final active = i == currentIndex;
-          return Expanded(
-            child: _TabSegment(
-              item: items[i],
-              active: active,
-              onTap: () {
-                HapticFeedback.selectionClick();
-                onChanged(i);
-              },
-            ),
-          );
-        }),
-      ),
+      child: scrollable
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: segments),
+            )
+          : Row(children: segments),
     );
   }
 }
@@ -58,17 +66,29 @@ class UgamTabItem {
 class _TabSegment extends StatelessWidget {
   final UgamTabItem item;
   final bool active;
+  final bool scrollable;
   final VoidCallback onTap;
 
   const _TabSegment({
     required this.item,
     required this.active,
     required this.onTap,
+    this.scrollable = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final label = Text(
+      item.label,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.ellipsis,
+      style: UgamText.bodyStrong.copyWith(
+        color: active ? c.ink : c.ink2,
+        fontSize: 12,
+      ),
+    );
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -81,7 +101,10 @@ class _TabSegment extends StatelessWidget {
           child: AnimatedContainer(
             duration: UgamMotion.tab,
             curve: UgamMotion.easeOut,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: EdgeInsets.symmetric(
+              vertical: 8,
+              horizontal: scrollable ? 12 : 0,
+            ),
             decoration: BoxDecoration(
               color: active ? c.card : Colors.transparent,
               borderRadius: BorderRadius.circular(11),
@@ -97,23 +120,13 @@ class _TabSegment extends StatelessWidget {
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: scrollable ? MainAxisSize.min : MainAxisSize.max,
               children: [
                 if (item.icon != null) ...[
                   Icon(item.icon, size: 14, color: active ? c.ink : c.ink2),
                   const SizedBox(width: 5),
                 ],
-                Flexible(
-                  child: Text(
-                    item.label,
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.ellipsis,
-                    style: UgamText.bodyStrong.copyWith(
-                      color: active ? c.ink : c.ink2,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
+                if (scrollable) label else Flexible(child: label),
                 if (item.count != null) ...[
                   const SizedBox(width: 5),
                   Text(

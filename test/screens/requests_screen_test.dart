@@ -10,6 +10,7 @@ import 'package:occubusbooking/models/passenger.dart';
 import 'package:occubusbooking/models/passenger_group.dart';
 import 'package:occubusbooking/models/priority_status.dart';
 import 'package:occubusbooking/models/request_line.dart';
+import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
@@ -44,6 +45,8 @@ Passenger _newPassenger(
   String? pickupLocationName,
   PriorityStatus priority = PriorityStatus.none,
   TripType tripType = TripType.roundTrip,
+  bool confirmed = false,
+  List<SeatAssignment> seats = const [],
 }) =>
     Passenger(
       id: id,
@@ -56,6 +59,8 @@ Passenger _newPassenger(
       pickupLocationName: pickupLocationName,
       priorityStatus: priority,
       tripType: tripType,
+      isConfirmed: confirmed,
+      assignedSeats: seats,
     );
 
 Tour _tour({
@@ -115,7 +120,7 @@ void main() {
     // Seat summary is plural-free "2 · <type>" — assert on the count prefix.
     expect(find.textContaining('2 ·'), findsOneWidget);
     // Collapsed → the per-card primary action is NOT built yet.
-    expect(find.text('requests.action.confirm'), findsNothing);
+    expect(find.text('requests.action.accept'), findsNothing);
   });
 
   testWidgets('tapping a row expands it to reveal note + primary action',
@@ -127,15 +132,17 @@ void main() {
       ]),
     );
 
-    expect(find.text('requests.action.confirm'), findsNothing);
+    expect(find.text('requests.action.accept'), findsNothing);
     expect(find.textContaining('qa-note-xyz'), findsNothing);
 
     await tester.tap(find.text('Anjali QA'));
     await tester.pumpAndSettle();
 
-    // Expanded → note box + New-state primary action are now in the tree.
+    // Expanded → note box + New-state Accept primary AND labeled Assign seats
+    // (elevated from icon-only) are now in the tree.
     expect(find.textContaining('qa-note-xyz'), findsOneWidget);
-    expect(find.text('requests.action.confirm'), findsOneWidget);
+    expect(find.text('requests.action.accept'), findsOneWidget);
+    expect(find.text('requests.action.assign_seats'), findsOneWidget);
   });
 
   testWidgets('only one row is expanded at a time', (tester) async {
@@ -197,7 +204,40 @@ void main() {
     expect(iconInRow(Icons.arrow_forward_rounded),
         findsOneWidget); // outbound one-way
     // Not yet expanded → the action row is not built.
-    expect(find.text('requests.action.confirm'), findsNothing);
+    expect(find.text('requests.action.accept'), findsNothing);
+  });
+
+  testWidgets('confirmed tab lists partially assigned riders before unseated',
+      (tester) async {
+    await _pumpScreen(
+      tester,
+      _tour(passengers: [
+        _newPassenger(
+          'p-full',
+          name: 'Unseated QA',
+          confirmed: true,
+          lines: [RequestLine(seatType: SeatType.seater, qty: 2)],
+        ),
+        _newPassenger(
+          'p-part',
+          name: 'Partial QA',
+          confirmed: true,
+          lines: [RequestLine(seatType: SeatType.seater, qty: 2)],
+          seats: [
+            SeatAssignment(busId: 'b1', seatId: 'S1'),
+          ],
+        ),
+      ]),
+    );
+
+    // Switch to Confirmed tab (index 2 in New / Wait / Confirm / Assigned).
+    await tester.tap(find.text('requests.filter.confirmed'));
+    await tester.pumpAndSettle();
+
+    // Both on Confirmed; Partial must appear above Unseated.
+    final partialY = tester.getTopLeft(find.text('Partial QA')).dy;
+    final unseatedY = tester.getTopLeft(find.text('Unseated QA')).dy;
+    expect(partialY < unseatedY, isTrue);
   });
 
   testWidgets('rows are swipeable normally, not in selection mode',

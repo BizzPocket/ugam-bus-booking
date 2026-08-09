@@ -3,7 +3,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/services/sync_retry_policy.dart';
-import 'package:occubusbooking/services/sync_service.dart' show RpcUnavailableException;
+import 'package:occubusbooking/services/sync_service.dart'
+    show RpcUnavailableException, SyncService;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
@@ -130,6 +131,65 @@ void main() {
               const SocketException('Connection reset by peer')),
           isFalse);
       expect(isPreSendConnectionError(TimeoutException('slow')), isFalse);
+    });
+  });
+
+  // Deploy-order safety for migration 054. The archive filter must switch
+  // itself off — and ONLY off — when the server says `deleted_at` is missing.
+  // Getting the classifier too broad silently disables archive filtering for
+  // the whole session; too narrow and every read 400s on a healthy network.
+  group('soft-delete deploy probe', () {
+    setUp(SyncService.resetSoftDeleteProbe);
+    tearDown(SyncService.resetSoftDeleteProbe);
+
+    PostgrestException pg(String message, {String? code}) =>
+        PostgrestException(message: message, code: code);
+
+    test('recognises the missing deleted_at column (by SQLSTATE)', () {
+      expect(
+        SyncService.isMissingDeletedAtError(
+            pg('column tours.deleted_at does not exist', code: '42703')),
+        isTrue,
+      );
+    });
+
+    test('recognises it by message alone when no SQLSTATE is supplied', () {
+      expect(
+        SyncService.isMissingDeletedAtError(
+            pg('column collections.deleted_at does not exist')),
+        isTrue,
+      );
+    });
+
+    test('an UNRELATED missing column must NOT disarm the filter', () {
+      // The dangerous false positive: one unrelated schema gap would otherwise
+      // switch archive filtering off everywhere for the rest of the session.
+      expect(
+        SyncService.isMissingDeletedAtError(
+            pg('column buses.pickup_code does not exist', code: '42703')),
+        isFalse,
+      );
+    });
+
+    test('an RLS refusal must NOT disarm the filter', () {
+      expect(
+        SyncService.isMissingDeletedAtError(
+            pg('permission denied for table collections', code: '42501')),
+        isFalse,
+      );
+    });
+
+    test('non-Postgrest errors are never a schema signal', () {
+      expect(SyncService.isMissingDeletedAtError(TimeoutException('slow')),
+          isFalse);
+      expect(
+          SyncService.isMissingDeletedAtError(
+              const SocketException('Failed host lookup: api')),
+          isFalse);
+    });
+
+    test('the filter is armed by default', () {
+      expect(SyncService.softDeleteFilterActive, isTrue);
     });
   });
 }

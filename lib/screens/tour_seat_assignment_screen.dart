@@ -160,6 +160,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     if (Get.isRegistered<PickupController>()) {
       Get.find<PickupController>().ensureLoaded();
     }
+    // Cold start omits bus layout jsonb — pull it before the agent seats anyone.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ctrl.ensureTourReadyForSeating(widget.tourId);
+    });
   }
 
   TourController get _ctrl => Get.find<TourController>();

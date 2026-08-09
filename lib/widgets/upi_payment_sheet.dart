@@ -26,6 +26,22 @@ Future<bool> launchUpiApp(UpiRequest request) async {
   }
 }
 
+/// What the payer told us after scanning: that they paid, and optionally the
+/// reference their own UPI app showed them.
+///
+/// This is an ASSERTION, never proof. A direct UPI deep-link to the organiser's
+/// VPA is zero-MDR precisely because no gateway sits in the middle, so nothing
+/// calls the app back to confirm the transfer. The agent verifies it against
+/// their bank statement before it becomes money — see `confirm_payment_claim`
+/// in migration 060.
+class UpiClaimResult {
+  /// The reference / UTR the payer copied from their UPI app. May be blank —
+  /// it is a lookup aid for the agent, not a requirement.
+  final String? reference;
+
+  const UpiClaimResult({this.reference});
+}
+
 /// Show a UPI payment as a scannable QR + a one-tap open-my-UPI-app action.
 ///
 /// Two callers, same sheet:
@@ -34,28 +50,60 @@ Future<bool> launchUpiApp(UpiRequest request) async {
 ///     MDR by law, so there is no gateway cut on this path.
 ///   • PAY OUT — the organiser settling bus rent, fuel or tolls. They tap
 ///     "Open UPI app" and their own app opens with the vendor and amount filled.
-Future<void> showUpiPaymentSheet(
+///
+/// Set [askConfirmation] for the COLLECT case to add an "I've paid" step. It
+/// resolves to a [UpiClaimResult] when the payer says they paid, or null when
+/// they simply close the sheet. Without it the money is invisible to the app:
+/// the handler prices from the fare alone and collects the advance a second
+/// time. The PAY OUT caller leaves it off — nobody needs to claim their own
+/// outgoing payment.
+Future<UpiClaimResult?> showUpiPaymentSheet(
   BuildContext context, {
   required UpiRequest request,
   required String title,
   String? subtitle,
+  bool askConfirmation = false,
 }) {
-  return UgamSheet.show<void>(
+  return UgamSheet.show<UpiClaimResult>(
     context,
     title: title,
-    builder: (_) => _UpiPaymentSheet(request: request, subtitle: subtitle),
+    builder: (_) => _UpiPaymentSheet(
+      request: request,
+      subtitle: subtitle,
+      askConfirmation: askConfirmation,
+    ),
   );
 }
 
-class _UpiPaymentSheet extends StatelessWidget {
+class _UpiPaymentSheet extends StatefulWidget {
   final UpiRequest request;
   final String? subtitle;
+  final bool askConfirmation;
 
-  const _UpiPaymentSheet({required this.request, this.subtitle});
+  const _UpiPaymentSheet({
+    required this.request,
+    this.subtitle,
+    this.askConfirmation = false,
+  });
+
+  @override
+  State<_UpiPaymentSheet> createState() => _UpiPaymentSheetState();
+}
+
+class _UpiPaymentSheetState extends State<_UpiPaymentSheet> {
+  final _ref = TextEditingController();
+
+  @override
+  void dispose() {
+    _ref.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final request = widget.request;
+    final subtitle = widget.subtitle;
 
     if (!request.isValid) {
       return Padding(
@@ -100,10 +148,10 @@ class _UpiPaymentSheet extends StatelessWidget {
             textAlign: TextAlign.center,
             style: UgamText.bodyStrong.copyWith(color: c.ink2),
           ),
-          if (subtitle != null && subtitle!.isNotEmpty) ...[
+          if (subtitle != null && subtitle.isNotEmpty) ...[
             const SizedBox(height: 2),
             Text(
-              subtitle!,
+              subtitle,
               textAlign: TextAlign.center,
               style: UgamText.caption.copyWith(color: c.ink3),
             ),
@@ -162,6 +210,45 @@ class _UpiPaymentSheet extends StatelessWidget {
               if (!opened) AppSnackBar.error(tr('upi.err_no_app'));
             },
           ),
+
+          // ── "I've paid" ────────────────────────────────────
+          // Nothing calls this app back when the transfer lands, so the payer
+          // telling us is the only signal there is. Recording it — even
+          // unverified — is what stops the handler charging the advance a
+          // second time on the bus.
+          if (widget.askConfirmation) ...[
+            const SizedBox(height: UgamSpacing.lg),
+            Divider(height: 1, color: c.border),
+            const SizedBox(height: UgamSpacing.md),
+            Text(
+              tr('upi.claim_hint'),
+              style: UgamText.caption.copyWith(color: c.ink3),
+            ),
+            const SizedBox(height: UgamSpacing.sm),
+            TextField(
+              controller: _ref,
+              textCapitalization: TextCapitalization.characters,
+              textInputAction: TextInputAction.done,
+              style: UgamText.body.copyWith(color: c.ink),
+              decoration: InputDecoration(
+                labelText: tr('upi.claim_ref_label'),
+                hintText: tr('upi.claim_ref_hint'),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: UgamSpacing.md),
+            UgamButton(
+              label: tr('upi.claim_done'),
+              icon: Icons.check_circle_outline,
+              expand: true,
+              onPressed: () {
+                final ref = _ref.text.trim();
+                Navigator.of(context).pop(
+                  UpiClaimResult(reference: ref.isEmpty ? null : ref),
+                );
+              },
+            ),
+          ],
         ],
       ),
     );

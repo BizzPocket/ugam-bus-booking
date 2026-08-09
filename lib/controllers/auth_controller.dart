@@ -133,15 +133,18 @@ class AuthController extends GetxController {
             Get.find<UserController>().ensureLoadedForCurrentAdmin();
           }
           if (Get.isRegistered<CustomerMemoryController>()) {
-            // ignore: unawaited_futures
-            Get.find<CustomerMemoryController>().load();
+            // Same deferral as CustomerMemoryController.onInit — don't race
+            // the tour cold-start wave on cellular.
+            Future<void>.delayed(const Duration(milliseconds: 2200), () {
+              if (!Get.isRegistered<CustomerMemoryController>()) return;
+              Get.find<CustomerMemoryController>().load();
+            });
           }
-          // COLD START: TourController.onInit already fired _loadTours() before
-          // the persisted session was restored, so that first fetch ran with no
-          // admin context (and often before the Supabase token was ready) and
-          // could error — leaving the agent on the "Retry" screen. Now that the
-          // admin session is confirmed, re-fetch with the right owner scope.
-          // This is exactly what tapping Retry did, just automatic.
+          // COLD START: TourController is lazyPut, so it usually is not
+          // registered yet — [_reloadToursWhenReady] waits for the home shell
+          // to mount it, then re-fetches with the confirmed admin owner scope.
+          // (TourController also awaits [whenRestored] before its own first
+          // load; this path covers login/role flips and a missed first paint.)
           _reloadTours();
         }
       } catch (_) {
@@ -166,10 +169,23 @@ class AuthController extends GetxController {
   /// tours; customers/anon see all public tours. The tour controller is a
   /// fenix singleton whose `onInit` won't re-run on navigation, so an explicit
   /// refresh is required when the role flips (login / logout).
+  ///
+  /// On cold start [TourController] is still `lazyPut`-unregistered while
+  /// session restore finishes — a plain `isRegistered` check was a silent
+  /// no-op, so the re-fetch documented above never ran. Wait briefly for the
+  /// home shell to mount the controller, then refresh.
   void _reloadTours() {
-    if (Get.isRegistered<TourController>()) {
-      // ignore: unawaited_futures
-      Get.find<TourController>().refreshTours();
+    // ignore: unawaited_futures
+    _reloadToursWhenReady();
+  }
+
+  Future<void> _reloadToursWhenReady() async {
+    for (var i = 0; i < 40; i++) {
+      if (Get.isRegistered<TourController>()) {
+        await Get.find<TourController>().refreshTours();
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
   }
 

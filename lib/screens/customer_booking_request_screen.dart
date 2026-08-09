@@ -8,7 +8,6 @@ import 'package:uuid/uuid.dart';
 import '../controllers/tour_controller.dart';
 import '../controllers/user_controller.dart';
 import '../design/ugam.dart';
-import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../routes/app_routes.dart';
 import '../services/customer_requests_store.dart';
@@ -179,21 +178,45 @@ class _CustomerBookingRequestScreenState
           hasOrganiser: hasOrganiser,
         );
       } else {
+        // Arm the anti-spam cooldown BEFORE the write, not after a successful
+        // one. Stamping it only on success meant a failing submit left the
+        // cooldown unarmed, so an anxious customer could re-tap immediately and
+        // repeat the failure as fast as they could press — which is exactly how
+        // one bad submit turned into three identical organiser notifications.
+        await _markSubmitted();
         await _submitCreate(
           data: data,
           adminPhone: adminPhone,
           hasOrganiser: hasOrganiser,
         );
-        await _markSubmitted();
       }
     } catch (e, st) {
-      // Surface the real cause in logs so a failing submit can be diagnosed
-      // (the customer still sees the friendly message).
+      // Surface the real cause in logs so a failing submit can be diagnosed.
       debugPrint('customer booking submit failed — $e\n$st');
-      AppSnackBar.error(tr('customer_booking.err_save_failed'));
+      AppSnackBar.error(_submitErrorMessage(e));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Turns a submit failure into something the customer can act on.
+  ///
+  /// The gates inside `submit_booking_request` raise `check_violation` with a
+  /// specific reason (tour not public / bookings closed / pickup missing).
+  /// Collapsing all of those into "try again" told the customer to repeat a
+  /// submission that could never succeed, so each reason gets its own line and
+  /// only genuine transport failures keep the retry wording.
+  String _submitErrorMessage(Object e) {
+    if (e is PostgrestException && e.code == '23514') {
+      final reason = e.message.toLowerCase();
+      if (reason.contains('pickup')) {
+        return tr('customer_booking.err_pickup_required');
+      }
+      if (reason.contains('closed') || reason.contains('not open')) {
+        return tr('customer_booking.err_bookings_closed');
+      }
+    }
+    return tr('customer_booking.err_save_failed');
   }
 
   static const _kLastRequestMsKey = 'last_request_ms';
@@ -241,6 +264,36 @@ class _CustomerBookingRequestScreenState
     );
   }
 
+  /// PostgREST's "function not found in the schema cache" code. It does NOT
+  /// only mean "migration 014 was never applied" — PostgREST also answers this
+  /// for a few seconds after ANY DDL, while it rebuilds its schema cache. A
+  /// customer who taps Submit inside that window used to be dropped onto the
+  /// (broken) legacy fallback; now we simply wait for the cache and re-issue.
+  static const _kSchemaCacheMiss = 'PGRST202';
+
+  /// Calls `submit_booking_request`, retrying ONCE on a schema-cache miss.
+  ///
+  /// Safe to retry: the RPC is keyed by the client-generated `p_request_id`
+  /// (booking_requests PK), so a retry after a genuine miss cannot duplicate —
+  /// and a miss means PostgREST never reached Postgres, so nothing was written.
+  Future<void> _callSubmitRpc({
+    required Map<String, dynamic> params,
+  }) async {
+    try {
+      await Supabase.instance.client.rpc(
+        'submit_booking_request',
+        params: params,
+      );
+    } on PostgrestException catch (e) {
+      if (e.code != _kSchemaCacheMiss) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      await Supabase.instance.client.rpc(
+        'submit_booking_request',
+        params: params,
+      );
+    }
+  }
+
   Future<void> _submitCreate({
     required BookingCaptureData data,
     required String? adminPhone,
@@ -259,59 +312,37 @@ class _CustomerBookingRequestScreenState
       if (note.isNotEmpty) 'note': note,
     };
 
-    try {
-      // Atomic create via a SECURITY DEFINER RPC: inserts a fresh passenger
-      // AND its booking_requests audit row in ONE transaction, linking them by
-      // passenger_id. Every submission creates its own pair, so one phone can
-      // hold multiple distinct requests on the same tour (migration 030). Runs
-      // as the function owner, so the insert isn't blocked by anon RLS.
-      await Supabase.instance.client.rpc(
-        'submit_booking_request',
-        params: {
-          'p_request_id': requestId,
-          'p_tour_id': widget.tour.id,
-          'p_phone': normalisedPhone,
-          'p_name': name,
-          'p_party_size': data.totalSeats,
-          'p_trip_type': data.tripType.storageKey,
-          'p_raw_form': rawForm,
-          'p_request_lines': requestLines.map((l) => l.toMap()).toList(),
-          'p_note': note.isEmpty ? null : note,
-          'p_pickup_location_id': data.pickupLocationId,
-          'p_pickup_location_name': data.pickupLocationName,
-        },
-      );
-    } on PostgrestException catch (e) {
-      // RPC not deployed yet (migration 014). Fall back to the legacy two
-      // writes so first-time bookings still go through.
-      if (e.code != 'PGRST202') rethrow;
-      await Supabase.instance.client.from('booking_requests').insert({
-        'id': requestId,
-        'tour_id': widget.tour.id,
-        'customer_phone': normalisedPhone,
-        'customer_name': name,
-        'party_size': data.totalSeats,
-        'trip_type': data.tripType.storageKey,
-        'raw_form': rawForm,
-        'pickup_location_id': data.pickupLocationId,
-        'pickup_location_name': data.pickupLocationName,
-      });
-      final passenger = Passenger(
-        tourId: widget.tour.id,
-        name: name,
-        phone: normalisedPhone,
-        requestLines: requestLines,
-        note: note.isEmpty ? null : note,
-        tripType: data.tripType,
-        pickupLocationId: data.pickupLocationId,
-        pickupLocationName: data.pickupLocationName,
-      );
-      // Plain insert — a phone may now hold multiple distinct requests on one
-      // tour, so we never collapse onto an existing (tour_id, phone) row.
-      await Supabase.instance.client
-          .from('passengers')
-          .insert(passenger.toMap());
-    }
+    // Atomic create via a SECURITY DEFINER RPC: inserts a fresh passenger AND
+    // its booking_requests audit row in ONE transaction, linking them by
+    // passenger_id. Every submission creates its own pair, so one phone can
+    // hold multiple distinct requests on the same tour (migration 030). Runs as
+    // the function owner, so the insert isn't blocked by anon RLS.
+    //
+    // There is DELIBERATELY no non-RPC fallback. The legacy one (two loose
+    // writes) could not succeed as anon and silently corrupted the roster:
+    // anon RLS ACCEPTS a booking_requests insert unconditionally but REFUSES
+    // the passengers insert, so the fallback always landed a booking_requests
+    // row — whose AFTER INSERT trigger pushed "New booking request" to the
+    // organiser — and then threw on the passenger. The admin app only ever
+    // reads passengers (sync_service.dart), so the organiser got a notification
+    // for a request that existed nowhere, while the customer was told the save
+    // had failed and re-tapped, minting one more orphan + push per tap.
+    // If the RPC is unreachable we now write NOTHING and fail honestly.
+    await _callSubmitRpc(
+      params: {
+        'p_request_id': requestId,
+        'p_tour_id': widget.tour.id,
+        'p_phone': normalisedPhone,
+        'p_name': name,
+        'p_party_size': data.totalSeats,
+        'p_trip_type': data.tripType.storageKey,
+        'p_raw_form': rawForm,
+        'p_request_lines': requestLines.map((l) => l.toMap()).toList(),
+        'p_note': note.isEmpty ? null : note,
+        'p_pickup_location_id': data.pickupLocationId,
+        'p_pickup_location_name': data.pickupLocationName,
+      },
+    );
 
     await CustomerRequestsStore().upsert(
       CustomerRequestEntry(

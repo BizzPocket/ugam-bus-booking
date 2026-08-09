@@ -91,6 +91,17 @@ class _SeatsScreenState extends State<SeatsScreen> {
   bool get _onGrid => _mode == SeatsMode.grid.index;
 
   @override
+  void initState() {
+    super.initState();
+    // Cold start omits layout jsonb — pull roster+layouts before summary meters
+    // / fill / grid need them. Coalesced with other seating entry points.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _ctrl.ensureTourReadyForSeating(widget.tourId);
+    });
+  }
+
+  @override
   void dispose() {
     _clearAction.dispose();
     super.dispose();
