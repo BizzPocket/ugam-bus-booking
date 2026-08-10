@@ -22,6 +22,7 @@ import 'firebase_options.dart';
 import 'services/error_reporter.dart';
 import 'services/push_service.dart';
 import 'services/remote_translation_loader.dart';
+import 'services/timeout_http_client.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -123,6 +124,11 @@ class _BootstrapState extends State<_Bootstrap> {
       Supabase.initialize(
         url: SupabaseConfig.url,
         anonKey: SupabaseConfig.anonKey,
+        // Without this every PostgREST read, RPC and storage call awaits a
+        // socket with no deadline. On a 2G link that is not "slow" — it is a
+        // spinner that never resolves, invisible to the error reporter because
+        // a hang is the absence of an exception rather than one.
+        httpClient: TimeoutHttpClient(),
       ),
       Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform),
     ]);

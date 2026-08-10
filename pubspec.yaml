@@ -47,6 +47,10 @@ dependencies:
 
   # Supabase backend
   supabase_flutter: ^2.8.0
+  # Already present transitively via supabase_flutter; declared directly so we
+  # can hand Supabase.initialize a timeout-wrapping BaseClient. Pure Dart — no
+  # native code, so it adds nothing to the build.
+  http: ^1.6.0
   # Secure storage for Supabase session refresh tokens
   flutter_secure_storage: ^9.2.2
   # On-device biometric unlock (fingerprint / Face ID) for admin quick sign-in.

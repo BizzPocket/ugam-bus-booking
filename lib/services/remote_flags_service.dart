@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_info.dart';
 import '../config/remote_flags_config.dart';
+import 'timeout_http_client.dart';
 
 /// What the launch gate has decided for this session.
 enum LaunchDecision {
@@ -173,10 +174,23 @@ class RemoteFlagsService extends GetxService {
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, dynamic>) {
         flags.value = RemoteFlags.fromJson(decoded);
+        _applyTunables();
       }
     } catch (e) {
       debugPrint('[flags] cache ignored: $e');
     }
+  }
+
+  /// Pushes tunables into the subsystems that own them.
+  ///
+  /// Applied from the CACHE too, not just a fresh fetch — the cached value is
+  /// the one in force during the cold start where a stuck request hurts most,
+  /// and waiting for the network to learn how long to wait for the network is
+  /// the wrong way round.
+  void _applyTunables() {
+    TimeoutHttpClient.applyRemoteTimeout(
+      flags.value.tunables['http_timeout_seconds'],
+    );
   }
 
   /// [force] skips the [minFetchInterval] throttle. Cold start forces; a
@@ -220,6 +234,7 @@ class RemoteFlagsService extends GetxService {
       if (decoded is! Map<String, dynamic>) return;
 
       flags.value = RemoteFlags.fromJson(decoded);
+      _applyTunables();
       await prefs.setString(_cacheKey, body);
       if (result.etag != null && result.etag!.isNotEmpty) {
         await prefs.setString(_etagKey, result.etag!);
