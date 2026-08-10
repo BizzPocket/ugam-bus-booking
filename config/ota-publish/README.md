@@ -11,6 +11,7 @@ Endpoints are compiled into the app from `config/ota.json`.
 | Local file | Bucket | Object |
 | --- | --- | --- |
 | `flags.json` | `app-config` | `flags.json` |
+| `content.json` | `app-config` | `content.json` |
 | `i18n/<lang>.json` | `i18n` | `<lang>.json` |
 
 Upload via the Supabase dashboard (Storage → bucket → Upload, overwrite) or
@@ -53,6 +54,75 @@ Changes land on the **next foreground**, bounded by a 15-minute client-side
 throttle and served with an ETag so an unchanged document transfers no body. A
 cold start always checks. Nothing on the boot path waits for it — an
 unreachable bucket means the app runs on its cached or compiled-in defaults.
+
+---
+
+## content.json — server-driven content, deliberately narrow
+
+Drives the content slot at the top of the customer tour list. Notices, promos,
+a link to something. **It is not a UI language.** The seat chart, every money
+surface and the whole handler flow are native code and stay that way, because
+they encode correctness a JSON document cannot express and no test can cover.
+
+The server picks which of three compiled-in block types to show and what text
+goes in it. It cannot introduce a widget, a layout or an interaction.
+
+```json
+{
+  "blocks": [
+    {
+      "type": "notice",
+      "tone": "info",
+      "title": "Monsoon timings",
+      "body": "Departures move 30 minutes later from 1 July."
+    },
+    {
+      "type": "banner",
+      "image_url": "https://example.com/promo.png",
+      "title": "Diwali specials",
+      "body": "Six routes, booking open now."
+    },
+    {
+      "type": "link",
+      "title": "My bookings",
+      "action": "route",
+      "action_target": "my_bookings"
+    }
+  ]
+}
+```
+
+| Type | Renders |
+| --- | --- |
+| `notice` | Text with a coloured left rule. `tone`: `neutral`, `info`, `warn` |
+| `banner` | 16:9 image with optional title and body |
+| `link` | A row with a chevron |
+
+| Action | Meaning |
+| --- | --- |
+| *(omitted)* | Inert |
+| `url` | Opens an external **https** URL. `http`, app schemes and `javascript:` are refused at parse time |
+| `route` | One of a **whitelist** — currently `my_bookings`, `home`. The name is remote; the destination is compiled in |
+
+Rules worth knowing, all enforced by the parser and covered by tests:
+
+- **Unknown block types are skipped, not errors.** An older build ignores a
+  block it was never taught, so you can publish for the newest build without
+  breaking older ones.
+- **One malformed block does not cost the others.** The rest of the document
+  still renders.
+- **A block with no title, body or image is dropped** — no empty rows.
+- **`{"blocks": []}` is the off switch**, and it reaches every installed
+  client.
+- Nothing here blocks first paint. No content, no cache, or an unreachable
+  bucket all render the screen exactly as it was before the feature existed.
+
+### Why the whitelist matters
+
+Without it, a content document could route a user into any screen in the app —
+that is a remote navigation primitive, not content. To add a destination, add
+it to `_allowedRoutes` in `lib/components/content_block_view.dart` and ship a
+build. That friction is the point.
 
 ---
 

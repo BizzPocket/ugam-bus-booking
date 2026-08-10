@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../components/content_block_view.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
@@ -209,8 +210,14 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                       UgamSpacing.gutter,
                       UgamSpacing.dockClearance,
                     ),
-                    itemCount: groups.length,
-                    itemBuilder: (_, i) {
+                    // +1 for the server-driven content slot at the top. It
+                    // renders zero-height when there is nothing to show, which
+                    // is the normal state, so the list looks untouched unless
+                    // content has actually been published.
+                    itemCount: groups.length + 1,
+                    itemBuilder: (_, index) {
+                      if (index == 0) return const ContentSlot();
+                      final i = index - 1;
                       final g = groups[i];
                       if (g.tours.isEmpty) return const SizedBox.shrink();
                       return Padding(

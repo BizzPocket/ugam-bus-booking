@@ -19,6 +19,7 @@ import 'controllers/customer_memory_controller.dart';
 import 'screens/launch_block_overlay.dart';
 import 'screens/main_shell.dart';
 import 'services/realtime_service.dart';
+import 'services/remote_content_service.dart';
 import 'services/remote_flags_service.dart';
 import 'services/sync_service.dart';
 import 'services/user_service.dart';
@@ -117,6 +118,12 @@ class AppBinding extends Bindings {
     // network round trip. Deliberately NOT reusing SyncService — its cellular
     // read gate would queue this behind the tour load with a 28s timeout.
     Get.put<RemoteFlagsService>(RemoteFlagsService(), permanent: true)
+        .warm()
+        .ignore();
+    // Server-driven content for the customer surface's content slot. Same
+    // fire-and-forget discipline: it reads its cache immediately and refreshes
+    // behind the app. Dormant unless REMOTE_CONTENT_URL is compiled in.
+    Get.put<RemoteContentService>(RemoteContentService(), permanent: true)
         .warm()
         .ignore();
     Get.put<SyncService>(SyncService(), permanent: true);

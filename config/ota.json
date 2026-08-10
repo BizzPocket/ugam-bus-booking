@@ -4,5 +4,6 @@
   "_comment_3": "Set a value to \"\" to switch that channel OFF. The clients treat an empty URL as dormant: no network call is made and every value falls back to its compiled-in default.",
 
   "REMOTE_FLAGS_URL": "https://rhyqjzulpvaeslbaymex.supabase.co/storage/v1/object/public/app-config/flags.json",
-  "I18N_OVERLAY_BASE_URL": "https://rhyqjzulpvaeslbaymex.supabase.co/storage/v1/object/public/i18n"
+  "I18N_OVERLAY_BASE_URL": "https://rhyqjzulpvaeslbaymex.supabase.co/storage/v1/object/public/i18n",
+  "REMOTE_CONTENT_URL": "https://rhyqjzulpvaeslbaymex.supabase.co/storage/v1/object/public/app-config/content.json"
 }
