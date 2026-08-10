@@ -36,6 +36,53 @@ class LedgerMoneySource {
   }
 
   Future<List<Map<String, dynamic>>> Function()? debugFetchAllBusRows;
+  Future<List<Map<String, dynamic>>> Function()? debugFetchTourRows;
+
+  /// tourId → online (bank.gateway) money in RUPEES.
+  ///
+  /// This is money `fetchAllBusRollups` structurally cannot return: 069 posts
+  /// the online slice with `bus_id` NULL on both legs, and
+  /// `finance_bus_summary` filters `where l.bus_id is not null`, so an
+  /// online-only entry produces no row at all. Without this, a fully prepaid
+  /// trip reports zero revenue against real rent and prints a loss.
+  ///
+  /// Safe to add to the per-bus `collected` figure: 069's single-post rule puts
+  /// a rupee on `cash.handler` OR `bank.gateway`, never both.
+  ///
+  /// Fails soft — an empty map, never an exception. The P&L showing slightly
+  /// low is bad; the whole Finance screen failing to load is worse, and this
+  /// view may not exist yet on a database where 076 has not been applied.
+  Future<Map<String, double>> fetchOnlineByTourRupees() async {
+    try {
+      final rows = debugFetchTourRows != null
+          ? await debugFetchTourRows!()
+          : await _queryTourSummary();
+      final out = <String, double>{};
+      for (final row in rows) {
+        final tid = row['tour_id'] as String?;
+        if (tid == null || tid.isEmpty) continue;
+        final v = row['online_minor'];
+        final minor = v is int
+            ? v
+            : v is num
+                ? v.round()
+                : int.tryParse('$v') ?? 0;
+        out[tid] = minorToRupees(minor);
+      }
+      return out;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _queryTourSummary() async {
+    final raw = await _supabase.client
+        .from('finance_tour_summary')
+        .select('tour_id, online_minor');
+    return [
+      for (final r in (raw as List)) Map<String, dynamic>.from(r as Map),
+    ];
+  }
 
   /// passengerId → owes in rupees (positive = still due, negative = change due).
   Future<Map<String, double>> fetchRiderOwesRupees(String tourId) async {

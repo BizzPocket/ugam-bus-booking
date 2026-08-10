@@ -113,6 +113,18 @@ class FinanceController extends GetxController {
         income[tid] = (income[tid] ?? 0) + r.income;
       }
 
+      // Online (bank.gateway) money belongs to no bus, so it never appears in
+      // a per-bus rollup — finance_bus_summary filters `bus_id is not null`.
+      // Without this, a trip whose riders all paid by UPI shows zero revenue
+      // against real rent and prints a loss. No double count: 069 puts a rupee
+      // on cash.handler OR bank.gateway, never both.
+      final onlineByTour = await _ledgerSource.fetchOnlineByTourRupees();
+      if (gen != _loadGeneration) return;
+      onlineByTour.forEach((tid, online) {
+        if (online == 0) return;
+        revenue[tid] = (revenue[tid] ?? 0) + online;
+      });
+
       _revenueByTour
         ..clear()
         ..addAll(revenue);
