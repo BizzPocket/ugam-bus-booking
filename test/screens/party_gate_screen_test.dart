@@ -66,7 +66,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('it shows all three questions immediately, with no loading',
+  testWidgets('it shows both questions immediately, with no loading',
       (tester) async {
     await tester.pumpWidget(harness());
     await tester.pump();
@@ -78,8 +78,19 @@ void main() {
           'before the customer can answer',
     );
     expect(find.byKey(PartyGateScreen.peopleKey), findsOneWidget);
-    expect(find.byKey(PartyGateScreen.ladiesKey), findsOneWidget);
     expect(find.byKey(PartyGateScreen.shareKey), findsOneWidget);
+  });
+
+  testWidgets('it no longer asks about ladies', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('party_ladies')),
+      findsNothing,
+      reason: 'the picker never read the answer, so the question was a tax on '
+          'the customer and nothing else',
+    );
   });
 
   testWidgets('it never asks about splitting across buses', (tester) async {
@@ -105,17 +116,15 @@ void main() {
     expect(captured!.people, 1);
   });
 
-  testWidgets('the three answers reach the chart', (tester) async {
+  testWidgets('the answers reach the chart', (tester) async {
     await tester.pumpWidget(harness());
     await tester.pumpAndSettle();
 
     await pickPeople(tester, 4);
-    await answer(tester, PartyGateScreen.ladiesKey, true);
     await answer(tester, PartyGateScreen.shareKey, false);
     await submit(tester);
 
     expect(captured!.people, 4);
-    expect(captured!.hasLadies, isTrue);
     expect(
       captured!.shareOk,
       isFalse,
@@ -131,7 +140,6 @@ void main() {
     await submit(tester);
 
     expect(captured!.shareOk, isTrue);
-    expect(captured!.hasLadies, isFalse);
   });
 
   testWidgets('changing the party size updates what is sent', (tester) async {

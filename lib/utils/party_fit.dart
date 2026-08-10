@@ -25,11 +25,6 @@ class PartyIntent {
   /// How many people are travelling. One berth each.
   final int people;
 
-  /// Whether the group includes women. Feeds the ladies marker and colours the
-  /// sharing decision — a lone woman asked to share a sofa with an unknown man
-  /// is the case this exists to handle.
-  final bool hasLadies;
-
   /// Whether they will share a two-person sofa with a stranger.
   ///
   /// False means half-sofas are never auto-picked and never offered on tap.
@@ -37,9 +32,13 @@ class PartyIntent {
   /// without ever saying the word.
   final bool shareOk;
 
+  // `hasLadies` was removed. The gate collected it, threaded it through here
+  // and handed it to the picker, which never read it — so it changed nothing a
+  // customer could see. Gender is still collected at checkout, and the lady
+  // marker on the chart is read from occupancy data, not from this answer.
+
   const PartyIntent({
     required this.people,
-    this.hasLadies = false,
     this.shareOk = true,
   });
 

@@ -187,7 +187,6 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
       availability: _availability,
       leg: _leg,
       people: widget.intent.people,
-      hasLadies: widget.intent.hasLadies,
       shareOk: widget.intent.shareOk,
     );
 

@@ -7,18 +7,27 @@ import '../models/tour.dart';
 import '../utils/party_fit.dart';
 import 'seat_selection_screen.dart';
 
-/// Three plain questions, asked before the chart is drawn.
+/// A few plain questions, asked before the chart is drawn.
 ///
 /// *** WHAT THIS SCREEN IS FOR ***
 /// A customer booking a pilgrimage for four relatives should not have to audit
-/// 36 unlabelled cells to work out whether they can sit together. They answer
-/// three questions, and the chart opens with seats ALREADY chosen.
+/// 36 unlabelled cells to work out whether they can sit together. They answer a
+/// short list of questions, and the chart opens with seats ALREADY chosen.
 ///
-/// An earlier version asked how many people and whether they had to share one
-/// bus, then handed over the same blank puzzle — it added a step without
-/// removing the hard one. The same-bus question is gone: keeping a party
-/// together is what the picker tries first, and predicting when that is
-/// impossible was the picker's job, not the customer's.
+/// *** WHAT THIS SCREEN DOES NOT ASK, AND WHY ***
+/// Two questions have been removed, both for the same reason: the answer never
+/// changed anything the customer could see.
+///
+///  - "Must you stay on one bus?" — keeping a party together is what the picker
+///    tries first. Asking the customer to predict when that is impossible was
+///    asking them to do the picker's job.
+///  - "Any ladies in the group?" — this was collected, threaded through
+///    [PartyIntent], and handed to the picker, which never read it. Gender is
+///    still collected at checkout, and the lady marker on the chart comes from
+///    occupancy data rather than from this answer.
+///
+/// Before adding a question here, check that something downstream actually
+/// branches on it.
 ///
 /// It fetches NOTHING. Every answer here is about the party, not the bus, so
 /// the questions appear instantly instead of behind a spinner.
@@ -34,7 +43,6 @@ class PartyGateScreen extends StatefulWidget {
   static const maxPeople = 6;
 
   static const peopleKey = Key('party_people');
-  static const ladiesKey = Key('party_ladies');
   static const shareKey = Key('party_share');
   static const yesKey = Key('party_yes');
   static const noKey = Key('party_no');
@@ -46,7 +54,6 @@ class PartyGateScreen extends StatefulWidget {
 
 class _PartyGateScreenState extends State<PartyGateScreen> {
   int _people = 1;
-  bool _hasLadies = false;
 
   /// Defaults to true so the picker is not hobbled for a customer who does not
   /// care. Saying NO is the deliberate act, because it is the one that costs
@@ -57,7 +64,6 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
     HapticFeedback.selectionClick();
     final intent = PartyIntent(
       people: _people,
-      hasLadies: _hasLadies,
       shareOk: _shareOk,
     );
 
@@ -96,15 +102,6 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
                   _Question(c: c, label: tr('party_gate.people_q')),
                   const SizedBox(height: UgamSpacing.md),
                   _peopleChips(c),
-                  const SizedBox(height: UgamSpacing.xl),
-                  _Question(c: c, label: tr('party_gate.ladies_q')),
-                  const SizedBox(height: UgamSpacing.md),
-                  _YesNo(
-                    key: PartyGateScreen.ladiesKey,
-                    c: c,
-                    value: _hasLadies,
-                    onChanged: (v) => setState(() => _hasLadies = v),
-                  ),
                   const SizedBox(height: UgamSpacing.xl),
                   _Question(c: c, label: tr('party_gate.share_q')),
                   const SizedBox(height: 4),

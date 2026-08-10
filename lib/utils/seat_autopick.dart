@@ -243,7 +243,6 @@ List<ChartBusSelection> autoPick({
   required Map<String, SeatAvailability> availability,
   required TripType leg,
   required int people,
-  bool hasLadies = false,
   bool shareOk = true,
 }) {
   if (people <= 0 || buses.isEmpty) return const [];

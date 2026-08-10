@@ -1329,7 +1329,8 @@
     "invalid_newline": "WhatsApp does not allow line breaks inside a template message. Remove the {count} line break(s) — or tap Fix automatically to join the paragraphs.",
     "invalid_tab": "WhatsApp does not allow tab characters inside a template message.",
     "invalid_spaces": "WhatsApp does not allow more than 4 spaces in a row inside a template message.",
-    "invalid_too_long": "Too long: {count} characters. WhatsApp allows at most {max}. Please shorten the message."
+    "invalid_too_long": "Too long: {count} characters. WhatsApp allows at most {max}. Please shorten the message.",
+    "invalid_rendered_too_long": "Too long once the greeting and blessing are added: {count} characters in all. WhatsApp allows at most {max} — shorten by {over}."
   },
   "seat": {
     "group_locked_msg": "Group members must stay on the same bus. Move the whole group instead.",
@@ -2849,7 +2850,6 @@
   "party_gate": {
     "title": "Who is travelling?",
     "people_q": "How many people?",
-    "ladies_q": "Any ladies in the group?",
     "share_q": "Will you share a sofa with a stranger?",
     "share_hint": "A sofa seats two. Sharing costs half — say no and we book whole sofas only.",
     "yes": "Yes",
@@ -2872,5 +2872,35 @@
     "no_room": "No room for {n} on this trip right now",
     "lower_n": "{n} lower",
     "upper_n": "{n} upper"
+  },
+  "tracking": {
+    "notification_title": "Sharing bus location",
+    "notification_text": "Your tour operator can see where the bus is while the trip is running.",
+    "card_live": "Sharing location",
+    "card_updated_ago": "updated {n}",
+    "card_starting": "Starting location sharing…",
+    "card_denied_title": "Location permission needed",
+    "card_denied_body": "Without it the office cannot see where your bus is.",
+    "card_denied_cta": "Allow location",
+    "card_settings_cta": "Open settings",
+    "card_service_off_title": "Location is switched off",
+    "card_service_off_body": "Turn on location so the office can follow the bus.",
+    "card_service_off_cta": "Turn on location",
+    "card_foreground_only": "Sharing only while this screen is open",
+    "card_window_closed": "Trip finished — sharing stopped",
+    "card_unavailable": "Sharing unavailable",
+    "card_stop": "Stop sharing",
+    "rationale_title": "Share this bus's location",
+    "rationale_body": "While the trip is running, this app sends the bus's position to your tour operator so they can answer passengers asking where the bus is.\n\nIt collects only the bus position — never your calls, messages or contacts. It starts when the trip is locked and stops on its own when the trip is marked complete. You can stop it any time from the notification or this screen.",
+    "rationale_continue": "Continue",
+    "rationale_not_now": "Not now",
+    "map_title": "Live map",
+    "map_open": "Live map",
+    "map_empty_title": "No bus has shared its location yet",
+    "map_empty_body": "A bus appears here once its handler opens the trip on their phone.",
+    "map_last_seen": "Last seen {n}",
+    "map_moving": "{n} km/h",
+    "map_parked": "Parked",
+    "map_stale": "Not reporting"
   }
 }
