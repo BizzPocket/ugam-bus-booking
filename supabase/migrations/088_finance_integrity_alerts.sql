@@ -183,7 +183,12 @@ select
   'finance_entries',
   format('lines sum to %s, not zero — a constraint trigger is missing',
          sum(l.amount_minor)),
-  max(e.created_at)
+  -- recorded_at, not occurred_at. 056 notes that REPORTS key on occurred_at,
+  -- but an alert wants to know when the problem ARRIVED: an entry recorded
+  -- offline can carry a days-old occurred_at, and sorting by it would bury a
+  -- problem that landed thirty seconds ago. (There is no created_at on this
+  -- table — occurred_at and recorded_at are the only two timestamps.)
+  max(e.recorded_at)
 from public.finance_entries e
 join public.finance_lines l on l.entry_id = e.id
 group by e.id, e.tour_id
@@ -199,7 +204,7 @@ select
   'finance_entries',
   format('entry has %s line(s); double entry needs at least two',
          count(l.entry_id)),
-  max(e.created_at)
+  max(e.recorded_at)
 from public.finance_entries e
 left join public.finance_lines l on l.entry_id = e.id
 group by e.id, e.tour_id
