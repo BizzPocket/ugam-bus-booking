@@ -23,6 +23,16 @@ if (hasKeystore) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+// Google Maps key for the admin live map, read from android/local.properties
+// (git-ignored, same as key.properties). Unlike the keystore there is no build
+// guard here: a missing key degrades the map to grey tiles rather than shipping
+// something invalid, so a fresh clone must still configure and build.
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    FileInputStream(localPropertiesFile).use { localProperties.load(it) }
+}
+
 android {
     namespace = "com.occubitsolution.ugambooking"
     compileSdk = flutter.compileSdkVersion
@@ -49,6 +59,9 @@ android {
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        manifestPlaceholders["mapsApiKey"] =
+            localProperties.getProperty("MAPS_API_KEY") ?: ""
     }
 
     signingConfigs {

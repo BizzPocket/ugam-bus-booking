@@ -43,6 +43,11 @@ dependencies:
 
   # Intl for date/time formatting
   intl: ^0.20.2
+  # Grapheme-cluster counting for WhatsApp template length limits. Present
+  # transitively via flutter; declared directly because wa_template_params.dart
+  # imports it, and a message's length must be counted the way its sender sees
+  # it (an emoji is one character, not two runes or seven).
+  characters: ^1.4.0
   google_fonts: ^8.0.2
 
   # Supabase backend
@@ -86,6 +91,14 @@ dependencies:
   # App version/build for the settings + customer "more" footers
   package_info_plus: ^9.0.1
   qr_flutter: ^4.1.0
+
+  # Handler GPS capture. Its AndroidSettings.foregroundNotificationConfig
+  # creates the Android foreground service, and AppleSettings covers iOS
+  # background updates — so no separate foreground-task package is needed.
+  geolocator: ^14.0.2
+
+  # Admin live map. Map loads on the mobile SDKs are not billed.
+  google_maps_flutter: ^2.18.0
 
 dev_dependencies:
   flutter_test:

@@ -42,10 +42,19 @@
 	<string>Ugam Booking uses Face ID to sign you in quickly and securely.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Ugam Booking needs access to your photo library so you can pick a cover image for a tour.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Shows the tour operator where your bus is while a trip is running.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Keeps sharing your bus location with the tour operator while the trip is running, even when the screen is off.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<string>location</string>
 	</array>
+	<!-- Populated from ios/Flutter/Secrets.xcconfig (git-ignored) and read in
+	     AppDelegate. Empty in a fresh clone: the map renders grey. -->
+	<key>MAPS_API_KEY</key>
+	<string>$(MAPS_API_KEY)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
