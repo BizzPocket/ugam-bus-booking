@@ -20,6 +20,7 @@ import 'config/supabase_config.dart';
 import 'design/tokens.dart';
 import 'firebase_options.dart';
 import 'services/push_service.dart';
+import 'services/remote_translation_loader.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -150,6 +151,16 @@ class _BootstrapState extends State<_Bootstrap> {
           fallbackLocale: I18nConfig.fallbackLocale,
           startLocale: I18nConfig.fallbackLocale,
           useOnlyLangCode: true,
+          // Bundled catalogue + a cached remote delta merged over it, so copy
+          // fixes ship without a store release. Reads no network and cannot
+          // throw; see RemoteTranslationLoader.
+          assetLoader: const RemoteTranslationLoader(),
+          // MANDATORY alongside a custom loader. EasyLocalization renders
+          // `errorWidget ?? ErrorWidget(...)` on a load failure, and
+          // ErrorWidget.builder is globally overridden above as a red
+          // diagnostic dump — without this, any load failure becomes a
+          // full-screen crash-looking page for every user.
+          errorWidget: (_) => const _BootstrapSplash(),
           child: const MyApp(),
         );
       },
