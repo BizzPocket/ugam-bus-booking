@@ -61,15 +61,19 @@
 -- Requires 064, 068, 069. Idempotent, re-runnable, changes no data.
 -- ============================================================
 
+-- to_regPROCEDURE, not to_regproc: `regproc` accepts a bare function NAME and
+-- cannot parse an argument list, so to_regproc('f(uuid)') is always null and
+-- the guard would fire on a perfectly healthy database. `regprocedure` is the
+-- one that takes a full signature.
 do $$
 begin
-  if to_regproc('public.chart_finalize_hold(uuid)') is null then
+  if to_regprocedure('public.chart_finalize_hold(uuid)') is null then
     raise exception '073 requires 064_seat_holds_chart_finalize.sql first';
   end if;
-  if to_regproc('public.chart_finalize_party_holds(uuid)') is null then
+  if to_regprocedure('public.chart_finalize_party_holds(uuid)') is null then
     raise exception '073 requires 068_multi_bus_chart_claim.sql first';
   end if;
-  if to_regproc('public.confirm_payment_claim(uuid, text)') is null then
+  if to_regprocedure('public.confirm_payment_claim(uuid, text)') is null then
     raise exception '073 requires 069_online_payment_single_post.sql first';
   end if;
 end $$;
