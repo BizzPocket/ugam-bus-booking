@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:uuid/uuid.dart';
 
 import '../components/bus_message_composer_field.dart';
 import '../components/combined_seat_grid.dart';
@@ -187,12 +188,39 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
     return list;
   }
 
-  /// Reads the local cache first, falling back to the manifest. Returns null
-  /// when no money has been collected for that passenger on that bus.
-  Collection? _collectionFor(String passengerId, String busId, String seatId) {
-    final cached = _collections[_collectionKey(passengerId, busId, seatId)];
-    if (cached != null) return cached;
-    return _manifest?.collectionFor(passengerId, busId, seatId);
+  /// Manifest rows with any locally-cached edit layered over the top.
+  ///
+  /// Merged by ROW ID, not by the (passenger, bus, seat) key the local cache is
+  /// filed under: a row can be adopted under a seat other than the one it
+  /// stores, so keying the merge by seat would show the manifest's stale copy
+  /// alongside the edited one and double-count it.
+  Iterable<Collection> get _mergedCollections {
+    final byId = <String, Collection>{
+      for (final c in _manifest?.collections ?? const <Collection>[]) c.id: c,
+    };
+    for (final c in _collections.values) {
+      byId[c.id] = c;
+    }
+    return byId.values;
+  }
+
+  /// The EXISTING collection row a tap on [seatId] must write into, or null
+  /// when this seat genuinely deserves a new one.
+  ///
+  /// Resolves through [collectionRowForSeat] rather than the strict
+  /// (passenger, bus, seat) triple. A rider who paid on one seat and later
+  /// moved to another MISSED on that triple, so the sheet opened blank and the
+  /// save INSERTed a second row — `handler_upsert_collection` conflicts on the
+  /// same triple, so it never collided. 062's `collections_ledger_sync` then
+  /// posted the duplicate to the ledger, and both money engines fold per row,
+  /// so the books showed double the cash actually in hand.
+  Collection? _collectionFor(Passenger passenger, String busId, String seatId) {
+    return collectionRowForSeat(
+      passenger: passenger,
+      busId: busId,
+      seatId: seatId,
+      collections: _mergedCollections,
+    );
   }
 
   /// Reads the local attendance cache first, falling back to the manifest.
@@ -498,6 +526,16 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
               ? _manifest!.passengers.first.tourId
               : '')
         : '';
+    // Minted ONCE per sheet, not once per save attempt. The model constructors
+    // do `id = id ?? Uuid().v4()`, so building the row inside onSave gave every
+    // retry a fresh id — and the RPCs honour the client id and conflict only on
+    // (id), so a retry after a commit-whose-response-was-lost was a plain
+    // INSERT, not an upsert. 062's bus_handovers_ledger_sync then posted the
+    // handover to the ledger twice. bus_handovers has no natural-key
+    // uniqueness, so Postgres could not catch it either. A stable id makes the
+    // retry idempotent, which matters most on exactly the 2G links this screen
+    // is built for.
+    final draftId = const Uuid().v4();
     await UgamSheet.show<void>(
       context,
       title: tr('handler_chart.handover_title'),
@@ -507,6 +545,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
           final saved = await _store.handlerUpsertHandover(
             widget.requestId,
             BusHandover(
+              id: draftId,
               tourId: tourId,
               busId: bus.id,
               expectedAmount: summary.inHand,
@@ -662,7 +701,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
     Passenger passenger,
   ) {
     final due = bus.amountDueForSeat(passenger, seatId);
-    final existing = _collectionFor(passenger.id, bus.id, seatId);
+    final existing = _collectionFor(passenger, bus.id, seatId);
     // Resolve the tour id from the bus first, falling back to the passenger;
     // both manifest models carry tourId.
     final tourId = (bus.tourId?.isNotEmpty == true)
@@ -730,6 +769,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
   /// and the "spent / in hand" summary refresh without a reload.
   Future<void> _showExpenseSheet(Bus bus, {Expense? existing}) {
     final tourId = bus.tourId?.isNotEmpty == true ? bus.tourId! : '';
+    final draftId = const Uuid().v4();
     return UgamSheet.show<void>(
       context,
       title: existing == null
@@ -738,8 +778,15 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
       builder: (sheetCtx) => _ExpenseSheet(
         existing: existing,
         onSave: (category, label, amount, paidBy) async {
+          // draftId, not a fresh uuid per attempt — see _openHandoverSheet.
           final base =
-              existing ?? Expense(tourId: tourId, busId: bus.id, label: label);
+              existing ??
+              Expense(
+                id: draftId,
+                tourId: tourId,
+                busId: bus.id,
+                label: label,
+              );
           final updated = base.copyWith(
             busId: bus.id,
             category: category,
@@ -811,6 +858,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
   /// ADDS to what they hold.
   Future<void> _showIncomeSheet(Bus bus, {IncomeEntry? existing}) {
     final tourId = bus.tourId?.isNotEmpty == true ? bus.tourId! : '';
+    final draftId = const Uuid().v4();
     return UgamSheet.show<void>(
       context,
       title: existing == null
@@ -819,9 +867,15 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
       builder: (sheetCtx) => _IncomeSheet(
         existing: existing,
         onSave: (category, label, amount, receivedBy) async {
+          // draftId, not a fresh uuid per attempt — see _openHandoverSheet.
           final base =
               existing ??
-              IncomeEntry(tourId: tourId, busId: bus.id, label: label);
+              IncomeEntry(
+                id: draftId,
+                tourId: tourId,
+                busId: bus.id,
+                label: label,
+              );
           final updated = base.copyWith(
             busId: bus.id,
             category: category,
@@ -1153,8 +1207,8 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
                     _SeatGrid(
                       bus: bus,
                       fullOccupantsBySeat: fullOccupantsBySeat,
-                      collectionFor: (pId, seatId) =>
-                          _collectionFor(pId, bus.id, seatId),
+                      collectionFor: (p, seatId) =>
+                          _collectionFor(p, bus.id, seatId),
                       onTapSeat: (seatId, occupants) =>
                           _onSeatTapped(bus, seatId, occupants),
                     ),
@@ -1271,7 +1325,9 @@ class _SeatGrid extends StatelessWidget {
   /// to four riders shows them all + the "+N" badge), drives the seat-level
   /// money dot, and is passed to the tap handler.
   final Map<String, List<Passenger>> fullOccupantsBySeat;
-  final Collection? Function(String passengerId, String seatId) collectionFor;
+  /// Takes the whole [Passenger], not just an id: resolving an orphaned row
+  /// after a seat move needs their current assignments.
+  final Collection? Function(Passenger passenger, String seatId) collectionFor;
   final void Function(String seatId, List<Passenger> occupants) onTapSeat;
 
   const _SeatGrid({
@@ -1290,7 +1346,7 @@ class _SeatGrid extends StatelessWidget {
         occupants.map(
           (p) => riderMoneyStateOf(
             bus.amountDueForSeat(p, seatId),
-            collectionFor(p.id, seatId),
+            collectionFor(p, seatId),
           ),
         ),
       );

@@ -101,7 +101,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
             passenger: p,
             seatId: seatId,
             due: due,
-            col: controller.collectionFor(p.id, widget.bus.id, seatId),
+            col: controller.collectionFor(p, widget.bus.id, seatId),
             pendingClaim: controller.pendingClaimForPassenger(p.id),
           ),
         );

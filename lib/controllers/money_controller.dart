@@ -21,6 +21,7 @@ import '../services/supabase_service.dart';
 import '../services/sync_read_projections.dart';
 import '../services/sync_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/collection_seat_resolver.dart';
 import 'finance_controller.dart';
 import 'tour_controller.dart';
 
@@ -533,12 +534,21 @@ class MoneyController extends GetxController {
 
   // ── Collections ───────────────────────────────────────────
 
-  Collection? collectionFor(String passengerId, String busId, String seatId) =>
-      collections.firstWhereOrNull(
-        (c) =>
-            c.passengerId == passengerId &&
-            c.busId == busId &&
-            c.seatId == seatId,
+  /// The EXISTING collection row a tap on [seatId] must write into.
+  ///
+  /// Resolves through [collectionRowForSeat], not the strict
+  /// (passenger, bus, seat) triple. Matching on the triple meant a rider who
+  /// paid on one seat and later moved to another MISSED their own row, so the
+  /// collect sheet opened blank and the save wrote a SECOND row — which 062's
+  /// collections_ledger_sync posted to the ledger again, and both money engines
+  /// fold per row. The admin board then showed double the cash in hand. Same
+  /// hole, same fix, as the handler chart's `_collectionFor`.
+  Collection? collectionFor(Passenger passenger, String busId, String seatId) =>
+      collectionRowForSeat(
+        passenger: passenger,
+        busId: busId,
+        seatId: seatId,
+        collections: collections,
       );
 
   Future<void> upsertCollection(Collection c) async {
