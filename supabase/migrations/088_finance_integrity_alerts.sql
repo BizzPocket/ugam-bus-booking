@@ -118,8 +118,12 @@ union all
 select
   'DUPLICATE_SEAT_COLLECTION',
   'high',
-  min(col.tour_id),
-  min(col.id),
+  col.tour_id,
+  -- Postgres has no min()/max() for uuid, so the representative row is picked
+  -- explicitly: the OLDEST, which is the original rather than the duplicate.
+  -- created_at then id, so the choice is deterministic when two rows share a
+  -- timestamp.
+  (array_agg(col.id order by col.created_at, col.id))[1],
   'collections',
   format('%s live rows for rider %s on %s seat %s — cash is being counted '
          'more than once', count(*), col.passenger_id, col.bus_id,
@@ -127,7 +131,11 @@ select
   max(col.updated_at)
 from public.collections col
 where col.deleted_at is null
-group by col.passenger_id, col.bus_id, split_part(col.seat_id, '#', 1)
+-- tour_id is grouped rather than aggregated: it is functionally determined by
+-- bus_id, so this changes nothing about the grouping and avoids needing an
+-- aggregate over a uuid.
+group by col.tour_id, col.passenger_id, col.bus_id,
+         split_part(col.seat_id, '#', 1)
 having count(*) > 1
 
 union all
@@ -190,12 +198,15 @@ select
   e.id,
   'finance_entries',
   format('entry has %s line(s); double entry needs at least two',
-         count(l.*)),
+         count(l.entry_id)),
   max(e.created_at)
 from public.finance_entries e
 left join public.finance_lines l on l.entry_id = e.id
 group by e.id, e.tour_id
-having count(l.*) < 2;
+-- count(l.entry_id), not count(l.*): with a LEFT JOIN the unmatched side is a
+-- row of nulls, and counting a specific non-null column is the unambiguous way
+-- to get 0 for an entry with no lines at all.
+having count(l.entry_id) < 2;
 
 
 comment on view public.finance_integrity_alerts is
