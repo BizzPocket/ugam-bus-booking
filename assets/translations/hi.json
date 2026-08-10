@@ -1,4 +1,13 @@
 {
+  "launch_block": {
+    "update_required_title": "अपडेट ज़रूरी है",
+    "update_required_body": "उगम का यह वर्शन अब नहीं चलेगा। अपनी टूर चलाते रहने के लिए अपडेट करें।",
+    "maintenance_title": "थोड़ी देर में वापस",
+    "maintenance_body": "उगम में अभी काम चल रहा है। कुछ भी नहीं गया — आपकी टूर और बुकिंग सुरक्षित हैं।",
+    "recommended_title": "नया वर्शन आया है",
+    "update_action": "अपडेट करें",
+    "later_action": "बाद में"
+  },
   "actions": {
     "retry": "फिर से प्रयास करें"
   },

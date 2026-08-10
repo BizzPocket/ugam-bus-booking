@@ -1,4 +1,13 @@
 {
+  "launch_block": {
+    "update_required_title": "Update needed",
+    "update_required_body": "This version of Ugam is no longer supported. Update to keep managing your tours.",
+    "maintenance_title": "Back shortly",
+    "maintenance_body": "Ugam is down for maintenance. Nothing has been lost — your tours and bookings are safe.",
+    "recommended_title": "A newer version is available",
+    "update_action": "Update",
+    "later_action": "Later"
+  },
   "actions": {
     "retry": "Retry"
   },

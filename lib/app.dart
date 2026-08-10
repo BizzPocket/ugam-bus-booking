@@ -16,8 +16,10 @@ import 'controllers/auth_controller.dart';
 import 'controllers/locale_controller.dart';
 import 'controllers/user_controller.dart';
 import 'controllers/customer_memory_controller.dart';
+import 'screens/launch_block_overlay.dart';
 import 'screens/main_shell.dart';
 import 'services/realtime_service.dart';
+import 'services/remote_flags_service.dart';
 import 'services/sync_service.dart';
 import 'services/user_service.dart';
 
@@ -93,7 +95,11 @@ class MyApp extends StatelessWidget {
             ),
             child: AnnotatedRegion<SystemUiOverlayStyle>(
               value: overlay,
-              child: child ?? const SizedBox.shrink(),
+              // Above the Navigator, so no Get.offAllNamed — from a push deep
+              // link or a post-login redirect — can slip past the block.
+              child: LaunchBlockOverlay(
+                child: child ?? const SizedBox.shrink(),
+              ),
             ),
           );
         },
@@ -106,6 +112,13 @@ class AppBinding extends Bindings {
   @override
   void dependencies() {
     Get.put<LocaleController>(LocaleController(), permanent: true);
+    // Registered before everything else and warmed fire-and-forget: the launch
+    // gate reads it from cached-or-default state, so no caller ever waits on a
+    // network round trip. Deliberately NOT reusing SyncService — its cellular
+    // read gate would queue this behind the tour load with a 28s timeout.
+    Get.put<RemoteFlagsService>(RemoteFlagsService(), permanent: true)
+        .warm()
+        .ignore();
     Get.put<SyncService>(SyncService(), permanent: true);
     // RealtimeService must come before TourController — the latter calls
     // Get.find<RealtimeService>() in its onInit to subscribe to live events.
