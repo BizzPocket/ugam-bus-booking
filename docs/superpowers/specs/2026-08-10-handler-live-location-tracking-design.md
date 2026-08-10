@@ -291,12 +291,20 @@ rows/hour while idle, which the `isStale` getter then reads correctly.
 
 | Response | Action |
 |---|---|
-| `{accepted: n}` | drop `n` from buffer, stay `live` |
+| `{accepted, skipped}` | drop the **whole sent batch**, stay `live` (see note) |
 | `error: "window_closed"` | stop stream, clear buffer + mirror, status `windowClosed` |
 | `error: "forbidden"` | stop stream, clear buffer + mirror, status `forbidden` |
 | `error: "bad_payload"` | drop the batch (client bug — never retry a poison batch), log via `error_reporter` |
 | throws, `isRetryable == true` | keep buffer, back off |
 | throws, `isRetryable == false` | keep buffer, surface on card, no retry storm |
+
+**Note on dropping the whole batch.** The server returns
+`skipped = length(p_fixes) - accepted`, which lumps together fixes it rejected
+as invalid and fixes that already existed (the `on conflict do nothing` path).
+Neither is worth re-sending: an invalid fix stays invalid forever, and a
+duplicate is already stored. So any RPC call that *returns* — as opposed to
+throwing — consumes its entire batch. Only a thrown exception preserves the
+buffer for retry. Getting this backwards produces a buffer that never drains.
 
 Retry classification reuses `isRetryable(e, retryOnTimeout: true)` from
 [sync_retry_policy.dart](../../../lib/services/sync_retry_policy.dart).
