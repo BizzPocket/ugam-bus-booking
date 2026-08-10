@@ -19,6 +19,7 @@ import 'config/i18n_config.dart';
 import 'config/supabase_config.dart';
 import 'design/tokens.dart';
 import 'firebase_options.dart';
+import 'services/error_reporter.dart';
 import 'services/push_service.dart';
 import 'services/remote_translation_loader.dart';
 
@@ -32,30 +33,41 @@ void main() {
   // the returned Future is already complete and `main()` stays synchronous.
   initializeDateFormatting();
 
-  // DIAGNOSTIC (temporary — remove once the blank-sheet bug is fixed).
-  // Flutter's default ErrorWidget is a light-grey 0xF0C0C0C0 box sized
-  // 100000x100000 whenever asserts are stripped, so a build() that throws in a
-  // RELEASE build reads to the user as a blank screen that overflows off-frame
-  // — which is exactly what the occupant / edit-request sheet is doing. Render
-  // the real exception instead so a tester can screenshot it. Kept dependency
-  // free (no theme, no localization, no GetX) because it must paint in ANY
-  // slot, including one whose ancestors never built.
+  // Catch Dart failures app-wide and queue them for public.client_errors.
+  // Installed before anything else can throw, and performs no I/O itself.
+  ErrorReporter.install();
+
+  // Flutter's default ErrorWidget is a light-grey box sized 100000x100000 once
+  // asserts are stripped, so a build() that throws in RELEASE reads to the user
+  // as a blank screen overflowing off-frame. This replaces it.
+  //
+  // It used to print the raw exception and stack trace — labelled "DIAGNOSTIC
+  // (temporary)" and shipped to users for months. That is a leak (stack traces
+  // name internals) and it tells a bus handler nothing. Now the exception goes
+  // where it is useful, and the user gets a quiet placeholder.
+  //
+  // It still SWALLOWS the error rather than rethrowing: this builder exists
+  // because a throwing build() used to take the whole app down, and that has
+  // not changed. Kept dependency-free — no theme, no localization, no GetX —
+  // because it must paint in ANY slot, including one whose ancestors never
+  // built.
   ErrorWidget.builder = (FlutterErrorDetails details) {
+    ErrorReporter.report(
+      kind: 'widget_build',
+      error: details.exception,
+      stack: details.stack,
+      context: {'library': details.library},
+    );
     return Directionality(
       textDirection: ui.TextDirection.ltr,
       child: Container(
         constraints: const BoxConstraints(maxWidth: 420, maxHeight: 340),
-        padding: const EdgeInsets.all(12),
-        color: const Color(0xFFFFEBEE),
-        child: SingleChildScrollView(
-          child: Text(
-            'UI ERROR\n\n${details.exceptionAsString()}\n\n${details.stack}',
-            style: const TextStyle(
-              color: Color(0xFFB00020),
-              fontSize: 11,
-              height: 1.35,
-            ),
-          ),
+        padding: const EdgeInsets.all(16),
+        color: const Color(0xFF1A1A1A),
+        alignment: Alignment.center,
+        child: const Text(
+          '—',
+          style: TextStyle(color: Color(0xFF6B6B6B), fontSize: 20),
         ),
       ),
     );
