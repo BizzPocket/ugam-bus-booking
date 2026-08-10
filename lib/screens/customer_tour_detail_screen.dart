@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../components/content_block_view.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/tour.dart';
@@ -92,6 +93,19 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
                 HapticFeedback.lightImpact();
                 await WhatsAppService().copyAnnouncementToClipboard(tour: t);
               },
+            ),
+          ),
+          // Below the hero header, above the detail. Zero-height unless
+          // something is published for this slot.
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.gutter,
+                UgamSpacing.md,
+                UgamSpacing.gutter,
+                0,
+              ),
+              child: const ContentSlot(ContentSlots.customerTourDetailTop),
             ),
           ),
           SliverPadding(

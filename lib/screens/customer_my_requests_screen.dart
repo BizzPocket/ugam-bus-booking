@@ -312,21 +312,33 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                           UgamSpacing.gutter,
                           UgamSpacing.dockClearance,
                         ),
-                        itemCount: _visible.length,
+                        // +1 for the slot at the head of the list. It renders
+                        // zero-height when nothing is published, so the list
+                        // is unchanged by default.
+                        itemCount: _visible.length + 1,
                         separatorBuilder: (_, _) =>
                             const SizedBox(height: UgamSpacing.md),
-                        itemBuilder: (_, i) => _RequestRow(
-                          entry: _visible[i],
-                          isHandler: _handlerStatus[_visible[i].id] ?? false,
-                          onTap: () => _onRowTap(_visible[i]),
-                          onEdit: () => _openEdit(_visible[i]),
-                          onViewChart: () => _openFullChart(_visible[i]),
-                          onAddAnother: () => _openAddAnother(_visible[i]),
-                          onPayAdvance: _payAdvance,
-                          onCancel: () => _cancel(_visible[i]),
-                          onRequestCancel: () => _requestCancel(_visible[i]),
-                          onContact: () => _contactOrganiser(_visible[i]),
-                        ),
+                        itemBuilder: (_, index) {
+                          if (index == 0) {
+                            return const ContentSlot(
+                              ContentSlots.customerMyRequestsTop,
+                            );
+                          }
+                          final i = index - 1;
+                          return _RequestRow(
+                            entry: _visible[i],
+                            isHandler:
+                                _handlerStatus[_visible[i].id] ?? false,
+                            onTap: () => _onRowTap(_visible[i]),
+                            onEdit: () => _openEdit(_visible[i]),
+                            onViewChart: () => _openFullChart(_visible[i]),
+                            onAddAnother: () => _openAddAnother(_visible[i]),
+                            onPayAdvance: _payAdvance,
+                            onCancel: () => _cancel(_visible[i]),
+                            onRequestCancel: () => _requestCancel(_visible[i]),
+                            onContact: () => _contactOrganiser(_visible[i]),
+                          );
+                        },
                       ),
                     ),
             ),

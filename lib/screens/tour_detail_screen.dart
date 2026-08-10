@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
+import '../components/content_block_view.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
@@ -195,6 +196,21 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
                         ),
                       ),
                       onDelete: () => _confirmDelete(context, tourCtrl, tour),
+                    ),
+                  ),
+                  // Operator-facing slot, below the identity header.
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        UgamSpacing.gutter,
+                        UgamSpacing.md,
+                        UgamSpacing.gutter,
+                        0,
+                      ),
+                      child: const ContentSlot(
+                        ContentSlots.adminTourDetailTop,
+                        role: 'admin',
+                      ),
                     ),
                   ),
                   SliverToBoxAdapter(
