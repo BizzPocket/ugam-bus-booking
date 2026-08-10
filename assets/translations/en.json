@@ -1314,6 +1314,8 @@
     "invalid_title": "WhatsApp will refuse this message",
     "invalid_edit": "Edit message",
     "fix_auto": "Fix automatically",
+    "fix_and_send": "Fix & send",
+    "invalid_repair_note": "This is what will be sent:",
     "invalid_empty": "Type a message first.",
     "invalid_newline": "WhatsApp does not allow line breaks inside a template message. Remove the {count} line break(s) — or tap Fix automatically to join the paragraphs.",
     "invalid_tab": "WhatsApp does not allow tab characters inside a template message.",

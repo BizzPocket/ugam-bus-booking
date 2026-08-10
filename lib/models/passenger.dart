@@ -244,21 +244,43 @@ class Passenger {
   }
 
   /// The trip leg this passenger holds [seatId] on: the per-seat
-  /// [SeatAssignment.leg] when it was recorded, else the coarse passenger-level
-  /// [tripType] (legacy rows / unstamped seats). This is what lets a mixed
-  /// same-type request tint and charge EACH physical seat by its own leg
-  /// instead of collapsing both to the [derivedTripType] summary — e.g. one
-  /// "1 seater GO-only + 1 seater RET-only" booking shows one seat cyan (GO)
-  /// and the other violet (RET). Pass [busId] to disambiguate the rare case of
-  /// the same seatId across two buses; omit it on a per-bus chart.
+  /// [SeatAssignment.leg] when it was recorded, else [_unstampedSeatLeg]. This
+  /// is what lets a mixed same-type request tint and charge EACH physical seat
+  /// by its own leg instead of collapsing both to the [derivedTripType] summary
+  /// — e.g. one "1 seater GO-only + 1 seater RET-only" booking shows one seat
+  /// cyan (GO) and the other violet (RET). Pass [busId] to disambiguate the rare
+  /// case of the same seatId across two buses; omit it on a per-bus chart.
   TripType legForSeat(String seatId, {String? busId}) {
     for (final a in assignedSeats) {
       if (a.seatId == seatId && (busId == null || a.busId == busId)) {
-        return a.leg ?? tripType;
+        return a.leg ?? effectiveTripType;
       }
     }
-    return tripType;
+    return effectiveTripType;
   }
+
+  /// The best coarse leg known for this passenger — what every seat-capacity,
+  /// swap and manifest rule should use instead of the raw [tripType] field.
+  ///
+  /// Seats placed BY HAND are written without a leg, so this decides how every
+  /// occupant of a manually-built chart is counted. It must read the REQUEST
+  /// LINES ([derivedTripType]) and not the raw [tripType] column: `tripType`
+  /// defaults to round-trip and is never stamped for a request-mode booking, so
+  /// a wholly one-way rider was being counted as occupying BOTH legs of their
+  /// seat.
+  ///
+  /// That is the "ડબલ ના સોફા" bug: two OUTBOUND-only riders sharing a Double
+  /// Sofa read as round-trip, which filled the return leg they never travel and
+  /// refused the return-only rider who had booked that same sofa. A double sofa
+  /// is 2 berths on GO *and* 2 on RET; one leg's occupants must never consume
+  /// the other's. See `test/utils/double_sofa_leg_split_test.dart`.
+  ///
+  /// [derivedTripType] is round-trip whenever the lines disagree, so a mixed-leg
+  /// booking still gets the conservative both-legs answer and capacity is never
+  /// over-sold. A LEGACY passenger carrying no request lines at all kept its leg
+  /// only in [tripType], so that shape still reads the stored column.
+  TripType get effectiveTripType =>
+      requestLines.isEmpty ? tripType : derivedTripType;
 
   /// Total number of seats actually assigned.
   int get totalSeatsAssigned => assignedSeats.length;

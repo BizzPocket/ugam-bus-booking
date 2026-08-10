@@ -127,16 +127,26 @@ class WaTemplateParams {
       ));
     }
 
-    if (value.length > maxBodyChars) {
+    final chars = characterCount(value);
+    if (chars > maxBodyChars) {
       out.add(WaParamViolation(
         issue: WaParamIssue.tooLong,
         paramIndex: paramIndex,
-        count: value.length,
+        count: chars,
       ));
     }
 
     return out;
   }
+
+  /// How many CHARACTERS [value] is, the way Meta counts them.
+  ///
+  /// Dart's `String.length` is UTF-16 CODE UNITS, so every emoji counts twice
+  /// (`'🙏'.length == 2`). A perfectly legal announcement of ~600 characters
+  /// carrying emoji measured 1200 and was refused locally as "too long" — the
+  /// send was then aborted and NOTHING went out. Counting runes measures the
+  /// characters Meta actually limits, so an emoji costs one.
+  static int characterCount(String value) => value.runes.length;
 
   /// Every rule broken across a whole `bodyParams` list, in parameter order.
   static List<WaParamViolation> validateAll(List<String> params) => [

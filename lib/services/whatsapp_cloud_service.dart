@@ -105,14 +105,49 @@ class WaMessage {
 class WhatsAppCloudService {
   SupabaseClient get _client => Supabase.instance.client;
 
-  /// Formats a stored phone (10-digit or otherwise) to Graph's
-  /// country-code + number digits, e.g. `919876543210`.
+  /// Formats a stored phone to Graph's country-code + number digits, e.g.
+  /// `919876543210`. Returns `''` when the number cannot be dialled at all, so
+  /// callers can REPORT that rider instead of putting a malformed `to` on the
+  /// wire (see [WhatsAppOutbound.unreachableBusRiders]).
+  ///
+  /// This used to add the country code only when the stripped number was
+  /// EXACTLY 10 digits. Numbers written the way people actually keep them —
+  /// `0 98765 43210` with the domestic trunk prefix, or `0091 …` with the
+  /// international access prefix — stripped to 11 or 14 digits, so they were
+  /// passed to Meta with no country code and that ONE rider silently never
+  /// received the announcement while everyone else did. That is the "some
+  /// passengers don't get the msg" report.
   static String graphPhone(String phone) {
     var digits = phone.replaceAll(RegExp(r'[^\d]'), '');
-    if (digits.length == 10) {
-      digits = '${WhatsAppCloudConfig.defaultCountryCode}$digits';
+    if (digits.isEmpty) return '';
+    const cc = WhatsAppCloudConfig.defaultCountryCode;
+
+    // "00" / "011"-style international access prefix written before the code.
+    if (digits.length > 10 && digits.startsWith('00')) {
+      digits = digits.substring(2);
     }
-    return digits;
+    // Already exactly country code + 10 digits — nothing to do.
+    if (digits.length == cc.length + 10 && digits.startsWith(cc)) return digits;
+
+    // Domestic trunk prefix: a 0 parked in front of the 10-digit mobile number.
+    while (digits.length > 10 && digits.startsWith('0')) {
+      digits = digits.substring(1);
+    }
+    // Country code plus stray leading digits → keep the last 10, matching the
+    // rule [displayPhone] already applies when rendering the same number.
+    if (digits.length > 10 && digits.startsWith(cc)) {
+      digits = digits.substring(digits.length - 10);
+    }
+    if (digits.length == 10) return '$cc$digits';
+
+    // A genuine FOREIGN number (its own country code, no trunk prefix) is left
+    // exactly as stored — this rule must not rewrite a non-Indian rider.
+    if (digits.length >= 11 && digits.length <= 15 && !digits.startsWith('0')) {
+      return digits;
+    }
+
+    // Too short / too long to be a real number. Empty says so out loud.
+    return '';
   }
 
   /// Max messages per Edge Function invocation. Tours can have 200–700
@@ -129,6 +164,41 @@ class WhatsAppCloudService {
   /// chunk's recipients are recorded as failed instead.
   Future<WaSendResult> send(List<WaMessage> messages) async {
     if (messages.isEmpty) return WaSendResult.empty;
+
+    // A message with no recipient can never be delivered, and putting a blank
+    // `to` on the wire risks Meta refusing the WHOLE chunk — taking 19 valid
+    // recipients down with one bad phone number. [graphPhone] returns '' for a
+    // number it cannot make dialable, so filter here rather than at each of the
+    // half-dozen call sites: one guard, and no future caller can miss it. The
+    // dropped recipients are still REPORTED, never silently discarded.
+    final addressed = <WaMessage>[];
+    final unaddressed = <WaRecipientResult>[];
+    for (final m in messages) {
+      if (m.to.trim().isEmpty) {
+        unaddressed.add(const WaRecipientResult(
+          to: '',
+          ok: false,
+          error: 'No usable WhatsApp number for this passenger '
+              '— contact them by phone.',
+        ));
+      } else {
+        addressed.add(m);
+      }
+    }
+    if (addressed.isEmpty) {
+      debugPrint('[WA] send: every recipient lacked a usable number '
+          '(${unaddressed.length})');
+      return WaSendResult(
+        sent: 0,
+        failed: unaddressed.length,
+        results: unaddressed,
+      );
+    }
+    if (unaddressed.isNotEmpty) {
+      debugPrint('[WA] send: dropping ${unaddressed.length} recipient(s) '
+          'with no usable number');
+    }
+    messages = addressed;
 
     var sent = 0;
     var failed = 0;
@@ -203,7 +273,11 @@ class WhatsAppCloudService {
         ));
       }
     }
-    return WaSendResult(sent: sent, failed: failed, results: results);
+    return WaSendResult(
+      sent: sent,
+      failed: failed + unaddressed.length,
+      results: [...results, ...unaddressed],
+    );
   }
 
   /// Per-bus announcement, HANDLER path (F4). The handler has no Supabase Auth

@@ -25,7 +25,6 @@ import '../utils/passenger_display.dart';
 import '../utils/seat_drop_engine.dart';
 import '../utils/seat_fit.dart';
 import '../utils/seat_leg_capacity.dart';
-import '../utils/tour_capacity.dart';
 import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
 import '../widgets/occupant_action_sheet.dart';
@@ -393,7 +392,10 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           if (n > 0) (trip: p.legForSeat(claim.seatId, busId: claim.busId), berths: n),
     ];
     return seatHasLegRoom(
-      activeTrip: passenger.tripType,
+      // The rider's REAL leg, not the raw stored column — which defaults to
+      // round-trip and would claim a one-way rider needs both legs of their own
+      // sofa. Same rule the occupant side above and [_berthsForCell] use.
+      activeTrip: passenger.effectiveTripType,
       need: 1,
       cap: 2,
       occupants: holders,
@@ -1147,8 +1149,8 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     String busId,
   ) {
     final overlap = occupants
-        .where((o) =>
-            _tripsOverlap(o.legForSeat(seatId, busId: busId), active.tripType))
+        .where((o) => _tripsOverlap(
+            o.legForSeat(seatId, busId: busId), active.effectiveTripType))
         .toList();
     if (overlap.length == 1) return overlap.first;
     if (overlap.isEmpty && occupants.length == 1) return occupants.first;
@@ -2246,7 +2248,8 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                     // it tracks the grid, not the engine plan.
                     Builder(
                       builder: (_) {
-                        final busCap = computeActualCapacity(tour).byBus[bus.id];
+                        final busCap =
+                            _ctrl.actualCapacityFor(tour).byBus[bus.id];
                         if (busCap == null || busCap.capacity <= 0) {
                           return const SizedBox.shrink();
                         }

@@ -121,12 +121,17 @@ class SeatSwapGuard {
           if (_berthsOn(p, busId, seatId) > 0)
             (
               id: p.id,
-              trip: p.tripType,
+              // Per-seat leg when it was stamped, else the rider's REAL coarse
+              // leg. The raw [Passenger.tripType] column defaults to round-trip
+              // and is never set for a request-mode booking, so a one-way rider
+              // read as occupying BOTH legs and the guard reported an overbook
+              // on a swap that was perfectly legal.
+              trip: p.legForSeat(seatId, busId: busId),
               berths: _berthsOn(p, busId, seatId),
             ),
     ];
     final over = legOverbookedOccupants(
-      incomingTrip: incoming.tripType,
+      incomingTrip: incoming.effectiveTripType,
       incomingBerths: incomingBerths,
       cap: cap,
       remaining: remaining,

@@ -322,18 +322,41 @@ class WhatsAppOutbound {
     return out;
   }
 
+  /// Riders seated on [busId] whose stored phone cannot be dialled at all — a
+  /// blank number, or digits that do not resolve to a real subscriber number.
+  ///
+  /// [busMessageRecipients] drops these so nothing malformed reaches Meta, but
+  /// dropping them SILENTLY is what left the agent saying "some passengers
+  /// don't get the msg, I don't know why". Naming them turns an invisible gap
+  /// into a short list of people to phone by hand.
+  ///
+  /// Pure + static so the rule is unit-testable without a network.
+  static List<Passenger> unreachableBusRiders(Tour tour, String busId) => [
+        for (final p in tour.passengers)
+          if (p.assignedSeats.any((a) => a.busId == busId) &&
+              WhatsAppCloudService.graphPhone(p.phone).isEmpty)
+            p,
+      ];
+
   Future<WaSendResult> sendBusMessage({
     required Tour tour,
     required String busId,
     required String messageText,
   }) async {
-    // Meta rejects a body parameter carrying a new-line, a tab or 5+ spaces —
-    // for EVERY recipient, after the whole batch has been fanned out. The
-    // composers check this first and offer a repair; this is the last line of
-    // defence so no other caller can put a doomed announcement on the wire.
-    // Reported as a per-recipient failure (not an exception) so it flows
-    // through the same result plumbing every caller already renders.
-    final violations = WaTemplateParams.validateOne(messageText);
+    // Meta rejects a body parameter carrying a new-line, a tab or 5+ spaces.
+    // REPAIR rather than refuse: collapsing a paragraph break to a space is the
+    // only way that text can legally travel, and an announcement delivered with
+    // its line breaks flattened beats the old behaviour — where a perfectly
+    // ordinary long, multi-paragraph message was rejected here and reached NOBODY.
+    // The composers apply the same repair up front so the agent sees the final
+    // wording; this is the last line of defence for every other caller.
+    final text = WaTemplateParams.sanitize(messageText);
+
+    // What survives a repair genuinely cannot be sent: nothing to say, or too
+    // long for the template. Both need a human, so they stay a hard refusal —
+    // reported as a per-recipient failure (not an exception) so it flows through
+    // the same result plumbing every caller already renders.
+    final violations = WaTemplateParams.validateOne(text);
     if (violations.isNotEmpty) {
       debugPrint('[WA] sendBusMessage BLOCKED locally: '
           '${violations.map((v) => v.issue.name).toList()}');
@@ -346,17 +369,36 @@ class WhatsAppOutbound {
             ok: false,
             error: 'Message rejected before sending: '
                 '${violations.map((v) => v.issue.name).join(', ')}. '
-                'WhatsApp does not allow line breaks, tabs or 5+ spaces in a '
-                'template message.',
+                'A WhatsApp template message must not be empty and must stay '
+                'within ${WaTemplateParams.maxBodyChars} characters.',
           ),
         ],
       );
     }
 
+    // Riders whose phone cannot be dialled are reported by NAME rather than
+    // quietly dropped — this is the other half of "some passengers don't get
+    // the msg". They are counted as failures so the summary the agent reads
+    // adds up to the roster.
+    final unreachable = [
+      for (final p in unreachableBusRiders(tour, busId))
+        WaRecipientResult(
+          to: '',
+          ok: false,
+          error: 'No usable WhatsApp number on file for ${p.displayName} '
+              '— contact them by phone.',
+        ),
+    ];
+
     final phones = busMessageRecipients(tour, busId);
     if (phones.isEmpty) {
       debugPrint('[WA] sendBusMessage early-return: no recipient on bus $busId');
-      return WaSendResult.empty;
+      if (unreachable.isEmpty) return WaSendResult.empty;
+      return WaSendResult(
+        sent: 0,
+        failed: unreachable.length,
+        results: unreachable,
+      );
     }
 
     final messages = phones
@@ -364,15 +406,22 @@ class WhatsAppOutbound {
           (to) => WaMessage(
             to: to,
             template: WhatsAppCloudConfig.busMessageTemplate,
-            bodyParams: [messageText],
+            bodyParams: [text],
           ),
         )
         .toList();
 
     debugPrint('[WA] sendBusMessage: template='
         '${WhatsAppCloudConfig.busMessageTemplate} bus=$busId built '
-        '${messages.length} msg(s) -> ${messages.map((m) => m.to).toList()}');
-    return _cloud.send(messages);
+        '${messages.length} msg(s), ${unreachable.length} unreachable '
+        '-> ${messages.map((m) => m.to).toList()}');
+    final res = await _cloud.send(messages);
+    if (unreachable.isEmpty) return res;
+    return WaSendResult(
+      sent: res.sent,
+      failed: res.failed + unreachable.length,
+      results: [...res.results, ...unreachable],
+    );
   }
 
   /// Sends a single "request cancelled" utility notification to [passenger].

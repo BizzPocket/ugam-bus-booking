@@ -217,15 +217,23 @@ class _NotifyScreenState extends State<NotifyScreen> {
             : null;
         final Tour? tour =
             selected ?? (activeTours.isEmpty ? null : activeTours.first);
-        if (tour == null) return const SizedBox.shrink();
+        // Not SizedBox.shrink: a non-null zero-height bar still strips the
+        // body's bottom inset (Scaffold checks for non-null, not for height),
+        // so reserve the system inset whenever the CTA is absent.
+        if (tour == null) {
+          return SizedBox(height: MediaQuery.paddingOf(context).bottom);
+        }
 
         final isLocked = tour.status == TourStatus.locked;
         if (isLocked) {
           final seated = tour.passengers
               .where((p) => p.assignedSeats.isNotEmpty)
               .toList();
-          // No seated riders → nothing to send at all.
-          if (seated.isEmpty) return const SizedBox.shrink();
+          // No seated riders → nothing to send at all. Still reserve the
+          // system inset; see the note on the tour == null branch above.
+          if (seated.isEmpty) {
+            return SizedBox(height: MediaQuery.paddingOf(context).bottom);
+          }
           // Riders whose CURRENT seats have NOT been notified — a fresh lock
           // (never sent) OR an organiser edit AFTER lock. Persistent, so it
           // survives a reload/restart (unlike the session-only _sentIds tracker),
@@ -1299,37 +1307,51 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
       AppSnackBar.error(tr('bus_message.pick_bus_first'));
       return;
     }
-    final text = _textCtrl.text.trim();
-    if (text.isEmpty) {
+    final raw = _textCtrl.text.trim();
+    if (raw.isEmpty) {
       AppSnackBar.error(tr('bus_message.empty_text'));
       return;
     }
 
     // Meta refuses a template variable holding a line break, a tab or 5+
     // spaces — the rule that silently killed every multi-paragraph
-    // announcement. Refuse it HERE, name the reason, and offer the repair,
-    // rather than fanning a doomed batch out to every recipient.
+    // announcement.
+    //
+    // A REPAIRABLE break is fixed and the send CONTINUES. Rewriting the field
+    // and returning meant the agent had to spot the change and press Send
+    // again, so a long notice routinely went nowhere. Show the exact wording
+    // that will travel, then carry on to the usual bus confirmation.
+    var text = raw;
     final violations = WaTemplateParams.validateOne(text);
     if (violations.isNotEmpty) {
-      final fixable = WaTemplateParams.canAutoFix(text);
-      final fix = await UgamDialog.confirm(
+      if (!WaTemplateParams.canAutoFix(text)) {
+        // Empty or over the character limit — only a human can resolve it.
+        await UgamDialog.confirm(
+          context,
+          title: tr('bus_message.invalid_title'),
+          message: waViolationsText(violations),
+          cancelLabel: tr('app.action.cancel'),
+          confirmLabel: tr('bus_message.invalid_edit'),
+          confirmIcon: Icons.edit_rounded,
+        );
+        return;
+      }
+      final repaired = WaTemplateParams.sanitize(text);
+      final proceed = await UgamDialog.confirm(
         context,
         title: tr('bus_message.invalid_title'),
-        message: waViolationsText(violations),
+        message: '${waViolationsText(violations)}\n\n'
+            '${tr('bus_message.invalid_repair_note')}\n$repaired',
         cancelLabel: tr('app.action.cancel'),
-        confirmLabel: fixable
-            ? tr('bus_message.fix_auto')
-            : tr('bus_message.invalid_edit'),
-        confirmIcon: fixable ? Icons.auto_fix_high_rounded : Icons.edit_rounded,
+        confirmLabel: tr('bus_message.fix_and_send'),
+        confirmIcon: Icons.auto_fix_high_rounded,
       );
-      if (fix && fixable && mounted) {
-        final fixed = WaTemplateParams.sanitize(text);
-        _textCtrl.value = TextEditingValue(
-          text: fixed,
-          selection: TextSelection.collapsed(offset: fixed.length),
-        );
-      }
-      return;
+      if (!proceed || !mounted) return;
+      _textCtrl.value = TextEditingValue(
+        text: repaired,
+        selection: TextSelection.collapsed(offset: repaired.length),
+      );
+      text = repaired;
     }
 
     // Name the destination bus one last time before anything leaves. The text
