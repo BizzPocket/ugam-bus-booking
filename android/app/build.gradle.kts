@@ -42,9 +42,11 @@ android {
     defaultConfig {
         applicationId = "com.occubitsolution.ugambooking"
         minSdk = maxOf(24, flutter.minSdkVersion)
-        // Google Play requires new apps/updates to target a recent API level.
-        // Pinned explicitly so the target doesn't drift with the Flutter SDK.
-        targetSdk = 35
+        // Google Play requires new apps/updates to target API 36 (Android 16)
+        // from 2026-08-31. Pinned explicitly so the target doesn't drift with
+        // the Flutter SDK — which also defaults to 36 on 3.44.x, so this pin
+        // currently matches rather than overrides it.
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

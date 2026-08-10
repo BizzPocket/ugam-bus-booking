@@ -25,8 +25,10 @@ class CustomerMoreScreen extends StatelessWidget {
     final activeLanguage = I18nConfig.labelFor(context.locale);
 
     return UgamScaffold(
+      // No bottomNavigationBar and no dock on the customer surface, so nothing
+      // else consumes the nav-bar inset — SafeArea must keep its bottom edge or
+      // the last menu row and the version footer render under the system bar.
       body: SafeArea(
-        bottom: false,
         child: Column(
           children: [
             UgamAppBar(showBack: true, title: tr('customer_more.title')),

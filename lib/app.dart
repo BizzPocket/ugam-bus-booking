@@ -52,6 +52,17 @@ class MyApp extends StatelessWidget {
         // and this re-runs on every theme toggle AND "System" brightness flip.
         // Every screen (admin + customer + pushed) inherits it because none of
         // them use a Material AppBar to set their own overlay.
+        //
+        // NOTE on enforced edge-to-edge (Android 15+, unavoidable at targetSdk
+        // 36): the engine gates `systemNavigationBarColor` and
+        // `systemNavigationBarDividerColor` behind device SDK_INT < 35, so on
+        // Android 15+ they are no-ops — the nav-bar ground is whatever the app
+        // paints there, plus the OS contrast scrim. They are kept because the
+        // gate is on the DEVICE version, not targetSdk, and Android 7–14 is
+        // still most of the install base. The *IconBrightness fields and
+        // statusBarColor continue to apply on every version. If a solid
+        // nav-bar ground is ever wanted on 15+, paint it in Dart behind
+        // MediaQuery.viewPaddingOf(context).bottom.
         builder: (context, child) {
           final c = UgamColors.of(context);
           final isDark = Theme.of(context).brightness == Brightness.dark;

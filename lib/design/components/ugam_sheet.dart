@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
@@ -88,7 +90,17 @@ class _SheetShell extends StatelessWidget {
           ),
         ),
         padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
+          // The keyboard inset when the IME is up, the system nav-bar inset
+          // when it is down. `useSafeArea: true` on the showModalBottomSheet
+          // above insets the TOP ONLY — the framework resolves it to
+          // SafeArea(bottom: false), so the sheet owns its own bottom inset
+          // under enforced edge-to-edge (Android 15+). Flutter reports
+          // padding.bottom as 0 while the IME is visible, so max() picks the
+          // right one in both states without ever double-counting.
+          bottom: math.max(
+            MediaQuery.viewInsetsOf(context).bottom,
+            MediaQuery.paddingOf(context).bottom,
+          ),
         ),
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxH),

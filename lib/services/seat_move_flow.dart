@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -394,11 +396,18 @@ class _DestinationPickerSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(
+      padding: EdgeInsets.fromLTRB(
         UgamSpacing.gutter,
         UgamSpacing.sm + 4,
         UgamSpacing.gutter,
-        UgamSpacing.lg,
+        // This sheet bypasses _SheetShell, and its parent passes
+        // useSafeArea: true — which insets the TOP only. Own the bottom inset
+        // here or the last bus row is clipped by the gesture pill.
+        UgamSpacing.lg +
+            math.max(
+              MediaQuery.viewInsetsOf(context).bottom,
+              MediaQuery.paddingOf(context).bottom,
+            ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -511,7 +520,11 @@ class _SwapAssistSheet extends StatelessWidget {
         UgamSpacing.gutter,
         UgamSpacing.sm + 4,
         UgamSpacing.gutter,
-        UgamSpacing.lg + MediaQuery.of(context).viewInsets.bottom,
+        UgamSpacing.lg +
+            math.max(
+              MediaQuery.viewInsetsOf(context).bottom,
+              MediaQuery.paddingOf(context).bottom,
+            ),
       ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
