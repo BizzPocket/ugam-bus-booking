@@ -90,6 +90,10 @@ class SyncReadProjections {
   /// [IncomeEntry] deserialize. Avoids select(*) on every board load.
   static const String collectionsSelect =
       'id,tour_id,bus_id,passenger_id,seat_id,amount_due,amount_received,'
+      // amount_online: the slice that arrived by UPI rather than as cash in the
+      // handler's pocket. Without it every online advance reads as cash the
+      // handler must hand over.
+      'amount_online,'
       'amount_refunded,note,collected_by,created_at,updated_at';
 
   static const String expensesSelect =

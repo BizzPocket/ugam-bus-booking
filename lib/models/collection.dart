@@ -16,6 +16,16 @@ class Collection {
   final String seatId;
   final double amountDue;
   final double amountReceived;
+
+  /// The slice of [amountReceived] that arrived ONLINE (a UPI advance), not as
+  /// cash in the handler's pocket.
+  ///
+  /// Server-owned. `confirm_payment_claim` writes it, and 062's
+  /// `finance_sync_collection` books exactly this slice to `bank.gateway`
+  /// instead of `cash.handler`. The client reads it and never writes it — see
+  /// the note in [toMap].
+  final double amountOnline;
+
   final double amountRefunded;
   final String? note;
   final String? collectedBy;
@@ -30,6 +40,7 @@ class Collection {
     this.seatId = '',
     this.amountDue = 0,
     this.amountReceived = 0,
+    this.amountOnline = 0,
     this.amountRefunded = 0,
     this.note,
     this.collectedBy,
@@ -39,8 +50,22 @@ class Collection {
        createdAt = createdAt ?? DateTime.now(),
        updatedAt = updatedAt ?? DateTime.now();
 
-  /// Cash the collection actually holds.
+  /// Everything received against this row, however it arrived, less refunds.
+  ///
+  /// This is the RIDER's position — what they have paid. It is NOT what the
+  /// handler is holding; use [netCash] for that.
   double get netCollected => amountReceived - amountRefunded;
+
+  /// CASH the handler is actually holding for this row.
+  ///
+  /// A UPI advance lands in the organiser's bank, never in the handler's
+  /// pocket, so it must not appear in what the handler is asked to hand over.
+  /// This mirrors the ledger exactly: `finance_bus_summary` (063) restricts
+  /// `collected_minor` to `cash.handler` receipts and refunds, so any figure
+  /// that drives a handover must subtract the online slice or the two disagree
+  /// by precisely that amount — a cash dispute at the moment money changes
+  /// hands.
+  double get netCash => amountReceived - amountOnline - amountRefunded;
 
   /// Sub-rupee tolerance for money classification. Fractional dues (one-leg
   /// 0.5, sofa/2, bus/seats) can leave sub-rupee residuals in [balance]; without
@@ -69,6 +94,11 @@ class Collection {
       'seat_id': seatId,
       'amount_due': amountDue,
       'amount_received': amountReceived,
+      // amount_online is deliberately ABSENT. It is written only by
+      // confirm_payment_claim; a client PATCH carrying a stale value (or the
+      // 0 default on a row the client has never refreshed) would silently
+      // re-book an online advance as handler cash. Reading it is safe, echoing
+      // it back is not.
       'amount_refunded': amountRefunded,
       'note': note,
       'collected_by': collectedBy,
@@ -86,6 +116,7 @@ class Collection {
       seatId: (map['seat_id'] ?? '').toString(),
       amountDue: (map['amount_due'] as num?)?.toDouble() ?? 0,
       amountReceived: (map['amount_received'] as num?)?.toDouble() ?? 0,
+      amountOnline: (map['amount_online'] as num?)?.toDouble() ?? 0,
       amountRefunded: (map['amount_refunded'] as num?)?.toDouble() ?? 0,
       note: map['note'] as String?,
       collectedBy: map['collected_by'] as String?,
@@ -107,6 +138,7 @@ class Collection {
     String? seatId,
     double? amountDue,
     double? amountReceived,
+    double? amountOnline,
     double? amountRefunded,
     Object? note = _unset,
     Object? collectedBy = _unset,
@@ -119,6 +151,9 @@ class Collection {
       seatId: seatId ?? this.seatId,
       amountDue: amountDue ?? this.amountDue,
       amountReceived: amountReceived ?? this.amountReceived,
+      // Carried through so a local edit of cash or refunds cannot silently
+      // reclassify an online advance as handler cash.
+      amountOnline: amountOnline ?? this.amountOnline,
       amountRefunded: amountRefunded ?? this.amountRefunded,
       note: identical(note, _unset) ? this.note : note as String?,
       collectedBy: identical(collectedBy, _unset)

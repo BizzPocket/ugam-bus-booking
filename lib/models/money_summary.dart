@@ -156,15 +156,21 @@ class BusMoneySummary {
       for (final p in passengers)
         if (p.assignedSeats.any((a) => a.busId == busId)) p.id,
     };
+    // netCash, not netCollected: a UPI advance lands in the organiser's bank,
+    // never in the handler's pocket. `collected` drives inHand, outstanding and
+    // the pre-filled handover amount, and the ledger's own collected_minor
+    // (finance_bus_summary, 063) counts only cash.handler receipts — so using
+    // the rider-side figure here asks the handler to hand over money they were
+    // never given, and leaves outstanding permanently short by the online take.
     final detachedCash = passengers.isEmpty
         ? 0.0
         : busCollections
               .where((c) => !seatedHere.contains(c.passengerId))
-              .fold(0.0, (sum, c) => sum + c.netCollected);
+              .fold(0.0, (sum, c) => sum + c.netCash);
 
     return BusMoneySummary(
       busId: busId,
-      collected: busCollections.fold(0.0, (sum, c) => sum + c.netCollected),
+      collected: busCollections.fold(0.0, (sum, c) => sum + c.netCash),
       detachedCash: detachedCash,
       income: busIncomes.fold(0.0, (sum, i) => sum + i.amount),
       busRent: busRent,
@@ -383,9 +389,11 @@ class TourMoneySummary {
       orphanExpenses = expenses
           .where((e) => !knownBusIds.contains(e.busId))
           .fold(0.0, (sum, e) => sum + e.amount);
+      // netCash for the same reason as the per-bus rollup above: this folds
+      // into the tour's cash position, not the riders'.
       orphanCollected = collections
           .where((c) => !knownBusIds.contains(c.busId))
-          .fold(0.0, (sum, c) => sum + c.netCollected);
+          .fold(0.0, (sum, c) => sum + c.netCash);
       orphanIncome = incomes
           .where((i) => !knownBusIds.contains(i.busId))
           .fold(0.0, (sum, i) => sum + i.amount);
