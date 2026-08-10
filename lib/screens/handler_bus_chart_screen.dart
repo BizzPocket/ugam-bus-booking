@@ -36,6 +36,7 @@ import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/collection_seat_resolver.dart';
+import '../utils/collection_write.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
@@ -830,28 +831,21 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
         due: due,
         existing: existing,
         onSave: (received, returned, collectedBy, note) async {
-          final base =
-              existing ??
-              Collection(
-                tourId: tourId,
-                busId: bus.id,
-                passengerId: passenger.id,
-                seatId: seatId,
-              );
-          final updated = base.copyWith(
+          // See buildCollectionToSave: an ADOPTED row keeps its own seat_id,
+          // because the upsert's conflict target is
+          // (passenger_id, bus_id, seat_id) and rewriting it turns the update
+          // into an INSERT that collides on the primary key.
+          final updated = buildCollectionToSave(
+            existing: existing,
+            tourId: tourId,
+            busId: bus.id,
+            passengerId: passenger.id,
             seatId: seatId,
-            amountDue: due,
-            amountReceived: received,
-            // Overpayment auto-books as change returned (net settles to due)
-            // unless the handler typed an explicit return — same rule as the
-            // admin collection screen. See [refundToRecord].
-            amountRefunded: refundToRecord(
-              due: due,
-              received: received,
-              manualReturned: returned,
-            ),
-            collectedBy: collectedBy.isEmpty ? null : collectedBy,
-            note: note.isEmpty ? null : note,
+            due: due,
+            received: received,
+            manualReturned: returned,
+            collectedBy: collectedBy,
+            note: note,
           );
           final saved = await _store.handlerUpsertCollection(
             widget.requestId,

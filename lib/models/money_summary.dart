@@ -403,7 +403,12 @@ class TourMoneySummary {
       orphanExpenses: orphanExpenses,
       orphanCollected: orphanCollected,
       orphanIncome: orphanIncome,
-      totalCollected: collections.fold(0.0, (sum, c) => sum + c.netCollected),
+      // netCash, consistent with orphanCollected above and the per-bus rollup
+      // at :169/:173. This was left as netCollected when amount_online was
+      // introduced, so the tour total silently included UPI money the handler
+      // never held — the exact figure the split existed to separate, still
+      // wrong at the tour level while every per-bus figure was right.
+      totalCollected: collections.fold(0.0, (sum, c) => sum + c.netCash),
       totalDetachedCash: detachedCashTotal,
       totalIncome: incomes.fold(0.0, (sum, i) => sum + i.amount),
       totalBusRent: busRentsTotal,
