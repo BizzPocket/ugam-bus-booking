@@ -216,7 +216,11 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                     // content has actually been published.
                     itemCount: groups.length + 1,
                     itemBuilder: (_, index) {
-                      if (index == 0) return const ContentSlot();
+                      if (index == 0) {
+                        return const ContentSlot(
+                          ContentSlots.customerTourListTop,
+                        );
+                      }
                       final i = index - 1;
                       final g = groups[i];
                       if (g.tours.isEmpty) return const SizedBox.shrink();

@@ -1,19 +1,98 @@
 {
-  "_comment": "A worked example. To see the content slot render, upload THIS as content.json (the live file ships empty on purpose). Revert by re-uploading content.json with {\"blocks\": []} — that reaches every installed client.",
+  "_comment": "A worked example of every block type, slot and targeting rule. To see it render, upload THIS as content.json (the live file ships empty on purpose). Revert by re-uploading {\"blocks\": []} — that reaches every installed client.",
 
   "blocks": [
     {
+      "id": "shravan-promo",
+      "slot": "customer.tour_list.top",
       "type": "notice",
       "tone": "info",
+      "order": 0,
       "title": "શ્રાવણ માસની યાત્રાઓ",
       "body": "નવી બસો ઉમેરાઈ છે. બુકિંગ ચાલુ છે."
     },
     {
-      "type": "link",
+      "id": "weekly-seats",
+      "slot": "customer.tour_list.top",
+      "type": "stat",
+      "order": 1,
+      "title": "આ અઠવાડિયે બુક થયેલી સીટ",
+      "value": "128",
+      "body": "ગયા અઠવાડિયા કરતાં વધુ"
+    },
+    { "id": "rule-1", "slot": "customer.tour_list.top", "type": "divider", "order": 2 },
+    {
+      "id": "faq-payment",
+      "slot": "customer.tour_list.top",
+      "type": "faq",
+      "order": 3,
+      "title": "પેમેન્ટ કેવી રીતે કરવું?",
+      "body": "UPI થી એડવાન્સ ભરો, બાકીના પૈસા બસમાં આપો."
+    },
+    {
+      "id": "cta-bookings",
+      "slot": "customer.tour_list.top",
+      "type": "cta",
+      "order": 4,
       "title": "મારી બુકિંગ જુઓ",
-      "body": "તમારી બધી બુકિંગ એક જગ્યાએ",
       "action": "route",
       "action_target": "my_bookings"
+    },
+
+    {
+      "id": "empty-nudge",
+      "slot": "customer.my_requests.empty",
+      "type": "banner",
+      "title": "હજુ કોઈ બુકિંગ નથી",
+      "body": "આગામી યાત્રાઓ જુઓ અને સીટ બુક કરો."
+    },
+
+    {
+      "id": "depot-notice",
+      "slot": "handler.chart.top",
+      "type": "notice",
+      "tone": "warn",
+      "title": "ડેપો સૂચના",
+      "body": "પ્રસ્થાન પહેલાં ઓફિસમાં ફોન કરો."
+    },
+
+    {
+      "id": "settlement-reminder",
+      "slot": "admin.money.top",
+      "type": "notice",
+      "tone": "info",
+      "title": "Settlement reminder",
+      "body": "Handovers for last week's tours close on Friday."
+    },
+
+    {
+      "_note": "Targeting examples. Each is suppressed unless every condition matches.",
+      "id": "ios-only-tip",
+      "slot": "customer.tour_list.top",
+      "type": "notice",
+      "order": 90,
+      "title": "iOS only",
+      "body": "Shown on iPhone, never on Android.",
+      "when": { "platforms": ["ios"] }
+    },
+    {
+      "id": "old-build-warning",
+      "slot": "customer.tour_list.top",
+      "type": "notice",
+      "tone": "warn",
+      "order": 91,
+      "title": "Update available",
+      "body": "Shown only to builds 25 and older — disappears once they update.",
+      "when": { "max_build": 25 }
+    },
+    {
+      "id": "diwali-promo",
+      "slot": "customer.tour_list.top",
+      "type": "banner",
+      "order": 92,
+      "title": "Diwali specials",
+      "body": "Appears on 20 Oct and stops on 5 Nov, with no further action.",
+      "when": { "from": "2026-10-20T00:00:00Z", "to": "2026-11-05T00:00:00Z" }
     }
   ]
 }

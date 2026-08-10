@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import '../controllers/money_controller.dart';
 import '../controllers/tour_controller.dart';
+import '../components/content_block_view.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/money_summary.dart';
@@ -156,6 +157,14 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                       parent: BouncingScrollPhysics(),
                     ),
                     children: [
+                      // Operator-facing slot: settlement reminders, a note
+                      // about a rate change, guidance during an incident.
+                      // Content only — every figure below is computed from the
+                      // ledger and must never come from a document.
+                      const ContentSlot(
+                        ContentSlots.adminMoneyTop,
+                        role: 'admin',
+                      ),
                       _PnlEntryCard(
                         summary: tourSummary,
                         onTap: _openPnl,

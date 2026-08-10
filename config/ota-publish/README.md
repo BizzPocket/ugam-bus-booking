@@ -92,11 +92,74 @@ goes in it. It cannot introduce a widget, a layout or an interaction.
 }
 ```
 
-| Type | Renders |
+### Block types
+
+| Type | Renders | Requires |
+| --- | --- | --- |
+| `notice` | Text with a coloured left rule | title or body |
+| `banner` | 16:9 image with optional title and body | image, title or body |
+| `link` | A row with a chevron | title or body |
+| `cta` | A full-width primary button | `title` |
+| `faq` | Collapsed expander; `body` is the answer | `title` |
+| `stat` | Large figure with label and optional secondary | `value` |
+| `divider` | A rule. The only type allowed to carry no content | — |
+
+`tone` (`neutral`, `info`, `warn`, `danger`) colours the `notice` rule and the
+`stat` figure. `order` sorts ascending within a slot; ties keep document order.
+
+**`stat.value` is a string and is rendered verbatim.** It is deliberately not
+computed on device — a server-supplied figure the app also calculated would be
+a second source of truth for a number, which is the exact class of bug that
+cost this app a week. Use it for editorial figures, never for money the app
+already knows.
+
+### Slots
+
+Every surface has one. `surface.screen.position`.
+
+| Slot | Where |
 | --- | --- |
-| `notice` | Text with a coloured left rule. `tone`: `neutral`, `info`, `warn` |
-| `banner` | 16:9 image with optional title and body |
-| `link` | A row with a chevron |
+| `customer.tour_list.top` | above the tour list — the default when no slot is named |
+| `customer.tour_list.empty` | when there are no tours |
+| `customer.tour_detail.top` | above a tour's detail |
+| `customer.my_requests.top` | above the bookings list |
+| `customer.my_requests.empty` | **when a customer has no bookings — the best audience in the app** |
+| `customer.more.top` | above the More menu |
+| `handler.chart.top` | above the handler's bus chart — depot notices, pickup changes |
+| `admin.home.top` | above the operator's home |
+| `admin.tour_detail.top` | above a tour's admin detail |
+| `admin.money.top` | above the money board |
+
+An unknown slot is **dropped**, not defaulted — otherwise a block written for a
+future screen would land on the customer home page.
+
+### Targeting — the `when` block
+
+Every field is optional; omitted means no restriction. All of it is evaluated
+on-device against values the app already has, so targeting costs no extra
+round trip and works offline.
+
+| Field | Effect |
+| --- | --- |
+| `platforms` | `["android"]`, `["ios"]` |
+| `min_build` / `max_build` | inclusive build-number window |
+| `locales` | `["gu"]`, `["en","hi"]` |
+| `roles` | `["customer"]`, `["handler"]`, `["admin"]` |
+| `from` / `to` | UTC ISO-8601. `to` is **exclusive** |
+
+```json
+"when": { "platforms": ["android"], "max_build": 25 }
+```
+
+That one shows a notice to exactly the builds carrying a bug, and it vanishes
+by itself as people update — no follow-up edit.
+
+`from`/`to` is what makes a promo schedulable: publish once, it appears and
+retires on its own.
+
+An **unreadable build number passes any build window**. `AppInfo` leaves an
+empty string when `PackageInfo` fails, and a device that cannot report its
+version must not silently lose content.
 
 | Action | Meaning |
 | --- | --- |

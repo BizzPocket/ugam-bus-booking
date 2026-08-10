@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/tour_controller.dart';
+import '../components/content_block_view.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
@@ -265,10 +266,32 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                   : (_loadFailed && live.isEmpty)
                   ? UgamEmpty.error(onRetry: _refresh)
                   : live.isEmpty
-                  ? UgamEmpty(
-                      icon: Icons.inbox_outlined,
-                      title: tr('customer_my_requests.empty_title'),
-                      body: tr('customer_my_requests.empty_body'),
+                  // Expanded keeps UgamEmpty vertically centred exactly as it
+                  // was; the slot sits beneath it and is zero-height unless
+                  // something is published. A customer with no bookings is the
+                  // single best audience in the app — this is the one screen
+                  // where remote content earns its place outright.
+                  ? Column(
+                      children: [
+                        Expanded(
+                          child: UgamEmpty(
+                            icon: Icons.inbox_outlined,
+                            title: tr('customer_my_requests.empty_title'),
+                            body: tr('customer_my_requests.empty_body'),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            UgamSpacing.gutter,
+                            0,
+                            UgamSpacing.gutter,
+                            UgamSpacing.dockClearance,
+                          ),
+                          child: const ContentSlot(
+                            ContentSlots.customerMyRequestsEmpty,
+                          ),
+                        ),
+                      ],
                     )
                   : _visible.isEmpty
                   ? UgamEmpty(

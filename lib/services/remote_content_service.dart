@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:get/get.dart';
 
+import '../config/app_info.dart';
 import '../config/remote_content_config.dart';
 import '../models/content_block.dart';
 import 'cached_remote_document.dart';
@@ -33,8 +36,50 @@ class RemoteContentService extends GetxService {
 
   final CachedRemoteDocument _doc;
 
-  /// Blocks for the customer content slot. Empty is the normal, safe state.
+  /// Every parsed block, across all slots, before targeting is applied.
+  /// Empty is the normal, safe state.
   final RxList<ContentBlock> blocks = <ContentBlock>[].obs;
+
+  /// The caller's role, set by whichever surface is on screen. Blocks can
+  /// target it. Defaults to customer because that is the surface a cold,
+  /// unauthenticated launch lands on.
+  final RxString role = 'customer'.obs;
+
+  /// Blocks eligible for [slot] right now, in order.
+  ///
+  /// Targeting is evaluated HERE rather than at parse time, because the answer
+  /// changes without the document changing — a scheduled promo starts, the
+  /// user switches language, the app is updated. Re-filtering per read keeps
+  /// those correct without a refetch, and the list is small enough that the
+  /// cost is irrelevant.
+  List<ContentBlock> forSlot(String slot, {String? locale}) {
+    final platform = _platform();
+    final build = int.tryParse(AppInfo.buildNumber.trim());
+    final loc = (locale ?? '').toLowerCase();
+    final now = DateTime.now().toUtc();
+
+    return [
+      for (final b in blocks)
+        if (b.slot == slot &&
+            b.when.matches(
+              platform: platform,
+              build: build,
+              locale: loc,
+              role: role.value,
+              nowUtc: now,
+            ))
+          b,
+    ];
+  }
+
+  static String _platform() {
+    try {
+      if (kIsWeb) return 'web';
+      return Platform.operatingSystem;
+    } catch (_) {
+      return 'unknown';
+    }
+  }
 
   /// Reads the cache, then refreshes in the background.
   ///

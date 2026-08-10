@@ -7,6 +7,7 @@ import '../components/ugam_logo.dart';
 import '../config/app_info.dart';
 import '../config/i18n_config.dart';
 import '../content/legal_content.dart';
+import '../components/content_block_view.dart';
 import '../design/ugam.dart';
 import '../widgets/language_picker_sheet.dart';
 import 'legal_document_screen.dart';
@@ -42,6 +43,9 @@ class CustomerMoreScreen extends StatelessWidget {
                   UgamSpacing.lg,
                 ),
                 children: [
+                  // Server-driven slot. Zero-height unless content is
+                  // published, so this screen is unchanged by default.
+                  const ContentSlot(ContentSlots.customerMoreTop),
                   _BrandHero(c: c),
                   const SizedBox(height: UgamSpacing.xl),
 

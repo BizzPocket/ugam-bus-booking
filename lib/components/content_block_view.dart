@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -7,6 +8,10 @@ import '../models/content_block.dart';
 import '../routes/app_routes.dart';
 import '../services/remote_content_service.dart';
 
+// Re-exported so a screen placing a slot needs one import, not two. The slot
+// names and the widget that renders them belong together at the call site.
+export '../models/content_block.dart' show ContentSlots;
+
 /// Renders the server-driven content slot, or nothing at all.
 ///
 /// Nothing is the normal state: with no content configured, no cached
@@ -14,7 +19,14 @@ import '../services/remote_content_service.dart';
 /// space and the host screen looks exactly as it did before the feature
 /// existed.
 class ContentSlot extends StatelessWidget {
-  const ContentSlot({super.key});
+  /// Which named slot to render. See [ContentSlots].
+  final String slot;
+
+  /// Set on surfaces where the role is known, so blocks can target it. The
+  /// customer surface leaves it null because that is the service default.
+  final String? role;
+
+  const ContentSlot(this.slot, {super.key, this.role});
 
   @override
   Widget build(BuildContext context) {
@@ -24,16 +36,29 @@ class ContentSlot extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final service = Get.find<RemoteContentService>();
+    if (role != null && service.role.value != role) {
+      // Post-frame: this is a build method, and writing to an Rx during build
+      // would trigger a rebuild-in-build assertion.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        service.role.value = role!;
+      });
+    }
 
     return Obx(() {
-      final blocks = service.blocks;
+      // Read through forSlot so targeting is evaluated per build: a scheduled
+      // promo starts, the locale changes, the app updates — all without the
+      // document changing or a refetch.
+      final blocks = service.forSlot(
+        slot,
+        locale: context.locale.languageCode,
+      );
       if (blocks.isEmpty) return const SizedBox.shrink();
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (final b in blocks) ...[
             ContentBlockView(block: b),
-            const SizedBox(height: UgamSpacing.md),
+            if (b.type != 'divider') const SizedBox(height: UgamSpacing.md),
           ],
         ],
       );
@@ -71,8 +96,17 @@ class ContentBlockView extends StatelessWidget {
     final content = switch (block.type) {
       'banner' => _Banner(block: block, c: c),
       'link' => _LinkRow(block: block, c: c, hasTap: onTap != null),
+      'cta' => _Cta(block: block, onTap: onTap),
+      'faq' => _Faq(block: block, c: c),
+      'stat' => _Stat(block: block, c: c),
+      'divider' => _Divider(c: c),
       _ => _Notice(block: block, c: c),
     };
+
+    // These own their own tap surface (a button) or must not have one at all
+    // (an expander swallows the tap; a divider is decoration). Wrapping either
+    // in an InkWell would either double-handle or make a rule tappable.
+    if (const {'cta', 'faq', 'divider'}.contains(block.type)) return content;
 
     if (onTap == null) return content;
     return InkWell(
@@ -197,6 +231,81 @@ class _Banner extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A primary button. The action is resolved by the same constrained rules as
+/// every other block — https URL or whitelisted route — so a CTA cannot reach
+/// anywhere a link could not.
+class _Cta extends StatelessWidget {
+  final ContentBlock block;
+  final VoidCallback? onTap;
+  const _Cta({required this.block, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCTA(
+      label: block.title!,
+      // An inert CTA is a bug in the document, not something to render as a
+      // dead button: UgamCTA renders disabled on a null callback, which is the
+      // honest presentation.
+      onPressed: onTap,
+    );
+  }
+}
+
+/// Collapsed question, expanded answer. The single highest-value block for
+/// support content: it costs no vertical space until someone wants it.
+class _Faq extends StatelessWidget {
+  final ContentBlock block;
+  final UgamColorSet c;
+  const _Faq({required this.block, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamExpander(
+      title: block.title ?? '',
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: UgamSpacing.md),
+        child: Text(
+          block.body ?? '',
+          style: UgamText.body.copyWith(color: c.ink2),
+        ),
+      ),
+    );
+  }
+}
+
+/// A large figure with a label — "12 seats left", "3 tours this week".
+///
+/// The VALUE IS A STRING and is rendered verbatim. It is deliberately not
+/// computed on device: a server-supplied figure that the app also calculated
+/// would be a second source of truth for a number, which is the exact class of
+/// bug that cost this app a week.
+class _Stat extends StatelessWidget {
+  final ContentBlock block;
+  final UgamColorSet c;
+  const _Stat({required this.block, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamHeroStat(
+      label: block.title ?? '',
+      value: block.value!,
+      tone: ContentBlockView.toneColor(block.tone, c),
+      secondary: block.body,
+    );
+  }
+}
+
+class _Divider extends StatelessWidget {
+  final UgamColorSet c;
+  const _Divider({required this.c});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
+        child: Divider(height: 1, thickness: 1, color: c.border),
+      );
 }
 
 class _LinkRow extends StatelessWidget {

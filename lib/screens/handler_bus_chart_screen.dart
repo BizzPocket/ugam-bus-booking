@@ -13,6 +13,7 @@ import '../components/seat_chart_tile.dart';
 import '../controllers/pickup_controller.dart';
 import '../design/group_color.dart';
 import '../design/price_band_color.dart';
+import '../components/content_block_view.dart';
 import '../design/ugam.dart';
 import '../models/attendance.dart';
 import '../models/bus_details.dart';
@@ -1127,6 +1128,22 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
                 setState(() => _selectedBusId = manifest.buses[i].id),
           ),
         if (multiBus) const SizedBox(height: UgamSpacing.md),
+        // Server-driven slot for the handler surface — depot notices, a
+        // changed pickup point, "call the office before departure".
+        //
+        // CONTENT ONLY, and that boundary is deliberate. The chart geometry,
+        // the collect sheet and the handover form stay native because handlers
+        // work offline on moving buses: a surface that must be fetched cannot
+        // render without signal, and this screen is where cash is counted.
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.gutter,
+          ),
+          child: const ContentSlot(
+            ContentSlots.handlerChartTop,
+            role: 'handler',
+          ),
+        ),
         Padding(
           padding: EdgeInsets.fromLTRB(
             UgamSpacing.gutter,
