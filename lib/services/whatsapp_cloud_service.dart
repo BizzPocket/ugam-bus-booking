@@ -346,11 +346,31 @@ class WhatsAppCloudService {
   /// Uploads [bytes] to Storage [bucket]/[path] and returns a SIGNED URL that
   /// expires after [ttlSeconds]. Upserts so re-sends reuse the path.
   ///
-  /// NOTE: this is NOT access control. Migration 009 makes both buckets
-  /// public-read (Meta must fetch template media by plain URL), so the object
-  /// stays reachable at its public path regardless of signing. Fine for a
-  /// send-time fetch — but the URL silently EXPIRES, so never persist it in
-  /// the database; use [uploadPublic] for that.
+  /// THE SIGNATURE IS THE ACCESS CONTROL — do not "fix" this by making a
+  /// bucket public.
+  ///
+  /// This docstring used to claim that migration 009 makes both buckets
+  /// public-read, so signing was cosmetic. That has been false since 011:139
+  /// made seat-charts private, and 051 deliberately kept it private because an
+  /// object here is a rendered roster: every occupant's name and phone, their
+  /// pickup point, and the handler's contact details.
+  ///
+  /// Meta does not need a public bucket. It fetches
+  /// `/object/sign/<bucket>/<path>?token=<jwt>`, which storage-api authorises
+  /// by validating the token — no database role is involved. Proof inside this
+  /// repo: 059 makes wa-media private with a single owner-scoped
+  /// `to authenticated` policy and NO anon policy at all, and
+  /// whatsapp_inbox_service.dart mints signed URLs that conversation_screen
+  /// renders with Image.network, sending neither apikey nor Authorization.
+  /// That path works in production.
+  ///
+  /// The stale claim was the likeliest reason someone would re-add
+  /// `wa_seatcharts_public_read` (dropped in 081) and re-expose every
+  /// passenger roster ever generated, so it is corrected here rather than
+  /// merely deleted.
+  ///
+  /// The URL still silently EXPIRES, so never persist it in the database; use
+  /// [uploadPublic] for that.
   Future<String> uploadSigned({
     required String bucket,
     required String path,
