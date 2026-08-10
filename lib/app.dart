@@ -18,6 +18,7 @@ import 'controllers/user_controller.dart';
 import 'controllers/customer_memory_controller.dart';
 import 'screens/launch_block_overlay.dart';
 import 'screens/main_shell.dart';
+import 'services/location_tracker_service.dart';
 import 'services/realtime_service.dart';
 import 'services/remote_content_service.dart';
 import 'services/remote_flags_service.dart';
@@ -137,6 +138,10 @@ class AppBinding extends Bindings {
       CustomerMemoryController(),
       permanent: true,
     );
+    // Handler live-location tracking. Permanent because sharing outlives the
+    // bus-chart screen: a handler who backs out or pockets the phone must keep
+    // reporting for the rest of the trip.
+    Get.put<LocationTrackerService>(LocationTrackerService(), permanent: true);
     Get.lazyPut<ShellController>(() => ShellController(), fenix: true);
     Get.lazyPut<TourController>(() => TourController(), fenix: true);
     Get.lazyPut<MoneyController>(() => MoneyController(), fenix: true);

@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../components/bus_message_composer_field.dart';
@@ -26,6 +30,7 @@ import '../models/income_entry.dart';
 import '../models/passenger.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
+import '../services/location_tracker_service.dart';
 import '../services/wa_template_params.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_service.dart';
@@ -38,6 +43,9 @@ import '../utils/pickup_grouping.dart';
 import '../utils/seat_money_state.dart';
 import '../utils/seat_occupants.dart';
 import '../utils/time_format.dart';
+import '../widgets/location_rationale_sheet.dart';
+import '../widgets/tracking_status_card.dart';
+import '../utils/wa_error_text.dart';
 import '../utils/wa_param_error_text.dart';
 import 'fullscreen_chart_screen.dart';
 
@@ -158,6 +166,13 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
 
   /// Which leg the attendance view is currently showing (GO vs RETURN).
   AttendanceLeg _attLeg = AttendanceLeg.go;
+
+  /// Guards [_bootstrapTracking] so the permission flow runs once per open,
+  /// not once per silent reconcile (which fires on every write and resume).
+  bool _trackingBootstrapped = false;
+
+  /// One-time flag for the background-location disclosure sheet.
+  static const String _rationaleSeenKey = 'tracking.rationale_seen';
 
   /// Cash already handed to the admin for this handler's bus, keyed by id.
   /// Read through its own RPC rather than the manifest (whose live body has
@@ -363,7 +378,100 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Deliberately does NOT stop tracking. Sharing is scoped to the TRIP, not
+    // to this screen — a handler who backs out to check something, or pockets
+    // the phone, must keep reporting. The foreground-service notification is
+    // what keeps that visible and stoppable.
     super.dispose();
+  }
+
+  // ── live location ─────────────────────────────────────────
+
+  /// Auto-start, per the design: the handler never taps a Start button.
+  /// Consent lives at the permission step, not behind a button.
+  ///
+  /// Runs once per screen open. The gate is simply "the manifest loaded and a
+  /// bus is selected", because `handler_tour_manifest` is ITSELF lock-gated
+  /// (migration 039) — a handler on a pre-lock tour gets no manifest, so this
+  /// never fires for them. The server re-checks the window on every push
+  /// anyway and answers `window_closed`, so the client gate is belt-and-braces
+  /// rather than the real authority.
+  Future<void> _bootstrapTracking() async {
+    if (_trackingBootstrapped) return;
+    if (!Get.isRegistered<LocationTrackerService>()) return;
+    final busId = _selectedBusId;
+    if (busId == null || _manifest == null) return;
+    _trackingBootstrapped = true;
+
+    final tracker = Get.find<LocationTrackerService>();
+    tracker.status.value = TrackingStatus.awaitingPermission;
+
+    var serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    var permission = await Geolocator.checkPermission();
+    var state = resolveTrackingStatus(
+      serviceEnabled: serviceEnabled,
+      permission: permission,
+    );
+
+    // First ask ever: disclose BEFORE the OS prompt (Play policy), once only.
+    if (state == TrackingStatus.denied) {
+      final prefs = await SharedPreferences.getInstance();
+      final seen = prefs.getBool(_rationaleSeenKey) ?? false;
+      if (!seen) {
+        if (!mounted) return;
+        final go = await showLocationRationale(context);
+        await prefs.setBool(_rationaleSeenKey, true);
+        if (!go) {
+          tracker.status.value = TrackingStatus.denied;
+          return;
+        }
+      }
+      permission = await Geolocator.requestPermission();
+      // Android needs a SECOND ask to move whileInUse -> always. Declining
+      // leaves foreground-only tracking, which the card states plainly rather
+      // than dressing up as fully live.
+      if (permission == LocationPermission.whileInUse && Platform.isAndroid) {
+        permission = await Geolocator.requestPermission();
+      }
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      state = resolveTrackingStatus(
+        serviceEnabled: serviceEnabled,
+        permission: permission,
+      );
+    }
+
+    if (state == TrackingStatus.live || state == TrackingStatus.foregroundOnly) {
+      await tracker.start(
+        requestId: widget.requestId,
+        busId: busId,
+        leg: _attLeg.storageKey,
+      );
+      // start() optimistically sets `live`; correct it when the handler only
+      // granted while-in-use.
+      tracker.status.value = state;
+      tracker.startStream();
+    } else {
+      tracker.status.value = state;
+    }
+  }
+
+  /// The card's single recovery action, resolved from the current status.
+  Future<void> _onTrackingFix() async {
+    if (!Get.isRegistered<LocationTrackerService>()) return;
+    switch (Get.find<LocationTrackerService>().status.value) {
+      case TrackingStatus.serviceDisabled:
+        await Geolocator.openLocationSettings();
+      case TrackingStatus.deniedForever:
+        await Geolocator.openAppSettings();
+      default:
+        _trackingBootstrapped = false;
+        await _bootstrapTracking();
+    }
+  }
+
+  Future<void> _stopTracking() async {
+    if (!Get.isRegistered<LocationTrackerService>()) return;
+    await Get.find<LocationTrackerService>().stop();
   }
 
   @override
@@ -452,6 +560,10 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
         _error = null;
         _loading = false;
       });
+      // Auto-start sharing. Guarded internally so the silent reconciles that
+      // fire after every write and every resume do not re-run the permission
+      // flow. Not awaited: the board must paint now, not after a dialog.
+      unawaited(_bootstrapTracking());
     } catch (_) {
       if (!mounted || token != _loadToken) return;
       // Mirrors MoneyController.loadForTour's guard (money_controller.dart:150)
@@ -969,7 +1081,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
             );
           } else if (result.anySent) {
             AppSnackBar.warning(
-              '${tr('bus_message.partial_body', namedArgs: {'sent': '${result.sent}', 'failed': '${result.failed}'})}${firstWaError(result)}',
+              '${tr('bus_message.partial_body', namedArgs: {'sent': '${result.sent}', 'failed': '${result.failed}'})}${waFailureAppendix(result)}',
               title: tr('bus_message.partial_title'),
             );
           } else if (result.results.isEmpty) {
@@ -982,7 +1094,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
             // new-line/tab characters…") — previously dropped, which is what
             // made a refused announcement look like nothing had happened.
             AppSnackBar.error(
-              '${tr('bus_message.failed_body')}${firstWaError(result)}',
+              '${tr('bus_message.failed_body')}${waFailureAppendix(result)}',
               title: tr('bus_message.failed_title'),
             );
           }
@@ -1144,6 +1256,38 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
             role: 'handler',
           ),
         ),
+        // Live location: state + the one recovery action, then a small
+        // confirmation map while actually sharing. Absent entirely under
+        // `flutter test`, where the service is never registered.
+        if (Get.isRegistered<LocationTrackerService>())
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: UgamSpacing.gutter,
+            ),
+            child: Obx(() {
+              final tracker = Get.find<LocationTrackerService>();
+              final status = tracker.status.value;
+              final sharing =
+                  status == TrackingStatus.live ||
+                  status == TrackingStatus.foregroundOnly;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TrackingStatusCard(
+                    status: status,
+                    lastUploadAt: tracker.lastUploadAt.value,
+                    onStop: () => unawaited(_stopTracking()),
+                    onFix: () => unawaited(_onTrackingFix()),
+                  ),
+                  if (sharing)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: UgamSpacing.sm),
+                      child: _HandlerOwnBusMap(),
+                    ),
+                ],
+              );
+            }),
+          ),
         Padding(
           padding: EdgeInsets.fromLTRB(
             UgamSpacing.gutter,
@@ -3979,5 +4123,70 @@ class _PickupChip extends StatelessWidget {
     // Obx repaints once the async pickup list arrives.
     if (pk == null) return _chip(_label(null));
     return Obx(() => _chip(_label(pk)));
+  }
+}
+
+/// A small "yes, your dot is moving" confirmation for the handler.
+///
+/// Lite mode renders a static bitmap rather than a live vector map: this sits
+/// on a phone that is already running GPS for hours, and a full map would cost
+/// battery and memory for no added information at this size.
+///
+/// Reads its own position stream rather than the tracker's buffer — the buffer
+/// drains on every upload, so it is not a source of "where am I now".
+class _HandlerOwnBusMap extends StatefulWidget {
+  const _HandlerOwnBusMap();
+
+  @override
+  State<_HandlerOwnBusMap> createState() => _HandlerOwnBusMapState();
+}
+
+class _HandlerOwnBusMapState extends State<_HandlerOwnBusMap> {
+  Position? _me;
+  StreamSubscription<Position>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 50,
+          ),
+        ).listen(
+          (p) {
+            if (mounted) setState(() => _me = p);
+          },
+          // A failure here costs a reassurance map, nothing more. The upload
+          // path has its own stream and its own error reporting.
+          onError: (_) {},
+        );
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final me = _me;
+    if (me == null) return const UgamSkeleton(height: 160);
+    final here = LatLng(me.latitude, me.longitude);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(UgamRadius.card),
+      child: SizedBox(
+        height: 160,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: here, zoom: 14),
+          liteModeEnabled: Platform.isAndroid,
+          myLocationButtonEnabled: false,
+          zoomControlsEnabled: false,
+          markers: {Marker(markerId: const MarkerId('me'), position: here)},
+        ),
+      ),
+    );
   }
 }
