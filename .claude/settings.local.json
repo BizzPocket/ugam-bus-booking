@@ -116,7 +116,11 @@
       "Bash(grep -n \"class _Header\\\\|_Header\\(\\\\s*$\\\\|_Header\\(subtitle\" lib/screens/add_bus_screen.dart)",
       "Bash(/Users/zeelshiyani/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/scripts/start-server.sh --project-dir /Users/zeelshiyani/WorkSpace/occubusbooking)",
       "WebFetch(domain:muz.li)",
-      "WebFetch(domain:play.google.com)"
+      "WebFetch(domain:play.google.com)",
+      "PowerShell(graphify query \"controllers architecture state management sync layer\" 2>$null)"
     ]
+  },
+  "worktree": {
+    "baseRef": "head"
   }
 }

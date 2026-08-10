@@ -142,3 +142,11 @@ node_modules/
 
 # Stray media dropped in the repo root (never part of the app bundle)
 /*.mp4
+/*.pdf
+
+# Agent worktrees — full checkouts (~120 MB) created per isolated session.
+# Never source; committing one would bloat history irrecoverably.
+.claude/worktrees/
+
+# Generated knowledge graph of this repo — rebuilt on demand via `graphify update .`
+graphify-out/
