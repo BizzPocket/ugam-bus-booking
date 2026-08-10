@@ -32,6 +32,8 @@ import '../utils/passenger_display.dart';
 import '../utils/phone_normalize.dart';
 import '../utils/seat_leg_resolver.dart';
 import '../utils/seat_occupants.dart';
+import '../models/bus_type.dart';
+import '../utils/bus_layout_recovery.dart';
 import '../utils/tour_capacity.dart';
 import '../widgets/seat_move_money_notice.dart';
 import 'auth_controller.dart';
@@ -92,6 +94,44 @@ class TourController extends GetxController {
     return capacity;
   }
 
+  /// Memoization cache for [actualCapacityFor], mirroring [_capacityCache].
+  final _actualCapacityCache =
+      <String, ({int sig, ActualCapacity capacity})>{};
+
+  /// Memoized [computeActualCapacity] for [t].
+  ///
+  /// Cheaper than [capacityFor] — it never runs the engine — but far from free:
+  /// it walks every bus grid and every passenger's seats, and the surfaces that
+  /// want it (the tour-overview meter, each bus row, the seat-assignment leg
+  /// meter) sit inside `Obx` blocks that rebuild on every seat tap and every
+  /// realtime event. Sharing [_capacitySignature] is safe because that
+  /// fingerprint already folds a strict SUPERSET of what
+  /// [computeActualCapacity] reads: bus grids, legacy seat counts, and each
+  /// passenger's assigned seats and legs.
+  ActualCapacity actualCapacityFor(Tour t) {
+    final sig = _capacitySignature(t);
+    final hit = _actualCapacityCache[t.id];
+    if (hit != null && hit.sig == sig) return hit.capacity;
+    final capacity = computeActualCapacity(t);
+    _actualCapacityCache[t.id] = (sig: sig, capacity: capacity);
+    return capacity;
+  }
+
+  /// True once every bus on [tourId] has had its `layout` jsonb resolved —
+  /// fetched, or confirmed absent on the server.
+  ///
+  /// Cold start ships buses WITHOUT their grids, so `bus.layout == null` is
+  /// ambiguous on its own: it means EITHER "still loading" or "this bus genuinely
+  /// has no seat map". Surfaces that would otherwise render a hard, wrong
+  /// conclusion from that null — an empty seat chart, or a capacity-shortfall
+  /// banner claiming riders will not fit when the engine simply has no grid to
+  /// place them on — gate on this instead.
+  bool layoutsLoadedFor(String tourId) {
+    final tour = getTour(tourId);
+    if (tour == null) return false;
+    return tour.buses.every((b) => _layoutFetchedBusIds.contains(b.id));
+  }
+
   /// Cheap structural fingerprint of every input [computeTourCapacity] reads —
   /// computed WITHOUT running the engine, so it's safe to evaluate on each
   /// rebuild. Folds the tour status plus, per bus, its id and seat-grid
@@ -105,7 +145,11 @@ class TourController extends GetxController {
   int _capacitySignature(Tour t) {
     var h = t.status.index;
     for (final b in t.buses) {
-      h = Object.hash(h, b.id);
+      // totalSeatsLegacy is folded because capacity now FALLS BACK to it for a
+      // bus with no usable grid (see [busBerths]). Without it, a bus whose
+      // layout jsonb arrives mid-session — grid empty, then 37 seats — could
+      // keep serving the memoized snapshot taken while it read as empty.
+      h = Object.hash(h, b.id, b.totalSeatsLegacy);
       for (final cell in b.layout?.grid ?? const []) {
         // cell.reserved is folded because computeTourCapacity subtracts held
         // berths and skips reserved cells — without it, toggling a seat to
@@ -2511,13 +2555,16 @@ class TourController extends GetxController {
       persist: () async {
         final t = getTour(tourId);
         if (t == null) return;
-        // The bus row owns the per-bus pointer.
+        // The bus row owns the per-bus pointer. Patch ONLY that column: a whole
+        // -row write here used to ship `layout: null` for any bus whose grid had
+        // not been fetched yet (cold start omits the jsonb), erasing the seat
+        // chart as a side effect of naming a handler.
         final bus = t.buses.firstWhereOrNull((b) => b.id == busId);
         if (bus != null) {
-          await _sync.smartUpdate(
+          await _sync.updatePatch(
             table: 'buses',
             entityId: busId,
-            data: bus.toMap(),
+            fields: {'handler_passenger_id': bus.handlerPassengerId},
           );
         }
         // The tour row carries the legacy handler_id pointer.
@@ -2589,12 +2636,13 @@ class TourController extends GetxController {
       persist: () async {
         final t = getTour(tourId);
         if (t == null) return;
+        // Clearing the pointer is the same one-column write as setting it.
         final bus = t.buses.firstWhereOrNull((b) => b.id == busId);
         if (bus != null) {
-          await _sync.smartUpdate(
+          await _sync.updatePatch(
             table: 'buses',
             entityId: busId,
-            data: bus.toMap(),
+            fields: {'handler_passenger_id': bus.handlerPassengerId},
           );
         }
         await _sync.smartUpdate(
@@ -2649,7 +2697,19 @@ class TourController extends GetxController {
     }
   }
 
-  Future<void> updateBus(String tourId, Bus bus) async {
+  /// Persist edits to [bus].
+  ///
+  /// [layoutChanged] MUST be true only when the caller actually built a new seat
+  /// layout in this operation. It is a caller declaration, never inferred from
+  /// `bus.layout != null` — an unloaded layout and a real one are
+  /// indistinguishable in memory, and guessing wrong erases the seat chart.
+  /// When false the `layout` column is left out of the write entirely, so the
+  /// grid on the server survives untouched.
+  Future<void> updateBus(
+    String tourId,
+    Bus bus, {
+    required bool layoutChanged,
+  }) async {
     final tourGate = getTour(tourId);
     if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
       AppSnackBar.info(tr('manage_buses.layout_locked_body'),
@@ -2663,10 +2723,10 @@ class TourController extends GetxController {
           buses: t.buses.map((b) => b.id == bus.id ? bus : b).toList(),
         ),
       ),
-      persist: () => _sync.smartUpdate(
+      persist: () => _sync.updatePatch(
         table: 'buses',
         entityId: bus.id,
-        data: bus.toMap(),
+        fields: bus.toPatch(includeLayout: layoutChanged),
       ),
       failure: tr('errors.update_bus'),
     );
@@ -2923,6 +2983,7 @@ class TourController extends GetxController {
 
     raw[idx] = raw[idx].copyWith(buses: updatedBuses);
     _capacityCache.remove(tourId);
+    _actualCapacityCache.remove(tourId);
     _scheduleNotify();
   }
 
@@ -3248,13 +3309,75 @@ class TourController extends GetxController {
           buses: t.buses.map((b) => b.id == busId ? updatedBus : b).toList(),
         ),
       ),
-      persist: () => _sync.smartUpdate(
+      // Seat-cell edits change exactly one column. `layout` is non-null here —
+      // the guard above returned early otherwise — so this is the one write that
+      // legitimately carries a grid.
+      persist: () => _sync.updatePatch(
         table: 'buses',
         entityId: busId,
-        data: updatedBus.toMap(),
+        fields: {'layout': updatedBus.layout?.toMap()},
       ),
       failure: tr('errors.update_seat'),
     );
+  }
+
+  /// Rebuild the seat layout of a bus whose `layout` jsonb was lost, inferring
+  /// the original grid from the seat ids its riders are still assigned to.
+  ///
+  /// Repairs the damage described in migration 065. Safe by construction: the
+  /// rebuilt grid is only written when [recoverBusLayout] identifies EXACTLY one
+  /// candidate, and that candidate contains every surviving seat id, so no
+  /// passenger moves — unlike regenerating through the bus editor, which
+  /// renumbers seats and calls [unassignBus] to clear everyone first.
+  ///
+  /// Returns the outcome so a caller can report ambiguity or an inconsistency
+  /// instead of silently doing nothing. Refuses on a bus that still HAS a
+  /// layout — this only ever fills a hole, never overwrites a live grid.
+  Future<LayoutRecovery> recoverBusLayoutFor(String tourId, String busId) async {
+    await ensureBusLayoutsForTour(tourId);
+
+    final tour = getTour(tourId);
+    final bus = tour?.buses.where((b) => b.id == busId).firstOrNull;
+    if (tour == null || bus == null) {
+      return const LayoutRecovery(reason: 'bus not found');
+    }
+    if (busBerths(bus).fromGrid) {
+      return const LayoutRecovery(
+        reason: 'bus already has a seat layout — nothing to recover',
+      );
+    }
+
+    final survivors = <String>{};
+    for (final p in tour.passengers) {
+      for (final a in p.assignedSeats) {
+        if (a.busId == busId) survivors.add(a.seatId);
+      }
+    }
+
+    final result = recoverBusLayout(
+      totalSeats: bus.totalSeatsLegacy,
+      busType: BusType.fromString(bus.busType),
+      assignedSeatIds: survivors,
+    );
+    final rebuilt = result.layout;
+    if (rebuilt == null) return result;
+
+    final updatedBus = bus.copyWith(layout: rebuilt);
+    await _write(
+      optimistic: () => _updateTourLocal(
+        tourId,
+        (t) => t.copyWith(
+          buses: t.buses.map((b) => b.id == busId ? updatedBus : b).toList(),
+        ),
+      ),
+      persist: () => _sync.updatePatch(
+        table: 'buses',
+        entityId: busId,
+        fields: {'layout': rebuilt.toMap()},
+      ),
+      failure: tr('errors.update_bus'),
+    );
+    return result;
   }
 
   /// THE single place optimistic writes live.

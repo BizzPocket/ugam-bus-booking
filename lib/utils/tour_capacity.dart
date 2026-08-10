@@ -1,10 +1,54 @@
 import 'dart:math' as math;
 
+import '../models/bus_details.dart';
 import '../models/passenger.dart';
+import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
 import '../services/seating_engine.dart';
+
+/// Sellable berths on [bus], and whether that number came from its real seat
+/// grid or from the legacy `total_seats` column.
+///
+/// THE single definition of "how big is this bus", read by BOTH
+/// [computeTourCapacity] and [computeActualCapacity] so those surfaces can never
+/// disagree about the same bus again.
+///
+/// Why the fallback exists: cold start deliberately ships buses WITHOUT their
+/// `layout` jsonb (~71% of bus bytes on a live probe), and a LOST layout leaves
+/// exactly the same shape behind — an empty grid on a bus that really does have
+/// seats. Every grid-derived count then reads 0. That is how the tour overview
+/// came to show `0/0` for a 37-seat bus while the Requests screen — the one
+/// surface that already carried this fallback — correctly showed `72/74` off the
+/// identical tour.
+///
+/// The grid wins whenever it holds seats: it is the ONLY source that knows which
+/// cells are RESERVED (held), and those berths are excluded from [sellable].
+/// The legacy column knows nothing about holds, so in that branch every berth is
+/// treated as sellable — an over-count is safer here than a false "full", which
+/// is the failure this whole helper exists to prevent.
+({int sellable, int reserved, bool fromGrid}) busBerths(Bus bus) {
+  var sellable = 0;
+  var reserved = 0;
+  for (final cell in bus.layout?.grid ?? const <SeatCell>[]) {
+    if (cell.seatId == null || cell.seatType == null) continue;
+    final berths = cell.seatType == SeatType.doubleSofa ? 2 : 1;
+    if (cell.reserved) {
+      reserved += berths;
+    } else {
+      sellable += berths;
+    }
+  }
+  if (sellable > 0 || reserved > 0) {
+    return (sellable: sellable, reserved: reserved, fromGrid: true);
+  }
+  // No usable grid. Read the legacy column DIRECTLY rather than via
+  // [Bus.totalSeats] — that getter prefers `layout.totalSeats`, which is 0 for
+  // the present-but-empty-grid case and would defeat the fallback here.
+  final legacy = bus.totalSeatsLegacy;
+  return (sellable: legacy < 0 ? 0 : legacy, reserved: 0, fromGrid: false);
+}
 
 /// Leg-aware capacity for ONE bus, read from the same engine plan as
 /// [TourCapacity]. Lets a per-bus row show the honest two-leg split
@@ -118,10 +162,15 @@ class TourCapacity {
   /// Per-seat `max(0, retFree − goFree)`, summed. Fillable by a return-only rider.
   final int retOnlyFree;
 
-  /// Distinct passengers the engine could NOT auto-seat under the hard rules
-  /// (stranger-share double, no matching seat type, leg-blocked, overflow).
-  /// These are the riders that need the agent's decision — NOT a silent "full".
-  final int needsDecision;
+  /// The riders the engine could NOT auto-seat under the hard rules
+  /// (stranger-share double, no matching seat type, leg-blocked, overflow),
+  /// minus any overflow rider already held on the waitlist.
+  ///
+  /// Carried on the snapshot rather than recomputed by
+  /// [seatingDecisionExceptions] so the "Needs your decision" SCREEN and the
+  /// badge COUNT come from one memoized engine run instead of two identical
+  /// ones. See [needsDecision].
+  final List<SeatingException> decisions;
 
   /// Physical TILE capacity per seat type — one tile of that type = 1 unit (a
   /// Double Sofa cell is ONE tile that seats a pair, NOT two berths), matching
@@ -152,11 +201,14 @@ class TourCapacity {
     required this.retOccupied,
     required this.goOnlyFree,
     required this.retOnlyFree,
-    required this.needsDecision,
+    required this.decisions,
     required this.capByType,
     required this.freeByType,
     required this.byBus,
   });
+
+  /// How many riders need the agent's decision — NOT a silent "full".
+  int get needsDecision => decisions.length;
 
   /// Tour-wide seats with a free OUTBOUND slot — `capacity − goOccupied`.
   /// Mirror of [returnSeatsFree] for the GO leg.
@@ -203,23 +255,21 @@ TourCapacity computeTourCapacity(Tour tour) {
   // seat can never read as free sellable capacity.
   final typeBySeat = <String, SeatType>{};
   final capByType = <SeatType, int>{};
-  int reservedBerths = 0;
   for (final b in tour.buses) {
     for (final cell in b.layout?.grid ?? const []) {
       final sid = cell.seatId;
       final st = cell.seatType;
-      if (sid == null || st == null) continue;
-      if (cell.reserved) {
-        reservedBerths += st == SeatType.doubleSofa ? 2 : 1;
-        continue;
-      }
+      if (sid == null || st == null || cell.reserved) continue;
       typeBySeat['${b.id}:$sid'] = st;
       capByType[st] = (capByType[st] ?? 0) + 1;
     }
   }
-  // Sellable capacity = physical total minus every held (reserved) berth.
+  // Sellable capacity through the SHARED [busBerths] definition — grid berths
+  // minus held cells where a grid exists, the legacy column where it does not.
+  // Identical arithmetic to the old `totalBusSeats − reservedBerths`, now stated
+  // once so [computeActualCapacity] cannot drift from it.
   final capacity =
-      (tour.totalBusSeats - reservedBerths).clamp(0, tour.totalBusSeats).toInt();
+      tour.buses.fold<int>(0, (sum, b) => sum + busBerths(b).sellable);
   // Berth-legs the plan PLACES on each physical tile, split by leg. A whole
   // double tile is two entries on one seatId, a half-open double just one.
   // Gated PER SEAT by the request line's leg via [Passenger.legForSeatType] —
@@ -329,9 +379,14 @@ TourCapacity computeTourCapacity(Tour tour) {
   // ensureBusLayouts fills grids, the loops above see empty grids and would
   // report free=0 on a 40-seat bus — a false "full" on Home. Fall back to the
   // legacy total_seats column + assigned seat entries for those buses only.
+  //
+  // Gated on [busBerths.fromGrid] rather than `b.layout != null`: a layout that
+  // is present but carries an EMPTY grid strands the bus in exactly the same
+  // place, and the old null-check skipped the rescue for it.
   for (final b in tour.buses) {
-    if (b.layout != null) continue;
-    final capBerths = b.totalSeats;
+    final berths = busBerths(b);
+    if (berths.fromGrid) continue;
+    final capBerths = berths.sellable;
     if (capBerths <= 0) continue;
     var placed = 0;
     for (final p in tour.passengers) {
@@ -356,7 +411,7 @@ TourCapacity computeTourCapacity(Tour tour) {
   occupied = occupied.clamp(0, capacity);
   free = free.clamp(0, capacity);
 
-  final needsDecision = _decisionFilter(plan, tour).length;
+  final decisions = _decisionFilter(plan, tour);
 
   return TourCapacity(
     capacity: capacity,
@@ -366,7 +421,7 @@ TourCapacity computeTourCapacity(Tour tour) {
     retOccupied: retOccupied,
     goOnlyFree: goOnlyFree,
     retOnlyFree: retOnlyFree,
-    needsDecision: needsDecision,
+    decisions: decisions,
     capByType: capByType,
     freeByType: freeByType,
     byBus: byBus,
@@ -442,15 +497,15 @@ ActualCapacity computeActualCapacity(Tour tour) {
   // Sellable berths per bus (physical berths minus held/reserved cells) — the
   // SAME denominator [computeTourCapacity] derives, so switching a meter from the
   // engine plan to this changes only the OCCUPANCY, never the "/ n" total.
+  // Denominator via the SHARED [busBerths] definition, so a bus whose layout
+  // jsonb has not landed (or was lost) reports its legacy seat count instead of
+  // 0 — the fix for the tour overview reading `0/0` on a 37-seat bus. Occupancy
+  // below is read from [Passenger.assignedSeats] and never touched the grid, so
+  // correcting the denominator is all that is needed here.
   final capByBus = <String, int>{};
   var capacityTotal = 0;
   for (final b in tour.buses) {
-    var berths = 0;
-    for (final cell in b.layout?.grid ?? const []) {
-      final st = cell.seatType;
-      if (cell.seatId == null || st == null || cell.reserved) continue;
-      berths += st == SeatType.doubleSofa ? 2 : 1;
-    }
+    final berths = busBerths(b).sellable;
     capByBus[b.id] = berths;
     capacityTotal += berths;
   }

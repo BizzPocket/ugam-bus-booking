@@ -227,6 +227,28 @@ class Bus {
 
   // ── Postgres serialization ────────────────────────────────
 
+  /// Column map for a column-scoped UPDATE (see `SyncService.updatePatch`).
+  ///
+  /// Identical to [toMap] except `layout` is present ONLY when [includeLayout]
+  /// is true, and the caller — not this model — decides that.
+  ///
+  /// `layout` is fetched LAZILY: cold start omits the jsonb because it is ~71%
+  /// of bus bytes on a 2G link, so an in-memory bus routinely holds
+  /// `layout == null` for a bus that has a perfectly good seat grid on the
+  /// server. A write that carried that null erased the grid — the bug that cost
+  /// two live seat charts. An ABSENT key leaves the column alone; a null key
+  /// destroys it, so the distinction here is load-bearing.
+  ///
+  /// Pass `includeLayout: true` only when this operation actually built a new
+  /// layout. Never derive it from `layout != null`: that is precisely the
+  /// inference that fails, because an unloaded layout and a deliberately-cleared
+  /// one are indistinguishable in memory.
+  Map<String, dynamic> toPatch({required bool includeLayout}) {
+    final patch = toMap();
+    if (!includeLayout) patch.remove('layout');
+    return patch;
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'id': id,

@@ -14,6 +14,7 @@ import '../models/seat_layout.dart';
 import '../models/tour.dart';
 import '../routes/app_routes.dart';
 import '../utils/seat_occupants.dart';
+import '../utils/tour_capacity.dart';
 import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
 import '../widgets/occupant_action_sheet.dart';
@@ -222,7 +223,13 @@ class _ChartsScreenState extends State<ChartsScreen> {
           // shows BOTH names; the raw `assignments` above still feeds the tile.
           final sheetOccupants = occupantListForBus(tour.passengers, bus.id);
           final groupColors = tourGroupColors(tour);
-          final totalSeats = layout?.totalSeats ?? 0;
+          // Denominator through the shared [busBerths] definition so a bus whose
+          // layout jsonb has not landed (or was lost) reads its legacy seat
+          // count instead of 0 — this bar used to render "36/0". Held cells are
+          // added back because this is the bus's PHYSICAL size, matching what
+          // `layout.totalSeats` reported before the fallback existed.
+          final berths = busBerths(bus);
+          final totalSeats = berths.sellable + berths.reserved;
           // Leg-aware fill count (busier leg = max(GO, RET)) — NOT a raw fold
           // of `assignments` entries. A seat shared by an outbound-only rider
           // and a return-only rider produces two disjoint assignment entries
@@ -270,6 +277,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
                     children: [
                       _SeatChartCard(
                         layout: layout,
+                        loaded: tourCtrl.layoutsLoadedFor(tour.id),
                         assignments: assignments,
                         sheetOccupants: sheetOccupants,
                         groupColors: groupColors,
@@ -442,6 +450,58 @@ class _FillIndicator extends StatelessWidget {
   }
 }
 
+// ─── Seat-grid skeleton ────────────────────────────────────────────────
+
+/// Placeholder shown while a bus's `layout` jsonb is still on the wire.
+///
+/// Deliberately shaped like the grid it will become — rows of seat-sized blocks
+/// inside the usual chassis padding — so the chart does not appear to be empty
+/// and then jump. Distinct from [UgamEmpty], which states a CONCLUSION ("this
+/// bus has no seat layout") that is only true once loading has finished.
+class _SeatGridSkeleton extends StatelessWidget {
+  const _SeatGridSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Semantics(
+      label: tr('charts.layout_loading'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var row = 0; row < 4; row++)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var col = 0; col < 4; col++)
+                      Container(
+                        width: kSeatTileW,
+                        height: kSeatTileH,
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        decoration: BoxDecoration(
+                          color: c.cardElev,
+                          borderRadius: BorderRadius.circular(UgamRadius.seat),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: UgamSpacing.md),
+            Text(
+              tr('charts.layout_loading'),
+              style: UgamText.caption.copyWith(color: c.ink3),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Edit-seats FAB ────────────────────────────────────────────────────
 
 /// The chart's one primary hand-off into the editable grid, as a small copper
@@ -496,6 +556,10 @@ class _EditSeatsFab extends StatelessWidget {
 class _SeatChartCard extends StatelessWidget {
   final BusLayout? layout;
 
+  /// Whether this bus's `layout` jsonb has been RESOLVED — fetched, or confirmed
+  /// absent on the server. Separates "no grid yet" from "no grid at all".
+  final bool loaded;
+
   /// Raw, berth-accurate occupant lists for TILE rendering: a whole double held
   /// solo appears twice so the half-double split detection stays exact.
   final Map<String, List<Passenger>> assignments;
@@ -513,6 +577,7 @@ class _SeatChartCard extends StatelessWidget {
 
   const _SeatChartCard({
     required this.layout,
+    required this.loaded,
     required this.assignments,
     required this.sheetOccupants,
     required this.groupColors,
@@ -523,11 +588,18 @@ class _SeatChartCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = layout;
     if (l == null || l.totalCells == 0) {
+      // `layout == null` is AMBIGUOUS on its own: cold start ships buses without
+      // their grids to save 2G bytes, so it means either "still loading" or
+      // "this bus genuinely has no seat map". Rendering the second answer while
+      // the first is true showed an empty-chart dead end on a bus that had 36
+      // riders seated on it. [loaded] resolves the ambiguity.
       return UgamCard.plain(
-        child: UgamEmpty(
-          icon: Icons.event_seat_outlined,
-          title: tr('charts.no_layout'),
-        ),
+        child: loaded
+            ? UgamEmpty(
+                icon: Icons.event_seat_outlined,
+                title: tr('charts.no_layout'),
+              )
+            : const _SeatGridSkeleton(),
       );
     }
 

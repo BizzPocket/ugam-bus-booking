@@ -10,7 +10,6 @@ import '../services/seating_engine.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/stranger_share_seat.dart';
-import '../utils/tour_capacity.dart';
 import '../widgets/edit_request_sheet.dart';
 
 /// SLICE 2 of the smart-seat UI: the short "needs your decision" list.
@@ -259,9 +258,12 @@ class SeatingExceptionsScreen extends StatelessWidget {
                 // number you see on those surfaces equals the cards here. Pure:
                 // never fillTour (which would assign + persist seats just to
                 // view), and an overflow rider already HELD is dropped instantly.
+                // Read off the memoized capacity snapshot: the badge count on
+                // Dashboard/Requests and these cards are now literally the same
+                // list from the same engine run, not two runs that agree.
                 final exceptions = tour == null
                     ? const <SeatingException>[]
-                    : seatingDecisionExceptions(tour);
+                    : _ctrl.capacityFor(tour).decisions;
 
                 if (exceptions.isEmpty) {
                   return UgamEmpty(

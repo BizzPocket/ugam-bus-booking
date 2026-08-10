@@ -893,7 +893,7 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     // seater vs sofa). Reading the deterministic plan makes `free` mean GENUINELY
     // empty, and the riders the engine can't auto-seat surface as
     // "needs your decision" instead of hiding inside a phantom full bus.
-    final cap = computeTourCapacity(tour);
+    final cap = Get.find<TourController>().capacityFor(tour);
     final free = cap.free;
     final needsDecision = cap.needsDecision;
     // GENUINELY-empty WHOLE tiles per seat type, split by open leg, read from

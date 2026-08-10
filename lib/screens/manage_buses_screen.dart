@@ -233,7 +233,7 @@ class ManageBusesScreen extends StatelessWidget {
           // Single engine-sourced capacity snapshot for the whole screen:
           // feeds the app-bar "free seats" subtitle AND each per-bus meter
           // (via cap.byBus[bus.id]) so the list never re-derives its own count.
-          final cap = computeTourCapacity(tour);
+          final cap = _tourCtrl.capacityFor(tour);
           final totalCapacity = cap.capacity;
 
           // "N buses · X free of Y" — the old 2-col stat strip folded into the
@@ -312,7 +312,10 @@ class ManageBusesScreen extends StatelessWidget {
       bottomNavigationBar: Obx(() {
         final tour = _tourCtrl.getTour(tourId);
         if (tour == null || !_layoutEditable(tour)) {
-          return const SizedBox.shrink();
+          // A zero-height bar still strips the body SafeArea's bottom inset
+          // (Scaffold checks for non-null, not for height), so reserve the
+          // system inset when the add-bus CTA is hidden.
+          return SizedBox(height: MediaQuery.paddingOf(context).bottom);
         }
         return UgamStickyCTA(
           child: UgamCTA(

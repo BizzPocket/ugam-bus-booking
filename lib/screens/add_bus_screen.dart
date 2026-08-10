@@ -596,7 +596,16 @@ class _AddBusScreenState extends State<AddBusScreen> {
           layout: newLayout,
           totalSeatsLegacy: structuralChange ? _totalSeats : null,
         );
-        await _tourCtrl.updateBus(widget.tourId, updated);
+        // `regenerate` is the editor's own record of whether it built a fresh
+        // grid this save. Handing it to the controller keeps the "reused
+        // untouched" promise above literally true: when false the layout column
+        // never reaches the wire, so a bus whose jsonb had not loaded yet cannot
+        // have its seat chart overwritten with the null we are holding.
+        await _tourCtrl.updateBus(
+          widget.tourId,
+          updated,
+          layoutChanged: regenerate,
+        );
         if (!mounted) return;
         AppSnackBar.success(
           tr('add_bus.snackbar.updated', namedArgs: {'name': updated.name}),

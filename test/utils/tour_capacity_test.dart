@@ -557,4 +557,100 @@ void main() {
       expect(cap.byBus['b1']!.free, 39);
     });
   });
+
+  // The twin of the group above. [computeActualCapacity] drives the tour
+  // overview meter and every per-bus row; without the SAME total_seats fallback
+  // those surfaces read 0/0 for a 37-seat bus whose layout jsonb is still in
+  // flight (or was wiped), while the Requests screen — which routes through
+  // [computeTourCapacity] — correctly reads 72/74 off the identical tour.
+  group('computeActualCapacity — layout deferred (2G Phase 2)', () {
+    Tour twoLayoutlessBuses() => _tour([
+          Bus(
+            id: 'b1',
+            name: 'shivkamal-1',
+            busType: 'Sleeper',
+            totalSeatsLegacy: 37,
+          ),
+          Bus(
+            id: 'b2',
+            name: 'shivkamal-2',
+            busType: 'Sleeper',
+            totalSeatsLegacy: 37,
+          ),
+        ], [
+          _pSeated(
+            'A',
+            lines: [_line(SeatType.singleSofa, 2)],
+            seats: const [
+              SeatAssignment(busId: 'b1', seatId: 'SU1'),
+              SeatAssignment(busId: 'b2', seatId: 'SU1'),
+            ],
+          ),
+        ]);
+
+    test('null layout uses total_seats for tour capacity', () {
+      final actual = computeActualCapacity(twoLayoutlessBuses());
+      expect(actual.capacity, 74,
+          reason: 'must agree with computeTourCapacity on the same tour');
+      expect(actual.occupied, 2);
+      expect(actual.free, 72);
+    });
+
+    test('null layout counts real assignments per bus', () {
+      final actual = computeActualCapacity(twoLayoutlessBuses());
+      expect(actual.byBus['b1']!.capacity, 37);
+      expect(actual.byBus['b1']!.goOccupied, 1);
+      expect(actual.byBus['b1']!.retOccupied, 1);
+      expect(actual.byBus['b2']!.capacity, 37);
+      expect(actual.byBus['b2']!.free, 36);
+    });
+
+    test('a layout-less bus never reads as full while seats remain', () {
+      final actual = computeActualCapacity(twoLayoutlessBuses());
+      expect(actual.isFull, isFalse,
+          reason: '72 of 74 berths are still sellable');
+      expect(actual.byBus['b1']!.free, greaterThan(0));
+    });
+
+    test('assignments beyond the legacy count clamp instead of going negative',
+        () {
+      final tour = _tour([
+        Bus(id: 'b1', name: 'Bus 1', busType: 'Sleeper', totalSeatsLegacy: 2),
+      ], [
+        _pSeated(
+          'A',
+          lines: [_line(SeatType.singleSofa, 3)],
+          seats: const [
+            SeatAssignment(busId: 'b1', seatId: 'SU1'),
+            SeatAssignment(busId: 'b1', seatId: 'SU2'),
+            SeatAssignment(busId: 'b1', seatId: 'SU3'),
+          ],
+        ),
+      ]);
+
+      final actual = computeActualCapacity(tour);
+      expect(actual.byBus['b1']!.goOccupied, 2, reason: 'clamped to capacity');
+      expect(actual.free, 0);
+    });
+
+    test('a loaded layout still wins over the legacy count', () {
+      final tour = _tour([
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.upper, 'SU2'),
+        ]).copyWith(totalSeatsLegacy: 99),
+      ], [
+        _pSeated(
+          'A',
+          lines: [_line(SeatType.singleSofa, 1)],
+          seats: const [SeatAssignment(busId: 'b1', seatId: 'SU1')],
+        ),
+      ]);
+
+      final actual = computeActualCapacity(tour);
+      expect(actual.capacity, 2,
+          reason: 'the real grid is authoritative once it has loaded');
+      expect(actual.free, 1);
+    });
+  });
 }

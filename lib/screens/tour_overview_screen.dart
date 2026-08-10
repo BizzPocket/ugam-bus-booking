@@ -183,8 +183,11 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
             //    which asks "can everyone fit?", not "who is placed?".
             // Both are leg-aware: a berth shared by two opposite one-way riders
             // is ONE physical seat, split into honest GO/RET loads per leg.
-            final actual = total > 0 ? computeActualCapacity(tour) : null;
-            final cap = total > 0 ? computeTourCapacity(tour) : null;
+            // Both memoized on the controller: these sit inside an Obx that
+            // rebuilds on every seat tap and realtime event, and [cap] runs the
+            // full seating engine.
+            final actual = total > 0 ? _ctrl.actualCapacityFor(tour) : null;
+            final cap = total > 0 ? _ctrl.capacityFor(tour) : null;
 
             // Demand summary: how many of each seat type the passengers
             // requested, so the agent knows what to book. A Double Sofa
@@ -229,7 +232,18 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
             // Requests banner use — over-demand surfaces as needsDecision,
             // never a phantom number. See [TourCapacity.freeByType].
             final shortfall = cap?.needsDecision ?? 0;
-            final showCapacity = overflowCount > 0 || shortfall > 0;
+            // The engine can only place riders onto a real seat GRID — see the
+            // early return in [SeatingEngine] for a bus with no layout. While
+            // the layout jsonb is still in flight (cold start omits it to save
+            // 2G bytes) it therefore places NOBODY, and every rider lands in
+            // needsDecision. Rendering that reads as "79 wanted, only 74 fit,
+            // ~54 won't make it" on a tour that is in fact almost perfectly
+            // seated. Withhold the verdict until the grids are actually here;
+            // the seats-placed numbers above stay honest throughout because
+            // they fall back to the legacy seat count.
+            final layoutsReady = _ctrl.layoutsLoadedFor(widget.tourId);
+            final showCapacity =
+                layoutsReady && (overflowCount > 0 || shortfall > 0);
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(

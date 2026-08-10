@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +28,7 @@ import '../services/wa_template_params.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/collection_seat_resolver.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
@@ -55,19 +58,77 @@ enum _ViewMode { grid, attendance }
 class HandlerBusChartScreen extends StatefulWidget {
   final String requestId;
 
-  const HandlerBusChartScreen({super.key, required this.requestId});
+  /// TEST SEAM for the manifest read. `CustomerRequestsStore` is a
+  /// private-constructor singleton wired straight to `Supabase.instance.client`
+  /// — it cannot be subclassed or injected — so without this hook a widget test
+  /// could only ever drive the FAILURE path (Supabase is uninitialised under
+  /// `flutter test`) and the refresh loop's "don't blank the board" guard would
+  /// be unverifiable. Production always leaves it null.
+  ///
+  /// Only the manifest needs a seam: the handover and leg-state reads are
+  /// already best-effort (see [_HandlerBusChartScreenState._safeHandovers]) and
+  /// degrade to empty lists on any throw.
+  @visibleForTesting
+  final HandlerManifestReader? manifestReader;
+
+  const HandlerBusChartScreen({
+    super.key,
+    required this.requestId,
+    this.manifestReader,
+  });
 
   @override
   State<HandlerBusChartScreen> createState() => _HandlerBusChartScreenState();
 }
 
-class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
+/// Signature of [CustomerRequestsStore.handlerTourManifest] — see
+/// [HandlerBusChartScreen.manifestReader].
+typedef HandlerManifestReader =
+    Future<HandlerManifest?> Function(String requestId);
+
+/// Why a fetch is running. This decides two things a "refresh loop" gets wrong
+/// if it treats every fetch alike: whether a spinner is shown, and what a
+/// FAILURE is allowed to do to whatever is already on screen.
+enum _LoadKind {
+  /// Screen open (or Retry from the error card). Nothing on screen to protect,
+  /// so this one shows the skeleton and a failure may take over the body.
+  initial,
+
+  /// The handler pulled down. [RefreshIndicator] owns the spinner, so we show
+  /// none of our own; a failure keeps the rows and toasts instead.
+  pull,
+
+  /// A background reconcile — after a write, or on app resume. Deliberately
+  /// invisible: NO spinner and NO skeleton, because these fire on every saved
+  /// expense and every return from the lock screen, and a flicker on each one
+  /// would be worse than the staleness it fixes. A failure here is silent too:
+  /// the optimistic patch on screen is still the handler's own write, so there
+  /// is nothing they could usefully do about a failed confirmation.
+  silent,
+}
+
+class _HandlerBusChartScreenState extends State<HandlerBusChartScreen>
+    with WidgetsBindingObserver {
   final _store = CustomerRequestsStore();
 
   bool _loading = true;
   String? _error;
   HandlerManifest? _manifest;
   String? _selectedBusId;
+
+  /// True once a fetch has genuinely succeeded. Mirrors the admin's
+  /// `MoneyController.loadedOnce`: it is what lets a LATER failure be treated
+  /// as "keep what we have" rather than "show the error card", so a transient
+  /// timeout mid-trip can't wipe a screen full of good figures.
+  bool _loadedOnce = false;
+
+  /// Monotonic token identifying the newest in-flight fetch. The refresh loop
+  /// can now have several running at once (a silent post-write reconcile fired
+  /// while a pull-to-refresh is still in the air), and they can land out of
+  /// order — a slow EARLIER response arriving last would otherwise overwrite
+  /// the newer body and make the handler watch their just-saved row vanish.
+  /// Only the load still holding the current token is allowed to commit.
+  int _loadToken = 0;
 
   /// Attendance (list) is the default — handlers board/call by name first;
   /// the seat Grid is one tap away when they need the chart.
@@ -220,6 +281,9 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
       setState(() {
         _attendance[_attKey(saved.passengerId, saved.busId, saved.leg)] = saved;
       });
+      // Then confirm against the server. The optimistic patch above already
+      // moved the tally, so this only ever corrects it.
+      _reconcile();
     } catch (_) {
       AppSnackBar.error(tr('handler_chart.error_save_attendance'));
     }
@@ -253,6 +317,12 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
   @override
   void initState() {
     super.initState();
+    // The handler works a moving bus for hours with the admin editing the same
+    // tour behind them, so the screen has to keep re-reading: on resume (here),
+    // on pull-to-refresh, and after every write. Without the observer this
+    // screen showed a snapshot frozen at open — the single biggest source of
+    // handler/admin disagreement on the money figures.
+    WidgetsBinding.instance.addObserver(this);
     _load();
     // Warm the global pickup list so each attendance row can label its rider's
     // boarding point. Registered lazily app-wide; absent under `flutter test`.
@@ -261,16 +331,54 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     }
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Only `resumed` matters: the handler pockets the phone between pickups and
+    // comes back minutes later to an admin-edited tour. Reconcile SILENTLY —
+    // returning to the app and being met with a skeleton would read as a crash.
+    if (state != AppLifecycleState.resumed) return;
+    _reconcile();
+  }
+
+  /// Fire-and-forget background re-read. Used after every mutation and on app
+  /// resume: the optimistic local patch already made the UI feel instant, and
+  /// this confirms it against the server rather than trusting the cache
+  /// forever. Deliberately NOT awaited by its callers so a sheet still closes
+  /// at once, and deliberately spinner-free (see [_LoadKind.silent]).
+  void _reconcile() {
+    unawaited(_load(kind: _LoadKind.silent));
+  }
+
+  Future<void> _load({_LoadKind kind = _LoadKind.initial}) async {
+    final token = ++_loadToken;
+    if (kind == _LoadKind.initial && !_loading) {
+      // Retry off the error card: nothing on screen is worth keeping, so this
+      // one genuinely goes back to the skeleton. The cold start needs no
+      // setState at all — [_loading] already starts true, and calling setState
+      // from initState would be an error. Every other kind leaves the current
+      // body standing.
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
-      final manifest = await _store.handlerTourManifest(widget.requestId);
+      final read = widget.manifestReader ?? _store.handlerTourManifest;
+      final manifest = await read(widget.requestId);
       // Handovers + leg state ride alongside the manifest rather than inside it
       // (its live body has drifted from the files, so it is never rewritten).
       // Both are best-effort: a handler whose backend predates these RPCs still
       // gets a working chart, just without settlement or the GO-leg action.
       final handovers = await _safeHandovers();
       final legState = await _safeLegState();
-      if (!mounted) return;
+      if (!mounted || token != _loadToken) return;
       setState(() {
         _manifest = manifest;
         _handovers
@@ -310,18 +418,49 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
               (a) => MapEntry(_attKey(a.passengerId, a.busId, a.leg), a),
             ),
           );
-        _selectedBusId = manifest?.buses.isNotEmpty == true
-            ? manifest!.buses.first.id
-            : null;
+        _selectedBusId = _busIdAfterReload(manifest);
+        _loadedOnce = true;
+        _error = null;
         _loading = false;
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || token != _loadToken) return;
+      // Mirrors MoneyController.loadForTour's guard (money_controller.dart:150)
+      // — "only COMMIT the fetched rows when the load genuinely succeeded".
+      // Nothing above touched the caches yet, so a failure here inherently
+      // keeps the last-known rows; what must NOT happen is flipping to the
+      // error card, which would throw away a screen full of good figures over a
+      // dropped packet on the highway. That takeover is reserved for the case
+      // where there is genuinely nothing to protect.
+      if (_loadedOnce) {
+        // Surfaced non-destructively: a toast over the still-correct board,
+        // never a wipe. Silent reconciles stay silent — they fire on every
+        // write and every resume, so toasting them would nag constantly about
+        // something the handler cannot act on.
+        if (kind != _LoadKind.silent) {
+          AppSnackBar.error(tr('handler_chart.error_refresh'));
+        }
+        setState(() => _loading = false);
+        return;
+      }
       setState(() {
         _error = tr('handler_chart.error_load');
         _loading = false;
       });
     }
+  }
+
+  /// Which bus stays selected after a re-read. A refresh must NOT yank a
+  /// multi-bus handler back to bus 1 — these now fire on every save and every
+  /// resume, so the old "always pick buses.first" would have made the pill
+  /// strip un-usable. The current pick is kept whenever it still exists in the
+  /// fresh manifest; only a bus that has genuinely gone away falls back.
+  String? _busIdAfterReload(HandlerManifest? manifest) {
+    final buses = manifest?.buses ?? const <Bus>[];
+    if (buses.isEmpty) return null;
+    final current = _selectedBusId;
+    if (current != null && buses.any((b) => b.id == current)) return current;
+    return buses.first.id;
   }
 
   /// Settlement and leg-progress reads that must never take the whole screen
@@ -380,6 +519,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           }
           if (!mounted) return;
           setState(() => _handovers[saved.id] = saved);
+          _reconcile();
         },
       ),
     );
@@ -402,10 +542,14 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
     );
     if (!ok || !mounted) return;
     try {
-      final removed = await _store.handlerDeleteHandover(widget.requestId, h.id);
+      final removed = await _store.handlerDeleteHandover(
+        widget.requestId,
+        h.id,
+      );
       if (!removed) throw StateError('Delete rejected.');
       if (!mounted) return;
       setState(() => _handovers.remove(h.id));
+      _reconcile();
     } catch (_) {
       if (mounted) AppSnackBar.error(tr('handler_chart.handover_failed'));
     }
@@ -441,7 +585,9 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
         tr('handler_chart.leg_done_ok', namedArgs: {'count': '$cleared'}),
       );
       // Seats moved server-side, so re-read rather than patching locally.
-      await _load();
+      // Silent: the chart is already correct-looking and the success toast has
+      // fired, so dropping back to the skeleton here would read as a reset.
+      await _load(kind: _LoadKind.silent);
     } catch (_) {
       if (mounted) AppSnackBar.error(tr('handler_chart.leg_done_failed'));
     }
@@ -573,6 +719,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
                 )] =
                 saved;
           });
+          _reconcile();
         },
       ),
     );
@@ -609,6 +756,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           }
           if (!mounted) return;
           setState(() => _expenses[saved.id] = saved);
+          _reconcile();
         },
       ),
     );
@@ -650,6 +798,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
       }
       if (!mounted) return;
       setState(() => _expenses.remove(expense.id));
+      _reconcile();
     } catch (_) {
       AppSnackBar.error(tr('handler_chart.error_delete_expense'));
     }
@@ -689,6 +838,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           }
           if (!mounted) return;
           setState(() => _income[saved.id] = saved);
+          _reconcile();
         },
       ),
     );
@@ -730,6 +880,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
       }
       if (!mounted) return;
       setState(() => _income.remove(income.id));
+      _reconcile();
     } catch (_) {
       AppSnackBar.error(tr('handler_chart.error_delete_income'));
     }
@@ -763,10 +914,7 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
             );
           } else if (result.anySent) {
             AppSnackBar.warning(
-              '${tr('bus_message.partial_body', namedArgs: {
-                    'sent': '${result.sent}',
-                    'failed': '${result.failed}',
-                  })}${firstWaError(result)}',
+              '${tr('bus_message.partial_body', namedArgs: {'sent': '${result.sent}', 'failed': '${result.failed}'})}${firstWaError(result)}',
               title: tr('bus_message.partial_title'),
             );
           } else if (result.results.isEmpty) {
@@ -870,10 +1018,14 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(UgamSpacing.lg),
-          child: UgamEmpty(
-            icon: Icons.cloud_off_rounded,
+          // UgamEmpty.error, not a bare UgamEmpty: this card used to be a dead
+          // end — a handler whose first fetch failed on a patchy highway had no
+          // way back other than force-quitting the app. Same shared retry state
+          // the four admin money screens show.
+          child: UgamEmpty.error(
             title: tr('handler_chart.error_load_title'),
-            body: _error!,
+            message: _error!,
+            onRetry: _load,
           ),
         ),
       );
@@ -947,90 +1099,101 @@ class _HandlerBusChartScreenState extends State<HandlerBusChartScreen> {
           ),
         ),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(
-              UgamSpacing.gutter,
-              0,
-              UgamSpacing.gutter,
-              UgamSpacing.xl,
-            ),
-            physics: const BouncingScrollPhysics(),
-            child: Column(
-              children: [
-                _BusDeparture(bus: bus, c: c),
-                _DriverContact(bus: bus, c: c),
-                _SummaryHeader(
-                  collected: summary.collected,
-                  toReturn: summary.toReturn,
-                  toCollect: summary.toCollect,
-                  spent: summary.spent,
-                  income: summary.income,
-                  inHand: summary.inHand,
-                  handedOver: summary.handedOver,
-                  outstanding: summary.outstanding,
-                  settled: summary.isSettled,
-                ),
-                const SizedBox(height: UgamSpacing.md),
-                _SettlementCard(
-                  summary: summary,
-                  handovers: _handoversForBus(bus.id),
-                  c: c,
-                  onSettle: () => _openHandoverSheet(bus, summary),
-                  onDelete: (h) => _deleteHandover(h),
-                ),
-                const SizedBox(height: UgamSpacing.md),
-                _LegCompletionCard(
-                  state: _legState[bus.id],
-                  c: c,
-                  onComplete: () => _completeOutboundLeg(bus),
-                ),
-                const SizedBox(height: UgamSpacing.md),
-                _BoardedSummary(go: goCounts, ret: retCounts, c: c),
-                const SizedBox(height: UgamSpacing.lg),
-                if (grid) ...[
-                  _SeatGrid(
-                    bus: bus,
-                    fullOccupantsBySeat: fullOccupantsBySeat,
-                    collectionFor: (pId, seatId) =>
-                        _collectionFor(pId, bus.id, seatId),
-                    onTapSeat: (seatId, occupants) =>
-                        _onSeatTapped(bus, seatId, occupants),
+          // Pull-to-refresh, wired exactly as the four admin money screens do
+          // (see bus_money_screen.dart:137): RefreshIndicator over the scroller,
+          // with AlwaysScrollableScrollPhysics so the gesture still works on a
+          // short bus whose content doesn't fill the viewport. Until this
+          // existed the handler read a snapshot frozen at screen-open while the
+          // admin edited the same tour live.
+          child: RefreshIndicator(
+            onRefresh: () => _load(kind: _LoadKind.pull),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.gutter,
+                0,
+                UgamSpacing.gutter,
+                UgamSpacing.xl,
+              ),
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              child: Column(
+                children: [
+                  _BusDeparture(bus: bus, c: c),
+                  _DriverContact(bus: bus, c: c),
+                  _SummaryHeader(
+                    collected: summary.collected,
+                    toReturn: summary.toReturn,
+                    toCollect: summary.toCollect,
+                    spent: summary.spent,
+                    income: summary.income,
+                    inHand: summary.inHand,
+                    handedOver: summary.handedOver,
+                    outstanding: summary.outstanding,
+                    settled: summary.isSettled,
                   ),
+                  const SizedBox(height: UgamSpacing.md),
+                  _SettlementCard(
+                    summary: summary,
+                    handovers: _handoversForBus(bus.id),
+                    c: c,
+                    onSettle: () => _openHandoverSheet(bus, summary),
+                    onDelete: (h) => _deleteHandover(h),
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  _LegCompletionCard(
+                    state: _legState[bus.id],
+                    c: c,
+                    onComplete: () => _completeOutboundLeg(bus),
+                  ),
+                  const SizedBox(height: UgamSpacing.md),
+                  _BoardedSummary(go: goCounts, ret: retCounts, c: c),
                   const SizedBox(height: UgamSpacing.lg),
-                  UgamSeatChartLegend(c: c),
-                  _PriceBandKey(bus: bus),
-                  const SizedBox(height: UgamSpacing.xl),
-                  _ExpensesSection(
-                    busName: bus.name,
-                    expenses: _expensesForBus(bus.id),
-                    onAdd: () => _showExpenseSheet(bus),
-                    onEdit: (e) => _showExpenseSheet(bus, existing: e),
-                    onDelete: (e) => _deleteExpense(e),
-                  ),
-                  const SizedBox(height: UgamSpacing.xl),
-                  _IncomeSection(
-                    busName: bus.name,
-                    incomes: _incomesForBus(bus.id),
-                    onAdd: () => _showIncomeSheet(bus),
-                    onEdit: (i) => _showIncomeSheet(bus, existing: i),
-                    onDelete: (i) => _deleteIncome(i),
-                  ),
-                ] else
-                  _AttendanceView(
-                    bus: bus,
-                    leg: _attLeg,
-                    rows: [
-                      for (final p in _expectedForLeg(manifest, bus, _attLeg))
-                        _AttendanceEntry(
-                          passenger: p,
-                          present: _isPresent(p.id, bus.id, _attLeg),
-                        ),
-                    ],
-                    onToggleLeg: (leg) => setState(() => _attLeg = leg),
-                    onTogglePresent: (p, present) =>
-                        _togglePresent(bus, p, _attLeg, present),
-                  ),
-              ],
+                  if (grid) ...[
+                    _SeatGrid(
+                      bus: bus,
+                      fullOccupantsBySeat: fullOccupantsBySeat,
+                      collectionFor: (pId, seatId) =>
+                          _collectionFor(pId, bus.id, seatId),
+                      onTapSeat: (seatId, occupants) =>
+                          _onSeatTapped(bus, seatId, occupants),
+                    ),
+                    const SizedBox(height: UgamSpacing.lg),
+                    UgamSeatChartLegend(c: c),
+                    _PriceBandKey(bus: bus),
+                    const SizedBox(height: UgamSpacing.xl),
+                    _ExpensesSection(
+                      busName: bus.name,
+                      expenses: _expensesForBus(bus.id),
+                      onAdd: () => _showExpenseSheet(bus),
+                      onEdit: (e) => _showExpenseSheet(bus, existing: e),
+                      onDelete: (e) => _deleteExpense(e),
+                    ),
+                    const SizedBox(height: UgamSpacing.xl),
+                    _IncomeSection(
+                      busName: bus.name,
+                      incomes: _incomesForBus(bus.id),
+                      onAdd: () => _showIncomeSheet(bus),
+                      onEdit: (i) => _showIncomeSheet(bus, existing: i),
+                      onDelete: (i) => _deleteIncome(i),
+                    ),
+                  ] else
+                    _AttendanceView(
+                      bus: bus,
+                      leg: _attLeg,
+                      rows: [
+                        for (final p in _expectedForLeg(manifest, bus, _attLeg))
+                          _AttendanceEntry(
+                            passenger: p,
+                            present: _isPresent(p.id, bus.id, _attLeg),
+                          ),
+                      ],
+                      onToggleLeg: (leg) => setState(() => _attLeg = leg),
+                      onTogglePresent: (p, present) =>
+                          _togglePresent(bus, p, _attLeg, present),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -2649,8 +2812,11 @@ class _SettlementCard extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: UgamSpacing.tight),
                 child: Row(
                   children: [
-                    Icon(Icons.check_circle_outline_rounded,
-                        size: 15, color: c.good),
+                    Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 15,
+                      color: c.good,
+                    ),
                     const SizedBox(width: UgamSpacing.sm),
                     Expanded(
                       child: Text(
@@ -2750,9 +2916,7 @@ class _HandoverSheetState extends State<_HandoverSheet> {
           Text(
             tr(
               'handler_chart.handover_intro',
-              namedArgs: {
-                'amount': Formatters.formatMoneyInr(widget.expected),
-              },
+              namedArgs: {'amount': Formatters.formatMoneyInr(widget.expected)},
             ),
             style: UgamText.body.copyWith(color: c.ink2),
           ),
@@ -2836,8 +3000,10 @@ class _LegCompletionCard extends StatelessWidget {
           Text(
             done
                 ? tr('handler_chart.leg_done_state')
-                : tr('handler_chart.leg_pending',
-                    namedArgs: {'count': '$pending'}),
+                : tr(
+                    'handler_chart.leg_pending',
+                    namedArgs: {'count': '$pending'},
+                  ),
             style: UgamText.caption.copyWith(color: c.ink2),
           ),
           if (!done) ...[
@@ -3258,36 +3424,50 @@ class _HandlerBusMessageSheetState extends State<_HandlerBusMessageSheet> {
 
   Future<void> _send() async {
     if (_sending) return;
-    final text = _textCtrl.text.trim();
-    if (text.isEmpty) {
+    final raw = _textCtrl.text.trim();
+    if (raw.isEmpty) {
       AppSnackBar.error(tr('bus_message.empty_text'));
       return;
     }
 
     // Same Meta pre-flight as the admin composer (shared rule set) — a line
-    // break, tab or 5+ spaces is refused by Meta for EVERY recipient, so catch
-    // it here where the handler can still repair it.
+    // break, tab or 5+ spaces is refused by Meta for EVERY recipient.
+    //
+    // A REPAIRABLE break is fixed and the send CONTINUES. The old flow rewrote
+    // the field and returned, so the handler had to notice and press Send a
+    // second time — which is how long multi-paragraph notices ended up never
+    // going out at all. Show the exact wording that will travel, then send it.
+    var text = raw;
     final violations = WaTemplateParams.validateOne(text);
     if (violations.isNotEmpty) {
-      final fixable = WaTemplateParams.canAutoFix(text);
-      final fix = await UgamDialog.confirm(
+      if (!WaTemplateParams.canAutoFix(text)) {
+        // Empty or over the character limit — only a human can resolve it.
+        await UgamDialog.confirm(
+          context,
+          title: tr('bus_message.invalid_title'),
+          message: waViolationsText(violations),
+          cancelLabel: tr('app.action.cancel'),
+          confirmLabel: tr('bus_message.invalid_edit'),
+          confirmIcon: Icons.edit_rounded,
+        );
+        return;
+      }
+      final repaired = WaTemplateParams.sanitize(text);
+      final ok = await UgamDialog.confirm(
         context,
         title: tr('bus_message.invalid_title'),
-        message: waViolationsText(violations),
+        message: '${waViolationsText(violations)}\n\n'
+            '${tr('bus_message.invalid_repair_note')}\n$repaired',
         cancelLabel: tr('app.action.cancel'),
-        confirmLabel: fixable
-            ? tr('bus_message.fix_auto')
-            : tr('bus_message.invalid_edit'),
-        confirmIcon: fixable ? Icons.auto_fix_high_rounded : Icons.edit_rounded,
+        confirmLabel: tr('bus_message.fix_and_send'),
+        confirmIcon: Icons.auto_fix_high_rounded,
       );
-      if (fix && fixable && mounted) {
-        final fixed = WaTemplateParams.sanitize(text);
-        _textCtrl.value = TextEditingValue(
-          text: fixed,
-          selection: TextSelection.collapsed(offset: fixed.length),
-        );
-      }
-      return;
+      if (!ok || !mounted) return;
+      _textCtrl.value = TextEditingValue(
+        text: repaired,
+        selection: TextSelection.collapsed(offset: repaired.length),
+      );
+      text = repaired;
     }
 
     setState(() => _sending = true);

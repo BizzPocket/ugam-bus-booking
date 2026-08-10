@@ -340,7 +340,8 @@ class _EditTourScreenState extends State<EditTourScreen> {
           rearPrice: source.rearPrice,
           priceBands: List<PriceBand>.from(source.priceBands),
         );
-        await ctrl.updateBus(widget.tourId, updated);
+        // Pricing-only copy — the seat grid is not part of this edit.
+        await ctrl.updateBus(widget.tourId, updated, layoutChanged: false);
       }
       if (!mounted) return;
       AppSnackBar.success(

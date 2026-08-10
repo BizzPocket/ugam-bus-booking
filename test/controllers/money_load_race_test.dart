@@ -72,7 +72,7 @@ class _CountingSync extends SyncService {
   }) async {
     if (table == 'collections') collectionFetches++;
     await Future<void>.delayed(Duration.zero);
-    return (rows: const [], failed: false, error: null);
+    return (rows: const <Map<String, dynamic>>[], failed: false, error: null);
   }
 
   @override
@@ -106,7 +106,7 @@ class _GatedTourSync extends SyncService {
     final gate = _gates.putIfAbsent(tourId, Completer<void>.new);
     await gate.future;
     if (table != 'collections') {
-      return (rows: const [], failed: false, error: null);
+      return (rows: const <Map<String, dynamic>>[], failed: false, error: null);
     }
     return (
       rows: [

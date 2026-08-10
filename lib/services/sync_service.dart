@@ -770,6 +770,43 @@ class SyncService extends GetxService {
     );
   }
 
+  /// Column-scoped update: writes ONLY [fields], leaving every other column on
+  /// the row untouched.
+  ///
+  /// Prefer this over [smartUpdate] whenever a caller changes a few known
+  /// columns. [smartUpdate] sends a WHOLE-entity map, so every column it carries
+  /// is overwritten with whatever the in-memory model happened to hold. That is
+  /// how bus `layout` jsonb was being destroyed: cold start deliberately omits
+  /// that column to save 2G bytes, so an unrelated write — setting a handler
+  /// pointer — shipped `layout: null` and erased the seat map of a bus that had
+  /// riders assigned to it.
+  ///
+  /// Also far cheaper on a slow link: a one-column patch is tens of bytes where
+  /// a full bus row is dominated by its seat grid.
+  ///
+  /// Unlike [smartUpdate] this NEVER falls back to insert — see the 'patch'
+  /// branch of [_writeToServer] for why a partial insert is unacceptable.
+  Future<void> updatePatch({
+    required String table,
+    required String entityId,
+    required Map<String, dynamic> fields,
+  }) async {
+    if (fields.isEmpty) return;
+    _ensureOnline();
+    // Idempotent: re-applying identical field values yields the identical row,
+    // so a timed-out patch that actually landed is safe to re-run.
+    await _withRetry(
+      () => _writeToServer(
+        operation: 'patch',
+        table: table,
+        entityId: entityId,
+        data: fields,
+      ),
+      timeout: _writeTimeout,
+      label: 'patch $table',
+    );
+  }
+
   Future<void> smartDelete({
     required String table,
     required String entityId,
@@ -884,8 +921,13 @@ class SyncService extends GetxService {
 
     // Backfill owner_id from the current Supabase Auth session for tables
     // whose RLS requires it.
+    //
+    // Skipped for 'patch': a patch promises to touch ONLY the caller's columns,
+    // and an UPDATE does not need owner_id in the payload anyway — RLS matches
+    // the row on its existing owner.
     final authUid = _client.auth.currentUser?.id;
-    if (_ownerScopedTables.contains(table) &&
+    if (operation != 'patch' &&
+        _ownerScopedTables.contains(table) &&
         authUid != null &&
         (clean['owner_id'] == null ||
             (clean['owner_id'] is String &&
@@ -930,6 +972,29 @@ class SyncService extends GetxService {
         if ((res as List).isEmpty) {
           // Row missing — fall back to insert.
           await _client.from(table).insert(clean);
+        }
+        break;
+      case 'patch':
+        // Column-scoped update: writes ONLY the keys the caller supplied and
+        // NEVER falls back to insert. The insert fallback above is safe for a
+        // whole-entity map but catastrophic for a partial one — it would
+        // materialise a row containing just the patched columns and defaults
+        // for everything else.
+        //
+        // A patch that matches no row is therefore a BUG (wrong id, or the row
+        // was deleted underneath us), and it surfaces as an error rather than
+        // being papered over with a half-built row.
+        final patchData = Map<String, dynamic>.from(clean)..remove('id');
+        final patched = await _client
+            .from(table)
+            .update(patchData)
+            .eq('id', entityId)
+            .select();
+        if ((patched as List).isEmpty) {
+          throw StateError(
+            'patch $table/$entityId matched no row — refusing to insert a '
+            'partial row from ${patchData.keys.join(', ')}',
+          );
         }
         break;
       case 'delete':

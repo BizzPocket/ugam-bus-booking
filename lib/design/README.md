@@ -11,7 +11,7 @@ import 'package:occubusbooking/design/ugam.dart';
 
 // Tokens
 final c = UgamColors.of(context);   // active set (dark or light)
-final radius = UgamRadius.card;     // 22
+final radius = UgamRadius.card;     // 16 — cockpit density, was 22
 final gap = UgamSpacing.lg;         // 16
 
 // Text
@@ -57,14 +57,16 @@ The entire app's accent flows from **one** token. To ship an orange
 variant:
 
 ```dart
-// tokens.dart
-static const dark = UgamColorSet(
-  // ...
-  accent: Color(0xFFF97316),                   // was 0xFF3B82F6
-  accentFill: Color(0x29F97316),               // was 0x293B82F6
-  // ...
-);
+// tokens.dart — edit the Brand seeds, everything downstream follows
+class Brand {
+  static const Color amber     = Color(0xFFF97316); // was 0xFFFFC24B (dark accent)
+  static const Color amberDeep = Color(0xFFC2410C); // was 0xFFB07100 (light accent)
+}
 ```
+
+Note the accent is **not** the button colour — buttons use `action`
+(max contrast, no brand hue). The accent means one thing only:
+*"this is yours."*
 
 Run `flutter test --update-goldens` and `git diff test/design/golden/` —
 the diff should be colour-only, no layout shifts. That's the proof the

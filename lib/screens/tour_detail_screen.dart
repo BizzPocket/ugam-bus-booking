@@ -17,7 +17,6 @@ import '../utils/app_nav.dart';
 import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/phone_dialer.dart';
-import '../utils/tour_capacity.dart';
 import '../utils/tour_detail_cockpit.dart';
 import '../widgets/tour_detail/tour_money_tab.dart';
 import '../widgets/tour_detail/tour_overview_cockpit.dart';
@@ -36,12 +35,22 @@ import 'tour_groups_screen.dart';
 
 /// Admin's single-tour workspace.
 ///
-/// Layout:
-///   [Hero (320px) — bus backdrop, floating back / status / edit chrome,
-///    overlay summary card pulled up to overlap]
-///   [Tab pills: Overview · Passengers · Buses · Activity]
+/// Layout — IDENTICAL on every tab, which is the whole point:
+///   [Identity header — back / more chrome, title, route, status, vitals,
+///    seat badge. Scrolls away.]
+///   [Sticky mini bar — back / title / status / more. Fades in once the
+///    identity header scrolls off, on EVERY tab, so back is always reachable.]
+///   [Tab pills: Overview · Passengers · Buses · Money · Activity]
 ///   [Body — switches per tab]
 ///   [Sticky bottom action — contextual per tab]
+///
+/// HISTORY: the header used to fork three ways — a 200pt broadcast-photo hero
+/// on Overview, a compact header on the work tabs (`forceCompact`), and a
+/// generated backdrop when the photo failed. Same tour, same screen, three
+/// different identities depending on which tab you tapped, plus a ~200pt
+/// vertical jump on every tab switch and no reachable back button once a
+/// roster scrolled. The photo is CONTENT, not chrome, so it now lives in the
+/// Overview body as [_TourCoverCard] and the header never changes.
 ///
 /// Business logic is unchanged from the previous incarnation:
 /// `TourController.getTour`, `ManageBusesScreen`, `TourSeatAssignmentScreen`,
@@ -56,11 +65,30 @@ class TourDetailScreen extends StatefulWidget {
 
 class _TourDetailScreenState extends State<TourDetailScreen> {
   int _tabIndex = 0;
-  bool _heroCollapsed = false;
+
+  /// One scroll view serves all five tabs, so we own its controller: it drives
+  /// the sticky mini bar and lets a tab switch return to the top.
+  final ScrollController _scroll = ScrollController();
+
+  /// Whether the in-place tab strip has reached the top edge. A
+  /// [ValueNotifier] rather than `setState` on purpose — the previous version
+  /// rebuilt the ENTIRE screen (Obx, roster, every card) on the scroll frame
+  /// that crossed the threshold. Only the sticky bar listens now.
+  final ValueNotifier<bool> _collapsed = ValueNotifier<bool>(false);
+
+  /// Mark the in-place tab strip and the sticky bar so [_onScroll] can ask
+  /// where they actually are. A measured handover rather than a magic scroll
+  /// offset: the header's height depends on the title's line count, the locale
+  /// and the text scale, so any constant would hand over too early on one
+  /// device and too late on another — and an early handover shows the tabs
+  /// twice.
+  final GlobalKey _tabStripKey = GlobalKey();
+  final GlobalKey _stickyBarKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onScroll);
     // Cold start fetches rosters for RUNNING tours only — that scoping is what
     // makes launch viable on 2G. An ARCHIVED tour therefore arrives without
     // its passengers/buses, so pull them now that the user has actually asked
@@ -71,6 +99,43 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
       // Roster + seat layouts (layouts are deferred on cold start for 2G).
       Get.find<TourController>().ensureTourReadyForSeating(widget.tourId);
     });
+  }
+
+  @override
+  void dispose() {
+    _scroll.removeListener(_onScroll);
+    _scroll.dispose();
+    _collapsed.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!mounted || !_scroll.hasClients) return;
+    final strip = _tabStripKey.currentContext?.findRenderObject() as RenderBox?;
+    final bar = _stickyBarKey.currentContext?.findRenderObject() as RenderBox?;
+    // Scroll deep enough into a long roster and the viewport disposes the
+    // in-place strip outright — there is nothing left to measure. Holding the
+    // last value is the right answer there: it can only ever have been
+    // "collapsed", since the strip cannot vanish while it is on screen.
+    if (strip == null || !strip.hasSize) return;
+    if (bar == null || !bar.hasSize) return;
+    // Hand over the instant the in-place strip finishes passing behind the
+    // sticky bar. The sticky copy sits at that bar's bottom edge, so it lands
+    // exactly where the in-place one left — no jump, and never both at once.
+    final stripBottom = strip.localToGlobal(Offset.zero).dy + strip.size.height;
+    _collapsed.value = stripBottom <= bar.size.height;
+  }
+
+  /// Switch tabs and rewind to the top.
+  ///
+  /// All five tabs share ONE scroll view, so without the rewind the offset
+  /// from a 52-rider roster carries into a three-card Overview and strands the
+  /// user in the middle of it — or past its end.
+  void _selectTab(int i) {
+    if (i == _tabIndex) return;
+    setState(() => _tabIndex = i);
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    _collapsed.value = false;
   }
 
   @override
@@ -97,128 +162,118 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
         );
       }
 
-      // A real broadcast photo (the ~1% case) gets the image hero; otherwise
-      // the compact header. The summary card only overlaps in the image case,
-      // so the tab gap adapts below.
-      final hasHeroImage = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
-      // Overview keeps the tall hero. Work tabs (Travelers/Buses/Money/
-      // Activity) force the compact header so the roster owns the screen.
-      final workTab = _tabIndex != 0;
-      final showCollapsedChrome = hasHeroImage && (_heroCollapsed || workTab);
+      // Shared by the in-place strip and its sticky copy, so the two can never
+      // drift apart.
+      final tabCounts = <int?>[
+        null,
+        tour.passengerCount == 0 ? null : tour.passengerCount,
+        tour.buses.isEmpty ? null : tour.buses.length,
+        null,
+        null,
+      ];
       return UgamScaffold(
         extendBody: true,
-        body: NotificationListener<ScrollNotification>(
-          onNotification: (n) {
-            if (!hasHeroImage || workTab) return false;
-            if (n.metrics.axis != Axis.vertical) return false;
-            final collapsed = n.metrics.pixels > 140;
-            if (collapsed != _heroCollapsed) {
-              setState(() => _heroCollapsed = collapsed);
-            }
-            return false;
-          },
-          child: Stack(
-            children: [
-              RefreshIndicator(
-                color: c.accent,
-                onRefresh: tourCtrl.refreshTours,
-                child: CustomScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(
-                    parent: BouncingScrollPhysics(),
+        body: Stack(
+          children: [
+            RefreshIndicator(
+              color: c.accent,
+              onRefresh: tourCtrl.refreshTours,
+              child: CustomScrollView(
+                controller: _scroll,
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: _TourIdentityHeader(
+                      tour: tour,
+                      onBack: () => AppNav.pop(context),
+                      onEdit: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              EditTourScreen(tourId: widget.tourId),
+                        ),
+                      ),
+                      onDelete: () => _confirmDelete(context, tourCtrl, tour),
+                    ),
                   ),
-                  slivers: [
-                    SliverToBoxAdapter(
-                      child: _HeroSection(
-                        tour: tour,
-                        forceCompact: workTab,
-                        onBack: () => AppNav.pop(context),
-                        onEdit: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                EditTourScreen(tourId: widget.tourId),
-                          ),
-                        ),
-                        onDelete: () =>
-                            _confirmDelete(context, tourCtrl, tour),
-                      ),
-                    ),
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          UgamSpacing.gutter,
-                          hasHeroImage && !workTab
-                              ? UgamSpacing.huge
-                              : UgamSpacing.md,
-                          UgamSpacing.gutter,
-                          UgamSpacing.sm,
-                        ),
-                        child: _TabBar(
-                          index: _tabIndex,
-                          counts: [
-                            null,
-                            tour.passengerCount == 0
-                                ? null
-                                : tour.passengerCount,
-                            tour.buses.isEmpty ? null : tour.buses.length,
-                            null,
-                            null,
-                          ],
-                          onChanged: (i) => setState(() {
-                            _tabIndex = i;
-                            if (i == 0) _heroCollapsed = false;
-                          }),
-                        ),
-                      ),
-                    ),
-                    SliverPadding(
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      key: _tabStripKey,
+                      // Constant gap. It used to widen to `huge` on the one
+                      // tab that drew the photo hero, which is half of why
+                      // switching tabs shifted the whole page.
                       padding: const EdgeInsets.fromLTRB(
                         UgamSpacing.gutter,
-                        0,
+                        UgamSpacing.md,
                         UgamSpacing.gutter,
-                        UgamSpacing.dockClearance,
+                        UgamSpacing.sm,
                       ),
-                      sliver: _buildTabBody(tour, c),
-                    ),
-                  ],
-                ),
-              ),
-              if (hasHeroImage && !workTab)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: IgnorePointer(
-                    ignoring: !showCollapsedChrome,
-                    child: AnimatedOpacity(
-                      duration: const Duration(milliseconds: 180),
-                      opacity: showCollapsedChrome ? 1 : 0,
-                      child: _CollapsedTourChrome(
-                        tour: tour,
-                        c: c,
-                        onBack: () => AppNav.pop(context),
-                        onMore: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  EditTourScreen(tourId: widget.tourId),
-                            ),
-                          );
-                        },
+                      child: _TabBar(
+                        index: _tabIndex,
+                        counts: tabCounts,
+                        onChanged: _selectTab,
                       ),
                     ),
                   ),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.gutter,
+                      0,
+                      UgamSpacing.gutter,
+                      UgamSpacing.dockClearance,
+                    ),
+                    sliver: _buildTabBody(tour, c),
+                  ),
+                ],
+              ),
+            ),
+            // Sticky bar — on EVERY tab, for every tour. Previously it existed
+            // only on Overview and only when the tour had a broadcast photo,
+            // so scrolling a 52-rider roster left no way back and no way to
+            // change tab short of scrolling all the way up again.
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: ValueListenableBuilder<bool>(
+                valueListenable: _collapsed,
+                builder: (context, collapsed, child) => IgnorePointer(
+                  ignoring: !collapsed,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 180),
+                    opacity: collapsed ? 1 : 0,
+                    child: child,
+                  ),
                 ),
-            ],
-          ),
+                child: _CollapsedTourChrome(
+                  key: _stickyBarKey,
+                  tour: tour,
+                  c: c,
+                  tabs: _TabBar(
+                    index: _tabIndex,
+                    counts: tabCounts,
+                    onChanged: _selectTab,
+                  ),
+                  onBack: () => AppNav.pop(context),
+                  onMore: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) =>
+                            EditTourScreen(tourId: widget.tourId),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
         ),
         bottomNavigationBar: _StickyAction(
           tour: tour,
           tab: _tabIndex,
           c: c,
-          onSwitchTab: (i) => setState(() {
-            _tabIndex = i;
-            if (i == 0) _heroCollapsed = false;
-          }),
+          onSwitchTab: _selectTab,
         ),
       );
     });
@@ -258,23 +313,34 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
         return _OverviewTab(
           tour: tour,
           c: c,
-          onSwitchTab: (i) => setState(() => _tabIndex = i),
+          onSwitchTab: _selectTab,
         );
     }
   }
 }
 
 
-/// Sticky compact chrome shown when the tall image hero has scrolled away.
+/// Sticky bar shown once the identity header has scrolled away — on every tab,
+/// for every tour. Carries the tab strip too, so a 52-rider roster never traps
+/// the user: back and all five tabs stay one tap away at any scroll depth.
+///
+/// Deliberately carries no photo thumbnail: the bar is chrome, and chrome that
+/// changes shape per tour is what this screen was being fixed for.
 class _CollapsedTourChrome extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
+
+  /// The same [_TabBar] the page renders in place. It appears here exactly as
+  /// the in-place strip reaches the top edge, so the two never show at once.
+  final Widget tabs;
   final VoidCallback onBack;
   final VoidCallback onMore;
 
   const _CollapsedTourChrome({
+    super.key,
     required this.tour,
     required this.c,
+    required this.tabs,
     required this.onBack,
     required this.onMore,
   });
@@ -295,49 +361,45 @@ class _CollapsedTourChrome extends StatelessWidget {
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: c.border)),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            UgamIconButton(
-              icon: Icons.arrow_back_rounded,
-              onTap: onBack,
-              semanticLabel: tr('app.action.back'),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    tour.title,
-                    style: UgamText.titleS.copyWith(color: c.ink),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  UgamStatusDot(
-                    label: tour.status.displayName,
-                    tone: _toneFor(tour.status),
-                  ),
-                ],
-              ),
-            ),
-            if ((tour.broadcastImageUrl ?? '').trim().isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.network(
-                  tour.broadcastImageUrl!,
-                  width: 36,
-                  height: 36,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const SizedBox(width: 36, height: 36),
+            Row(
+              children: [
+                UgamIconButton(
+                  icon: Icons.arrow_back_rounded,
+                  onTap: onBack,
+                  semanticLabel: tr('app.action.back'),
                 ),
-              ),
-            const SizedBox(width: UgamSpacing.sm),
-            UgamIconButton(
-              icon: Icons.more_vert_rounded,
-              onTap: onMore,
-              semanticLabel: tr('tour_detail.actions_title'),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        tour.title,
+                        style: UgamText.titleS.copyWith(color: c.ink),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      UgamStatusDot(
+                        label: tour.status.displayName,
+                        tone: _toneFor(tour.status),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: UgamSpacing.sm),
+                UgamIconButton(
+                  icon: Icons.more_vert_rounded,
+                  onTap: onMore,
+                  semanticLabel: tr('tour_detail.actions_title'),
+                ),
+              ],
             ),
+            const SizedBox(height: UgamSpacing.sm),
+            tabs,
           ],
         ),
       ),
@@ -345,25 +407,26 @@ class _CollapsedTourChrome extends StatelessWidget {
   }
 }
 
-// ─── HERO ─────────────────────────────────────────────────────────────
+// ─── IDENTITY HEADER ──────────────────────────────────────────────────
 
-class _HeroSection extends StatelessWidget {
+/// The one and only tour header. Chrome row, title, route, status, live
+/// vitals, seat badge — identical on all five tabs, so the screen keeps the
+/// same identity wherever the user is working.
+class _TourIdentityHeader extends StatelessWidget {
   final Tour tour;
   final VoidCallback onBack;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
-  final bool forceCompact;
 
-  const _HeroSection({
+  const _TourIdentityHeader({
     required this.tour,
     required this.onBack,
     required this.onEdit,
     required this.onDelete,
-    this.forceCompact = false,
   });
 
   /// Bottom sheet of tour-level actions (edit / delete), opened from the single
-  /// overflow chrome circle so the hero stays uncluttered.
+  /// overflow chrome circle so the header stays uncluttered.
   void _showActions(BuildContext context) {
     final c = UgamColors.of(context);
     UgamSheet.show<void>(
@@ -400,11 +463,11 @@ class _HeroSection extends StatelessWidget {
     );
   }
 
-  /// Compact header for the common case (no broadcast photo): no illustration,
-  /// just chrome + tour identity, so the tabbed body reclaims the ~320px the
-  /// old backdrop spent on a faint generated glyph. Status shows once (the
-  /// status dot in the identity block), so no extra chip in the chrome row.
-  Widget _buildCompactHeader(BuildContext context) {
+  /// No illustration — just chrome + tour identity, so the tabbed body
+  /// reclaims the ~200px the old backdrop spent on a photo or a generated
+  /// glyph. Status shows once (the status dot in the identity block), so no
+  /// extra chip in the chrome row.
+  Widget _buildHeader(BuildContext context) {
     final c = UgamColors.of(context);
     final topInset = MediaQuery.of(context).padding.top;
     final statusTone = _toneFor(tour.status);
@@ -495,210 +558,8 @@ class _HeroSection extends StatelessWidget {
     );
   }
 
-  /// Physical pixels wide the hero is actually painted at, capped so a
-  /// high-DPI phone can't ask for more than the stored image has (1600).
-  /// Returning null would mean "decode at full size", which is the thing
-  /// this exists to avoid.
-  static int _heroDecodeWidth(BuildContext context) {
-    final mq = MediaQuery.of(context);
-    final physical = (mq.size.width * mq.devicePixelRatio).round();
-    if (physical <= 0) return 800; // degenerate metrics — pick a sane default
-    return physical > 1600 ? 1600 : physical;
-  }
-
   @override
-  Widget build(BuildContext context) {
-    final hasImage = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
-    // The 99% case: no photo → compact header, no wasted illustration.
-    // Work tabs also force compact so Travelers/Buses keep the roster visible.
-    if (!hasImage || forceCompact) return _buildCompactHeader(context);
-
-    final c = UgamColors.of(context);
-    final topInset = MediaQuery.of(context).padding.top;
-    final statusTone = _toneFor(tour.status);
-    return SizedBox(
-      // Decorative: the photo tracks the text scale so the card overlapping it
-      // stays proportionally placed on a small phone.
-      height: UgamScale.px(context, 200),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned.fill(
-            child: Image.network(
-              tour.broadcastImageUrl!,
-              fit: BoxFit.cover,
-              // Decode at the size we actually PAINT, not the size uploaded.
-              // The picker stores at maxWidth 1600 (create_tour_screen), so
-              // without this the hero decodes to a 1600x1067 ARGB bitmap —
-              // ~6.8 MB of RAM for a 200pt-tall decorative strip, on phones
-              // that have little to spare. cacheWidth resizes during decode,
-              // so the big bitmap never exists.
-              cacheWidth: _heroDecodeWidth(context),
-              // While loading or if the photo fails, fall back to the graphite
-              // backdrop so the hero never flashes raw/broken.
-              //
-              // HISTORY: this fallback used to be what ALWAYS rendered. The
-              // stored URL is a getPublicUrl() link, but the tour-broadcasts
-              // bucket was private live, so every uncredentialed fetch 400'd
-              // and the miss looked like a design choice rather than a
-              // failure. Fixed by migration 051, verified 2026-08-01:
-              // GET /object/public/tour-broadcasts/<file> with no credentials
-              // now returns 200 image/jpeg. Keep the fallback anyway — it
-              // still covers a slow network and a genuinely missing object.
-              loadingBuilder: (ctx, child, progress) => progress == null
-                  ? child
-                  : UgamBusBackdrop(seed: tour.id, label: _routeInitials(tour)),
-              errorBuilder: (_, _, _) =>
-                  UgamBusBackdrop(seed: tour.id, label: _routeInitials(tour)),
-            ),
-          ),
-          // Top scrim — keeps the white floating chrome (back / status / more)
-          // legible over the graphite backdrop's lighter top band.
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            height: topInset + 96,
-            child: const IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0x4D000000), Colors.transparent],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          // Top chrome row.
-          Positioned(
-            left: UgamSpacing.gutter,
-            right: UgamSpacing.gutter,
-            top: topInset + UgamSpacing.sm,
-            child: Row(
-              children: [
-                UgamIconButton(
-                  icon: Icons.arrow_back_rounded,
-                  onTap: onBack,
-                  semanticLabel: tr('app.action.back'),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: UgamSpacing.md,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    // Graphite-on-graphite, matching the sibling status chip on
-                    // the tours list — not a bespoke black/white pill.
-                    color: c.cardElev,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                  ),
-                  child: UgamStatusDot(
-                    label: tour.status.displayName,
-                    tone: statusTone,
-                  ),
-                ),
-                const Spacer(),
-                // Single overflow entry — edit / delete live in the sheet.
-                UgamIconButton(
-                  icon: Icons.more_vert_rounded,
-                  onTap: () => _showActions(context),
-                  semanticLabel: tr('tour_detail.actions_title'),
-                ),
-              ],
-            ),
-          ),
-          // Overlay card pulled past the hero bottom so it overlaps.
-          Positioned(
-            left: UgamSpacing.gutter,
-            right: UgamSpacing.gutter,
-            // Tracks the hero above it, so the overlap reads the same at any
-            // scale factor.
-            bottom: -UgamScale.px(context, 28),
-            child: UgamCard.plain(
-              elev: true,
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.lg,
-                UgamSpacing.md,
-                UgamSpacing.md,
-                UgamSpacing.md,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          tour.title,
-                          style: UgamText.titleM.copyWith(color: c.ink),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(Icons.south_east_rounded,
-                                size: 12, color: c.ink2),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                '${tour.fromCity} → ${tour.toCity}',
-                                style: UgamText.caption.copyWith(color: c.ink2),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: UgamSpacing.sm),
-                            Text(
-                              '·',
-                              style: UgamText.caption.copyWith(color: c.ink3),
-                            ),
-                            const SizedBox(width: UgamSpacing.sm),
-                            Text(
-                              _durationLabel(context, tour),
-                              style: UgamText.tabular(
-                                UgamText.caption.copyWith(color: c.ink2),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        UgamStatusDot(
-                          label: tour.status.description,
-                          tone: statusTone,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.sm),
-                  TourHeroChipBadge(tour: tour, c: c),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Short route monogram for the hero backdrop, e.g. `"S→M"` from the from/to
-  /// city initials. Returns null when either city is blank so the backdrop
-  /// falls back to the bare bus glyph.
-  String? _routeInitials(Tour t) {
-    String first(String s) {
-      final v = s.trim();
-      return v.isEmpty ? '' : v[0].toUpperCase();
-    }
-
-    final from = first(t.fromCity);
-    final to = first(t.toCity);
-    if (from.isEmpty || to.isEmpty) return null;
-    return '$from→$to';
-  }
+  Widget build(BuildContext context) => _buildHeader(context);
 
   String _durationLabel(BuildContext context, Tour t) {
     final r = t.returnDate;
@@ -851,6 +712,15 @@ class _OverviewTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: UgamSpacing.md),
+        // The broadcast poster. It used to be the screen's HEADER on this tab
+        // only — which is what made the same tour look like two different
+        // screens. It sits with the broadcast card because that is what it is
+        // for, and below the working cards because the agent's next action
+        // outranks decoration.
+        if ((tour.broadcastImageUrl ?? '').trim().isNotEmpty) ...[
+          _TourCoverCard(tour: tour),
+          const SizedBox(height: UgamSpacing.md),
+        ],
         _BroadcastCard(tour: tour, c: c),
       ]),
     );
@@ -1125,6 +995,81 @@ class _TourBroadcast {
     await WhatsAppService().copyAnnouncementToClipboard(tour: tour);
     AppSnackBar.success(tr('tour_detail.snack_broadcast_copied'));
   }
+}
+
+/// The tour's broadcast poster, rendered as ordinary Overview content.
+///
+/// Only ever built when [Tour.broadcastImageUrl] is non-empty, so there is no
+/// "no photo" variant to diverge — an absent poster simply means this card
+/// isn't in the list. The header above is the same either way.
+class _TourCoverCard extends StatelessWidget {
+  final Tour tour;
+
+  const _TourCoverCard({required this.tour});
+
+  /// Physical pixels wide the poster is actually painted at, capped so a
+  /// high-DPI phone can't ask for more than the stored image has (1600).
+  /// Returning null would mean "decode at full size", which is the thing this
+  /// exists to avoid.
+  static int _decodeWidth(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final physical = (mq.size.width * mq.devicePixelRatio).round();
+    if (physical <= 0) return 800; // degenerate metrics — pick a sane default
+    return physical > 1600 ? 1600 : physical;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(UgamRadius.photo),
+      child: SizedBox(
+        width: double.infinity,
+        // Decorative, so it tracks the responsive factor rather than the text
+        // scale — a poster does not need to grow with the font setting.
+        height: UgamScale.px(context, 168),
+        child: Image.network(
+          tour.broadcastImageUrl!,
+          fit: BoxFit.cover,
+          // Decode at the size we actually PAINT, not the size uploaded. The
+          // picker stores at maxWidth 1600 (create_tour_screen), so without
+          // this the poster decodes to a 1600x1067 ARGB bitmap — ~6.8 MB of
+          // RAM for a 168pt strip, on phones that have little to spare.
+          cacheWidth: _decodeWidth(context),
+          // While loading or if the photo fails, fall back to the graphite
+          // backdrop so the card never flashes raw/broken.
+          //
+          // HISTORY: this fallback used to be what ALWAYS rendered. The stored
+          // URL is a getPublicUrl() link, but the tour-broadcasts bucket was
+          // private live, so every uncredentialed fetch 400'd and the miss
+          // looked like a design choice rather than a failure. Fixed by
+          // migration 051, verified 2026-08-01: GET
+          // /object/public/tour-broadcasts/<file> with no credentials now
+          // returns 200 image/jpeg. Keep the fallback anyway — it still covers
+          // a slow network and a genuinely missing object.
+          loadingBuilder: (ctx, child, progress) => progress == null
+              ? child
+              : UgamBusBackdrop(seed: tour.id, label: _routeInitialsOf(tour)),
+          errorBuilder: (_, _, _) =>
+              UgamBusBackdrop(seed: tour.id, label: _routeInitialsOf(tour)),
+        ),
+      ),
+    );
+  }
+}
+
+/// Short route monogram for the poster fallback backdrop, e.g. `"S→M"` from the
+/// from/to city initials. Returns null when either city is blank so the
+/// backdrop falls back to the bare bus glyph.
+String? _routeInitialsOf(Tour t) {
+  String first(String s) {
+    final v = s.trim();
+    return v.isEmpty ? '' : v[0].toUpperCase();
+  }
+
+  final from = first(t.fromCity);
+  final to = first(t.toCity);
+  if (from.isEmpty || to.isEmpty) return null;
+  return '$from→$to';
 }
 
 /// A single broadcast card: campaign icon + title + hint, a PRIMARY
@@ -3037,7 +2982,8 @@ _NextAction _nextActionFor(Tour tour) {
     );
   }
   if (tour.isReturnPhase) {
-    final free = computeTourCapacity(tour).returnSeatsFree;
+    final free =
+        Get.find<TourController>().capacityFor(tour).returnSeatsFree;
     return _NextAction(
       kind: _NextActionKind.addReturnTicket,
       title: tr('tour_detail.action_return_leg_title'),
