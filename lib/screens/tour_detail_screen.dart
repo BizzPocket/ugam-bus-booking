@@ -26,6 +26,7 @@ import 'add_return_ticket_sheet.dart';
 import 'edit_tour_screen.dart';
 import 'bus_status_screen.dart';
 
+import 'live_map_screen.dart';
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
 import 'past_tour_seat_history_screen.dart';
@@ -1905,6 +1906,22 @@ class _BusesTab extends StatelessWidget {
           ],
         ),
         const SizedBox(height: UgamSpacing.md),
+        // Live map. Only while the trip is actually running: handlers may only
+        // push positions on a locked tour (migration 047), so before lock there
+        // is nothing to plot and the entry would just disappoint.
+        if (tour.status == TourStatus.locked) ...[
+          UgamCTA(
+            label: tr('tracking.map_open'),
+            leadingIcon: Icons.map_outlined,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) =>
+                    LiveMapScreen(tourId: tour.id, buses: tour.buses),
+              ),
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.md),
+        ],
         for (var i = 0; i < tour.buses.length; i++) ...[
           _BusListItem(
             bus: tour.buses[i],
