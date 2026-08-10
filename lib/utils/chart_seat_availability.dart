@@ -75,6 +75,35 @@ Map<String, SeatAvailability> availabilityByKey(
   return {for (final r in rows) r.key: r};
 }
 
+/// Whether two availability snapshots describe the same occupancy.
+///
+/// The customer chart polls every 20 seconds and used to `setState`
+/// unconditionally, rebuilding the whole grid whether or not anything had
+/// moved. On a quiet tour that is a guaranteed rebuild every 20s for nothing.
+///
+/// This is a VALUE comparison on purpose: [SeatAvailability] has no `==`, so
+/// comparing the maps directly compares instance identity, and the poll builds
+/// fresh instances every time — it would always report "changed".
+bool availabilityEquals(
+  Map<String, SeatAvailability> a,
+  Map<String, SeatAvailability> b,
+) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (final entry in a.entries) {
+    final other = b[entry.key];
+    if (other == null) return false;
+    final mine = entry.value;
+    if (mine.usedGo != other.usedGo ||
+        mine.usedRet != other.usedRet ||
+        mine.ladyGo != other.ladyGo ||
+        mine.ladyRet != other.ladyRet) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /// Physical berths one seat cell holds: a Double Sofa is an upper+lower pair
 /// (2), everything else is a single berth (1). Mirrors [SeatType.berthsPerUnit]
 /// and the `case when seatType = 'doubleSofa' then 2 else 1` in migration 048.

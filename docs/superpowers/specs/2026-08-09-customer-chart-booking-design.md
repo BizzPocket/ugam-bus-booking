@@ -1,7 +1,7 @@
 # Customer chart booking: layout, motion, party gate, multi-bus basket, payment lifecycle
 
 **Date:** 2026-08-09
-**Status:** Design approved — not yet implemented
+**Status:** Implemented — 1225 tests passing (+62), migrations 067 and 068 pending manual deploy
 **Branch:** `feat/money-collection-settlement`
 
 > **Scope note.** This spec deliberately covers five workstreams in one document. That was flagged during
@@ -295,6 +295,30 @@ Note for widget tests: `plural()` throws `LateInitializationError` unless a loca
 
 Payments is third rather than last so that end-to-end testing is unblocked before the two large features
 land.
+
+## §8a Where implementation diverged from this design
+
+Recorded because the reasoning matters more than the plan.
+
+**The page-transition item in §2 was wrong.** The design said the app defines no
+`pageTransitionsTheme`, so Android falls back to a poor default. A test proved the framework already
+supplies `PredictiveBackPageTransitionsBuilder` on Android and Cupertino on iOS — both fine, and
+overriding Android's would have **thrown away predictive-back gestures**. The jank is the first
+frame, not the builder: the screen rendered a bare centred spinner and then swapped in a whole
+ListView + grid, usually mid-transition. Fixed with `ChartSeatSkeleton`, which reserves the seats'
+shape at the real `ChartSeatMetrics` footprint. No transition theme was added.
+
+**The tile defect was worse than described.** §1 assumed two tiles of different sizes. Measured under
+the unbounded constraints the grid actually supplies, there were **five**: free single 36×14,
+selected single 34×12, free double 36×24, half-taken double 41×43. `_WholeTile` was a `Container`
+with an `alignment` and no size, so it *expanded* to fill; `_SplitTile` self-sized. Both are now
+pinned to `ChartSeatMetrics`.
+
+**Multi-bus advance needed a fifth server function.** §4 did not account for a party paying ONE
+advance against N holds: a `payment_claim` links to a single hold, so finalizing it would confirm one
+bus and let the party's other seats expire — after they had paid. Migration 068 §5 adds
+`chart_finalize_party_holds`, and the client puts the advance on only the first per-bus ticket so a
+split party is never shown the amount twice.
 
 ## §9 Risks
 

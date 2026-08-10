@@ -14,7 +14,7 @@ import 'customer_more_screen.dart';
 import 'customer_my_requests_screen.dart';
 import 'customer_tour_detail_screen.dart';
 import 'find_my_seat_screen.dart';
-import 'seat_selection_screen.dart';
+import 'party_gate_screen.dart';
 
 /// Public-facing tour list — image-5 fidelity.
 ///
@@ -248,7 +248,7 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
                                   final t = g.tours[j];
                                   Get.to(
                                     () => t.bookingMode.isChart
-                                        ? SeatSelectionScreen(tour: t)
+                                        ? PartyGateScreen(tour: t)
                                         : CustomerBookingRequestScreen(tour: t),
                                     transition: Transition.cupertino,
                                   );

@@ -9,14 +9,13 @@ import '../models/bus_details.dart';
 import '../models/pickup_location.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
+import '../services/chart_advance_payment.dart';
 import '../services/customer_requests_store.dart';
 import '../services/seat_chart_booking_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/chart_selection.dart';
 import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
-import '../utils/upi_uri.dart';
-import '../widgets/upi_payment_sheet.dart';
 
 /// Passenger details, then the atomic claim, then the advance QR.
 ///
@@ -29,19 +28,25 @@ import '../widgets/upi_payment_sheet.dart';
 /// back to re-pick only those.
 class SeatBookingConfirmScreen extends StatefulWidget {
   final Tour tour;
-  final Bus bus;
   final TripType leg;
-  final List<ChartPick> picks;
+
+  /// The buses this checkout covers. Usually one; more than one when a party
+  /// chose to split across buses (migration 068).
+  final List<ChartBusSelection> selections;
+
   final double totalRupees;
 
   const SeatBookingConfirmScreen({
     super.key,
     required this.tour,
-    required this.bus,
     required this.leg,
-    required this.picks,
+    required this.selections,
     required this.totalRupees,
   });
+
+  /// True when this checkout has to go through the multi-bus RPCs. A one-bus
+  /// booking deliberately keeps using migration 048's existing, proven path.
+  bool get isMultiBus => selections.length > 1;
 
   @override
   State<SeatBookingConfirmScreen> createState() =>
@@ -61,7 +66,14 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
   String? _phoneError;
   String? _pickupError;
 
-  int get _berths => totalBerths(widget.picks);
+  /// Berths across every bus in this checkout.
+  int get _berths =>
+      widget.selections.fold<int>(0, (sum, s) => sum + s.berths);
+
+  /// The single-bus shortcuts, valid only when [SeatBookingConfirmScreen
+  /// .isMultiBus] is false.
+  Bus get _soleBus => widget.selections.first.bus;
+  List<ChartPick> get _solePicks => widget.selections.first.picks;
 
   @override
   void initState() {
@@ -102,15 +114,20 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
     final useHold = widget.tour.collectsAdvance;
 
     try {
+      if (widget.isMultiBus) {
+        await _confirmMultiBus(phone: phone, name: name, useHold: useHold);
+        return;
+      }
+
       if (useHold) {
         final hold = await _service.hold(
           requestId: requestId,
           tourId: widget.tour.id,
-          busId: widget.bus.id,
+          busId: _soleBus.id,
           phone: phone,
           name: name,
           leg: widget.leg,
-          picks: widget.picks,
+          picks: _solePicks,
           gender: _gender,
           note: _note.text.trim().isEmpty ? null : _note.text.trim(),
           pickupLocationId: _pickup?.id,
@@ -154,10 +171,21 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
             pickupLocationId: _pickup?.id,
             pickupLocationName: _pickup?.name,
             tripType: widget.leg,
-            status: 'pending',
+            // 'held', not 'pending': this booking has NO booking_requests row
+            // until the advance is confirmed, so anything that reconciles
+            // against the server must know to ask the holds table instead of
+            // concluding the request was deleted.
+            status: 'held',
             isConfirmed: false,
             organiserPhone: widget.tour.createdBy,
             createdAt: DateTime.now(),
+            // Everything the "Pay advance" retry in My Requests needs, captured
+            // now so it works offline and cannot be re-quoted later.
+            holdExpiresAt: hold.expiresAt,
+            holdId: hold.holdId,
+            advancePaise: _advancePaise,
+            collectVpa: widget.tour.collectVpa,
+            collectPayeeName: widget.tour.collectPayeeName,
           ),
         );
 
@@ -178,11 +206,11 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
       final result = await _service.claim(
         requestId: requestId,
         tourId: widget.tour.id,
-        busId: widget.bus.id,
+        busId: _soleBus.id,
         phone: phone,
         name: name,
         leg: widget.leg,
-        picks: widget.picks,
+        picks: _solePicks,
         gender: _gender,
         note: _note.text.trim().isEmpty ? null : _note.text.trim(),
         pickupLocationId: _pickup?.id,
@@ -246,58 +274,240 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
     }
   }
 
+  /// Checkout for a party split across buses (migration 068).
+  ///
+  /// Each bus gets its OWN request id, because the server writes one
+  /// booking_request + one passenger per bus — that is what keeps every
+  /// passenger's seats inside a single bus and leaves billing, the handler
+  /// manifest and the WhatsApp ticket working untouched.
+  ///
+  /// The claim is all-or-nothing ACROSS buses: a seat lost on the second bus
+  /// rolls back the first, so a party is never left half-booked with money
+  /// owing on seats they cannot use.
+  Future<void> _confirmMultiBus({
+    required String phone,
+    required String name,
+    required bool useHold,
+  }) async {
+    final partyId = const Uuid().v4();
+    final buses = [
+      for (final s in widget.selections)
+        BusClaim(
+          busId: s.bus.id,
+          requestId: const Uuid().v4(),
+          picks: s.picks,
+        ),
+    ];
+    final note = _note.text.trim().isEmpty ? null : _note.text.trim();
+
+    if (useHold) {
+      final held = await _service.holdMulti(
+        partyId: partyId,
+        tourId: widget.tour.id,
+        phone: phone,
+        name: name,
+        leg: widget.leg,
+        buses: buses,
+        gender: _gender,
+        note: note,
+        pickupLocationId: _pickup?.id,
+        pickupLocationName: _pickup?.name,
+      );
+      if (!mounted) return;
+      if (!held.ok) {
+        setState(() => _saving = false);
+        _reportMultiFailure(held.conflicts, held.errorMessage);
+        return;
+      }
+
+      // One local ticket PER BUS, mirroring the server. Each carries its own
+      // hold id so "Pay advance" can be retried per bus if one claim fails.
+      for (var i = 0; i < held.holds.length; i++) {
+        final hold = held.holds[i];
+        final selection = widget.selections.firstWhere(
+          (s) => s.bus.id == hold.busId,
+          orElse: () => widget.selections.first,
+        );
+        await CustomerRequestsStore().upsert(
+          _entryFor(
+            requestId: hold.requestId,
+            name: name,
+            phone: phone,
+            berths: selection.berths,
+            status: 'held',
+            holdId: hold.holdId,
+            holdExpiresAt: held.expiresAt,
+            note: note,
+            // ONE advance for the whole party, carried by the first ticket.
+            // Putting the full amount on every per-bus ticket would show a
+            // split party "Pay ₹3,000" twice and invite them to pay double.
+            // The holds share a deadline and are finalized together server-side
+            // by chart_finalize_party_holds.
+            carriesAdvance: i == 0,
+          ),
+        );
+      }
+
+      if (!mounted) return;
+      setState(() => _saving = false);
+      // One sheet for the WHOLE party — the advance is quoted across buses,
+      // and the holds share a single deadline.
+      await _offerAdvance(
+        requestId: held.holds.first.requestId,
+        name: name,
+        holdId: held.holds.first.holdId,
+      );
+      if (!mounted) return;
+      AppSnackBar.success(tr('seat_confirm.success_held'));
+      Navigator.of(context).pop(true);
+      return;
+    }
+
+    final result = await _service.claimMulti(
+      partyId: partyId,
+      tourId: widget.tour.id,
+      phone: phone,
+      name: name,
+      leg: widget.leg,
+      buses: buses,
+      gender: _gender,
+      note: note,
+      pickupLocationId: _pickup?.id,
+      pickupLocationName: _pickup?.name,
+    );
+    if (!mounted) return;
+    if (!result.ok) {
+      setState(() => _saving = false);
+      _reportMultiFailure(result.conflicts, result.errorMessage);
+      return;
+    }
+
+    for (final booking in result.bookings) {
+      final selection = widget.selections.firstWhere(
+        (s) => s.bus.id == booking.busId,
+        orElse: () => widget.selections.first,
+      );
+      await CustomerRequestsStore().upsert(
+        _entryFor(
+          requestId: booking.requestId,
+          name: name,
+          phone: phone,
+          berths: selection.berths,
+          status: 'pending',
+          isConfirmed: true,
+          note: note,
+        ),
+      );
+    }
+
+    if (!mounted) return;
+    setState(() => _saving = false);
+    AppSnackBar.success(tr('seat_confirm.success'));
+    Navigator.of(context).pop(true);
+  }
+
+  /// A lost seat names its BUS as well as its id — every sleeper on the tour
+  /// has a "DU1", so a bare seat id would send the customer to the wrong chart.
+  void _reportMultiFailure(
+    List<PartyConflict> conflicts,
+    String? errorMessage,
+  ) {
+    if (conflicts.isEmpty) {
+      AppSnackBar.error(errorMessage ?? tr('seat_confirm.err_failed'));
+      return;
+    }
+    final named = conflicts.map((c) {
+      final bus = widget.selections
+          .where((s) => s.bus.id == c.busId)
+          .map((s) => s.bus.name)
+          .firstOrNull;
+      return bus == null ? c.seatId : '${c.seatId} ($bus)';
+    }).join(', ');
+    AppSnackBar.error(
+      tr('seat_confirm.err_seats_gone', namedArgs: {'seats': named}),
+    );
+    Navigator.of(context).pop(false);
+  }
+
+  /// One device-local ticket. Shared by both multi-bus paths so a held and a
+  /// claimed booking cannot drift apart in shape.
+  CustomerRequestEntry _entryFor({
+    required String requestId,
+    required String name,
+    required String phone,
+    required int berths,
+    required String status,
+    String? note,
+    String? holdId,
+    DateTime? holdExpiresAt,
+    bool isConfirmed = false,
+    bool carriesAdvance = true,
+  }) {
+    return CustomerRequestEntry(
+      id: requestId,
+      tourId: widget.tour.id,
+      tourTitle: widget.tour.title,
+      tourFromCity: widget.tour.fromCity,
+      tourToCity: widget.tour.toCity,
+      tourDepartureDate: widget.tour.departureDate,
+      tourPricePerSeat: widget.tour.pricePerSeat,
+      customerName: name,
+      customerPhone: phone,
+      partySize: berths,
+      doubleSofa: 0,
+      singleSofa: 0,
+      note: note,
+      pickupLocationId: _pickup?.id,
+      pickupLocationName: _pickup?.name,
+      tripType: widget.leg,
+      status: status,
+      isConfirmed: isConfirmed,
+      organiserPhone: widget.tour.createdBy,
+      createdAt: DateTime.now(),
+      holdExpiresAt: holdExpiresAt,
+      holdId: holdId,
+      advancePaise: (holdId == null || !carriesAdvance) ? 0 : _advancePaise,
+      collectVpa: widget.tour.collectVpa,
+      collectPayeeName: widget.tour.collectPayeeName,
+    );
+  }
+
+  /// Advance due on this booking, in paise. Zero when the tour asks for none.
+  int get _advancePaise {
+    final perBerth = widget.tour.advancePerBerthPaise ?? 0;
+    return perBerth > 0
+        ? perBerth * _berths
+        : (widget.totalRupees * 100).round();
+  }
+
+  /// Shows the advance sheet. Dismissing it is NOT a failure — the hold stands
+  /// and My Requests carries a countdown plus a "Pay advance" retry, so the
+  /// booking is recoverable. It used to be a dead end: this sheet was the only
+  /// place a customer could ever pay.
   Future<void> _offerAdvance({
     required String requestId,
     required String name,
     String? holdId,
   }) async {
     final tour = widget.tour;
-    final perBerth = tour.advancePerBerthPaise ?? 0;
-    final paise = perBerth > 0
-        ? perBerth * _berths
-        : (widget.totalRupees * 100).round();
-    if (paise <= 0) return;
+    if (_advancePaise <= 0) return;
 
-    final claim = await showUpiPaymentSheet(
-      context,
-      request: collectPayment(
-        vpa: tour.collectVpa!,
-        payeeName: (tour.collectPayeeName?.trim().isNotEmpty ?? false)
-            ? tour.collectPayeeName!
-            : tour.title,
-        amountPaise: paise,
-        note: '${tour.fromCity}-${tour.toCity} · $name',
-        bookingRef: requestId,
-      ),
-      title: tr('seat_confirm.advance_title'),
-      subtitle: perBerth > 0
+    await ChartAdvancePayment.collect(
+      context: context,
+      requestId: requestId,
+      holdId: holdId,
+      payeeVpa: tour.collectVpa!,
+      payeeName: (tour.collectPayeeName?.trim().isNotEmpty ?? false)
+          ? tour.collectPayeeName!
+          : tour.title,
+      amountPaise: _advancePaise,
+      note: '${tour.fromCity}-${tour.toCity} · $name',
+      subtitle: (tour.advancePerBerthPaise ?? 0) > 0
           ? tr('seat_confirm.advance_note', namedArgs: {
               'total': Formatters.formatMoneyInr(widget.totalRupees),
             })
           : null,
-      askConfirmation: true,
     );
-
-    if (claim == null) return;
-
-    final claimId = holdId != null
-        ? await CustomerRequestsStore().claimUpiAdvanceForHold(
-            holdId: holdId,
-            amountPaise: paise,
-            reference: claim.reference,
-          )
-        : await CustomerRequestsStore().claimUpiAdvance(
-            requestId: requestId,
-            amountPaise: paise,
-            reference: claim.reference,
-          );
-
-    if (!mounted) return;
-    if (claimId == null) {
-      AppSnackBar.error(tr('upi.claim_failed'));
-    } else {
-      AppSnackBar.success(tr('upi.claim_saved'));
-    }
   }
 
   Future<void> _pickPickup() async {
@@ -429,7 +639,7 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
   }
 
   Widget _summary(UgamColorSet c) {
-    final seats = widget.picks
+    final seats = _solePicks
         .map((p) => p.berths > 1 ? '${p.seatId} ×${p.berths}' : p.seatId)
         .join(' · ');
     return Container(
@@ -448,7 +658,7 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
           ),
           const SizedBox(height: 2),
           Text(
-            '${widget.bus.name} · ${_legLabel()}',
+            '${_soleBus.name} · ${_legLabel()}',
             style: UgamText.caption.copyWith(color: c.ink2),
           ),
           const SizedBox(height: UgamSpacing.sm),

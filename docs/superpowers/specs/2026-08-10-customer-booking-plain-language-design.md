@@ -144,9 +144,15 @@ The customer tile grows from 40×42 to **56×52** and carries meaning instead of
 
 - **Upper/lower in words** (ઉપર / નીચે), plus a berth glyph sitting high or low in the tile.
 - **Price on the face**, so band pricing is visible before the tap rather than after.
-- **A double sofa is ONE WIDE tile**, not two squares, because that is what it physically is.
+- **A double sofa is marked "2 જણ"** — it seats two.
 - **The seat code is demoted** to small corner text. It still has to match the printed ticket and the
   organiser's chart, so it cannot be deleted — only stop being the headline.
+
+> **Correction made during implementation.** An earlier draft of this section said a double sofa
+> should render as ONE WIDE tile "because that is what it physically is". That was wrong.
+> `SeatGridCols` puts `doubleUpper` at column 3 and `doubleLower` at column 4, so `DU1` and `DL1` are
+> two SEPARATE two-person sofas on different deck levels — not two halves of one. Merging them into a
+> wide tile would misrepresent the bus. All tiles keep a uniform footprint; only the label changes.
 
 **Density.** The recorded rule is that spacing tokens were deliberately compressed to a cockpit
 density and must not be re-widened. That rule was set for the OPERATOR app. This changes only

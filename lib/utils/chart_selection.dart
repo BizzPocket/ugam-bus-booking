@@ -12,6 +12,7 @@
 // money, capacity, the handler manifest, the chart PDF, notify and settlement
 // keep working without knowing chart mode exists.
 
+import '../models/bus_details.dart';
 import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
@@ -109,3 +110,18 @@ int totalBerths(List<ChartPick> picks) =>
 /// The claim payload for `chart_claim_seats`.
 List<Map<String, dynamic>> claimPayload(List<ChartPick> picks) =>
     [for (final p in picks) p.toClaimMap()];
+
+/// One bus's share of a checkout: the bus itself plus what was picked on it.
+///
+/// The chart's basket can now span buses (migration 068), so checkout receives
+/// a LIST of these rather than a single bus. Each carries its own [Bus] because
+/// fares are per bus — two buses on one tour can price the same seat type
+/// differently, and quoting a split party off the visible bus would misquote it.
+class ChartBusSelection {
+  final Bus bus;
+  final List<ChartPick> picks;
+
+  const ChartBusSelection({required this.bus, required this.picks});
+
+  int get berths => totalBerths(picks);
+}

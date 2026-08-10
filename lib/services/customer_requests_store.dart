@@ -15,6 +15,7 @@ import '../models/handler_tour_ref.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_ticket.dart';
 import '../models/trip_type.dart';
+import 'chart_hold_status.dart';
 
 /// Device-local journal of booking requests the customer submitted from
 /// this device. The customer has no Supabase Auth session, so the server
@@ -74,6 +75,33 @@ class CustomerRequestEntry {
   /// dead-end "Call organiser" for a confirmed/seated booking.
   final DateTime? cancelRequestedAt;
 
+  /// When this booking's SEAT HOLD lapses, for a chart booking on a tour that
+  /// collects an advance (migration 064).
+  ///
+  /// Such a booking has NO `booking_requests` row until the advance is
+  /// confirmed — `chart_hold_seats` writes only a `seat_holds` row, and
+  /// `chart_finalize_hold` creates the booking row later. Before this field
+  /// existed, refresh() read "no booking row" as "the organiser deleted it" and
+  /// branded every live unpaid hold as Cancelled.
+  final DateTime? holdExpiresAt;
+
+  /// `seat_holds.id` behind this booking. Needed to record a UPI claim against
+  /// the hold (`claim_upi_advance_for_hold`) when the customer pays LATER, from
+  /// My Requests, rather than in the one sheet shown at checkout.
+  final String? holdId;
+
+  /// Advance due on this booking, in paise, captured at hold time.
+  ///
+  /// Stored on the ticket rather than re-derived from the tour so the retry
+  /// works offline and cannot silently re-quote if the organiser edits the
+  /// tour's advance after the seats were held.
+  final int advancePaise;
+
+  /// The organiser's collection VPA and payee name, captured with the advance
+  /// for the same reason.
+  final String? collectVpa;
+  final String? collectPayeeName;
+
   CustomerRequestEntry({
     required this.id,
     required this.tourId,
@@ -100,9 +128,43 @@ class CustomerRequestEntry {
     this.isConfirmed = false,
     this.organiserPhone,
     this.cancelRequestedAt,
+    this.holdExpiresAt,
+    this.holdId,
+    this.advancePaise = 0,
+    this.collectVpa,
+    this.collectPayeeName,
   });
 
   bool get hasSeatsAssigned => assignedSeats.isNotEmpty;
+
+  /// Seats are held pending an advance payment. The booking is LIVE — the
+  /// seats are blocked on the chart for everyone else — it simply has not been
+  /// paid for yet, so it must never read as cancelled.
+  bool get isHeld => status == 'held';
+
+  /// The hold window closed without payment. The seats are back on sale, so
+  /// this ticket is re-bookable — which is what separates it from a cancel.
+  bool get holdExpired => status == 'expired';
+
+  /// Time left on the hold, floored at zero so a lapsed hold never counts
+  /// backwards on the customer's countdown.
+  Duration holdRemaining(DateTime now) {
+    final until = holdExpiresAt;
+    if (until == null) return Duration.zero;
+    final left = until.difference(now);
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  /// Whether "Pay advance" can be offered on this ticket.
+  ///
+  /// Requires a LIVE hold (an expired one has released its seats and must be
+  /// re-booked, not paid for), something to pay against, an amount, and a VPA
+  /// to pay it to.
+  bool get canPayAdvance =>
+      isHeld &&
+      (holdId?.isNotEmpty ?? false) &&
+      advancePaise > 0 &&
+      (collectVpa?.isNotEmpty ?? false);
 
   /// A request is cancellable by the customer ONLY while purely pending — not
   /// organiser-confirmed and with no seats assigned. Migration 034 enforces the
@@ -161,6 +223,14 @@ class CustomerRequestEntry {
     bool? isConfirmed,
     String? organiserPhone,
     DateTime? cancelRequestedAt,
+    DateTime? holdExpiresAt,
+    String? holdId,
+    int? advancePaise,
+    String? collectVpa,
+    String? collectPayeeName,
+    /// Wins over [holdExpiresAt] so a finalized/dead hold can be nulled out —
+    /// plain copyWith cannot set null through the `??` fallback.
+    bool clearHold = false,
   }) {
     return CustomerRequestEntry(
       id: id,
@@ -188,6 +258,12 @@ class CustomerRequestEntry {
       isConfirmed: isConfirmed ?? this.isConfirmed,
       organiserPhone: organiserPhone ?? this.organiserPhone,
       cancelRequestedAt: cancelRequestedAt ?? this.cancelRequestedAt,
+      holdExpiresAt:
+          clearHold ? null : (holdExpiresAt ?? this.holdExpiresAt),
+      holdId: clearHold ? null : (holdId ?? this.holdId),
+      advancePaise: advancePaise ?? this.advancePaise,
+      collectVpa: collectVpa ?? this.collectVpa,
+      collectPayeeName: collectPayeeName ?? this.collectPayeeName,
     );
   }
 
@@ -233,6 +309,12 @@ class CustomerRequestEntry {
     if (organiserPhone != null) 'organiser_phone': organiserPhone,
     if (cancelRequestedAt != null)
       'cancel_requested_at': cancelRequestedAt!.toIso8601String(),
+    if (holdExpiresAt != null)
+      'hold_expires_at': holdExpiresAt!.toIso8601String(),
+    if (holdId != null) 'hold_id': holdId,
+    if (advancePaise > 0) 'advance_paise': advancePaise,
+    if (collectVpa != null) 'collect_vpa': collectVpa,
+    if (collectPayeeName != null) 'collect_payee_name': collectPayeeName,
   };
 
   factory CustomerRequestEntry.fromJson(Map<String, dynamic> m) {
@@ -265,6 +347,13 @@ class CustomerRequestEntry {
       tourLocked: (m['tour_locked'] as bool?) ?? false,
       isConfirmed: (m['is_confirmed'] as bool?) ?? false,
       organiserPhone: m['organiser_phone'] as String?,
+      holdExpiresAt: m['hold_expires_at'] != null
+          ? DateTime.tryParse(m['hold_expires_at'] as String)
+          : null,
+      holdId: m['hold_id'] as String?,
+      advancePaise: (m['advance_paise'] as num?)?.toInt() ?? 0,
+      collectVpa: m['collect_vpa'] as String?,
+      collectPayeeName: m['collect_payee_name'] as String?,
       cancelRequestedAt: m['cancel_requested_at'] != null
           ? DateTime.tryParse(m['cancel_requested_at'] as String)
           : null,
@@ -358,6 +447,33 @@ class CustomerRequestsStore {
 
   Future<void> upsert(CustomerRequestEntry entry) => add(entry);
 
+  /// Live state of the SEAT HOLD behind a chart booking, or null when this
+  /// request has no hold (the ordinary request-mode case).
+  ///
+  /// Deliberately a SEPARATE RPC rather than an extension of
+  /// `booking_request_status_lookup`: that function exists only in the live
+  /// database and not in this repo, so replacing it blind would overwrite a
+  /// definition nobody here can see. The two results are merged client-side
+  /// instead.
+  ///
+  /// Returns null ONLY when the server genuinely reports no hold. Errors
+  /// propagate — the caller must not read a failed lookup as "no hold", because
+  /// that would resurrect the very bug this exists to fix.
+  Future<ChartHoldSnapshot?> _lookupHold(String requestId) async {
+    final result = await Supabase.instance.client.rpc(
+      'chart_hold_status_lookup',
+      params: {
+        'p_request_ids': [requestId],
+      },
+    );
+    if (result == null) return null;
+    final rows = result as List;
+    if (rows.isEmpty) return null;
+    return ChartHoldSnapshot.fromMap(
+      Map<String, dynamic>.from(rows.first as Map),
+    );
+  }
+
   Future<void> remove(String id) async {
     final all = await list();
     all.removeWhere((e) => e.id == id);
@@ -379,14 +495,40 @@ class CustomerRequestsStore {
     if (result == null) return existing;
     final rows = result as List;
     if (rows.isEmpty) {
-      // The booking_request → tours JOIN returned nothing: the organiser
-      // deleted the tour (or the request). Flag the local ticket as
-      // cancelled so it drops out of the active Pending/Confirmed tabs and
-      // surfaces under "Cancelled" instead of lingering as if still live.
-      if (existing.status == 'rejected') return existing;
-      final cancelled = existing.markCancelled(at: DateTime.now());
-      await upsert(cancelled);
-      return cancelled;
+      // An empty booking lookup is NOT proof of deletion.
+      //
+      // On a tour that collects an advance, `chart_hold_seats` writes only a
+      // `seat_holds` row; the booking_requests row appears later, from
+      // `chart_finalize_hold`. So a live, seats-blocked, unpaid hold looks
+      // exactly like a deleted request here. Branding those "Cancelled" is the
+      // bug this branch used to ship: the customer's ticket died while the
+      // chart still showed their berths taken.
+      //
+      // Ask the holds table before concluding anything.
+      final ChartHoldSnapshot? hold;
+      try {
+        hold = await _lookupHold(id);
+      } catch (e) {
+        // Migration 067 not applied on this database yet, or the network
+        // dropped mid-refresh. Either way we cannot tell a live hold from a
+        // deletion — so change NOTHING. Guessing "deleted" is what produced
+        // the cancelled-while-held bug, and it is the more damaging guess.
+        dev.log(
+          'hold lookup unavailable for $id; leaving status untouched',
+          name: 'CustomerRequestsStore',
+          error: e,
+        );
+        return existing;
+      }
+
+      final resolved = resolveMissingBookingRow(
+        existing: existing,
+        hold: hold,
+        now: DateTime.now(),
+      );
+      if (identical(resolved, existing)) return existing;
+      await upsert(resolved);
+      return resolved;
     }
     final row = Map<String, dynamic>.from(rows.first as Map);
     // Seat assignments are provisional until the organiser locks the tour. The
@@ -396,6 +538,10 @@ class CustomerRequestsStore {
     // [_resolveTourLocked].
     final locked = await _resolveTourLocked(id, row, existing.tourLocked);
     final updated = existing.copyWith(
+      // A booking row now exists, so any hold behind it has been finalized.
+      // Clearing the expiry stops a stale countdown ticking under a booking
+      // that is already confirmed.
+      clearHold: true,
       status: (row['status'] as String?) ?? existing.status,
       assignedSeats: CustomerRequestEntry._parseAssignedSeats(
         row['assigned_seats'],

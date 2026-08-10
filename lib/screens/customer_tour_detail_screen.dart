@@ -13,7 +13,7 @@ import '../utils/app_snackbar.dart';
 import '../utils/time_format.dart';
 import '../utils/tour_public_summary.dart';
 import 'customer_booking_request_screen.dart';
-import 'seat_selection_screen.dart';
+import 'party_gate_screen.dart';
 
 /// Public-facing tour detail — the page that has to sell the trip.
 ///
@@ -899,8 +899,12 @@ class _StickyBookCta extends StatelessWidget {
     } else if (tour.bookingMode.isChart) {
       label = tr('customer_tour_detail.cta_pick_seats');
       icon = Icons.event_seat_rounded;
+      // Through the party gate, not straight to the chart: it asks how many are
+      // travelling (and, on a multi-bus tour, whether they must stay together)
+      // so the chart can answer "does this bus fit us" instead of leaving the
+      // customer to work it out tile by tile.
       onTap = () => Get.to(
-        () => SeatSelectionScreen(tour: tour),
+        () => PartyGateScreen(tour: tour),
         transition: Transition.cupertino,
       );
     } else {

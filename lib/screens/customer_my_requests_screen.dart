@@ -8,7 +8,9 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
+import '../services/chart_advance_payment.dart';
 import '../services/customer_requests_store.dart';
+import '../widgets/hold_countdown_strip.dart';
 import '../services/sync_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
@@ -128,6 +130,21 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
     }
   }
 
+  /// Re-open the advance sheet for a booking whose seats are still held.
+  ///
+  /// This is the recovery path that did not exist: dismissing the UPI sheet at
+  /// checkout used to leave the hold alive with no way back to paying it, so
+  /// the booking simply died when the hold lapsed. Everything the sheet needs
+  /// was captured on the ticket when the hold was created, so this works
+  /// without re-reading the tour.
+  Future<void> _payAdvance(CustomerRequestEntry entry) async {
+    if (!entry.canPayAdvance) return;
+    await ChartAdvancePayment.retry(context: context, entry: entry);
+    // Refresh either way: a recorded claim moves the booking forward, and a
+    // dismissal may still have burned enough of the clock to matter.
+    await _refresh();
+  }
+
   Future<void> _openEdit(CustomerRequestEntry entry) async {
     Tour? tour;
     if (Get.isRegistered<TourController>()) {
@@ -183,7 +200,10 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       case _StatusFilter.confirmed:
         return live.where(_isConfirmedish).toList();
       case _StatusFilter.cancelled:
-        return live.where((e) => e.isCancelled).toList();
+        // An expired hold sits here rather than under Pending — it is no longer
+        // live — but it keeps its own label and a "Book again" action, because
+        // unlike a cancellation it can simply be redone.
+        return live.where((e) => e.isCancelled || e.holdExpired).toList();
       case _StatusFilter.all:
         return live;
     }
@@ -279,6 +299,7 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                           onEdit: () => _openEdit(_visible[i]),
                           onViewChart: () => _openFullChart(_visible[i]),
                           onAddAnother: () => _openAddAnother(_visible[i]),
+                          onPayAdvance: _payAdvance,
                           onCancel: () => _cancel(_visible[i]),
                           onRequestCancel: () => _requestCancel(_visible[i]),
                           onContact: () => _contactOrganiser(_visible[i]),
@@ -474,6 +495,9 @@ class _RequestRow extends StatelessWidget {
   final VoidCallback onRequestCancel;
   final VoidCallback onContact;
 
+  /// Re-opens the advance UPI sheet for a booking sitting on a live hold.
+  final Future<void> Function(CustomerRequestEntry entry) onPayAdvance;
+
   const _RequestRow({
     required this.entry,
     required this.isHandler,
@@ -484,6 +508,7 @@ class _RequestRow extends StatelessWidget {
     required this.onCancel,
     required this.onRequestCancel,
     required this.onContact,
+    required this.onPayAdvance,
   });
 
   @override
@@ -640,6 +665,17 @@ class _RequestRow extends StatelessWidget {
                 ),
               ],
             ),
+            // Seat-hold recovery. Sits ABOVE the informational chips because a
+            // ticking deadline with money attached outranks anything else on
+            // the card. Renders nothing unless this booking is on a hold.
+            if (entry.isHeld || entry.holdExpired) ...[
+              const SizedBox(height: UgamSpacing.sm + 2),
+              HoldCountdownStrip(
+                entry: entry,
+                onPay: () => onPayAdvance(entry),
+                onRebook: onAddAnother,
+              ),
+            ],
             // Chip strip is informational only (edited / one-way / seats /
             // cancel-requested / note). Actions live in the single action bar
             // below, so we never stack more than two strips under the header.
@@ -684,6 +720,21 @@ class _RequestRow extends StatelessWidget {
     // A cancelled/rejected ticket reads as cancelled regardless of stale seats.
     if (e.isCancelled) {
       return (tr('customer_my_requests.chip_cancelled'), UgamStatusTone.warm);
+    }
+    // Seats are HELD pending an advance. This is a live booking — the berths
+    // are blocked on the chart for everyone else — so it must never fall
+    // through to "Pending", and certainly not to "Cancelled", which is what it
+    // used to do (there is no booking_requests row until the advance clears).
+    if (e.isHeld) {
+      return (tr('customer_my_requests.chip_held'), UgamStatusTone.warm);
+    }
+    // The hold lapsed unpaid. The seats went back on sale, so this is
+    // re-bookable — which is why it is not folded into "Cancelled".
+    if (e.holdExpired) {
+      return (
+        tr('customer_my_requests.chip_hold_expired'),
+        UgamStatusTone.warm,
+      );
     }
     // A booking reads "Confirmed" the moment it is organiser-confirmed OR holds
     // a provisionally-assigned seat — even before the tour is locked. The seat
@@ -1132,8 +1183,16 @@ class _LoadingShimmer extends StatelessWidget {
 
 /// A request is truly PENDING (and self-cancellable): still 'pending', not
 /// organiser-confirmed, no seats yet. Mirrors [CustomerRequestEntry.canCancel].
+/// A booking still waiting on someone to act.
+///
+/// `held` belongs here: the seats ARE blocked on the chart and the booking is
+/// live, it is simply waiting on the customer's advance. Leaving it out stranded
+/// held bookings in the All tab only — the one place a customer chasing an
+/// unpaid booking is least likely to look.
 bool _isPending(CustomerRequestEntry e) =>
-    e.status == 'pending' && !e.hasSeatsAssigned && !e.isConfirmed;
+    (e.status == 'pending' || e.isHeld) &&
+    !e.hasSeatsAssigned &&
+    !e.isConfirmed;
 
 /// A request reads as CONFIRMED once the organiser confirms it, accepts it, or
 /// seats are assigned.

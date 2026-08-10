@@ -2577,7 +2577,11 @@
     "type_seater": "SEATER",
     "selected": "Selected",
     "taken": "Taken",
-    "ladies": "Ladies"
+    "ladies": "Ladies",
+    "berth_upper": "Upper",
+    "berth_lower": "Lower",
+    "berth_seater": "Seat",
+    "berth_sofa_two": "Sofa · 2"
   },
   "validation": {
     "name_required": "Name cannot be empty",
@@ -2830,5 +2834,32 @@
     "saved": "Booking settings saved",
     "err_save": "Couldn't save. Check the migration is deployed.",
     "err_vpa": "That does not look like a UPI ID (name@bank)."
+  },
+  "party_gate": {
+    "title": "Who is travelling?",
+    "people_q": "How many people?",
+    "ladies_q": "Any ladies in the group?",
+    "share_q": "Will you share a sofa with a stranger?",
+    "share_hint": "A sofa seats two. Sharing costs half — say no and we book whole sofas only.",
+    "yes": "Yes",
+    "no": "No",
+    "continue": "Show seats"
+  },
+  "sofa_share": {
+    "title": "How do you want this sofa?",
+    "whole": "Whole sofa",
+    "whole_detail": "Just your group — nobody else.",
+    "half": "Half sofa",
+    "half_detail": "Someone else may take the other berth.",
+    "half_detail_occupied": "Someone is already on the other berth."
+  },
+  "chart_summary": {
+    "ready": "Your {n} berths are ready — all together",
+    "ready_split": "Your {n} berths are ready — on {buses}",
+    "partial": "{got} of {want} chosen",
+    "pick_prompt": "Choose {n} berths",
+    "no_room": "No room for {n} on this trip right now",
+    "lower_n": "{n} lower",
+    "upper_n": "{n} upper"
   }
 }

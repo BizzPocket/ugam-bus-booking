@@ -297,9 +297,7 @@ class _SeatHoldsCard extends StatelessWidget {
                           final until = DateTime.tryParse(
                             hold['expires_at']?.toString() ?? '',
                           );
-                          final left = until == null
-                              ? null
-                              : until.difference(DateTime.now());
+                          final left = until?.difference(DateTime.now());
                           final parts = <String>[
                             if (seats.seatIds.isNotEmpty)
                               seats.seatIds.join(', '),
