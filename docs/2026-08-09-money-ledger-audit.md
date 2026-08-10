@@ -9,11 +9,17 @@ Triggered by: the Profit & Loss screen reporting `₹0` net / `₹0` income / `�
 expense for a running tour with 2 buses.
 
 Method: static trace of every money path from the Postgres ledger up through the
-sources, controllers and screens. Nothing was executed against the live
-database — network access is sandboxed here — so each finding below is paired
-with a query in [`supabase/diagnostics/finance_audit_checks.sql`](../supabase/diagnostics/finance_audit_checks.sql)
-that confirms or refutes it on the real data. **Findings marked *Needs DB
-confirmation* are code-certain but data-dependent.**
+sources, controllers and screens, then — once network access became available —
+verification against the live database over PostgREST. Each finding is paired
+with a query in [`supabase/diagnostics/finance_audit_checks.sql`](../supabase/diagnostics/finance_audit_checks.sql).
+
+**Verification reach.** The `anon` key can read the ledger VIEWS
+(`finance_bus_summary`, `finance_rider_balance`) and public `tours`, because a
+view runs with its owner's rights. It CANNOT read the base tables — `buses`,
+`collections`, `expenses`, `passengers`, `finance_entries`, `finance_lines` all
+return zero rows under RLS. So the checks that compare ledger against legacy
+(4, 5, 6, 7, 9, 10) still need running in the Supabase SQL editor, where you are
+`postgres` and RLS does not apply.
 
 Test baseline at time of audit: `flutter test` → **1120 passing, 3 failing**.
 All three failures were in another agent's in-flight work, not the money logic.
@@ -24,29 +30,101 @@ All three failures were in another agent's in-flight work, not the money logic.
 
 | # | Finding | Status |
 |---|---|---|
-| C1 | Online UPI advance credited twice | **fixed** — migration `069`, *not yet applied* |
-| C2/D1–D4 | Three fare formulas | **fixed** — migration `070`, *not yet applied* |
-| A1 | Silent ₹0 when the ledger is empty | **fixed** — `FinanceController.ledgerEmpty` + banner |
+| C1 | Online UPI advance credited twice | **fixed** — migration `069`, applied; §4 repair had a bug, **re-run 069** |
+| C2/D1–D4 | Three fare formulas | **fixed** — migration `070`, applied and **verified live** |
+| A1 | Silent ₹0 when the ledger is empty | **fixed** in the app — but the ledger really is empty, see below |
 | A2 | "Revenue" is cash, unlabelled | **fixed** — relabelled + basis note |
-| A3 | Rent missing for pre-062 buses | **needs the migrations applied** (058 → 062 → 063) |
+| A3 | Rent missing for pre-062 buses | **CONFIRMED live** — the 058 backfill has never been run |
 | B1 | Four bottom lines | **fixed** — all four now name their basis (`money.basis_cash` / `money.basis_billed`); the figures still differ, by design |
 | E1 | Orphan money dropped | **fixed** — `MoneyController.tourSummary` |
 | E2 | Empty ledger zeroes real money | **fixed** — `MoneyController.summaryForBus` |
 | F1 | Per-bus AR by first seat | **fixed** — `MoneyController._arShareByBus` |
 | F2 | Stale "can never disagree" contract | **fixed** — scope documented at the source |
 | G1 | Dead advance-netting helpers | **fixed** — deleted |
-| H1 | Backfill can't reverse cancelled fares | **fixed** — migration `069`, *not yet applied* |
+| H1 | Backfill can't reverse cancelled fares | **fixed** — migration `069` §5, applied; unaffected by the §4 bug |
 
 After the fixes: `flutter test` → **1160 passing, 2 failing**; both remaining
 failures are the other agent's in-flight files (`ChartSeatSkeleton` undefined,
 and a handler-chart test that was already red before this work started).
 
-> **The two migrations have NOT been run.** Network access is sandboxed in the
-> environment this work was done in, and no local Postgres was available, so
-> `069` and `070` are **unexecuted SQL**. Read them before applying, apply them
-> one at a time as this project always does, and use the diagnostic pack to
-> verify each one. The Dart fixes are all covered by tests that were watched to
-> fail first.
+---
+
+## Live verification — 2026-08-09, after 069 + 070 were applied
+
+### The ₹0 report is explained, and it is not a display bug
+
+`finance_bus_summary` contains **exactly 2 rows in the entire database** — both
+created by `supabase/seeds/test_tours.sql` minutes earlier. `finance_rider_balance`
+contains **0 rows**. Every pre-existing tour, including
+`fe4a2932-…` (the one on the screenshot), has **no ledger rows at all**.
+
+So the two halves of A1/A3 split cleanly:
+
+- The **write-through triggers (062) are live and correct.** The seeded tours
+  posted rent, ground expenses and extra income to the paise, with no help:
+
+  | | rent | ground | income |
+  |---|---|---|---|
+  | TEST-A expected / **got** | 30,000 / **30,000** | 4,000 / **4,000** | 1,500 / **1,500** |
+  | TEST-B expected / **got** | 22,000 / **22,000** | 3,200 / **3,200** | 900 / **900** |
+
+- The **058 backfill has never been run**, so nothing written before 062 went
+  live is in the ledger. That is the entire cause of the ₹0 Profit & Loss.
+  `backfill_finance_ledger` exists and is callable.
+
+**This is the one action that fixes the reported symptom.** The app-side E2/A1
+fixes stop it reading as a confident ₹0, but only the backfill puts the history
+in the books.
+
+### Migration 070 is verified correct on live data
+
+`baseline_seat_due_paise` was called against the seeded bus and returns exactly
+what the Dart engine computes for the same seats:
+
+| seat | row | band | ledger says | Dart says |
+|---|---|---|---|---|
+| `SL1` | 0 | Front Premium | ₹1,600 | ₹1,600 |
+| `DL1` | 0 | Front Premium | ₹1,600 | ₹1,600 |
+| `SL3` | 2 | — | ₹1,400 | ₹1,400 |
+| `DL3` | 2 | — | ₹1,100 | ₹1,100 |
+| `ST99` | — | no such seat | ₹0 | ₹0 |
+
+`passenger_derived_leg` and `passenger_leg_for_seat_type` both resolve.
+
+### Two defects found by running it — one mine
+
+1. **`finance_repair_online_double_post` failed: `record "c" is not assigned yet`.**
+   A real bug in 069 §4. PL/pgSQL substitutes its own variables into SQL before
+   planning, so the declared record variable `c` shadowed the table alias `c` in
+   the EXISTS subquery and the function died before reading a row. **Fixed** —
+   the variable is `v_col` and the alias is `col`. 069 is `create or replace`
+   throughout, so **just re-run it**.
+
+2. **`finance_resync_all_fares()` failed: `finance entry … has no lines`.**
+   NOT a defect in 070 — an artifact of calling it as `anon`. The invariant
+   functions from 056 §5 are not `security definer`, so their
+   `select … from finance_lines` is filtered by RLS and a role that cannot read
+   lines is told the entry has none. Proof: the lines demonstrably exist (the
+   view reports figures computed from them) while `select` on `finance_lines` as
+   anon returns 0 rows. Hardened by
+   [`071_ledger_invariant_sees_all_lines.sql`](../supabase/migrations/071_ledger_invariant_sees_all_lines.sql),
+   which matters beyond this test: those are DEFERRED constraint triggers, so
+   they fire at COMMIT *after* a `security definer` handler RPC has dropped its
+   elevated role.
+
+### Still unverified
+
+Checks 4, 5, 6, 7, 9 and 10 compare the ledger against the base tables, which
+RLS hides from the anon key. Run them in the SQL editor. With the ledger holding
+only the two seeded rows, checks 4 and 6 will currently report every historical
+tour and every bus as missing — that is A3, and the backfill is the fix.
+
+---
+
+> **069 must be re-run** (bug 1 above) and **071 has not been applied.** Read
+> both before applying, apply them one at a time as this project always does,
+> and use the diagnostic pack to verify each one. The Dart fixes are all covered
+> by tests that were watched to fail first.
 
 ---
 
@@ -366,27 +444,46 @@ defect below is a seam *around* it.
 
 ## What to run, in order
 
-1. `supabase/diagnostics/finance_audit_checks.sql` — checks 1→10, one block at a
-   time. This turns every *Needs DB confirmation* above into a yes or a no, and
-   check 4 gives you the exact rupee gap per tour.
-2. If checks 1/2 come back with anything missing, apply **058 → 062 → 063** in
-   that order (058 first, or the trigger-owned rows guard in 062 §0 has nothing
-   to protect against). This is what closes A1 and A3.
-3. Apply **069** (`069_online_payment_single_post.sql`), then run its two repair
-   functions in report mode, read the output, then in apply mode:
+Everything below runs in the **Supabase SQL editor**, where you are `postgres`
+and RLS does not hide the base tables. 062, 063, 069 and 070 are already applied.
+
+1. **Re-run `069_online_payment_single_post.sql`.** It is `create or replace`
+   throughout, so re-running is safe and idempotent; this picks up the `record
+   "c" is not assigned yet` fix in §4.
+
+2. **Apply `071_ledger_invariant_sees_all_lines.sql`.** Do this BEFORE the
+   backfill — the backfill posts thousands of entries, and every one of them is
+   checked by the invariant this file repairs.
+
+3. **Take a baseline, then run the 058 backfill.** This is the step that fixes
+   the ₹0 report, and the only one here that writes at scale. Capture first so
+   the result is provable:
+   ```sql
+   select public.capture_finance_baseline('pre-backfill','2026-08-09') as run_id;
+   select * from public.backfill_finance_ledger();          -- posts history
+   select * from public.verify_finance_backfill('<run_id>') where not ok;
+   ```
+   An empty third result means the ledger now reproduces the old books exactly.
+
+4. **Repair the two known data defects** — report first, read the output, then
+   apply:
    ```sql
    select * from public.finance_repair_online_double_post();      -- report
    select * from public.finance_repair_cancelled_fares();         -- report
    select * from public.finance_repair_online_double_post(true);  -- apply
    select * from public.finance_repair_cancelled_fares(true);     -- apply
    ```
-4. Apply **070** (`070_one_fare_formula.sql`), then re-price the ledger against
-   the unified formula:
+
+5. **Re-price against the unified fare formula:**
    ```sql
    select * from public.finance_resync_all_fares();
    ```
-5. Re-run the diagnostics. Check 4's deltas must all be 0, and checks 5 and 7
-   must return zero rows.
+   Run it AFTER the backfill, never before — on an empty ledger it would post
+   every rider's fare with none of their payments, so every rider would read as
+   owing their whole fare.
+
+6. **Prove it.** Re-run `supabase/diagnostics/finance_audit_checks.sql`. Check
+   4's deltas must all be 0; checks 5, 6 and 7 must return zero rows.
 
 ## Test tours
 

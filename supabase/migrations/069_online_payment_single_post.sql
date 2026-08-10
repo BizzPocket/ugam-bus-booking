@@ -273,7 +273,13 @@ language plpgsql security definer set search_path = public
 as $$
 declare
   r       record;
-  c       record;
+  -- NOT named `c`. PL/pgSQL substitutes its own variables into every SQL
+  -- statement in the body BEFORE the planner sees them, so a record variable
+  -- named `c` shadows the table alias `c` in the EXISTS subquery below and
+  -- `col.passenger_id` resolves to the (still unassigned) record — failing at
+  -- runtime with `record "c" is not assigned yet`, before a single row is read.
+  -- The alias is renamed too, so neither name can collide again.
+  v_col   record;
   v_rev   uuid;
   v_left  bigint;
   v_slice bigint;
@@ -291,13 +297,13 @@ begin
        -- and the trigger really did post the same money a second time
        and exists (
          select 1
-           from public.collections c
+           from public.collections col
            join public.finance_entries e2
-             on e2.source_table = 'collections' and e2.source_row_id = c.id
-          where c.passenger_id = pc.passenger_id
-            and c.tour_id      = pc.tour_id
-            and c.collected_by = 'online'
-            and c.deleted_at is null
+             on e2.source_table = 'collections' and e2.source_row_id = col.id
+          where col.passenger_id = pc.passenger_id
+            and col.tour_id      = pc.tour_id
+            and col.collected_by = 'online'
+            and col.deleted_at is null
             and e2.kind = 'cash_receipt')
   loop
     claim_id     := r.claim_id;
@@ -323,23 +329,30 @@ begin
     -- 060 applied it, so a row that ALSO holds the handler's cash is only
     -- credited to the bank for the part the claim actually paid.
     v_left := r.amount_paise;
-    for c in
-      select id, amount_received
-        from public.collections
-       where passenger_id = r.passenger_id
-         and tour_id      = r.tour_id
-         and collected_by = 'online'
-         and deleted_at is null
-         and coalesce(amount_online, 0) = 0
-       order by bus_id, seat_id
+    -- EVERY column is alias-qualified, and the table is aliased even though it
+    -- is the only one in the query. This function RETURNS TABLE, so
+    -- `passenger_id` and `tour_id` are OUT parameters — and they are also
+    -- columns of `collections`. An unqualified reference to either is
+    -- simultaneously a variable and a column, which PL/pgSQL rejects at runtime
+    -- with `column reference "passenger_id" is ambiguous`. Qualifying resolves
+    -- it to the column, which is what is meant.
+    for v_col in
+      select col.id, col.amount_received
+        from public.collections col
+       where col.passenger_id = r.passenger_id
+         and col.tour_id      = r.tour_id
+         and col.collected_by = 'online'
+         and col.deleted_at is null
+         and coalesce(col.amount_online, 0) = 0
+       order by col.bus_id, col.seat_id
     loop
       exit when v_left <= 0;
-      v_slice := least(v_left, round(c.amount_received * 100)::bigint);
+      v_slice := least(v_left, round(v_col.amount_received * 100)::bigint);
       if v_slice > 0 then
-        update public.collections
+        update public.collections c2
            set amount_online = v_slice / 100.0,
                updated_at    = now()
-         where id = c.id;
+         where c2.id = v_col.id;
         v_left := v_left - v_slice;
       end if;
     end loop;
