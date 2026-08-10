@@ -208,4 +208,60 @@ void main() {
   // customer to predict that was asking them to do the picker's job.
   //
   // `busFit` below is kept: the summary bar uses it to explain a shortfall.
+
+  /// A party is no longer "N people on one leg".
+  ///
+  /// The leg belongs to the PERSON, not to the booking: four relatives travel
+  /// out to Dwarka, two stay on with family, two come home. Chart mode could
+  /// not express that at all while one `TripType` covered the whole basket —
+  /// request mode has carried a leg per line since it was written.
+  group('PartyIntent leg buckets', () {
+    test('people is the sum of the three buckets', () {
+      const i = PartyIntent(roundTrip: 2, outboundOnly: 2);
+      expect(i.people, 4);
+    });
+
+    test('a single-bucket party is not mixed', () {
+      const i = PartyIntent(roundTrip: 4);
+      expect(i.isMixed, isFalse);
+      expect(i.activeLegs, [TripType.roundTrip]);
+    });
+
+    test('a mixed party lists its legs most-constrained first', () {
+      const i = PartyIntent(roundTrip: 2, outboundOnly: 1, returnOnly: 3);
+      expect(i.isMixed, isTrue);
+      expect(
+        i.activeLegs,
+        [TripType.roundTrip, TripType.outboundOnly, TripType.returnOnly],
+        reason: 'round-trip needs a berth free on BOTH legs, so it has the '
+            'fewest candidates and must claim them before a one-way pass does',
+      );
+    });
+
+    test('an empty bucket is not listed', () {
+      const i = PartyIntent(outboundOnly: 2);
+      expect(i.activeLegs, [TripType.outboundOnly]);
+      expect(i.isMixed, isFalse);
+    });
+
+    test('countFor reads the matching bucket', () {
+      const i = PartyIntent(roundTrip: 2, returnOnly: 3);
+      expect(i.countFor(TripType.roundTrip), 2);
+      expect(i.countFor(TripType.outboundOnly), 0);
+      expect(i.countFor(TripType.returnOnly), 3);
+    });
+
+    test('solo is one round-trip traveller willing to share', () {
+      expect(PartyIntent.solo.people, 1);
+      expect(PartyIntent.solo.countFor(TripType.roundTrip), 1);
+      expect(PartyIntent.solo.shareOk, isTrue);
+    });
+
+    test('an empty intent has no people and no legs', () {
+      const i = PartyIntent();
+      expect(i.people, 0);
+      expect(i.activeLegs, isEmpty);
+      expect(i.isMixed, isFalse);
+    });
+  });
 }

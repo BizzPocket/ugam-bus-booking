@@ -1330,7 +1330,13 @@
     "invalid_tab": "WhatsApp does not allow tab characters inside a template message.",
     "invalid_spaces": "WhatsApp does not allow more than 4 spaces in a row inside a template message.",
     "invalid_too_long": "Too long: {count} characters. WhatsApp allows at most {max}. Please shorten the message.",
-    "invalid_rendered_too_long": "Too long once the greeting and blessing are added: {count} characters in all. WhatsApp allows at most {max} — shorten by {over}."
+    "invalid_rendered_too_long": "Too long once the greeting and blessing are added: {count} characters in all. WhatsApp allows at most {max} — shorten by {over}.",
+    "preview_label": "Arrives as",
+    "formatting_note": "WhatsApp will show part of this bold, italic or struck through.",
+    "fix_plain": "Make it plain text",
+    "remaining": "{count} of {max} characters left",
+    "over_budget": "{count} characters over the limit",
+    "template_blocked": "WhatsApp has {status} the template used for bus messages, so nothing can be sent on it right now."
   },
   "seat": {
     "group_locked_msg": "Group members must stay on the same bus. Move the whole group instead.",
@@ -2850,6 +2856,12 @@
   "party_gate": {
     "title": "Who is travelling?",
     "people_q": "How many people?",
+    "both_ways_q": "Is everyone travelling both ways?",
+    "split_round": "Both ways",
+    "split_go": "Going only",
+    "split_return": "Coming back only",
+    "split_short": "{n} more to place",
+    "split_over": "{n} too many",
     "share_q": "Will you share a sofa with a stranger?",
     "share_hint": "A sofa seats two. Sharing costs half — say no and we book whole sofas only.",
     "yes": "Yes",
@@ -2902,5 +2914,83 @@
     "map_moving": "{n} km/h",
     "map_parked": "Parked",
     "map_stale": "Not reporting"
+  },
+  "wa_error": {
+    "auth_failed": {
+      "cause": "The WhatsApp access token has expired or lost permission.",
+      "fix": "This is a setup problem. Contact your developer."
+    },
+    "bad_request": {
+      "cause": "The app sent something WhatsApp could not read.",
+      "fix": "This is an app problem, not yours. Contact your developer."
+    },
+    "body_too_long": {
+      "cause": "The whole message is longer than WhatsApp allows.",
+      "fix": "Shorten the message and send again."
+    },
+    "chart_failed": {
+      "cause": "The seat chart could not be prepared on this device.",
+      "fix": "Try again. If it keeps failing, send from another device."
+    },
+    "config_missing": {
+      "cause": "WhatsApp sending is not configured on the server.",
+      "fix": "This is a setup problem. Contact your developer."
+    },
+    "media_rejected": {
+      "cause": "WhatsApp refused the seat-chart image.",
+      "fix": "The chart may be too large. Try again; if it repeats, tell your developer."
+    },
+    "no_number": {
+      "cause": "No usable WhatsApp number is saved for this passenger.",
+      "fix": "Add their number to the passenger, then send again."
+    },
+    "not_whatsapp_user": {
+      "cause": "This number is not on WhatsApp.",
+      "fix": "Call these passengers instead."
+    },
+    "outside_window": {
+      "cause": "Too long has passed since this person last replied.",
+      "fix": "Nothing to do — the app already sends approved templates."
+    },
+    "param_count": {
+      "cause": "The WhatsApp template has changed and no longer matches the app.",
+      "fix": "The message text is fine. Ask your developer to reconcile the template."
+    },
+    "param_formatting": {
+      "cause": "The message has a line break, tab or extra spaces in it.",
+      "fix": "Tap Fix automatically to join the lines, then send again."
+    },
+    "rate_limited": {
+      "cause": "Too many messages were sent too quickly.",
+      "fix": "Wait a few minutes, then retry the ones that failed."
+    },
+    "sender_not_registered": {
+      "cause": "Our own WhatsApp number is not registered with Meta.",
+      "fix": "This is a setup problem, not a problem with your message. Contact your developer."
+    },
+    "template_disabled": {
+      "cause": "Meta has permanently disabled this template.",
+      "fix": "A new template must be created and approved before this can be sent."
+    },
+    "template_format": {
+      "cause": "The message did not match the template's shape (a missing image or a different number of values).",
+      "fix": "For a seat allotment this usually means the chart image failed. Try again."
+    },
+    "template_not_found": {
+      "cause": "This WhatsApp template is not approved in Gujarati.",
+      "fix": "Check the template's name and language in Meta Business Manager."
+    },
+    "template_paused": {
+      "cause": "Meta has paused this template because too many people marked it as spam.",
+      "fix": "Nothing can be sent on it until Meta un-pauses it. Contact passengers another way."
+    },
+    "template_policy": {
+      "cause": "Meta says this template's wording breaks WhatsApp policy.",
+      "fix": "The template has to be reworded and submitted again."
+    },
+    "unknown": {
+      "cause": "WhatsApp refused the message.",
+      "fix": "Try again. If it repeats, show this message to your developer."
+    }
   }
 }

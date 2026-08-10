@@ -142,6 +142,111 @@ void main() {
     expect(captured!.shareOk, isTrue);
   });
 
+  Future<void> setSplit(WidgetTester tester, Key group, int n) async {
+    await tester.tap(
+      find.descendant(of: find.byKey(group), matching: find.text('$n')),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the split block is hidden until the party says it is mixed',
+      (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+    await pickPeople(tester, 4);
+
+    expect(find.byKey(PartyGateScreen.splitKey), findsNothing);
+
+    await answer(tester, PartyGateScreen.bothWaysKey, false);
+    expect(find.byKey(PartyGateScreen.splitKey), findsOneWidget);
+  });
+
+  testWidgets('everyone both ways sends one round-trip bucket', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+    await pickPeople(tester, 4);
+    await submit(tester);
+
+    expect(captured!.roundTrip, 4);
+    expect(captured!.outboundOnly, 0);
+    expect(captured!.returnOnly, 0);
+    expect(captured!.isMixed, isFalse);
+  });
+
+  testWidgets('the split buckets start at zero, not pre-filled', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+    await pickPeople(tester, 4);
+    await answer(tester, PartyGateScreen.bothWaysKey, false);
+    await submit(tester);
+
+    expect(
+      captured,
+      isNull,
+      reason: 'a zero split does not add up, so continuing must be blocked — '
+          'a pre-filled split would let them skip the question entirely and we '
+          'would record a guess as if it were their answer',
+    );
+  });
+
+  testWidgets('a split that adds up reaches the chart', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+    await pickPeople(tester, 4);
+    await answer(tester, PartyGateScreen.bothWaysKey, false);
+    await setSplit(tester, PartyGateScreen.roundTripKey, 2);
+    await setSplit(tester, PartyGateScreen.outboundKey, 2);
+    await submit(tester);
+
+    expect(captured!.roundTrip, 2);
+    expect(captured!.outboundOnly, 2);
+    expect(captured!.returnOnly, 0);
+    expect(captured!.people, 4);
+    expect(captured!.isMixed, isTrue);
+  });
+
+  testWidgets('a return-only party is expressible', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+    await pickPeople(tester, 2);
+    await answer(tester, PartyGateScreen.bothWaysKey, false);
+    await setSplit(tester, PartyGateScreen.returnKey, 2);
+    await submit(tester);
+
+    expect(captured!.returnOnly, 2);
+    expect(captured!.people, 2);
+  });
+
+  testWidgets('changing the headline count re-zeroes the split', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+    await pickPeople(tester, 4);
+    await answer(tester, PartyGateScreen.bothWaysKey, false);
+    await setSplit(tester, PartyGateScreen.roundTripKey, 4);
+    await pickPeople(tester, 3);
+    await submit(tester);
+
+    expect(
+      captured,
+      isNull,
+      reason: 'a stale split from the old headline must not silently survive '
+          'into a party that no longer has that many people',
+    );
+  });
+
+  testWidgets('saying yes again clears a half-entered split', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.pumpAndSettle();
+    await pickPeople(tester, 3);
+    await answer(tester, PartyGateScreen.bothWaysKey, false);
+    await setSplit(tester, PartyGateScreen.outboundKey, 3);
+    await answer(tester, PartyGateScreen.bothWaysKey, true);
+    await submit(tester);
+
+    expect(captured!.roundTrip, 3);
+    expect(captured!.outboundOnly, 0, reason: 'the abandoned split is gone');
+  });
+
   testWidgets('changing the party size updates what is sent', (tester) async {
     await tester.pumpWidget(harness());
     await tester.pumpAndSettle();

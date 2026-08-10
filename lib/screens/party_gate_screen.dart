@@ -43,6 +43,11 @@ class PartyGateScreen extends StatefulWidget {
   static const maxPeople = 6;
 
   static const peopleKey = Key('party_people');
+  static const bothWaysKey = Key('party_both_ways');
+  static const splitKey = Key('party_split');
+  static const roundTripKey = Key('party_split_round');
+  static const outboundKey = Key('party_split_go');
+  static const returnKey = Key('party_split_return');
   static const shareKey = Key('party_share');
   static const yesKey = Key('party_yes');
   static const noKey = Key('party_no');
@@ -55,15 +60,48 @@ class PartyGateScreen extends StatefulWidget {
 class _PartyGateScreenState extends State<PartyGateScreen> {
   int _people = 1;
 
+  /// True until the customer says otherwise. Most parties travel both ways, so
+  /// this is the answer that costs them no extra taps.
+  bool _bothWays = true;
+
+  /// The split, used only when [_bothWays] is false.
+  ///
+  /// All three start at ZERO rather than pre-filled. A pre-filled split already
+  /// adds up, so the customer could walk straight past the very question this
+  /// block exists to ask — and we would record a guess as if it were an answer.
+  int _roundTrip = 0;
+  int _outbound = 0;
+  int _return = 0;
+
   /// Defaults to true so the picker is not hobbled for a customer who does not
   /// care. Saying NO is the deliberate act, because it is the one that costs
   /// money — a party that refuses to share must buy whole sofas.
   bool _shareOk = true;
 
+  int get _splitTotal => _roundTrip + _outbound + _return;
+
+  /// People still unaccounted for in the split. Negative means they have
+  /// assigned more travellers than the party actually has.
+  int get _unassigned => _people - _splitTotal;
+
+  bool get _canContinue => _bothWays || _unassigned == 0;
+
+  /// Wipes the split. Called whenever the headline count changes or the
+  /// both-ways answer flips, so a stale answer from a previous count can never
+  /// survive into the intent.
+  void _resetSplit() {
+    _roundTrip = 0;
+    _outbound = 0;
+    _return = 0;
+  }
+
   void _continue() {
+    if (!_canContinue) return;
     HapticFeedback.selectionClick();
     final intent = PartyIntent(
-      people: _people,
+      roundTrip: _bothWays ? _people : _roundTrip,
+      outboundOnly: _bothWays ? 0 : _outbound,
+      returnOnly: _bothWays ? 0 : _return,
       shareOk: _shareOk,
     );
 
@@ -103,6 +141,66 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
                   const SizedBox(height: UgamSpacing.md),
                   _peopleChips(c),
                   const SizedBox(height: UgamSpacing.xl),
+                  _Question(c: c, label: tr('party_gate.both_ways_q')),
+                  const SizedBox(height: UgamSpacing.md),
+                  _YesNo(
+                    key: PartyGateScreen.bothWaysKey,
+                    c: c,
+                    value: _bothWays,
+                    onChanged: (v) => setState(() {
+                      _bothWays = v;
+                      _resetSplit();
+                    }),
+                  ),
+                  if (!_bothWays) ...[
+                    const SizedBox(height: UgamSpacing.lg),
+                    Column(
+                      key: PartyGateScreen.splitKey,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _splitRow(
+                          c,
+                          rowKey: PartyGateScreen.roundTripKey,
+                          label: tr('party_gate.split_round'),
+                          value: _roundTrip,
+                          onChanged: (n) => setState(() => _roundTrip = n),
+                        ),
+                        const SizedBox(height: UgamSpacing.md),
+                        _splitRow(
+                          c,
+                          rowKey: PartyGateScreen.outboundKey,
+                          label: tr('party_gate.split_go'),
+                          value: _outbound,
+                          onChanged: (n) => setState(() => _outbound = n),
+                        ),
+                        const SizedBox(height: UgamSpacing.md),
+                        _splitRow(
+                          c,
+                          rowKey: PartyGateScreen.returnKey,
+                          label: tr('party_gate.split_return'),
+                          value: _return,
+                          onChanged: (n) => setState(() => _return = n),
+                        ),
+                        const SizedBox(height: UgamSpacing.sm),
+                        // The mismatch is stated in WORDS. A silently dead CTA
+                        // teaches the customer nothing about why they are stuck.
+                        if (_unassigned != 0)
+                          Text(
+                            _unassigned > 0
+                                ? tr(
+                                    'party_gate.split_short',
+                                    namedArgs: {'n': '$_unassigned'},
+                                  )
+                                : tr(
+                                    'party_gate.split_over',
+                                    namedArgs: {'n': '${-_unassigned}'},
+                                  ),
+                            style: UgamText.caption.copyWith(color: c.warm),
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: UgamSpacing.xl),
                   _Question(c: c, label: tr('party_gate.share_q')),
                   const SizedBox(height: 4),
                   Text(
@@ -127,9 +225,72 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
           key: PartyGateScreen.continueKey,
           label: tr('party_gate.continue'),
           leadingIcon: Icons.arrow_forward_rounded,
-          onPressed: _continue,
+          // Disabled while the split does not add up. The reason is printed
+          // above the button, so this is never a dead control with no
+          // explanation next to it.
+          onPressed: _canContinue ? _continue : null,
         ),
       ),
+    );
+  }
+
+  /// One labelled count row of the split.
+  ///
+  /// Offers 0..[_people] because no single bucket can exceed the party — an
+  /// upper bound the customer can see beats a validation message they hit only
+  /// after making the mistake.
+  Widget _splitRow(
+    UgamColorSet c, {
+    required Key rowKey,
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
+        const SizedBox(height: 6),
+        Wrap(
+          key: rowKey,
+          spacing: UgamSpacing.sm,
+          runSpacing: UgamSpacing.sm,
+          children: [
+            for (var n = 0; n <= _people; n++)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  onChanged(n);
+                },
+                child: AnimatedContainer(
+                  duration: UgamMotion.tab,
+                  curve: UgamMotion.easeOut,
+                  width: 44,
+                  height: 40,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: value == n ? c.accentFill : c.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    border: Border.all(
+                      color: value == n
+                          ? c.accent.withValues(alpha: 0.32)
+                          : c.border,
+                    ),
+                  ),
+                  child: Text(
+                    '$n',
+                    style: UgamText.tabular(
+                      UgamText.body.copyWith(
+                        color: value == n ? c.accent : c.ink2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -144,7 +305,13 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
             behavior: HitTestBehavior.opaque,
             onTap: () {
               HapticFeedback.selectionClick();
-              setState(() => _people = n);
+              // Re-zero the split: a breakdown of four people is nonsense the
+              // moment the party becomes three, and silently carrying it over
+              // would submit numbers the customer never agreed to.
+              setState(() {
+                _people = n;
+                _resetSplit();
+              });
             },
             child: AnimatedContainer(
               duration: UgamMotion.tab,

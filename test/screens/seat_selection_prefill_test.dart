@@ -100,7 +100,7 @@ void main() {
       (tester) async {
     await tester.pumpWidget(harness(
       [bus(busId, threeRows())],
-      intent: const PartyIntent(people: 3),
+      intent: const PartyIntent(roundTrip:3),
     ));
     await tester.pumpAndSettle();
 
@@ -115,7 +115,7 @@ void main() {
       (tester) async {
     await tester.pumpWidget(harness(
       [bus(busId, threeRows())],
-      intent: const PartyIntent(people: 1),
+      intent: const PartyIntent(roundTrip:1),
     ));
     await tester.pumpAndSettle();
 
@@ -125,7 +125,7 @@ void main() {
   testWidgets('the summary bar states what was picked', (tester) async {
     await tester.pumpWidget(harness(
       [bus(busId, threeRows())],
-      intent: const PartyIntent(people: 3),
+      intent: const PartyIntent(roundTrip:3),
     ));
     await tester.pumpAndSettle();
 
@@ -146,7 +146,7 @@ void main() {
           cell(0, 1, 'SL1', 'singleSofa', 'lower'),
         ]),
       ],
-      intent: const PartyIntent(people: 5),
+      intent: const PartyIntent(roundTrip:5),
     ));
     await tester.pumpAndSettle();
 
@@ -164,7 +164,7 @@ void main() {
       (tester) async {
     await tester.pumpWidget(harness(
       [bus(busId, threeRows())],
-      intent: const PartyIntent(people: 2),
+      intent: const PartyIntent(roundTrip:2),
     ));
     await tester.pumpAndSettle();
 
@@ -184,7 +184,7 @@ void main() {
       [
         bus(busId, [cell(0, 4, 'DL1', 'doubleSofa', 'lower')]),
       ],
-      intent: const PartyIntent(people: 1, shareOk: false),
+      intent: const PartyIntent(roundTrip:1, shareOk: false),
       availability: availabilityByKey(const [
         SeatAvailability(busId: busId, seatId: 'DL1', usedGo: 1, usedRet: 1),
       ]),

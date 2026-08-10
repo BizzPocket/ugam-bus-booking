@@ -21,9 +21,25 @@ import 'chart_seat_availability.dart';
 /// "must you stay on one bus?" field: keeping a party together is simply what
 /// the picker tries first, and asking the customer to predict when that is
 /// impossible was asking them to do the picker's job.
+///
+/// *** WHY THREE COUNTS AND NOT ONE ***
+/// The leg used to be a property of the whole booking — one `TripType` on the
+/// screen, one `p_leg` on the RPC. That cannot express the ordinary case of a
+/// family where some stay on: four travel out to Dwarka, two remain with
+/// relatives, two come home. The leg belongs to the PERSON, so the intent
+/// counts people per leg.
+///
+/// Request mode has always worked this way (`RequestLine.leg`); chart mode was
+/// the odd one out.
 class PartyIntent {
-  /// How many people are travelling. One berth each.
-  final int people;
+  /// People travelling both ways. Their berth must be free on BOTH legs.
+  final int roundTrip;
+
+  /// People taking the outbound bus only, then staying on.
+  final int outboundOnly;
+
+  /// People already at the destination, boarding only for the journey home.
+  final int returnOnly;
 
   /// Whether they will share a two-person sofa with a stranger.
   ///
@@ -38,13 +54,43 @@ class PartyIntent {
   // marker on the chart is read from occupancy data, not from this answer.
 
   const PartyIntent({
-    required this.people,
+    this.roundTrip = 0,
+    this.outboundOnly = 0,
+    this.returnOnly = 0,
     this.shareOk = true,
   });
 
+  /// Total berths to place. One person, one berth, on whichever legs they take.
+  int get people => roundTrip + outboundOnly + returnOnly;
+
+  /// True when this party spans more than one leg — the case that needs a
+  /// return tab on the chart and a per-seat leg on the claim.
+  bool get isMixed => activeLegs.length > 1;
+
+  /// How many people are travelling on exactly [leg].
+  int countFor(TripType leg) => switch (leg) {
+        TripType.roundTrip => roundTrip,
+        TripType.outboundOnly => outboundOnly,
+        TripType.returnOnly => returnOnly,
+      };
+
+  /// Non-empty buckets, MOST CONSTRAINED FIRST.
+  ///
+  /// Round-trip leads because its berth must be free on both legs, so it has
+  /// the fewest candidates; letting a one-way pass take those cells first would
+  /// strand it. The picker walks this list in order and must not re-sort it.
+  List<TripType> get activeLegs => [
+        for (final leg in const [
+          TripType.roundTrip,
+          TripType.outboundOnly,
+          TripType.returnOnly,
+        ])
+          if (countFor(leg) > 0) leg,
+      ];
+
   /// The default for a customer who reached the chart without the gate (a deep
-  /// link, or a returning rider): one traveller, willing to share.
-  static const solo = PartyIntent(people: 1);
+  /// link, or a returning rider): one traveller, both ways, willing to share.
+  static const solo = PartyIntent(roundTrip: 1);
 }
 
 /// What one bus can offer a party of a given size, on a given leg.

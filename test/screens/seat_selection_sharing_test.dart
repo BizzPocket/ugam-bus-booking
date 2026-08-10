@@ -208,7 +208,7 @@ void main() {
       (tester) async {
     await tester.pumpWidget(harness(
       [bus(oneRow())],
-      intent: const PartyIntent(people: 1, shareOk: false),
+      intent: const PartyIntent(roundTrip:1, shareOk: false),
     ));
     await tester.pumpAndSettle();
     await clearPrefill(tester);
