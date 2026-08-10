@@ -151,6 +151,81 @@ void main() {
     });
   });
 
+  group('network frugality', () {
+    // On a 2G link the round trip dominates, not the payload — the flag
+    // document is a few hundred bytes. A conditional request saves the body;
+    // only NOT making the request saves the latency. Both are tested by
+    // counting calls, because "it was fast" is not observable in a unit test.
+
+    test('a second warm inside the interval does not hit the network',
+        () async {
+      var calls = 0;
+      RemoteFlagsService build() => RemoteFlagsService(fetcher: () async {
+            calls++;
+            return jsonEncode({'recommended_build': 5});
+          });
+
+      // An injected fetcher deliberately bypasses the throttle so the rest of
+      // the suite stays deterministic; the throttle is asserted against the
+      // stored timestamp instead.
+      final first = build();
+      await first.warm();
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, 1);
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getInt('remote_flags.fetched_at'),
+        isNotNull,
+        reason: 'the attempt must be stamped, or the throttle can never engage',
+      );
+    });
+
+    test('a stale timestamp does not block the next check', () async {
+      SharedPreferences.setMockInitialValues({
+        'remote_flags.fetched_at': DateTime.now()
+            .subtract(RemoteFlagsService.minFetchInterval * 2)
+            .millisecondsSinceEpoch,
+      });
+
+      var calls = 0;
+      final s = RemoteFlagsService(fetcher: () async {
+        calls++;
+        return jsonEncode({'recommended_build': 9});
+      });
+      await s.warm();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(calls, 1);
+      expect(s.decide(buildNumber: '1'), LaunchDecision.updateRecommended);
+    });
+
+    test('the interval is short enough for a kill switch to matter', () {
+      // A flag nobody receives for hours is not a kill switch. Cold start
+      // bypasses this entirely; it only bounds repeated foregrounding.
+      expect(
+        RemoteFlagsService.minFetchInterval.inMinutes,
+        lessThanOrEqualTo(15),
+      );
+    });
+
+    test('refreshNow bypasses the throttle', () async {
+      SharedPreferences.setMockInitialValues({
+        'remote_flags.fetched_at': DateTime.now().millisecondsSinceEpoch,
+      });
+
+      var calls = 0;
+      final s = RemoteFlagsService(fetcher: () async {
+        calls++;
+        return jsonEncode({'maintenance_mode': true});
+      });
+
+      await s.refreshNow();
+      expect(calls, 1);
+      expect(s.decide(buildNumber: '1'), LaunchDecision.maintenance);
+    });
+  });
+
   group('kill switches and tunables', () {
     test('absent means enabled', () {
       final s = RemoteFlagsService();

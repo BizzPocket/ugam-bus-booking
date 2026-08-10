@@ -51,7 +51,11 @@ jobs:
           # Stamp the APK with the tag's version so PackageInfo.version on
           # device matches what `latest.json` advertises — otherwise the
           # installed app would re-detect "update available" forever.
+          # config/ota.json carries the remote-flag and translation-overlay
+          # endpoints; see scripts/build_ios_release.sh for why it lives in a
+          # file rather than being repeated per build path.
           flutter build apk --release \
+            --dart-define-from-file=config/ota.json \
             --build-name "$VERSION_NUMERIC" \
             --build-number "$GITHUB_RUN_NUMBER"
 

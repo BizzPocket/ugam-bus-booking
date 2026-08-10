@@ -92,6 +92,21 @@ class RemoteFlags {
 /// gate.
 typedef FlagsFetcher = Future<String?> Function();
 
+/// One conditional-GET outcome.
+///
+/// [notModified] is the interesting state: the server confirmed the cached copy
+/// is current and sent no body. Distinct from a failure (also no body) — one
+/// means "you are up to date", the other means "keep what you have and try
+/// later", and only the first should be treated as success.
+@immutable
+class _FetchResult {
+  final String? body;
+  final String? etag;
+  final bool notModified;
+
+  const _FetchResult({this.body, this.etag, this.notModified = false});
+}
+
 /// Holds the current [RemoteFlags] and answers the one question the UI asks:
 /// may this launch proceed?
 ///
@@ -107,6 +122,19 @@ typedef FlagsFetcher = Future<String?> Function();
 ///     document in place rather than reverting to defaults.
 class RemoteFlagsService extends GetxService {
   static const String _cacheKey = 'remote_flags.doc';
+  static const String _etagKey = 'remote_flags.etag';
+  static const String _fetchedAtKey = 'remote_flags.fetched_at';
+
+  /// Don't go to the network more than this often.
+  ///
+  /// On a 2G link the ROUND TRIP dominates, not the payload — the flag document
+  /// is a few hundred bytes. A conditional request saves the body; only not
+  /// making the request saves the latency. Foregrounding the app repeatedly
+  /// must not mean repeatedly waiting on a socket.
+  ///
+  /// Short enough that a kill switch still lands within a quarter of an hour on
+  /// an app in active use, and any cold start bypasses it anyway.
+  static const Duration minFetchInterval = Duration(minutes: 15);
 
   final FlagsFetcher? _fetcher;
 
@@ -151,18 +179,51 @@ class RemoteFlagsService extends GetxService {
     }
   }
 
-  Future<void> _refresh() async {
+  /// [force] skips the [minFetchInterval] throttle. Cold start forces; a
+  /// foreground resume does not.
+  Future<void> _refresh({bool force = false}) async {
     try {
-      final body = await (_fetcher ?? _httpFetch)();
+      final prefs = await SharedPreferences.getInstance();
+
+      if (!force && _fetcher == null) {
+        final last = prefs.getInt(_fetchedAtKey);
+        if (last != null) {
+          final age = DateTime.now().millisecondsSinceEpoch - last;
+          if (age >= 0 && age < minFetchInterval.inMilliseconds) {
+            // Cheapest possible refresh: none at all.
+            return;
+          }
+        }
+      }
+
+      final knownEtag = prefs.getString(_etagKey);
+      final injected = _fetcher;
+      final result = injected != null
+          ? _FetchResult(body: await injected())
+          : await _httpFetch(knownEtag);
+
+      // Stamp the attempt even on a 304 or a no-op, so a healthy unchanged
+      // document does not re-request every 15 minutes forever.
+      await prefs.setInt(
+        _fetchedAtKey,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+
+      // 304 Not Modified — the cached document is already correct, and no body
+      // crossed the wire. This is the common case and the reason for the ETag.
+      if (result.notModified) return;
+
+      final body = result.body;
       if (body == null || body.isEmpty) return;
 
       final decoded = jsonDecode(body);
       if (decoded is! Map<String, dynamic>) return;
 
       flags.value = RemoteFlags.fromJson(decoded);
-
-      final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_cacheKey, body);
+      if (result.etag != null && result.etag!.isNotEmpty) {
+        await prefs.setString(_etagKey, result.etag!);
+      }
     } catch (e) {
       // Offline, DNS failure, timeout, bad JSON — keep last-known-good.
       debugPrint('[flags] refresh failed: $e');
@@ -171,27 +232,52 @@ class RemoteFlagsService extends GetxService {
     }
   }
 
-  static Future<String?> _httpFetch() async {
-    if (!RemoteFlagsConfig.enabled) return null;
+  static Future<_FetchResult> _httpFetch(String? knownEtag) async {
+    if (!RemoteFlagsConfig.enabled) return const _FetchResult();
     HttpClient? client;
     try {
       client = HttpClient()..connectionTimeout = RemoteFlagsConfig.fetchTimeout;
       final request = await client
           .getUrl(Uri.parse(RemoteFlagsConfig.url))
           .timeout(RemoteFlagsConfig.fetchTimeout);
+
+      // Conditional GET. Supabase Storage is S3-backed and serves an ETag; an
+      // unchanged document comes back as a bodyless 304. If the host ever stops
+      // sending one, knownEtag stays null and this degrades to a plain GET —
+      // exactly today's behaviour, never a failure.
+      if (knownEtag != null && knownEtag.isNotEmpty) {
+        request.headers.set(HttpHeaders.ifNoneMatchHeader, knownEtag);
+      }
+
       final response =
           await request.close().timeout(RemoteFlagsConfig.fetchTimeout);
-      if (response.statusCode != HttpStatus.ok) return null;
-      if (response.contentLength > RemoteFlagsConfig.maxBytes) return null;
+
+      if (response.statusCode == HttpStatus.notModified) {
+        return const _FetchResult(notModified: true);
+      }
+      if (response.statusCode != HttpStatus.ok) return const _FetchResult();
+      if (response.contentLength > RemoteFlagsConfig.maxBytes) {
+        return const _FetchResult();
+      }
+
       final body = await response
           .transform(utf8.decoder)
           .join()
           .timeout(RemoteFlagsConfig.fetchTimeout);
-      return body.length > RemoteFlagsConfig.maxBytes ? null : body;
+      if (body.length > RemoteFlagsConfig.maxBytes) return const _FetchResult();
+
+      return _FetchResult(
+        body: body,
+        etag: response.headers.value(HttpHeaders.etagHeader),
+      );
     } finally {
       client?.close(force: true);
     }
   }
+
+  /// Force a check now, ignoring [minFetchInterval]. For a pull-to-refresh or
+  /// an explicit "check for updates" affordance.
+  Future<void> refreshNow() => _refresh(force: true);
 
   /// The launch decision for [buildNumber], defaulting to this build.
   ///

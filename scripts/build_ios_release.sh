@@ -32,8 +32,14 @@ cd "$(dirname "$0")/.."
 echo "==> flutter clean (wipes stale build/native_assets simulator artifacts)"
 flutter clean >/dev/null
 
+# config/ota.json carries the remote-flag and translation-overlay endpoints.
+# Passed here, in .github/workflows/release.yml and in any local release build,
+# so the three cannot drift. Omitting it does not break the build — the clients
+# treat a missing URL as "channel off" — but it silently ships an app that
+# cannot be force-updated or put into maintenance, which is worse than a build
+# failure because nothing tells you.
 echo "==> flutter build ipa"
-flutter build ipa
+flutter build ipa --dart-define-from-file=config/ota.json
 
 APP="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app"
 if [[ ! -d "$APP" ]]; then

@@ -1,0 +1,8 @@
+{
+  "_comment_1": "OTA channel endpoints. Passed to every build with --dart-define-from-file=config/ota.json so the iOS script, CI and local builds cannot drift apart.",
+  "_comment_2": "Nothing here is secret. These are public Supabase Storage objects, deliberately readable with no credentials so the force-update gate works for a logged-out user on a build too old to log in. The project ref is already public in lib/config/supabase_config.dart.",
+  "_comment_3": "Set a value to \"\" to switch that channel OFF. The clients treat an empty URL as dormant: no network call is made and every value falls back to its compiled-in default.",
+
+  "REMOTE_FLAGS_URL": "https://rhyqjzulpvaeslbaymex.supabase.co/storage/v1/object/public/app-config/flags.json",
+  "I18N_OVERLAY_BASE_URL": "https://rhyqjzulpvaeslbaymex.supabase.co/storage/v1/object/public/i18n"
+}
