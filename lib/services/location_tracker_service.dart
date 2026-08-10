@@ -1,4 +1,10 @@
+import 'dart:async';
+import 'dart:io' show Platform;
+
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -60,6 +66,10 @@ class LocationTrackerService extends GetxService {
   bool _flushing = false;
   Duration _backoff = _minBackoff;
 
+  StreamSubscription<Position>? _positionSub;
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
+  Timer? _flushTimer;
+
   Duration get currentBackoff => _backoff;
 
   /// True once the tracker has been attached to a bus and not stopped.
@@ -117,6 +127,7 @@ class LocationTrackerService extends GetxService {
   }
 
   Future<void> stop() async {
+    await stopStream();
     _requestId = null;
     _busId = null;
     leg = null;
@@ -130,6 +141,100 @@ class LocationTrackerService extends GetxService {
     if (!_attached) return;
     await _buffer!.add(fix);
   }
+
+  // ── GPS capture ───────────────────────────────────────────
+
+  /// Opens the GPS stream and the 2-minute flush cycle. Call after [start],
+  /// once permission has resolved to live or foregroundOnly.
+  void startStream() {
+    _positionSub?.cancel();
+    _positionSub =
+        Geolocator.getPositionStream(
+          locationSettings: buildLocationSettings(
+            isAndroid: Platform.isAndroid,
+            notificationTitle: tr('tracking.notification_title'),
+            notificationText: tr('tracking.notification_text'),
+          ),
+        ).listen(
+          (p) => record(LocationFix.fromPosition(p, leg: leg)),
+          onError: (Object e, StackTrace st) {
+            ErrorReporter.report(kind: 'location_stream', error: e, stack: st);
+          },
+        );
+
+    _flushTimer?.cancel();
+    _flushTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      unawaited(_tick());
+    });
+
+    // A dead zone ends the moment the radio comes back — flush then, rather
+    // than waiting out the remainder of the backoff.
+    _connSub?.cancel();
+    _connSub = Connectivity().onConnectivityChanged.listen((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+      if (online) unawaited(flushNow());
+    });
+  }
+
+  Future<void> stopStream() async {
+    await _positionSub?.cancel();
+    await _connSub?.cancel();
+    _flushTimer?.cancel();
+    _positionSub = null;
+    _connSub = null;
+    _flushTimer = null;
+  }
+
+  /// One scheduled cycle: respect backoff, then flush — or heartbeat first if
+  /// the distance filter has kept the buffer empty.
+  @visibleForTesting
+  Future<void> tick() => _tick();
+
+  Future<void> _tick() async {
+    if (!_attached) return;
+    final since = lastUploadAt.value;
+    if (_backoff > _minBackoff &&
+        since != null &&
+        DateTime.now().difference(since) < _backoff) {
+      return;
+    }
+    if (_buffer!.length == 0) {
+      await _heartbeat();
+    }
+    await flushNow();
+  }
+
+  /// A 50 m distance filter means a stationary bus emits nothing, leaving the
+  /// admin unable to tell "parked" from "app died". One last-known fix per
+  /// cycle keeps `recorded_at` moving (~30 rows/hour idle).
+  Future<void> _heartbeat() async {
+    try {
+      final last = await _lastKnown();
+      if (last == null) return;
+      await record(
+        LocationFix(
+          lat: last.latitude,
+          lng: last.longitude,
+          accuracyM: last.accuracy >= 0 ? last.accuracy : null,
+          speedKmh: 0,
+          headingDeg: last.heading >= 0 ? last.heading : null,
+          leg: leg,
+          // NOW, not the stale fix's own timestamp — the point is to prove the
+          // handler's phone is still reporting, not to restate an old sample.
+          recordedAt: DateTime.now().toUtc(),
+        ),
+      );
+    } catch (_) {
+      // No last-known fix yet. Nothing to prove; skip this cycle.
+    }
+  }
+
+  /// Test seam for the heartbeat's only platform call.
+  @visibleForTesting
+  Future<Position?> Function()? lastKnownReader;
+
+  Future<Position?> _lastKnown() =>
+      (lastKnownReader ?? Geolocator.getLastKnownPosition)();
 
   // ── upload ────────────────────────────────────────────────
 
@@ -209,6 +314,9 @@ class LocationTrackerService extends GetxService {
   }
 
   Future<void> _stopAndClear(TrackingStatus next) async {
+    // The server has closed the window or refused the bus: the stream must die
+    // with it, or the foreground notification outlives the trip.
+    await stopStream();
     await _buffer?.clear();
     _requestId = null;
     _busId = null;
@@ -221,4 +329,56 @@ class LocationTrackerService extends GetxService {
     final doubled = _backoff * 2;
     _backoff = doubled > _maxBackoff ? _maxBackoff : doubled;
   }
+}
+
+/// Maps the OS's two independent signals onto one card state.
+///
+/// Service-enabled is checked FIRST: with the system location switch off,
+/// permission is irrelevant, and telling the handler to grant permission would
+/// send them to the wrong settings screen.
+TrackingStatus resolveTrackingStatus({
+  required bool serviceEnabled,
+  required LocationPermission permission,
+}) {
+  if (!serviceEnabled) return TrackingStatus.serviceDisabled;
+  return switch (permission) {
+    LocationPermission.always => TrackingStatus.live,
+    LocationPermission.whileInUse => TrackingStatus.foregroundOnly,
+    LocationPermission.deniedForever => TrackingStatus.deniedForever,
+    // `unableToDetermine` must never be optimistic — treat it as denied.
+    _ => TrackingStatus.denied,
+  };
+}
+
+/// 30 s / 50 m on both platforms.
+///
+/// iOS honours only `distanceFilter` (there is no interval), which is why the
+/// tracker also emits a heartbeat when a flush finds nothing buffered —
+/// otherwise a parked bus would be indistinguishable from a dead phone.
+LocationSettings buildLocationSettings({
+  required bool isAndroid,
+  required String notificationTitle,
+  required String notificationText,
+}) {
+  if (isAndroid) {
+    return AndroidSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 50,
+      intervalDuration: const Duration(seconds: 30),
+      foregroundNotificationConfig: ForegroundNotificationConfig(
+        notificationTitle: notificationTitle,
+        notificationText: notificationText,
+        enableWakeLock: true,
+      ),
+    );
+  }
+  return AppleSettings(
+    accuracy: LocationAccuracy.high,
+    activityType: ActivityType.automotiveNavigation,
+    distanceFilter: 50,
+    // A bus idling at a dhaba is exactly when the office looks at the map.
+    pauseLocationUpdatesAutomatically: false,
+    showBackgroundLocationIndicator: true,
+    allowBackgroundLocationUpdates: true,
+  );
 }
