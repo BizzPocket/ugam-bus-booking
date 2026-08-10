@@ -1,0 +1,19 @@
+{
+  "_comment": "A worked example. To see the content slot render, upload THIS as content.json (the live file ships empty on purpose). Revert by re-uploading content.json with {\"blocks\": []} — that reaches every installed client.",
+
+  "blocks": [
+    {
+      "type": "notice",
+      "tone": "info",
+      "title": "શ્રાવણ માસની યાત્રાઓ",
+      "body": "નવી બસો ઉમેરાઈ છે. બુકિંગ ચાલુ છે."
+    },
+    {
+      "type": "link",
+      "title": "મારી બુકિંગ જુઓ",
+      "body": "તમારી બધી બુકિંગ એક જગ્યાએ",
+      "action": "route",
+      "action_target": "my_bookings"
+    }
+  ]
+}
