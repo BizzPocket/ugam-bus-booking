@@ -7,6 +7,7 @@ import 'package:occubusbooking/models/booking_mode.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/models/tour_status.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/screens/seat_selection_screen.dart';
 import 'package:occubusbooking/utils/chart_seat_availability.dart';
 import 'package:occubusbooking/utils/party_fit.dart';
@@ -73,6 +74,10 @@ void main() {
         fromCity: 'Surat',
         toCity: 'Shirdi',
         departureDate: DateTime(2026, 9, 15),
+        // A tour with a return leg: a party that is partly one-way is only a
+        // meaningful scenario on one, and the return tab has nothing to show
+        // without it.
+        returnDate: DateTime(2026, 9, 18),
         pricePerSeat: 900,
         status: TourStatus.busBooked,
         bookingMode: BookingMode.chart,
@@ -95,6 +100,126 @@ void main() {
   int selectedBerths(WidgetTester tester) => tester
       .widgetList<ChartSeatTile>(find.byType(ChartSeatTile))
       .fold<int>(0, (sum, t) => sum + t.selectedBerths);
+
+  /// Seat ids currently held, whichever tab is on screen.
+  Set<String> selectedSeatIds(WidgetTester tester) => {
+        for (final t in tester.widgetList<ChartSeatTile>(
+          find.byType(ChartSeatTile),
+        ))
+          if (t.selectedBerths > 0) t.cell.seatId!,
+      };
+
+  group('the leg tabs are a view filter, not a change of purchase', () {
+    testWidgets('a single-leg party sees no tab strip', (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(busId, threeRows())],
+        intent: const PartyIntent(roundTrip: 2),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(SeatSelectionScreen.returnTabKey), findsNothing);
+      expect(find.byKey(SeatSelectionScreen.goTabKey), findsNothing);
+    });
+
+    testWidgets('a return-only party sees only the return map', (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(busId, threeRows())],
+        intent: const PartyIntent(returnOnly: 2),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(SeatSelectionScreen.goTabKey),
+        findsNothing,
+        reason: 'nothing is being filled on the outbound leg',
+      );
+    });
+
+    testWidgets('a mixed party gets both tabs', (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(busId, threeRows())],
+        intent: const PartyIntent(roundTrip: 1, returnOnly: 1),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(SeatSelectionScreen.goTabKey), findsOneWidget);
+      expect(find.byKey(SeatSelectionScreen.returnTabKey), findsOneWidget);
+    });
+
+    testWidgets('switching tabs keeps the selection', (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(busId, threeRows())],
+        intent: const PartyIntent(roundTrip: 1, returnOnly: 1),
+      ));
+      await tester.pumpAndSettle();
+
+      final goSeats = selectedSeatIds(tester);
+      expect(goSeats, isNotEmpty);
+
+      await tester.tap(find.byKey(SeatSelectionScreen.returnTabKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(SeatSelectionScreen.goTabKey));
+      await tester.pumpAndSettle();
+
+      expect(
+        selectedSeatIds(tester),
+        goSeats,
+        reason: 'the tab is a view filter now, not a change of what is bought',
+      );
+    });
+
+    testWidgets('a round-trip berth shows on BOTH tabs, a one-way berth on one',
+        (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(busId, threeRows())],
+        intent: const PartyIntent(roundTrip: 1, returnOnly: 1),
+      ));
+      await tester.pumpAndSettle();
+
+      final onGo = selectedSeatIds(tester);
+      await tester.tap(find.byKey(SeatSelectionScreen.returnTabKey));
+      await tester.pumpAndSettle();
+      final onReturn = selectedSeatIds(tester);
+
+      // The round-trip berth is one berth on both legs, so it appears on both
+      // maps. The return-only berth belongs to the return map alone.
+      expect(
+        onGo.intersection(onReturn),
+        hasLength(1),
+        reason: 'the round-trip berth is the same physical seat on both legs',
+      );
+      expect(onReturn.difference(onGo), hasLength(1));
+    });
+
+    testWidgets(
+        'untapping a round-trip berth on the return tab clears it '
+        'from the go tab too', (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(busId, threeRows())],
+        intent: const PartyIntent(roundTrip: 1, returnOnly: 1),
+      ));
+      await tester.pumpAndSettle();
+
+      final shared = selectedSeatIds(tester);
+      await tester.tap(find.byKey(SeatSelectionScreen.returnTabKey));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byWidgetPredicate(
+        (w) => w is ChartSeatTile && w.cell.seatId == shared.first,
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(SeatSelectionScreen.goTabKey));
+      await tester.pumpAndSettle();
+
+      expect(
+        selectedSeatIds(tester).contains(shared.first),
+        isFalse,
+        reason: 'it is ONE berth on ONE booking — it cannot survive on one map '
+            'after being given back on the other',
+      );
+    });
+  });
 
   testWidgets('a party of three arrives with three berths already picked',
       (tester) async {
@@ -133,11 +258,12 @@ void main() {
     final bar = tester.widget<ChartSummaryBar>(find.byType(ChartSummaryBar));
     expect(bar.people, 3);
     expect(bar.pickedBerths, 3);
-    expect(bar.noRoom, isFalse);
+    expect(bar.shortfall, isEmpty);
   });
 
-  testWidgets('when the bus cannot hold the party, it says so and picks nothing',
-      (tester) async {
+  testWidgets(
+      'when the bus cannot hold the whole party, it seats who it can and '
+      'names the gap', (tester) async {
     await tester.pumpWidget(harness(
       // Two berths only.
       [
@@ -146,17 +272,23 @@ void main() {
           cell(0, 1, 'SL1', 'singleSofa', 'lower'),
         ]),
       ],
-      intent: const PartyIntent(roundTrip:5),
+      intent: const PartyIntent(roundTrip: 5),
     ));
     await tester.pumpAndSettle();
 
-    expect(selectedBerths(tester), 0);
+    expect(
+      selectedBerths(tester),
+      2,
+      reason: 'the two real berths are worth keeping — discarding them would '
+          'hand the customer a blank map to solve by hand',
+    );
+
     final bar = tester.widget<ChartSummaryBar>(find.byType(ChartSummaryBar));
     expect(
-      bar.noRoom,
-      isTrue,
-      reason: 'a silent blank chart tells the customer nothing; a partial pick '
-          'would quietly under-book the family',
+      bar.shortfall,
+      {TripType.roundTrip: 3},
+      reason: 'a partial pick that says nothing would quietly under-book the '
+          'family; the bar must name the leg and the count',
     );
   });
 

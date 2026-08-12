@@ -214,7 +214,6 @@ void main() {
     test('a WHOLE double books as one doubleSofa line', () {
       final lines = requestLinesFor(
         picks: [ChartPick(cell: doubleSofa(), berths: 2)],
-        leg: TripType.roundTrip,
       );
       expect(lines, hasLength(1));
       expect(lines.single.seatType, SeatType.doubleSofa);
@@ -228,7 +227,6 @@ void main() {
       // doubleSofa unit is always two berths.
       final lines = requestLinesFor(
         picks: [ChartPick(cell: doubleSofa(), berths: 1)],
-        leg: TripType.roundTrip,
       );
       expect(lines.single.seatType, SeatType.singleSofa);
       expect(lines.single.qty, 1);
@@ -237,7 +235,6 @@ void main() {
     test('a seater carries no position', () {
       final lines = requestLinesFor(
         picks: [ChartPick(cell: seater(), berths: 1)],
-        leg: TripType.roundTrip,
       );
       expect(lines.single.seatType, SeatType.seater);
       expect(lines.single.position, isNull);
@@ -249,19 +246,17 @@ void main() {
           ChartPick(cell: single(), berths: 1),
           ChartPick(cell: single(), berths: 1),
         ],
-        leg: TripType.roundTrip,
       );
       expect(lines, hasLength(1));
       expect(lines.single.qty, 2);
     });
 
-    test('the chosen leg is stamped on every line', () {
+    test('each pick own leg is stamped on its line', () {
       final lines = requestLinesFor(
         picks: [
-          ChartPick(cell: single(), berths: 1),
-          ChartPick(cell: seater(), berths: 1),
+          ChartPick(cell: single(), berths: 1, leg: TripType.returnOnly),
+          ChartPick(cell: seater(), berths: 1, leg: TripType.returnOnly),
         ],
-        leg: TripType.returnOnly,
       );
       expect(lines.every((l) => l.leg == TripType.returnOnly), isTrue);
     });
@@ -272,7 +267,6 @@ void main() {
       final a = assignmentsFor(
         picks: [ChartPick(cell: doubleSofa(), berths: 2)],
         busId: busId,
-        leg: TripType.roundTrip,
       );
       expect(a, hasLength(2));
       expect(a.every((s) => s.seatId == 'DL1'), isTrue);
@@ -284,7 +278,6 @@ void main() {
         assignmentsFor(
           picks: [ChartPick(cell: doubleSofa(), berths: 1)],
           busId: busId,
-          leg: TripType.roundTrip,
         ),
         hasLength(1),
       );
@@ -293,15 +286,24 @@ void main() {
 
   group('CROSS-SYSTEM INVARIANT — a chart passenger is shaped like any other',
       () {
-    Passenger build(List<ChartPick> picks, TripType leg) => Passenger(
-          tourId: 't1',
-          name: 'Chart rider',
-          phone: '9900000000',
-          requestLines: requestLinesFor(picks: picks, leg: leg),
-          assignedSeats: assignmentsFor(picks: picks, busId: busId, leg: leg),
-          tripType: leg,
-          isConfirmed: true,
-        );
+    /// Stamps [leg] onto every pick, then builds. The leg now lives ON the pick
+    /// rather than travelling beside it, so the helper restamps instead of
+    /// threading a separate argument into the two derivations.
+    Passenger build(List<ChartPick> picks, TripType leg) {
+      final onLeg = [
+        for (final p in picks)
+          ChartPick(cell: p.cell, berths: p.berths, leg: leg),
+      ];
+      return Passenger(
+        tourId: 't1',
+        name: 'Chart rider',
+        phone: '9900000000',
+        requestLines: requestLinesFor(picks: onLeg),
+        assignedSeats: assignmentsFor(picks: onLeg, busId: busId),
+        tripType: leg,
+        isConfirmed: true,
+      );
+    }
 
     test('seatBerths always equals the number of assignment entries', () {
       final cases = <List<ChartPick>>[

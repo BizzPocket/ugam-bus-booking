@@ -56,6 +56,25 @@ class _ToursScreenState extends State<ToursScreen> {
     });
   }
 
+  /// The one way into tour creation from this tab — shared by the app-bar
+  /// action, every empty state's CTA and the list's tail button.
+  void _openCreate(BuildContext context) {
+    HapticFeedback.lightImpact();
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => const CreateTourScreen()),
+    );
+  }
+
+  /// Centred states (empty / error / no-match) fill the whole tab body, whose
+  /// bottom ~80pt is covered by the floating dock. Reserving the same
+  /// [UgamSpacing.dockClearance] the scrolling list reserves optically centres
+  /// them in the area the agent can actually see, instead of parking the CTA
+  /// behind the dock.
+  Widget _dockSafe(Widget child) => Padding(
+        padding: const EdgeInsets.only(bottom: UgamSpacing.dockClearance),
+        child: child,
+      );
+
   @override
   Widget build(BuildContext context) {
     final tourCtrl = Get.find<TourController>();
@@ -78,18 +97,15 @@ class _ToursScreenState extends State<ToursScreen> {
                   tooltip: tr('tours.search'),
                   onTap: _toggleSearch,
                 ),
+                // No `tint: c.accent` — tokens.dart reserves the amber for
+                // "this is yours" (a selection / an owned row) and explicitly
+                // NOT for controls. The create affordance is instead made
+                // unmissable by the full-width tail button at the end of the
+                // list, which also sits in the thumb zone.
                 UgamAppBarAction(
                   icon: Icons.add_rounded,
-                  tint: c.accent,
                   tooltip: tr('tours.create'),
-                  onTap: () {
-                    HapticFeedback.lightImpact();
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => const CreateTourScreen(),
-                      ),
-                    );
-                  },
+                  onTap: () => _openCreate(context),
                 ),
               ],
             ),
@@ -123,24 +139,24 @@ class _ToursScreenState extends State<ToursScreen> {
                   // Shared load-failed + retry surface. errorMessage carries the
                   // tour-specific tr('errors.load_tours') copy; retry re-runs the
                   // (now internally-retrying) fetch.
-                  return UgamEmpty.error(
-                    onRetry: tourCtrl.refreshTours,
-                    message: tourCtrl.errorMessage.value,
+                  return _dockSafe(
+                    UgamEmpty.error(
+                      onRetry: tourCtrl.refreshTours,
+                      message: tourCtrl.errorMessage.value,
+                    ),
                   );
                 }
 
                 if (tourCtrl.tours.isEmpty) {
-                  return UgamEmpty(
-                    icon: Icons.explore_rounded,
-                    title: tr('tours.empty.title'),
-                    body: tr('tours.empty.subtitle'),
-                    cta: UgamCTA(
-                      label: tr('tours.empty.cta'),
-                      leadingIcon: Icons.add_rounded,
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const CreateTourScreen(),
-                        ),
+                  return _dockSafe(
+                    UgamEmpty(
+                      icon: Icons.explore_rounded,
+                      title: tr('tours.empty.title'),
+                      body: tr('tours.empty.subtitle'),
+                      cta: UgamCTA(
+                        label: tr('tours.empty.cta'),
+                        leadingIcon: Icons.add_rounded,
+                        onPressed: () => _openCreate(context),
                       ),
                     ),
                   );
@@ -150,18 +166,47 @@ class _ToursScreenState extends State<ToursScreen> {
                 final hasMatches = groups.any((g) => g.tours.isNotEmpty);
 
                 if (_query.isNotEmpty && !hasMatches) {
-                  return UgamEmpty(
-                    icon: Icons.search_off_rounded,
-                    title: tr('tours.no_matches_title'),
-                    body: tr(
-                      'tours.no_matches_body',
-                      namedArgs: {'query': _query},
+                  return _dockSafe(
+                    UgamEmpty(
+                      icon: Icons.search_off_rounded,
+                      title: tr('tours.no_matches_title'),
+                      body: tr(
+                        'tours.no_matches_body',
+                        namedArgs: {'query': _query},
+                      ),
+                    ),
+                  );
+                }
+
+                // Tours on file, but every one of them has already finished.
+                // The three upcoming buckets are empty and Past is deliberately
+                // kept out of the browse view, so without this branch the tab
+                // rendered three collapsed groups — a completely blank page
+                // that reads as a failed load. "Genuinely zero upcoming" is a
+                // different statement from "no tours yet", so it gets its own
+                // copy and its own way forward.
+                if (!hasMatches) {
+                  return _dockSafe(
+                    UgamEmpty(
+                      icon: Icons.event_available_rounded,
+                      title: tr('tours.only_past_title'),
+                      body: tr(
+                        'tours.only_past_body',
+                        namedArgs: {'n': '${tourCtrl.tours.length}'},
+                      ),
+                      cta: UgamCTA(
+                        label: tr('tours.new_tour'),
+                        leadingIcon: Icons.add_rounded,
+                        onPressed: () => _openCreate(context),
+                      ),
                     ),
                   );
                 }
 
                 return RefreshIndicator(
-                  color: c.accent,
+                  // Chrome, not ownership — the pull spinner is neutral ink2
+                  // in every screen, so it never changes hue between tabs.
+                  color: c.ink2,
                   onRefresh: tourCtrl.refreshTours,
                   child: ListView.builder(
                     physics: const AlwaysScrollableScrollPhysics(
@@ -173,8 +218,25 @@ class _ToursScreenState extends State<ToursScreen> {
                       UgamSpacing.gutter,
                       UgamSpacing.dockClearance,
                     ),
-                    itemCount: groups.length,
+                    // +1 for the tail. A short list (one or two upcoming
+                    // trips) used to end halfway up the screen with the rest
+                    // of the tab as undesigned void; the tail closes the page
+                    // with the tab's own primary verb, in the thumb zone,
+                    // where a top-right 44pt icon was the only door before.
+                    itemCount: groups.length + 1,
                     itemBuilder: (_, i) {
+                      if (i == groups.length) {
+                        return Padding(
+                          padding: const EdgeInsets.only(top: UgamSpacing.xl),
+                          child: UgamButton(
+                            label: tr('tours.new_tour'),
+                            icon: Icons.add_rounded,
+                            kind: UgamButtonKind.neutral,
+                            expand: true,
+                            onPressed: () => _openCreate(context),
+                          ),
+                        );
+                      }
                       final g = groups[i];
                       if (g.tours.isEmpty) return const SizedBox.shrink();
                       final isPast = g.bucket == _Bucket.past;
@@ -307,22 +369,16 @@ class _GroupHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(label, style: UgamText.titleS.copyWith(color: c.ink)),
-        const SizedBox(width: UgamSpacing.sm),
-        Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: UgamSpacing.badgeH,
-            vertical: UgamSpacing.badgeV,
-          ),
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-          ),
-          child: Text(
-            '$count',
-            style: UgamText.tabular(UgamText.micro.copyWith(color: c.ink2)),
-          ),
+        // Gujarati group labels ("આગામી 30 દિવસ") run long; let the label take
+        // the width it needs and wrap rather than ellipsize — it is a fixed
+        // system label, not a user value.
+        Flexible(
+          child: Text(label, style: UgamText.titleS.copyWith(color: c.ink)),
         ),
+        const SizedBox(width: UgamSpacing.sm),
+        // The shared badge, not a hand-rolled cardElev pill: same fill + ink,
+        // and it tracks the component if the badge geometry changes.
+        UgamReqChip(label: '$count', variant: UgamChipVariant.neutral),
       ],
     );
   }
@@ -388,6 +444,11 @@ class _TourRow extends StatelessWidget {
                             color: c.cardElev,
                             borderRadius: BorderRadius.circular(UgamRadius.chip),
                           ),
+                          // No `.toUpperCase()`: it is a no-op in Gujarati and
+                          // Hindi (Indic scripts have no case), so it only ever
+                          // shouted at the English minority. The eyebrow read
+                          // comes from micro's weight + letter-spacing, which
+                          // works in every script.
                           child: Text(
                             Formatters.formatDateShort(
                               tour.departureDate,
@@ -397,7 +458,7 @@ class _TourRow extends StatelessWidget {
                               // app.dart feeds context.locale into the app's
                               // Localizations, so this is the SAME locale in app.
                               locale: Localizations.localeOf(context).toString(),
-                            ).toUpperCase(),
+                            ),
                             style: UgamText.tabular(
                               UgamText.micro.copyWith(color: c.ink),
                             ),
@@ -428,41 +489,22 @@ class _TourRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: UgamSpacing.md),
+                    // Status line. Three competing items used to share this
+                    // row (status · next-step · count); in Gujarati that left
+                    // ~240pt for three ellipsized strings at 375 and all three
+                    // read as fragments. The count moved down beside the bar it
+                    // describes and the next step got its own full-width line,
+                    // so nothing here ellipsizes in any language.
                     Row(
                       children: [
-                        Flexible(
+                        Expanded(
                           child: UgamStatusDot(
                             label: tour.status.displayName,
                             tone: _toneFor(tour.status),
                           ),
                         ),
-                        // Urgency is carried by a copper micro eyebrow naming
-                        // the next step (swipe the card to run it) — no inline
-                        // button competes for the thumb-zone any more.
-                        if (action != null) ...[
+                        if (capacity == 0) ...[
                           const SizedBox(width: UgamSpacing.sm),
-                          Flexible(
-                            child: Text(
-                              action.label.toUpperCase(),
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              style: UgamText.micro.copyWith(color: c.accent),
-                            ),
-                          ),
-                        ],
-                        const Spacer(),
-                        if (capacity > 0)
-                          Text(
-                            '$assigned/$capacity',
-                            // Same style as the pax fallback below (only the
-                            // ink differs) so the two branches of this slot
-                            // stop rendering at two weights.
-                            style: UgamText.tabular(
-                              UgamText.caption.copyWith(color: c.ink),
-                            ),
-                          )
-                        else
                           Text(
                             tr(
                               'tours.pax',
@@ -472,6 +514,7 @@ class _TourRow extends StatelessWidget {
                               UgamText.caption.copyWith(color: c.ink2),
                             ),
                           ),
+                        ],
                       ],
                     ),
                   ],
@@ -481,17 +524,61 @@ class _TourRow extends StatelessWidget {
           ),
           if (capacity > 0) ...[
             const SizedBox(height: UgamSpacing.tight),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(UgamRadius.chip),
-              child: LinearProgressIndicator(
-                value: pct,
-                minHeight: 5,
-                // Neutral per-row progress: the champagne accent is rationed
-                // for the single signal in this view, not painted on every
-                // capacity bar.
-                backgroundColor: c.border,
-                valueColor: AlwaysStoppedAnimation(c.ink3),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                    child: LinearProgressIndicator(
+                      value: pct,
+                      minHeight: 5,
+                      // Neutral per-row progress: the champagne accent is
+                      // rationed for the single signal in this view, not
+                      // painted on every capacity bar.
+                      backgroundColor: c.border,
+                      valueColor: AlwaysStoppedAnimation(c.ink3),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: UgamSpacing.sm),
+                Text(
+                  '$assigned/$capacity',
+                  style: UgamText.tabular(
+                    UgamText.caption.copyWith(color: c.ink),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          // The next step, on its own full-width line. Was an UPPERCASED
+          // copper micro eyebrow squeezed into the status row: the uppercase
+          // is a no-op in Gujarati/Hindi, and painting every actionable row
+          // amber is exactly the overuse that stopped the accent meaning
+          // "this is yours". Emphasis now comes from weight, and the double
+          // chevron names the right-swipe that runs it.
+          if (action != null) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Row(
+              children: [
+                Icon(action.icon, size: 14, color: c.ink2),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(
+                  child: Text(
+                    action.label,
+                    maxLines: 2,
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: UgamSpacing.sm),
+                Icon(
+                  Icons.keyboard_double_arrow_right_rounded,
+                  size: 14,
+                  color: c.ink3,
+                ),
+              ],
             ),
           ],
         ],
@@ -508,9 +595,17 @@ class _TourRow extends StatelessWidget {
             key: ValueKey('tour-row-${tour.id}'),
             rightLabel: action.label,
             rightIcon: action.icon,
-            rightColor: c.accent,
+            // No explicit rightColor — the component already defaults to the
+            // accent, and the revealed pane genuinely IS "the row you picked".
             borderRadius: BorderRadius.circular(UgamRadius.card),
             onRight: () => _runRowAction(context, action.kind, tour),
+            // Supplying rightIcon flips the Dismissible to `horizontal`, which
+            // also arms the DESTRUCTIVE left swipe — and with no onDelete the
+            // row was dismissed out of a list that still contains it (the
+            // "dismissed Dismissible is still part of the tree" assertion).
+            // Gating it here cancels that swipe and snaps the row back; there
+            // is no delete-a-tour gesture on this screen.
+            confirmDelete: () async => false,
             child: card,
           );
 
@@ -532,11 +627,17 @@ class _TourRow extends StatelessWidget {
     return '$from→$to';
   }
 
+  /// Status dot tone. Three of these used to be [UgamStatusTone.accent], which
+  /// painted an amber dot on nearly every row in the list — the accent means
+  /// "this is yours", and something on every row means nothing. The setup
+  /// phases now read neutral (their label already names them, and the next-step
+  /// line below says what to do); colour is spent only where it is a real
+  /// signal: warm while money/bookings are moving, mint once the tour is locked.
   UgamStatusTone _toneFor(TourStatus s) => switch (s) {
-    TourStatus.planning => UgamStatusTone.accent,
+    TourStatus.planning => UgamStatusTone.neutral,
     TourStatus.collecting => UgamStatusTone.warm,
-    TourStatus.busBooked => UgamStatusTone.accent,
-    TourStatus.assigning => UgamStatusTone.accent,
+    TourStatus.busBooked => UgamStatusTone.neutral,
+    TourStatus.assigning => UgamStatusTone.neutral,
     TourStatus.locked => UgamStatusTone.good,
     TourStatus.completed => UgamStatusTone.neutral,
   };
@@ -623,22 +724,47 @@ class _RowAction {
   _RowAction({required this.label, required this.icon, required this.kind});
 }
 
+/// First-load placeholder. Shaped like the list it stands in for — a group
+/// header (title + count badge) over full-width tour cards at the row's real
+/// height — so the shimmer/content swap is a fill change, not a re-layout.
+/// The gutters and the dock clearance match the real [ListView.builder] above,
+/// so nothing shifts sideways or hides under the dock when the data lands.
 class _LoadingShimmer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.all(UgamSpacing.gutter),
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.md,
+        UgamSpacing.gutter,
+        UgamSpacing.dockClearance,
+      ),
       physics: const NeverScrollableScrollPhysics(),
       children: const [
-        UgamSkeleton(height: 28, width: 120),
+        _ShimmerGroupHeader(),
         SizedBox(height: UgamSpacing.md),
-        UgamSkeleton(height: 120, radius: UgamRadius.card),
-        SizedBox(height: UgamSpacing.sm),
-        UgamSkeleton(height: 120, radius: UgamRadius.card),
+        UgamSkeleton(height: 132, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 132, radius: UgamRadius.card),
         SizedBox(height: UgamSpacing.xl),
-        UgamSkeleton(height: 28, width: 120),
+        _ShimmerGroupHeader(),
         SizedBox(height: UgamSpacing.md),
-        UgamSkeleton(height: 120, radius: UgamRadius.card),
+        UgamSkeleton(height: 132, radius: UgamRadius.card),
+      ],
+    );
+  }
+}
+
+class _ShimmerGroupHeader extends StatelessWidget {
+  const _ShimmerGroupHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Row(
+      children: [
+        UgamSkeleton(height: 20, width: 116, radius: 6),
+        SizedBox(width: UgamSpacing.sm),
+        UgamSkeleton(height: 16, width: 24, radius: 6),
       ],
     );
   }

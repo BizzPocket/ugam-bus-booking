@@ -135,6 +135,11 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                 return Stack(
                   children: [
                     RefreshIndicator(
+                      // Chrome, not ownership — the pull spinner is neutral
+                      // ink2 in every screen, so it never changes hue between
+                      // tabs. (Unset used to mean `colorScheme.primary`, i.e.
+                      // the accent; there is no theme hook for a spinner.)
+                      color: UgamColors.of(context).ink2,
                       onRefresh: () =>
                           controller.refreshForTour(widget.tour.id),
                       child: ListView(
@@ -376,8 +381,25 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           _SectionHeader(
                             title: tr('bus_money.section_handover_to_admin'),
                             actionLabel: tr('bus_money.action_record'),
-                            onAction: () =>
-                                _openHandoverSheet(context, s.expectedHandover),
+                            // What this NEW row is expected to settle: what is
+                            // still owed right now, not the GROSS the bus
+                            // generated. Identical on a FIRST handover (nothing
+                            // handed over yet, so outstanding == expected), and
+                            // divergent on every partial after it — where the
+                            // gross re-recorded money the admin already holds,
+                            // so the row below then read "Handed ₹5,000 of
+                            // ₹20,000" (`bus_money.handed_of`, :1316) on a row
+                            // that only ever owed ₹15,000. The same correction
+                            // the handler's own sheet took
+                            // (handler_money_tab.dart:270). No cash figure
+                            // moves: `outstandingHandover` is derived from
+                            // `handedOver`, and the ledger trigger posts
+                            // `handed_over_amount` alone
+                            // (062_ledger_write_through.sql:311-321).
+                            onAction: () => _openHandoverSheet(
+                              context,
+                              s.outstandingHandover,
+                            ),
                           ),
                           const SizedBox(height: UgamSpacing.sm),
                           if (handovers.isEmpty)
@@ -1288,6 +1310,15 @@ class _HandoverRow extends StatelessWidget {
     final date =
         '${Formatters.formatDateShort(handover.settledAt, locale: context.locale.languageCode)}, '
         '${DateFormat('h:mm a', 'en_US').format(handover.settledAt)}';
+    // WHO recorded this settlement. `source` was already selected and parsed
+    // but only ever read for the handler's edit permission (BusHandover
+    // .byHandler), so the admin reconciling cash could not tell a row the
+    // handler filed on the bus from one they typed in the office themselves.
+    // Read through `byHandler` so an unrecognised value falls back to 'admin'
+    // exactly as the model and the handler UI already treat it.
+    final source = handover.byHandler
+        ? tr('bus_money.handover_by_handler')
+        : tr('bus_money.handover_by_admin');
     // `onTap` goes THROUGH the card so the press animation fires (the outer
     // GestureDetector that used to wrap it swallowed the feedback).
     return UgamCard.plain(
@@ -1323,7 +1354,29 @@ class _HandoverRow extends StatelessWidget {
                     style: UgamText.bodyStrong.copyWith(color: c.ink),
                   ),
                   const SizedBox(height: 2),
-                  Text(date, style: UgamText.caption.copyWith(color: c.ink2)),
+                  // Metadata, not a headline: the provenance rides ALONGSIDE
+                  // the date on the same caption line rather than taking a row
+                  // of its own. A Wrap, not a Row — Gujarati runs ~30% longer
+                  // than English and the app allows 1.3x text scale, so the
+                  // pair must be free to fall onto a second line instead of
+                  // ellipsizing. Separated by weight and ink alone (no glyph),
+                  // which keeps a wrapped second line from opening on a
+                  // stranded separator.
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: UgamSpacing.sm,
+                    runSpacing: 2,
+                    children: [
+                      Text(
+                        date,
+                        style: UgamText.caption.copyWith(color: c.ink2),
+                      ),
+                      Text(
+                        source,
+                        style: UgamText.captionStrong.copyWith(color: c.ink3),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

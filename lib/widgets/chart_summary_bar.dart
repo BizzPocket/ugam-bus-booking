@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../design/ugam.dart';
+import '../models/trip_type.dart';
 import '../utils/formatters.dart';
 
 /// States, in plain words, what the chart has already done for this party.
@@ -33,8 +34,12 @@ class ChartSummaryBar extends StatelessWidget {
   /// the boarding point is the failure being designed out.
   final List<String> busNames;
 
-  /// True when the picker could not seat this party at all.
-  final bool noRoom;
+  /// Berths the picker could not place, per leg. Empty when everyone fits.
+  ///
+  /// This replaces a single `noRoom` flag, which could only say "nothing fits"
+  /// — useless for a mixed party whose outbound leg is seated and whose return
+  /// leg is not. That is a fact the customer must not discover at the counter.
+  final Map<TripType, int> shortfall;
 
   const ChartSummaryBar({
     super.key,
@@ -43,10 +48,15 @@ class ChartSummaryBar extends StatelessWidget {
     required this.lowerBerths,
     required this.total,
     this.busNames = const [],
-    this.noRoom = false,
+    this.shortfall = const {},
   });
 
-  bool get _ready => !noRoom && pickedBerths >= people && pickedBerths > 0;
+  bool get _noRoom => shortfall.isNotEmpty;
+
+  /// Ready means every bucket is seated. A party can have picked its full
+  /// [people] count and still be short — four berths that are all on the way
+  /// there leave the return leg empty — so the shortfall is checked first.
+  bool get _ready => !_noRoom && pickedBerths >= people && pickedBerths > 0;
   bool get _split => busNames.length > 1;
 
   int get upperBerths =>
@@ -59,7 +69,7 @@ class ChartSummaryBar extends StatelessWidget {
     final Color bg;
     final Color ink;
     final IconData icon;
-    if (noRoom) {
+    if (_noRoom) {
       bg = c.cardElev;
       ink = c.ink2;
       icon = Icons.info_outline_rounded;
@@ -97,7 +107,7 @@ class ChartSummaryBar extends StatelessWidget {
                   _headline(),
                   style: UgamText.bodyStrong.copyWith(color: ink, fontSize: 13),
                 ),
-                if (!noRoom && pickedBerths > 0) ...[
+                if (!_noRoom && pickedBerths > 0) ...[
                   const SizedBox(height: 2),
                   Text(
                     _detail(),
@@ -107,7 +117,7 @@ class ChartSummaryBar extends StatelessWidget {
               ],
             ),
           ),
-          if (!noRoom && pickedBerths > 0) ...[
+          if (!_noRoom && pickedBerths > 0) ...[
             const SizedBox(width: UgamSpacing.sm),
             Text(
               Formatters.formatMoneyInr(total),
@@ -122,8 +132,18 @@ class ChartSummaryBar extends StatelessWidget {
   }
 
   String _headline() {
-    if (noRoom) {
-      return tr('chart_summary.no_room', namedArgs: {'n': '$people'});
+    if (_noRoom) {
+      // Name the leg. "No room" alone sends a customer away from a chart that
+      // may well have seated three of their four buckets.
+      final entry = shortfall.entries.first;
+      return tr(
+        switch (entry.key) {
+          TripType.roundTrip => 'chart_summary.short_round',
+          TripType.outboundOnly => 'chart_summary.short_go',
+          TripType.returnOnly => 'chart_summary.short_return',
+        },
+        namedArgs: {'n': '${entry.value}'},
+      );
     }
     if (pickedBerths == 0) {
       return tr('chart_summary.pick_prompt', namedArgs: {'n': '$people'});

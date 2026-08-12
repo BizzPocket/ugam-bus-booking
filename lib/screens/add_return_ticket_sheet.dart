@@ -21,14 +21,22 @@ class AddReturnTicketSheet extends StatefulWidget {
 
   const AddReturnTicketSheet({super.key, required this.tour});
 
-  /// Open the sheet. [onAdded] fires after a successful add (so a caller already
-  /// on the seat chart can refresh / point the agent at the new pending rider).
+  /// Open the sheet. [onAdded] fires after a **successful** add (so a caller
+  /// already on the seat chart can refresh / point the agent at the new pending
+  /// rider).
+  ///
+  /// The sheet pops with `true` only on success, so a dismiss — swipe-down, the
+  /// close button, tap-outside — no longer fires [onAdded]. It previously fired
+  /// on `.then` unconditionally, i.e. cancelling the sheet told the caller a
+  /// rider had been added.
   static void show(BuildContext context, Tour tour, {VoidCallback? onAdded}) {
-    UgamSheet.show(
+    UgamSheet.show<bool>(
       context,
       title: tr('tour_detail.add_return_ticket_title'),
       builder: (_) => AddReturnTicketSheet(tour: tour),
-    ).then((_) => onAdded?.call());
+    ).then((added) {
+      if (added == true) onAdded?.call();
+    });
   }
 
   @override
@@ -63,7 +71,7 @@ class _AddReturnTicketSheetState extends State<AddReturnTicketSheet> {
       // ignore: unawaited_futures
       _userCtrl.rememberContact(name: data.name, phone: data.phone);
       if (!mounted) return;
-      Get.back();
+      Get.back<bool>(result: true);
       AppSnackBar.success(
         tr('tour_detail.return_ticket_added', namedArgs: {'name': data.name}),
       );
@@ -89,9 +97,12 @@ class _AddReturnTicketSheetState extends State<AddReturnTicketSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // `caption` IS 12 — the explicit fontSize was a no-op that also
+            // pinned the size against the ladder, so it is gone. Gujarati/
+            // Devanagari matras need the extra leading, hence the height bump.
             Text(
               tr('tour_detail.add_return_ticket_hint'),
-              style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+              style: UgamText.caption.copyWith(color: c.ink2, height: 1.45),
             ),
             const SizedBox(height: UgamSpacing.lg),
             BookingCaptureForm(

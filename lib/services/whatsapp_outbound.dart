@@ -10,6 +10,8 @@ import '../utils/seat_grid_placement.dart';
 import '../utils/time_format.dart';
 import 'chart_footer_store.dart';
 import 'seat_chart_pdf.dart';
+import 'wa_media.dart';
+import 'wa_template_catalog.dart';
 import 'wa_template_params.dart';
 import 'whatsapp_cloud_service.dart';
 
@@ -57,9 +59,9 @@ class WhatsAppOutbound {
     final message = WaMessage(
       to: WhatsAppCloudService.graphPhone(passenger.phone),
       template: WhatsAppCloudConfig.seatConfirmedTemplate,
-      bodyParams: [passenger.name, tour.title],
+      bodyParams: [_param(passenger.name), _param(tour.title)],
     );
-    return _cloud.send([message]);
+    return _cloud.send([message], passengerIds: [passenger.id]);
   }
 
   /// PRE-LOCK greeting fired by the Confirm action on the Requests screen. Uses
@@ -72,9 +74,9 @@ class WhatsAppOutbound {
     final message = WaMessage(
       to: WhatsAppCloudService.graphPhone(passenger.phone),
       template: WhatsAppCloudConfig.confirmTemplate,
-      bodyParams: [passenger.name, tour.title],
+      bodyParams: [_param(passenger.name), _param(tour.title)],
     );
-    return _cloud.send([message]);
+    return _cloud.send([message], passengerIds: [passenger.id]);
   }
 
   /// AFTER-LOCK details: sends each seated passenger the `seat_allotment`
@@ -143,6 +145,7 @@ class WhatsAppOutbound {
                 to: WhatsAppCloudService.graphPhone(seated[i].phone),
                 ok: false,
                 error: r.error ?? 'Seat chart could not be prepared',
+                passengerId: seated[i].id,
               ));
             }
             done++;
@@ -151,7 +154,18 @@ class WhatsAppOutbound {
       ]);
     }
 
-    final list = messages.whereType<WaMessage>().toList();
+    // Keep the passenger alongside their message: `messages` is index-aligned
+    // with `seated`, but compacting out the nulls would lose that, and a
+    // failure reported as a bare phone number is one the agent has to look up
+    // in the roster by hand before they can act on it.
+    final list = <WaMessage>[];
+    final listIds = <String>[];
+    for (var i = 0; i < total; i++) {
+      final m = messages[i];
+      if (m == null) continue;
+      list.add(m);
+      listIds.add(seated[i].id);
+    }
     debugPrint('[WA] sendSeatAllocations: template='
         '${WhatsAppCloudConfig.seatAllocationTemplate} built ${list.length} '
         'msg(s), ${chartFailures.length} chart failure(s) '
@@ -169,7 +183,7 @@ class WhatsAppOutbound {
       );
     }
 
-    final res = await _cloud.send(list);
+    final res = await _cloud.send(list, passengerIds: listIds);
     if (chartFailures.isEmpty) return res;
     return WaSendResult(
       sent: res.sent,
@@ -202,7 +216,7 @@ class WhatsAppOutbound {
     // shared [Bus.customerLabel] — no registration number, no internal "Bus N"
     // slot. The plate is an agent-only detail (it stays on the admin screens'
     // [Bus.displayLabel]); the customer just needs the name.
-    final busLabel = _orDash(bus == null ? '' : bus.customerLabel);
+    final busLabel = _param(bus == null ? '' : bus.customerLabel);
     // Template variable order (must match the approved `seat_allotment` body):
     //   {{1}} passenger name  {{2}} tour (in the greeting "{name}, {tour} માટે
     //   …")  {{3}} bus  {{4}} boarding place  {{5}} departure date
@@ -213,11 +227,11 @@ class WhatsAppOutbound {
     // Departure date is the tour date; time + place come from the passenger's
     // bus, falling back to the tour-level chart footer (mirrors what the chart
     // image footer prints).
-    final timeLabel = _orDash(formatHhMm(bus?.departureTime) ??
+    final timeLabel = _param(formatHhMm(bus?.departureTime) ??
         (footer.departureTime.trim().isNotEmpty
             ? footer.departureTime.trim()
             : ''));
-    final place = _orDash(
+    final place = _param(
       (bus?.boardingPoint.trim().isNotEmpty ?? false)
           ? bus!.boardingPoint.trim()
           : footer.boardingPlace.trim(),
@@ -232,7 +246,7 @@ class WhatsAppOutbound {
         : tour.passengers.where((hp) => hp.id == handlerId).toList();
     final handler = handlerMatch.isNotEmpty ? handlerMatch.first : tour.handler;
     final handlerPhone = displayPhone(handler?.phone) ?? '';
-    final handlerContact = _orDash(
+    final handlerContact = _param(
       handler == null
           ? ''
           : (handlerPhone.isNotEmpty
@@ -253,6 +267,32 @@ class WhatsAppOutbound {
         debugPrint('[WA] chart render produced no page for ${p.id}');
         return (message: null, error: 'Seat chart image could not be rendered');
       }
+
+      // Meta caps an IMAGE header at 5 MB and refuses anything larger with a
+      // bare "(#131053) Unable to upload the media used in the message" — per
+      // recipient, with no mention of size. Checking here costs nothing and
+      // turns that into a number the agent can act on. A big multi-deck chart
+      // on a high-DPI device is the realistic way to cross the line.
+      final violation = WaMedia.validateImage(
+        bytes: images.first.lengthInBytes,
+        contentType: 'image/png',
+      );
+      if (violation != null) {
+        debugPrint('[WA] chart image refused for ${p.id}: $violation');
+        return (
+          message: null,
+          error: switch (violation.issue) {
+            WaMediaIssue.tooLarge =>
+              'Seat chart is ${violation.sizeLabel}; WhatsApp allows at most '
+                  '${violation.limitLabel}.',
+            WaMediaIssue.empty => 'Seat chart image came out empty.',
+            WaMediaIssue.unsupportedType =>
+              'Seat chart is ${violation.contentType}, which WhatsApp does not '
+                  'accept as an image.',
+          },
+        );
+      }
+
       chartUrl = await _cloud.uploadSigned(
         bucket: WhatsAppCloudConfig.seatChartBucket,
         path: '${tour.id}/${p.id}.png',
@@ -273,8 +313,8 @@ class WhatsAppOutbound {
         template: WhatsAppCloudConfig.seatAllocationTemplate,
         headerImageUrl: chartUrl,
         bodyParams: [
-          _orDash(p.name),
-          tour.title, // {{2}} greeting: "{name}, {tour} માટે …"
+          _param(p.name),
+          _param(tour.title), // {{2}} greeting: "{name}, {tour} માટે …"
           busLabel,
           place,
           date,
@@ -286,9 +326,32 @@ class WhatsAppOutbound {
     );
   }
 
-  /// Meta rejects empty body parameters, so coerce blanks to a dash. Callers
-  /// pass already-trimmed text; this is the last guard before a value is sent.
-  static String _orDash(String s) => s.trim().isEmpty ? '—' : s.trim();
+  /// The last guard before ANY value goes on the wire: repair it into
+  /// something Meta will accept, and coerce a blank to a dash.
+  ///
+  /// This used to be a bare `trim()`, and that was a real bug rather than a
+  /// tidiness matter. Every seat-flow value is operator-entered or
+  /// operator-derived — a boarding point, a tour title, a bus name, a handler's
+  /// contact line — and any one of them may hold a line break the person who
+  /// typed it never thought about. Meta refuses a parameter containing a
+  /// new-line with `132000`, PER RECIPIENT. So one boarding point typed across
+  /// two lines silently cost every passenger on that bus their allotment
+  /// message while the rest of the tour received theirs: exactly the shape of
+  /// the standing "some passengers don't get the msg" report.
+  ///
+  /// Sanitizing here rather than at each call site means a value cannot reach
+  /// [WaMessage] unrepaired, and no future sender has to remember to do it.
+  static String _param(String s) {
+    final clean = WaTemplateParams.sanitize(s);
+    return clean.isEmpty ? '—' : clean;
+  }
+
+  /// [_param] under test. The rule it enforces is invisible from outside —
+  /// every caller is behind a network boundary — yet it is the one that
+  /// decides whether an operator-typed boarding point costs a whole bus their
+  /// allotment message, so it is worth pinning directly.
+  @visibleForTesting
+  static String paramValue(String s) => _param(s);
 
   /// Per-bus free-text announcement (F4 — ADMIN path). The signed-in agent
   /// types one [messageText] and it goes to every passenger seated on [busId]
@@ -356,7 +419,18 @@ class WhatsAppOutbound {
     // long for the template. Both need a human, so they stay a hard refusal —
     // reported as a per-recipient failure (not an exception) so it flows through
     // the same result plumbing every caller already renders.
-    final violations = WaTemplateParams.validateOne(text);
+    //
+    // Measured against the RENDERED body, not the typed text alone. `bus_msg`
+    // wraps what the agent types in a fixed greeting and closing blessing, and
+    // Meta's 1024 limit covers the assembled message — so a "legal" 1000-char
+    // announcement was being accepted here and then refused by Meta with
+    // 132005 for every passenger on the bus.
+    final staticChars = WaTemplateCatalog.instance
+        .staticCharsFor(WhatsAppCloudConfig.busMessageTemplate);
+    final violations = WaTemplateParams.validateRendered(
+      params: [text],
+      staticBodyChars: staticChars,
+    );
     if (violations.isNotEmpty) {
       debugPrint('[WA] sendBusMessage BLOCKED locally: '
           '${violations.map((v) => v.issue.name).toList()}');
@@ -367,10 +441,35 @@ class WhatsAppOutbound {
           WaRecipientResult(
             to: '',
             ok: false,
+            // Mirrors Meta's own code so this refusal is classified and
+            // explained by exactly the same path as a refusal from Meta.
+            code: 132005,
             error: 'Message rejected before sending: '
                 '${violations.map((v) => v.issue.name).join(', ')}. '
-                'A WhatsApp template message must not be empty and must stay '
-                'within ${WaTemplateParams.maxBodyChars} characters.',
+                'A WhatsApp template message must not be empty and the whole '
+                'message must stay within ${WaTemplateParams.maxBodyChars} '
+                'characters (this template already uses $staticChars).',
+          ),
+        ],
+      );
+    }
+
+    // One clear refusal beats N identical ones: if Meta has paused or disabled
+    // this template, every recipient would fail the same way.
+    final block = WaTemplateCatalog.instance
+        .blockFor(WhatsAppCloudConfig.busMessageTemplate);
+    if (block != null) {
+      debugPrint('[WA] sendBusMessage BLOCKED: template ${block.status}');
+      return WaSendResult(
+        sent: 0,
+        failed: 1,
+        results: [
+          WaRecipientResult(
+            to: '',
+            ok: false,
+            code: block.status == 'DISABLED' ? 132016 : 132015,
+            error: 'WhatsApp template "${block.template}" is '
+                '${block.status.toLowerCase()} and cannot be sent.',
           ),
         ],
       );
@@ -458,7 +557,7 @@ class WhatsAppOutbound {
   }
 
   String _requestCancelledText(Tour tour, Passenger passenger) {
-    return 'Namaste ${_orDash(passenger.displayName)}, your booking request for '
+    return 'Namaste ${_param(passenger.displayName)}, your booking request for '
         '${tour.title} (${tour.fromCity} → ${tour.toCity}) has been cancelled '
         'by admin. Please contact support/admin for details.';
   }

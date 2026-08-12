@@ -143,6 +143,13 @@ flutter:
     # via rootBundle by SeatChartPdf — NOT Flutter UI fonts). Bundling removes
     # the runtime google-fonts download, so Gujarati/Hindi passenger names
     # render even on the first send with no network.
+    #
+    # KEEP THESE FOUR LINES. `SeatChartPdf._assetFont()` calls
+    # `rootBundle.load('assets/fonts/…')` by literal path, so the PDF exporter
+    # needs the files as ADDRESSABLE ASSETS. The two Indic faces are ALSO
+    # declared under `fonts:` below, as UI font families — that is a second,
+    # independent registration for on-screen text, not a replacement for this
+    # one. Deleting either declaration breaks a different feature.
     - assets/fonts/NotoSans-Regular.ttf
     - assets/fonts/NotoSans-Bold.ttf
     - assets/fonts/NotoSansGujarati-Regular.ttf
@@ -166,6 +173,45 @@ flutter:
     - family: Sora
       fonts:
         - asset: assets/fonts/Sora-Variable.ttf
+    # ── Indic coverage ────────────────────────────────────────────────────
+    #
+    # Neither Inter nor Sora carries a single Gujarati or Devanagari glyph.
+    # Gujarati is this app's PRIMARY language, so without these two families
+    # every translated string on every screen was drawn by whatever Indic face
+    # the handset happened to ship — a different face on a Samsung, a Xiaomi
+    # and an iPhone, none of them chosen by us, and tofu boxes on a device
+    # with poor Indic coverage.
+    #
+    # They are wired in as `fontFamilyFallback` on every step of the ladder
+    # (see `UgamText.indicFallback` in lib/design/text_styles.dart), NOT as a
+    # primary family: Latin and digits still resolve in Inter/Sora, and only
+    # codepoints those two lack fall through to here.
+    #
+    # LIMITATION — REGULAR ONLY. Just the 400 face of each is on disk, so this
+    # buys DETERMINISM, not a weight hierarchy: a w600 or w700 Gujarati run is
+    # synthesised (faux bold, Skia) or simply drawn at 400, per platform. To
+    # get real weights, add the matching static faces and a second `- asset:`
+    # entry with `weight:` under each family below:
+    #   NotoSansGujarati-Medium.ttf   (500)  NotoSansGujarati-SemiBold.ttf (600)
+    #   NotoSansGujarati-Bold.ttf     (700)
+    #   NotoSansDevanagari-Medium.ttf (500)  NotoSansDevanagari-SemiBold.ttf (600)
+    #   NotoSansDevanagari-Bold.ttf   (700)
+    # (~350-450 KB each, ~2.4 MB for all six; the variable
+    # `NotoSansGujarati[wdth,wght].ttf` covers 100-900 in ~600 KB and is the
+    # better trade if the download size matters.)
+    #
+    # The same two .ttf files are ALSO declared under `assets:` above, where
+    # SeatChartPdf loads them by path for the WhatsApp chart. Both
+    # declarations are required; they serve different subsystems.
+    - family: NotoSansGujarati
+      fonts:
+        # `weight: 400` stated explicitly to document that 400 is ALL there is.
+        - asset: assets/fonts/NotoSansGujarati-Regular.ttf
+          weight: 400
+    - family: NotoSansDevanagari
+      fonts:
+        - asset: assets/fonts/NotoSansDevanagari-Regular.ttf
+          weight: 400
 
   # To add assets to your application, add an assets section, like this:
   # assets:

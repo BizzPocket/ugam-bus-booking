@@ -15,6 +15,19 @@ import 'account_details_screen.dart';
 import 'finance_screen.dart';
 import 'notifications_settings_screen.dart';
 import 'pickup_locations_screen.dart';
+import 'whatsapp_settings_screen.dart';
+
+/// ── Canonical settings-row geometry ────────────────────────────────────────
+/// The settings cluster (this screen + Account Details, Notifications,
+/// WhatsApp) was built across several passes and drifted: 38 vs 40 px icon
+/// tiles, 18 vs 20 px glyphs, corner radius 11 vs 12 vs 14, and two different
+/// row paddings. These four numbers are the agreed spec, and the same block is
+/// copied at the top of `notifications_settings_screen.dart`. Change both
+/// together, or promote them to a shared widget.
+const double _rowIconBox = 40;
+const double _rowIconGlyph = 20;
+const double _rowIconRadius = 12;
+const double _rowMinHeight = 64;
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -51,9 +64,16 @@ class SettingsScreen extends StatelessWidget {
                     const SizedBox(height: UgamSpacing.md),
                     _FinanceCard(c: c),
                     const SizedBox(height: UgamSpacing.xl),
-                    Text(
-                      tr('settings.account_section').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink3),
+                    // Section eyebrows carry emphasis with WEIGHT + COLOUR, not
+                    // with capitals: `.toUpperCase()` is a no-op in Gujarati
+                    // and Hindi, so for most of this app's users the caps did
+                    // nothing and a 3.5:1 `ink3` line was all that marked a
+                    // section. `ink2` measures 7.2:1 and is the same ink
+                    // UgamInput gives a field label, so eyebrows and form
+                    // labels across the cluster now read as one system.
+                    UgamSectionLabel(
+                      tr('settings.account_section'),
+                      color: c.ink2,
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     Obx(
@@ -63,10 +83,7 @@ class SettingsScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: UgamSpacing.xl),
-                    Text(
-                      tr('settings.appearance').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink3),
-                    ),
+                    UgamSectionLabel(tr('settings.appearance'), color: c.ink2),
                     const SizedBox(height: UgamSpacing.sm),
                     Obx(
                       () => _ThemeTriPicker(
@@ -76,83 +93,87 @@ class SettingsScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: UgamSpacing.xl),
-                    Text(
-                      tr('settings.security_section').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink3),
+                    UgamSectionLabel(
+                      tr('settings.security_section'),
+                      color: c.ink2,
                     ),
                     const SizedBox(height: UgamSpacing.sm),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: c.cardElev,
-                        borderRadius: BorderRadius.circular(UgamRadius.card),
-                      ),
-                      child: BiometricToggle(authCtrl: authCtrl),
+                    _GroupCard(
+                      children: [BiometricToggle(authCtrl: authCtrl)],
                     ),
                     const SizedBox(height: UgamSpacing.xl),
-                    Text(
-                      tr('settings.title').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink3),
-                    ),
+                    UgamSectionLabel(tr('settings.title'), color: c.ink2),
                     const SizedBox(height: UgamSpacing.sm),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: c.cardElev,
-                        borderRadius: BorderRadius.circular(UgamRadius.card),
-                      ),
-                      child: Column(
-                        children: [
-                          _SettingsRow(
-                            c: c,
-                            icon: Icons.person_outline_rounded,
-                            iconTone: UgamStatVariant.neutral,
-                            title: tr('settings.account_details_title'),
-                            subtitle: tr('settings.account_details_subtitle'),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const AccountDetailsScreen(),
-                              ),
+                    _GroupCard(
+                      children: [
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.person_outline_rounded,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('settings.account_details_title'),
+                          subtitle: tr('settings.account_details_subtitle'),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const AccountDetailsScreen(),
                             ),
                           ),
-                          _Divider(c: c),
-                          _SettingsRow(
-                            c: c,
-                            icon: Icons.notifications_none_rounded,
-                            iconTone: UgamStatVariant.neutral,
-                            title: tr('settings.notifications_title'),
-                            subtitle: tr('settings.notifications_subtitle'),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const NotificationsSettingsScreen(),
-                              ),
+                        ),
+                        _Divider(c: c),
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.notifications_none_rounded,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('settings.notifications_title'),
+                          subtitle: tr('settings.notifications_subtitle'),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  const NotificationsSettingsScreen(),
                             ),
                           ),
-                          _Divider(c: c),
-                          _SettingsRow(
-                            c: c,
-                            icon: Icons.place_outlined,
-                            iconTone: UgamStatVariant.neutral,
-                            title: tr('pickup.settings_title'),
-                            subtitle: tr('pickup.settings_subtitle'),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const PickupLocationsScreen(),
-                              ),
+                        ),
+                        _Divider(c: c),
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.place_outlined,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('pickup.settings_title'),
+                          subtitle: tr('pickup.settings_subtitle'),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const PickupLocationsScreen(),
                             ),
                           ),
-                          _Divider(c: c),
-                          _SettingsRow(
-                            c: c,
-                            icon: Icons.language_rounded,
-                            iconTone: UgamStatVariant.neutral,
-                            title: tr('settings.language'),
-                            subtitle: tr('settings.language_subtitle'),
-                            onTap: () => LanguagePickerSheet.show(context),
+                        ),
+                        _Divider(c: c),
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.chat_outlined,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('settings.whatsapp_title'),
+                          subtitle: tr('settings.whatsapp_subtitle'),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const WhatsAppSettingsScreen(),
+                            ),
                           ),
-                        ],
-                      ),
+                        ),
+                        _Divider(c: c),
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.language_rounded,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('settings.language'),
+                          subtitle: tr('settings.language_subtitle'),
+                          onTap: () => LanguagePickerSheet.show(context),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: UgamSpacing.xl),
+                    // The destructive action is pushed away from the ordinary
+                    // rows by a seam visibly wider than any section gap above
+                    // it (26 vs 16), so log-out can't be caught by a thumb
+                    // aiming at the last row of the list.
+                    const SizedBox(height: UgamSpacing.huge),
                     _DangerRow(
                       c: c,
                       onLogout: () async {
@@ -161,12 +182,15 @@ class SettingsScreen extends StatelessWidget {
                           title: tr('settings.logout'),
                           message: tr('settings.logout_confirm_message'),
                           confirmLabel: tr('settings.logout'),
+                          // UgamDialog defaults this to the literal English
+                          // 'Cancel', so every call site has to localise it.
+                          cancelLabel: tr('app.action.cancel'),
                           destructive: true,
                         );
                         if (ok) authCtrl.logout();
                       },
                     ),
-                    const SizedBox(height: UgamSpacing.xl),
+                    const SizedBox(height: UgamSpacing.huge),
                     Center(
                       child: Column(
                         children: [
@@ -191,6 +215,76 @@ class SettingsScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A grouped list of settings rows sharing one card surface.
+///
+/// Was a bare `Container(decoration: BoxDecoration(color: cardElev, …))`, so
+/// these groups sat flush with the page while the [UgamCard]s directly above
+/// them floated. Composing with [UgamCard] means a group picks up the app's
+/// elevation scale for free instead of opting out of it.
+///
+/// The [Material] is load-bearing: an [InkWell] paints its splash into the
+/// nearest ancestor [Material], which without this is the Scaffold's — i.e.
+/// *underneath* the card fill, so tapping a row produced no visible feedback
+/// at all.
+class _GroupCard extends StatelessWidget {
+  final List<Widget> children;
+  const _GroupCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    // The page Column lays out with CrossAxisAlignment.start, so claim width.
+    return SizedBox(
+      width: double.infinity,
+      child: UgamCard.plain(
+        elev: true,
+        padding: EdgeInsets.zero,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(children: children),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The one icon medallion every row in the settings cluster uses.
+///
+/// [UgamScale.px], not [UgamScale.tap]: the tile is decorative: the 44pt floor
+/// belongs to the row wrapped around it, not to the glyph box.
+class _RowIcon extends StatelessWidget {
+  final IconData icon;
+  final Color background;
+  final Color foreground;
+
+  const _RowIcon({
+    required this.icon,
+    required this.background,
+    required this.foreground,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final box = UgamScale.px(context, _rowIconBox);
+    return Container(
+      width: box,
+      height: box,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(_rowIconRadius),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        icon,
+        size: UgamScale.px(context, _rowIconGlyph),
+        color: foreground,
       ),
     );
   }
@@ -272,19 +366,12 @@ class _FinanceCardState extends State<_FinanceCard> {
         padding: const EdgeInsets.all(UgamSpacing.lg),
         child: Row(
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: failed ? c.dangerFill : c.accentFill,
-                borderRadius: BorderRadius.circular(13),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                failed ? Icons.cloud_off_rounded : Icons.insights_rounded,
-                size: 21,
-                color: failed ? c.danger : c.accent,
-              ),
+            // Was a one-off 44/21/r13 medallion — the only one in the whole
+            // cluster that missed the canonical 40/20/r12 spec.
+            _RowIcon(
+              icon: failed ? Icons.cloud_off_rounded : Icons.insights_rounded,
+              background: failed ? c.dangerFill : c.accentFill,
+              foreground: failed ? c.danger : c.accent,
             ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
@@ -309,10 +396,12 @@ class _FinanceCardState extends State<_FinanceCard> {
                     )
                   else
                     Text(
+                      // Was a hand-set 22. `numLg` (20) is the ladder step for
+                      // an in-card figure; `numXl` (26) is the hero size and
+                      // would out-shout the page title. numLg is already
+                      // tabular, so the tabular() wrapper was a no-op too.
                       _fmtSignedInr(net),
-                      style: UgamText.tabular(
-                        UgamText.numLg.copyWith(color: netColor, fontSize: 22),
-                      ),
+                      style: UgamText.numLg.copyWith(color: netColor),
                     ),
                   const SizedBox(height: 2),
                   Text(
@@ -343,26 +432,23 @@ class _ProfileHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final avatar = UgamScale.px(context, 48);
+    return UgamCard.plain(
+      elev: true,
       padding: const EdgeInsets.all(UgamSpacing.lg),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
       child: Row(
         children: [
           Container(
-            width: 48,
-            height: 48,
+            width: avatar,
+            height: avatar,
             decoration: BoxDecoration(color: c.accent, shape: BoxShape.circle),
             alignment: Alignment.center,
             child: Obx(
               () => Text(
                 authCtrl.initials.isNotEmpty ? authCtrl.initials : '👋',
-                style: UgamText.titleM.copyWith(
-                  color: c.onAccent,
-                  fontSize: 22,
-                ),
+                // `titleL` IS 22 — the hand-set size was already on the ladder,
+                // just spelled as an override of the wrong step.
+                style: UgamText.titleL.copyWith(color: c.onAccent),
               ),
             ),
           ),
@@ -377,7 +463,9 @@ class _ProfileHero extends StatelessWidget {
                     authCtrl.userName.value.isNotEmpty
                         ? authCtrl.userName.value
                         : tr('settings.welcome'),
-                    style: UgamText.titleM.copyWith(color: c.ink, fontSize: 17),
+                    // Was 17 — no such step. `titleM` (18) is the nearest and
+                    // is what every other in-card heading already uses.
+                    style: UgamText.titleM.copyWith(color: c.ink),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -401,18 +489,16 @@ class _AccountCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
-      child: _AccountRow(
-        c: c,
-        icon: Icons.phone_rounded,
-        iconTone: UgamStatVariant.neutral,
-        label: tr('settings.phone_label'),
-        value: phone,
-      ),
+    return _GroupCard(
+      children: [
+        _AccountRow(
+          c: c,
+          icon: Icons.phone_rounded,
+          iconTone: UgamStatVariant.neutral,
+          label: tr('settings.phone_label'),
+          value: phone,
+        ),
+      ],
     );
   }
 }
@@ -441,83 +527,81 @@ class _AccountRow extends StatelessWidget {
       UgamStatVariant.neutral => (c.card, c.ink2),
     };
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.md + 4,
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        minHeight: UgamScale.tap(context, _rowMinHeight),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: iconBg,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 20, color: iconFg),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: UgamText.caption.copyWith(
-                    color: c.ink2,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Country-code badge. Uses the darker base `card` against
-                    // the `cardElev` card so the pill actually reads — the old
-                    // neutral chip was `cardElev` on `cardElev` (invisible).
-                    // No border: the darker fill alone separates it (soft-card
-                    // style — depth from fill, not strokes).
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: c.card,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '+91',
-                        style: UgamText.micro.copyWith(
-                          color: c.ink2,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.lg,
+          vertical: UgamSpacing.md,
+        ),
+        child: Row(
+          children: [
+            _RowIcon(icon: icon, background: iconBg, foreground: iconFg),
+            const SizedBox(width: UgamSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      letterSpacing: 0.2,
                     ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        value.isNotEmpty ? value : '—',
-                        style: UgamText.tabular(
-                          UgamText.bodyStrong.copyWith(
-                            color: c.ink,
-                            fontSize: 15,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Country-code badge. Uses the darker base `card` against
+                      // the `cardElev` card so the pill actually reads — the old
+                      // neutral chip was `cardElev` on `cardElev` (invisible).
+                      // No border: the darker fill alone separates it (soft-card
+                      // style — depth from fill, not strokes).
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: c.card,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '+91',
+                          // `micro` IS 10 — the fontSize just restated the step.
+                          // Weight/tracking stay as deliberate badge overrides.
+                          style: UgamText.micro.copyWith(
+                            color: c.ink2,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.3,
                           ),
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          value.isNotEmpty ? value : '—',
+                          // `titleS` is the real 15px step (Sora, the numeral
+                          // face). The old `bodyStrong` + fontSize:15 invented a
+                          // step that does not exist on the ladder. Matches the
+                          // locked phone field on the Account Details page.
+                          style: UgamText.tabular(
+                            UgamText.titleS.copyWith(color: c.ink),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -546,12 +630,10 @@ class _ThemeTriPicker extends StatelessWidget {
     // choice: a stacked icon-over-label cell with a clearer selected state
     // (filled card + soft shadow + accent icon). Kept local so the shared
     // pill component used across the app is untouched.
-    return Container(
+    return UgamCard.plain(
+      elev: true,
+      radius: UgamRadius.input,
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.input),
-      ),
       child: Row(
         children: [
           for (final (m, icon, key) in _options)
@@ -596,33 +678,39 @@ class _ThemeSegment extends StatelessWidget {
       child: AnimatedContainer(
         duration: UgamMotion.tab,
         curve: UgamMotion.easeOut,
-        padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
+        constraints: BoxConstraints(minHeight: UgamScale.tap(context, 44)),
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.xs,
+          vertical: UgamSpacing.md,
+        ),
         decoration: BoxDecoration(
           color: active ? c.card : Colors.transparent,
           borderRadius: BorderRadius.circular(13),
-          boxShadow: active
-              ? const [
-                  BoxShadow(
-                    color: Color(0x14000000),
-                    blurRadius: 6,
-                    offset: Offset(0, 2),
-                  ),
-                ]
-              : null,
+          // Was a hand-rolled BoxShadow. The selected segment lifts off the
+          // track using the app's own scale, so it tracks the theme.
+          boxShadow: active ? UgamElevation.of(context).rest : null,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 20, color: active ? c.accent : c.ink3),
+            Icon(
+              icon,
+              size: UgamScale.px(context, 20),
+              color: active ? c.accent : c.ink3,
+            ),
             const SizedBox(height: 6),
             Text(
               label,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              style: UgamText.bodyStrong.copyWith(
+              // Was `maxLines: 1, softWrap: false` + ellipsis. The three
+              // Gujarati labels fit today, but the app allows a 1.3x
+              // accessibility text scale, at which point they would clip —
+              // wrapping grows the picker instead of hiding the word.
+              maxLines: 2,
+              textAlign: TextAlign.center,
+              // `caption` is the 12px step; only the weight is an override.
+              style: UgamText.caption.copyWith(
                 color: active ? c.ink : c.ink2,
-                fontSize: 12,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -659,54 +747,61 @@ class _SettingsRow extends StatelessWidget {
     };
 
     return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(UgamRadius.card),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.md + 2,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: UgamScale.tap(context, _rowMinHeight),
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: iconBg,
-                borderRadius: BorderRadius.circular(11),
-              ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 18, color: iconFg),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    subtitle,
-                    style: UgamText.caption.copyWith(
-                      color: c.ink3,
-                      fontSize: 12,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.lg,
+            vertical: UgamSpacing.md,
+          ),
+          child: Row(
+            children: [
+              _RowIcon(icon: icon, background: iconBg, foreground: iconFg),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Nothing in this row is clamped to one line, on purpose:
+                    // the Gujarati and Hindi strings run ~30% past the English
+                    // source and a settings row is label + value + chevron on
+                    // one line, so the copy has to be free to wrap. The row
+                    // grows; nothing hides behind an ellipsis.
+                    Text(
+                      title,
+                      // `titleS` IS 15 — the override restated the step.
+                      style: UgamText.titleS.copyWith(color: c.ink),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      // `caption` IS 12 — likewise redundant.
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-          ],
+              const SizedBox(width: UgamSpacing.sm),
+              Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
+/// Hairline between two rows inside a [_GroupCard]. Inset so it starts where
+/// the TEXT starts rather than under the icon medallion — that inset is what
+/// makes a stack of rows read as one list instead of a sliced box. Mirrored in
+/// `notifications_settings_screen.dart`.
 class _Divider extends StatelessWidget {
   final UgamColorSet c;
   const _Divider({required this.c});
@@ -714,12 +809,26 @@ class _Divider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
+      padding: EdgeInsets.only(
+        left: UgamSpacing.lg +
+            UgamScale.px(context, _rowIconBox) +
+            UgamSpacing.md,
+        right: UgamSpacing.lg,
+      ),
       child: Divider(height: 1, color: c.border),
     );
   }
 }
 
+/// Log out — the one destructive action on this screen.
+///
+/// It used to be a `cardElev` tile geometrically IDENTICAL to the five
+/// navigation rows above it, separated by the same 16px seam, and it even
+/// carried a chevron; the only thing marking it destructive was a red glyph.
+/// It is now a danger-toned [UgamCard] (tinted fill + danger hairline) behind
+/// a wider seam, with the chevron dropped — a chevron promises "this opens a
+/// page", and this ends your session. The confirmation step was already in
+/// place ([UgamDialog.confirm] with `destructive: true`) and is unchanged.
 class _DangerRow extends StatelessWidget {
   final UgamColorSet c;
   final VoidCallback onLogout;
@@ -731,75 +840,49 @@ class _DangerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _dangerTile(
-          icon: Icons.logout_rounded,
-          title: tr('settings.logout'),
-          subtitle: tr('settings.logout_subtitle'),
-          onTap: onLogout,
+    return UgamCard.plain(
+      tone: UgamCardTone.danger,
+      padding: EdgeInsets.zero,
+      onTap: onLogout,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: UgamScale.tap(context, _rowMinHeight),
         ),
-      ],
-    );
-  }
-
-  Widget _dangerTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(UgamRadius.card),
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.lg,
-          vertical: UgamSpacing.md + 2,
-        ),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.card),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: c.danger.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(11),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.lg,
+            vertical: UgamSpacing.md,
+          ),
+          child: Row(
+            children: [
+              _RowIcon(
+                icon: Icons.logout_rounded,
+                // The `dangerFill` token, not a per-call-site alpha.
+                background: c.dangerFill,
+                foreground: c.danger,
               ),
-              alignment: Alignment.center,
-              child: Icon(icon, size: 18, color: c.danger),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: UgamText.titleS.copyWith(
-                      color: c.danger,
-                      fontSize: 15,
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      tr('settings.logout'),
+                      style: UgamText.titleS.copyWith(color: c.danger),
                     ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    subtitle,
-                    style: UgamText.caption.copyWith(
-                      color: c.ink3,
-                      fontSize: 12,
+                    const SizedBox(height: 2),
+                    Text(
+                      tr('settings.logout_subtitle'),
+                      // `ink2`, not `ink3`: on the tinted danger fill the
+                      // tertiary ink drops under 3:1.
+                      style: UgamText.caption.copyWith(color: c.ink2),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -900,6 +983,7 @@ class _BiometricToggleState extends State<BiometricToggle> {
     final c = UgamColors.of(context);
     return _SecurityToggleRow(
       c: c,
+      icon: Icons.fingerprint_rounded,
       title: tr('settings.biometric_title'),
       subtitle: _available
           ? tr('settings.biometric_subtitle')
@@ -911,11 +995,16 @@ class _BiometricToggleState extends State<BiometricToggle> {
   }
 }
 
-/// Local copy of the notifications-screen `_ToggleRow` styling (icon tile +
-/// title/subtitle + trailing `Switch`), kept private to this file so the
-/// shared notifications widget stays untouched.
+/// Toggle row for the Security section.
+///
+/// Deliberately IDENTICAL in geometry and behaviour to `_ToggleRow` in
+/// `notifications_settings_screen.dart` — same 40/20/r12 medallion, same
+/// padding, same [UgamSwitch], same whole-row tap target. The two remain
+/// separate classes only because neither file may introduce a shared widget;
+/// keep them in lockstep.
 class _SecurityToggleRow extends StatelessWidget {
   final UgamColorSet c;
+  final IconData icon;
   final String title;
   final String subtitle;
   final bool value;
@@ -924,6 +1013,7 @@ class _SecurityToggleRow extends StatelessWidget {
 
   const _SecurityToggleRow({
     required this.c,
+    required this.icon,
     required this.title,
     required this.subtitle,
     required this.value,
@@ -935,59 +1025,59 @@ class _SecurityToggleRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final on = value && enabled;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.lg - 2,
-      ),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.fingerprint_rounded,
-              size: 18,
-              color: enabled ? c.ink2 : c.ink3,
-            ),
+    return InkWell(
+      // The whole row toggles, not just the ~50px switch — the nav rows on this
+      // same screen have always been fully tappable.
+      onTap: enabled ? () => onChanged(!value) : null,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: UgamScale.tap(context, _rowMinHeight),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.lg,
+            vertical: UgamSpacing.md,
           ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: UgamText.titleS.copyWith(
-                    color: enabled ? c.ink : c.ink3,
-                  ),
+          child: Row(
+            children: [
+              _RowIcon(
+                icon: icon,
+                background: c.card,
+                foreground: enabled ? c.ink2 : c.ink3,
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: UgamText.titleS.copyWith(
+                        color: enabled ? c.ink : c.ink3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: UgamText.caption.copyWith(color: c.ink3),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              // Was a raw Material Switch that set only the two ACTIVE colours,
+              // so the off state fell back to Material's grey. UgamSwitch tints
+              // all four, adds the haptic, guarantees the 44pt box and
+              // announces the toggled state to a screen reader.
+              UgamSwitch(
+                value: on,
+                onChanged: enabled ? onChanged : null,
+                semanticLabel: title,
+              ),
+            ],
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          Switch(
-            value: on,
-            onChanged: enabled ? onChanged : null,
-            activeTrackColor: c.accent,
-            activeThumbColor: c.onAccent,
-          ),
-        ],
+        ),
       ),
     );
   }

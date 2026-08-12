@@ -253,6 +253,13 @@ class SeatingExceptionsScreen extends StatelessWidget {
                 // getTour reads the reactive `tours` list, so holding a
                 // passenger (which mutates that list) rebuilds here.
                 final tour = _ctrl.getTour(tourId);
+                // "Not loaded yet" is NOT "nothing needs you". On a cold start
+                // / deep link the roster has not arrived, and this used to
+                // resolve to an empty exception list and paint the calm green
+                // "All clear" — the one message on the screen an agent acts on
+                // by walking away. Show the shape of the list instead; the Obx
+                // repaints the moment the tour lands.
+                if (tour == null) return const _ExceptionsSkeleton();
                 // SINGLE SOURCE with the Dashboard/Requests badge — the same
                 // live, non-mutating helper the needsDecision count uses, so the
                 // number you see on those surfaces equals the cards here. Pure:
@@ -261,9 +268,7 @@ class SeatingExceptionsScreen extends StatelessWidget {
                 // Read off the memoized capacity snapshot: the badge count on
                 // Dashboard/Requests and these cards are now literally the same
                 // list from the same engine run, not two runs that agree.
-                final exceptions = tour == null
-                    ? const <SeatingException>[]
-                    : _ctrl.capacityFor(tour).decisions;
+                final exceptions = _ctrl.capacityFor(tour).decisions;
 
                 if (exceptions.isEmpty) {
                   return UgamEmpty(
@@ -428,6 +433,38 @@ class _Section {
   const _Section({required this.label, required this.items});
 }
 
+// ─── Loading ─────────────────────────────────────────────────────────────
+
+/// The list's own shape while the roster loads — a section eyebrow followed by
+/// three exception-card blocks, on the same gutters and rhythm as the real
+/// [ListView] above. A centred spinner would have told the agent nothing about
+/// what is arriving; this holds the layout still so the real cards drop into
+/// place instead of shoving the page around.
+class _ExceptionsSkeleton extends StatelessWidget {
+  const _ExceptionsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+        UgamSpacing.gutter,
+        UgamSpacing.xl,
+      ),
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        const UgamSkeleton.text(width: 96),
+        const SizedBox(height: UgamSpacing.md),
+        for (var i = 0; i < 3; i++) ...[
+          const UgamSkeleton(height: 92, radius: UgamRadius.row),
+          const SizedBox(height: UgamSpacing.md),
+        ],
+      ],
+    );
+  }
+}
+
 // ─── Section header ──────────────────────────────────────────────────────
 
 class _SectionHeader extends StatelessWidget {
@@ -448,7 +485,10 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labelColor = alert ? c.danger : c.ink3;
+    // ink2, not ink3 — with caps and tracking gone from the eyebrow, colour is
+    // the emphasis that actually lands (ink3 is 3.69:1 on the dark ground and
+    // reads as disabled next to a count badge).
+    final labelColor = alert ? c.danger : c.ink2;
     return Padding(
       padding: const EdgeInsets.only(top: UgamSpacing.sm),
       child: Row(
@@ -461,7 +501,23 @@ class _SectionHeader extends StatelessWidget {
             ),
             const SizedBox(width: UgamSpacing.xs),
           ],
-          UgamSectionLabel(label, color: labelColor),
+          // [UgamText.label], not [UgamSectionLabel]. The shared eyebrow still
+          // uppercases onto `micro`, and every one of these categories is a
+          // translated string: in Gujarati the caps do nothing, micro's 1.4
+          // tracking splits conjuncts, and its 10px lands at 8.5 on a small
+          // phone. Flagged for the owner of lib/design; switched here because
+          // this screen is in the wave.
+          //
+          // Flexible: the label was an unbounded Row child sitting in front of
+          // a count badge, so a long Gujarati category had nowhere to give.
+          Flexible(
+            child: Text(
+              label,
+              style: UgamText.label.copyWith(color: labelColor),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           const SizedBox(width: UgamSpacing.sm),
           // THE app badge — the count no longer renders as a private
           // 999-radius lozenge while the identical count on Requests uses a
@@ -526,11 +582,16 @@ class _ExceptionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // The attention colour drives the icon badge + accents; the card surface
-    // itself is toned by [UgamCard] (warm vs danger).
+    // The attention colour drives the icon badge; the card surface itself is
+    // toned by [UgamCard] (warm vs danger).
+    //
+    // `dangerFill` instead of a hand-mixed `danger.withValues(alpha: 0.14)` —
+    // the token exists precisely so this alpha stops drifting per call site
+    // (see [UgamColorSet.dangerFill]), and the hand-mixed one sat lighter than
+    // the real token in Daylight, where dangerFill is an opaque tint rather
+    // than 14% of the ink.
     final Color toneInk = alert ? c.danger : c.warm;
-    final Color toneFill =
-        alert ? c.danger.withValues(alpha: 0.14) : c.warmFill;
+    final Color toneFill = alert ? c.dangerFill : c.warmFill;
 
     return UgamCard.plain(
       // UgamCard.plain accepts a null onTap and then skips the press
@@ -603,46 +664,50 @@ class _ExceptionCard extends StatelessWidget {
                     leading: Icons.group_rounded,
                   ),
                 ],
+                // Card actions sit as compact buttons aligned to the trailing
+                // edge, never full-bleed: a stack of edge-to-edge buttons under
+                // every card is a web card-footer, and it made each exception
+                // read as its own page rather than an item in a list. Labels
+                // stay — "Approve share" and "Hold" are not actions an icon
+                // alone can carry. Wrap so a third action or a long
+                // translation folds to the next line instead of overflowing.
                 if (onEdit != null ||
                     onHold != null ||
                     onApproveShare != null) ...[
                   const SizedBox(height: UgamSpacing.md),
-                  if (onApproveShare != null) ...[
-                    UgamButton(
-                      label: tr('seating_exceptions.action_approve_share'),
-                      icon: Icons.people_alt_rounded,
-                      kind: UgamButtonKind.tonal,
-                      expand: true,
-                      onPressed: onApproveShare,
-                    ),
-                    if (onHold != null || onEdit != null)
-                      const SizedBox(height: UgamSpacing.sm),
-                  ],
-                  if (onHold != null || onEdit != null)
-                    Row(
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: UgamSpacing.sm,
+                      runSpacing: UgamSpacing.sm,
                       children: [
                         if (onHold != null)
-                          Expanded(
-                            child: UgamButton(
-                              label: tr('seating_exceptions.action_hold'),
-                              icon: Icons.pause_circle_outline_rounded,
-                              kind: UgamButtonKind.neutral,
-                              onPressed: onHold,
-                            ),
+                          UgamButton(
+                            label: tr('seating_exceptions.action_hold'),
+                            icon: Icons.pause_circle_outline_rounded,
+                            kind: UgamButtonKind.neutral,
+                            onPressed: onHold,
                           ),
-                        if (onHold != null && onEdit != null)
-                          const SizedBox(width: UgamSpacing.sm),
                         if (onEdit != null)
-                          Expanded(
-                            child: UgamButton(
-                              label: tr('seating_exceptions.action_edit'),
-                              icon: Icons.edit_note_rounded,
-                              kind: UgamButtonKind.tonal,
-                              onPressed: onEdit,
-                            ),
+                          UgamButton(
+                            label: tr('seating_exceptions.action_edit'),
+                            icon: Icons.edit_note_rounded,
+                            kind: UgamButtonKind.tonal,
+                            onPressed: onEdit,
+                          ),
+                        // Primary last: on a trailing-aligned action row the
+                        // rightmost button is the one the thumb reaches first.
+                        if (onApproveShare != null)
+                          UgamButton(
+                            label: tr('seating_exceptions.action_approve_share'),
+                            icon: Icons.people_alt_rounded,
+                            kind: UgamButtonKind.tonal,
+                            onPressed: onApproveShare,
                           ),
                       ],
                     ),
+                  ),
                 ],
               ],
             ),

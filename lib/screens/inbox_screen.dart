@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import '../controllers/inbox_controller.dart';
 import '../design/ugam.dart';
 import '../models/wa_conversation.dart';
+import '../routes/app_routes.dart';
 import 'conversation_screen.dart';
 
 /// WhatsApp inbox — the two-way conversation list.
@@ -12,7 +13,10 @@ import 'conversation_screen.dart';
 /// One row per customer thread, ordered most-recent-first by the controller
 /// (which mirrors `wa_conversations.last_message_at desc`). Each row shows the
 /// customer name, the last message preview, a relative time and an unread
-/// count pill. Tapping marks the thread read and opens the [ConversationScreen].
+/// count pill. Tapping opens the [ConversationScreen], which owns marking the
+/// thread read (see the note on that screen — doing it here missed every other
+/// way into a thread and left the badge set for messages that arrived while the
+/// thread was already open).
 ///
 /// Chrome comes entirely from the Ugam system: [UgamScaffold] frame,
 /// [UgamAppBar] header, [UgamPersonRow] rows, [UgamEmpty] empty state and
@@ -31,10 +35,19 @@ class InboxScreen extends StatelessWidget {
           children: [
             // Shell tab in normal use (cannot pop); the back affordance only
             // shows when a future caller actually pushes the inbox.
-            UgamAppBar(
-              title: tr('inbox.title'),
-              showBack: Navigator.canPop(context),
-            ),
+            Obx(() {
+              final unread = ctrl.totalUnread.value;
+              return UgamAppBar(
+                title: tr('inbox.title'),
+                // The header carried a bare title over an empty band. The
+                // across-all-threads unread count is the one number an agent
+                // opens this screen to see, so it earns the subtitle slot.
+                subtitle: unread > 0
+                    ? tr('inbox.card_unread', namedArgs: {'count': '$unread'})
+                    : null,
+                showBack: Navigator.canPop(context),
+              );
+            }),
             Expanded(
               child: Obx(() {
                 // First load, nothing cached yet → shimmer rows rather than a
@@ -49,6 +62,16 @@ class InboxScreen extends StatelessWidget {
                     icon: Icons.forum_outlined,
                     title: tr('inbox.empty_title'),
                     body: tr('inbox.empty_subtitle'),
+                    // An empty inbox has exactly one useful action: confirm the
+                    // WhatsApp number is actually connected. Without it this
+                    // state is a dead end that cannot tell "no one has written"
+                    // from "the webhook was never wired up".
+                    cta: UgamButton(
+                      label: tr('inbox.empty_cta'),
+                      icon: Icons.settings_outlined,
+                      kind: UgamButtonKind.neutral,
+                      onPressed: () => Get.toNamed(AppRoutes.whatsappSettings),
+                    ),
                   );
                 }
 
@@ -56,11 +79,15 @@ class InboxScreen extends StatelessWidget {
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: BouncingScrollPhysics(),
                   ),
+                  // NOT `dockClearance`. The inbox is a root-level pushed route
+                  // (`AppRoutes.inbox`), so it covers `MainShell` and its dock
+                  // entirely — reserving 140px here was a screen-height of dead
+                  // space under the last thread.
                   padding: const EdgeInsets.fromLTRB(
                     UgamSpacing.gutter,
                     UgamSpacing.sm,
                     UgamSpacing.gutter,
-                    UgamSpacing.dockClearance,
+                    UgamSpacing.xxl,
                   ),
                   itemCount: conversations.length,
                   separatorBuilder: (_, _) =>
@@ -70,14 +97,8 @@ class InboxScreen extends StatelessWidget {
                     return _ConversationTile(
                       conversation: convo,
                       c: c,
-                      onTap: () {
-                        // Mark read first so the badge clears immediately, then
-                        // open the thread.
-                        ctrl.markRead(convo.id);
-                        Get.to(
-                          () => ConversationScreen(conversation: convo),
-                        );
-                      },
+                      onTap: () =>
+                          Get.to(() => ConversationScreen(conversation: convo)),
                     );
                   },
                 );
@@ -139,13 +160,19 @@ class _ConversationTile extends StatelessWidget {
         children: [
           Text(
             _relativeTime(context, conversation.lastMessageAt),
-            style: UgamText.micro.copyWith(
-              color: hasUnread ? c.accent : c.ink3,
-              fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w500,
+            // Meta text, so NOT the accent: tokens.dart reserves amber for
+            // "this is yours" and explicitly rules out subtitle text. Unread
+            // is carried by weight + full-strength ink, and by the pill below.
+            style: UgamText.tabular(
+              UgamText.caption.copyWith(
+                color: hasUnread ? c.ink : c.ink3,
+                fontWeight: hasUnread ? FontWeight.w700 : FontWeight.w500,
+              ),
             ),
+            maxLines: 1,
           ),
           if (hasUnread) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: UgamSpacing.xs + 2),
             _UnreadPill(count: conversation.unreadCount, c: c),
           ],
         ],
@@ -154,7 +181,12 @@ class _ConversationTile extends StatelessWidget {
   }
 }
 
-/// Small accent count pill for a thread's unread messages.
+/// Tonal count pill for a thread's unread messages.
+///
+/// `accentFill` + `accent` ink, never a solid copper disc: the accent-rationing
+/// law allows at most one solid accent fill in a screen's content area, and an
+/// inbox can show a dozen of these at once. Matches the dashboard's messages
+/// card, which already resolved this the same way.
 class _UnreadPill extends StatelessWidget {
   final int count;
   final UgamColorSet c;
@@ -164,22 +196,28 @@ class _UnreadPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: tr('inbox.new_label'),
+      label: tr('inbox.card_unread', namedArgs: {'count': '$count'}),
+      excludeSemantics: true,
       child: Container(
-        constraints: const BoxConstraints(minWidth: 20),
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        constraints: const BoxConstraints(minWidth: 22),
+        padding: const EdgeInsets.symmetric(
+          horizontal: UgamSpacing.sm,
+          vertical: UgamSpacing.badgeV,
+        ),
         decoration: BoxDecoration(
-          color: c.accent,
+          color: c.accentFill,
           borderRadius: BorderRadius.circular(UgamRadius.chip),
+          border: Border.all(color: c.accent.withValues(alpha: 0.28)),
         ),
         alignment: Alignment.center,
+        // `caption`, not `micro`: micro is the uppercase-eyebrow step and its
+        // 1.4 tracking visibly spaces out a two-digit badge.
         child: Text(
           count > 99 ? '99+' : '$count',
           style: UgamText.tabular(
-            UgamText.micro.copyWith(
-              color: c.onAccent,
-              fontWeight: FontWeight.w800,
-              fontSize: 11,
+            UgamText.caption.copyWith(
+              color: c.accent,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
@@ -189,6 +227,11 @@ class _UnreadPill extends StatelessWidget {
 }
 
 /// Shimmer placeholder list shown on first load.
+///
+/// Shaped like the row it stands in for — avatar disc, name line, preview line,
+/// trailing time — rather than one flat 64px slab. A placeholder that does not
+/// match the final layout still makes the content jump when it lands, which is
+/// the exact tell a skeleton exists to remove.
 class _InboxSkeletonList extends StatelessWidget {
   const _InboxSkeletonList();
 
@@ -200,13 +243,56 @@ class _InboxSkeletonList extends StatelessWidget {
         UgamSpacing.gutter,
         UgamSpacing.sm,
         UgamSpacing.gutter,
-        UgamSpacing.dockClearance,
+        UgamSpacing.xxl,
       ),
       itemCount: 8,
       separatorBuilder: (_, _) => const SizedBox(height: UgamSpacing.xs),
-      itemBuilder: (_, _) => const Padding(
-        padding: EdgeInsets.symmetric(vertical: UgamSpacing.sm),
-        child: UgamSkeleton.row(),
+      itemBuilder: (_, i) => _InboxSkeletonRow(seed: i),
+    );
+  }
+}
+
+class _InboxSkeletonRow extends StatelessWidget {
+  final int seed;
+
+  const _InboxSkeletonRow({required this.seed});
+
+  @override
+  Widget build(BuildContext context) {
+    // Decorative geometry — [UgamScale.px], never [tap]: nothing here is a
+    // target. Mirrors UgamPersonRow's 36pt avatar and 60pt min row height.
+    final avatar = UgamScale.px(context, 36);
+    // Varied name widths so eight identical bars don't read as a table.
+    final nameWidth = UgamScale.px(context, seed.isEven ? 132 : 104);
+
+    return Container(
+      constraints: const BoxConstraints(minHeight: 60),
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          UgamSkeleton(width: avatar, height: avatar, radius: avatar / 2),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                UgamSkeleton.text(width: nameWidth),
+                const SizedBox(height: UgamSpacing.sm),
+                const UgamSkeleton(height: 11, radius: 4),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          UgamSkeleton(
+            width: UgamScale.px(context, 38),
+            height: 11,
+            radius: 4,
+          ),
+        ],
       ),
     );
   }

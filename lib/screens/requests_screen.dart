@@ -2,12 +2,18 @@ import 'dart:async';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+// ScrollDirection — flutter/widgets only re-exports TextSelectionHandleType
+// from rendering, so the bottom bar's scroll-direction listener needs this.
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/pickup_controller.dart';
 import '../controllers/tour_controller.dart';
 import '../controllers/user_controller.dart';
+// Not in the design barrel yet (the foundation phase added the component but
+// not the export line) — imported directly rather than hand-rolling a press.
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/passenger.dart';
 import '../models/passenger_group.dart';
@@ -22,7 +28,7 @@ import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/tour_capacity.dart';
-import '../utils/wa_param_error_text.dart';
+import '../utils/wa_error_text.dart';
 import '../widgets/booking_capture_form.dart';
 import '../widgets/edit_request_sheet.dart';
 import '../widgets/group_picker.dart';
@@ -79,12 +85,55 @@ class _RequestsScreenState extends State<RequestsScreen> {
   // snap back to New whenever this tab is re-entered — see _resetToNewOnReentry.
   Worker? _tabReentryWorker;
 
-  // Bottom list clearance so the last card never hides under the floating
-  // bars. Both derive from the shared dock-clearance token so the list scrolls
-  // clear of the floating dock + sticky CTA / bulk-action bar.
-  static const double _listBottomPadSelection =
-      UgamSpacing.dockClearance - UgamSpacing.xxl; // 140-24 = 116
-  static const double _listBottomPadNormal = UgamSpacing.dockClearance; // 140
+  // ── Bottom chrome geometry ───────────────────────────────────
+  //
+  // This screen floats its OWN action bar over a shell that already floats the
+  // dock nav at the same edge. Both used to be pinned to `bottom: 0`, so the
+  // black "Seats · 7 left" bar sat behind the dock capsule and list rows
+  // scrolled under two overlapping slabs. The bar is now lifted to rest
+  // directly on top of the dock, and it retracts behind the dock while the
+  // agent scrolls DOWN the list, so the bottom edge only ever carries one
+  // piece of chrome at a time.
+  //
+  // Both floating controls are 52pt tall: UgamDockNav's capsule is its 44pt
+  // tap floor plus 4pt of padding on each side, and UgamCTA floors at
+  // `minHeight: 52`. Neither is exposed as a token — AppSnackBar hand-sums the
+  // same number for its toast offset.
+  static const double _kFloatingControl = 52;
+
+  /// Lift that clears the dock: its capsule + the dock's own bottom padding.
+  /// The safe-area inset is NOT added here — [UgamStickyCTA] wraps its child
+  /// in a bottom `SafeArea`, which supplies exactly that much itself.
+  static const double _kBarLift = _kFloatingControl + UgamSpacing.md; // 64
+
+  /// [UgamStickyCTA]'s own painted height: 16 above the control, 12 below.
+  static const double _kBarHeight =
+      UgamSpacing.lg + _kFloatingControl + UgamSpacing.md; // 80
+
+  /// Bottom inset the list must reserve so no row is ever trapped behind
+  /// chrome. With no bottom bar the dock alone is in the way and the shared
+  /// [UgamSpacing.dockClearance] covers it; with a bar, its lift + height +
+  /// the safe-area inset it adds stack on top of that edge.
+  double _listBottomInset(BuildContext context, {required bool withBar}) {
+    if (!withBar) return UgamSpacing.dockClearance;
+    return _kBarLift + _kBarHeight + MediaQuery.paddingOf(context).bottom;
+  }
+
+  // Whether the floating action bar is currently extended. Scrolling DOWN the
+  // list retracts it behind the dock; scrolling back up — or any state change
+  // that re-frames the list — brings it home. The bulk-action bar is exempt:
+  // it is the only way out of a multi-select, so it never hides.
+  bool _barShown = true;
+
+  bool _onUserScroll(UserScrollNotification n) {
+    if (_selectionMode || n.metrics.axis != Axis.vertical) return false;
+    if (n.direction == ScrollDirection.reverse && _barShown) {
+      setState(() => _barShown = false);
+    } else if (n.direction == ScrollDirection.forward && !_barShown) {
+      setState(() => _barShown = true);
+    }
+    return false;
+  }
 
   @override
   void initState() {
@@ -133,6 +182,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
         _expandedId = null;
         _selectionMode = false;
         _selectedIds.clear();
+        _barShown = true;
       });
     }
   }
@@ -154,6 +204,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
       _expandedId = null;
       _selectionMode = false;
       _selectedIds.clear();
+      _barShown = true;
     });
   }
 
@@ -191,6 +242,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
     setState(() {
       _selectionMode = false;
       _selectedIds.clear();
+      // Leaving a multi-select re-frames the bottom edge — bring the Seats CTA
+      // back rather than leaving the edge empty until the next upward scroll.
+      _barShown = true;
     });
   }
 
@@ -212,6 +266,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
       _selectionMode = true;
       _expandedId = null;
       _selectedIds.add(id);
+      _barShown = true;
     });
   }
 
@@ -258,7 +313,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
           // reported only "3 failed" gave the agent nothing to act on — if
           // every send is failing for one reason (a template rejection, a
           // number off the allowed list), that reason is the whole story.
-          waError ??= firstWaError(result);
+          waError ??= waFailureAppendix(result);
         }
       } catch (e) {
         failed++;
@@ -354,7 +409,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
         );
         waSent = wa.sent;
         waFailed = wa.failed;
-        waError = firstWaError(wa);
+        waError = waFailureAppendix(wa);
       } catch (e) {
         waFailed = selectedPassengers.length;
         waError = '\n$e';
@@ -531,8 +586,14 @@ class _RequestsScreenState extends State<RequestsScreen> {
                 Positioned(
                   left: 0,
                   right: 0,
-                  bottom: 0,
-                  child: _selectionMode
+                  // Lifted clear of the shell's floating dock instead of
+                  // stacking on top of it (see _kBarLift).
+                  bottom: _kBarLift,
+                  child: _RetractingBar(
+                    // The bulk bar owns the edge outright while selecting; only
+                    // the Seats CTA gets out of the way on a downward scroll.
+                    shown: _selectionMode || _barShown,
+                    child: _selectionMode
                       ? _BulkActionBar(
                           c: c,
                           count: _selectedIds.length,
@@ -562,6 +623,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                       : (hasRequests
                           ? _AssignmentCTA(tour: selectedTour, c: c)
                           : const SizedBox.shrink()),
+                  ),
                 ),
             ],
           );
@@ -627,6 +689,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
             onChanged: (i) => setState(() {
               _selectedTourIndex = i;
               _expandedId = null;
+              _barShown = true;
               _exitSelection();
             }),
             items: [
@@ -650,6 +713,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
             onChanged: (i) => setState(() {
               _filter = _RequestFilter.values[i];
               _expandedId = null;
+              _barShown = true;
             }),
             items: [
               UgamTabItem(
@@ -673,10 +737,16 @@ class _RequestsScreenState extends State<RequestsScreen> {
         ),
         const SizedBox(height: UgamSpacing.lg),
         Expanded(
-          child: RefreshIndicator(
-            color: c.accent,
-            onRefresh: tourCtrl.refreshTours,
-            child: passengers.isEmpty
+          // Scroll direction drives the floating action bar's retract/extend
+          // so the list never has to fight two slabs for the bottom edge.
+          child: NotificationListener<UserScrollNotification>(
+            onNotification: _onUserScroll,
+            child: RefreshIndicator(
+              // Chrome, not ownership — the pull spinner is neutral ink2 in
+              // every screen, so it never changes hue between tabs.
+              color: c.ink2,
+              onRefresh: tourCtrl.refreshTours,
+              child: passengers.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(
                       parent: BouncingScrollPhysics(),
@@ -744,9 +814,10 @@ class _RequestsScreenState extends State<RequestsScreen> {
                       UgamSpacing.gutter,
                       0,
                       UgamSpacing.gutter,
-                      _selectionMode
-                          ? _listBottomPadSelection
-                          : _listBottomPadNormal,
+                      // A populated list always carries a bottom bar (the
+                      // Seats CTA, or the bulk bar while selecting), so it
+                      // reserves the bar AND the dock beneath it.
+                      _listBottomInset(context, withBar: true),
                     ),
                     itemCount: passengers.length,
                     separatorBuilder: (_, _) =>
@@ -773,9 +844,46 @@ class _RequestsScreenState extends State<RequestsScreen> {
                       return _swipeWrap(selectedTour, p, card);
                     },
                   ),
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The screen's single bottom slab, extended or retracted.
+///
+/// The Requests tab floats its own action bar (Seats CTA / bulk-action bar)
+/// over a shell that already floats the dock nav at the same edge, which is
+/// what made the bottom of this screen read as two bars fighting each other.
+/// The bar is positioned ABOVE the dock (see `_kBarLift`) and slides down
+/// behind it whenever the agent scrolls into the list, so only one piece of
+/// chrome is on the edge at any moment. Hidden means genuinely inert — the
+/// retracted bar takes no taps in the dock's strip.
+class _RetractingBar extends StatelessWidget {
+  final bool shown;
+  final Widget child;
+
+  const _RetractingBar({required this.shown, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !shown,
+      child: AnimatedSlide(
+        duration: UgamMotion.dock,
+        curve: UgamMotion.easeOut,
+        // A full self-height slide parks it entirely under the dock capsule,
+        // which paints above the body and hides the last few pixels.
+        offset: shown ? Offset.zero : const Offset(0, 1),
+        child: AnimatedOpacity(
+          duration: UgamMotion.dock,
+          curve: UgamMotion.easeOut,
+          opacity: shown ? 1 : 0,
+          child: child,
+        ),
+      ),
     );
   }
 }
@@ -915,18 +1023,45 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     // one-way-only opening — the common round-trip case stays clean.
     final anyOneWay = typeFree.any((t) => t.$2.hasOneWay);
 
+    // Capacity has to MEAN something at a glance, so the banner's tone is
+    // driven by FILL PRESSURE rather than by a flat "has a bus / doesn't"
+    // switch: mint while there is real room, champagne once the bus is nearly
+    // gone, red when it is full. The old mapping was mint-or-`ink3`, which
+    // painted a full bus in tertiary grey — the least alarming colour in the
+    // set for the one state that stops the agent taking bookings.
+    //
+    // NOTE (V-06): the BAR itself still fills in neutral `ink2`, because that
+    // fill lives inside the shared `UgamCapacityMeter` and is not this
+    // screen's to change. Everything the banner owns — icon, glyph, card tone
+    // and the pressure chip below — now carries the semantic colour instead.
+    const double kTightFrac = 0.85;
+    final double fillFrac = cap.capacity <= 0
+        ? 0
+        : (cap.occupied / cap.capacity).clamp(0.0, 1.0);
+    final bool full = !noBus && free <= 0;
+    final bool tight = !noBus && !full && fillFrac >= kTightFrac;
+
     // The bar is a quiet soft card — surface, radius, shadow and press ink all
     // come from [UgamCard] so it reads as the same card family as the request
-    // rows below it (it was the only card-shaped surface on the screen that
-    // wasn't one). Only the no-bus *attention* state tints the whole surface
-    // (the warm card tone); a healthy/full bus stays the neutral card and lets
-    // the tone live in the icon, meter and status text instead.
+    // rows below it. The surface itself only tints for the two states that
+    // need the whole strip to shout: no bus at all (warm) and a full bus
+    // (danger). "Tight" stays a neutral card and speaks through the chip.
     final (Color tone, IconData icon, String statusLabel) = noBus
         ? (c.warm, Icons.directions_bus_outlined,
             tr('requests.capacity.no_buses'))
-        : free > 0
-        ? (c.good, Icons.event_seat_outlined, tr('requests.capacity.free'))
-        : (c.ink3, Icons.event_seat_outlined, tr('requests.capacity.free'));
+        : full
+            ? (c.danger, Icons.event_seat_rounded, tr('capacity.full'))
+            : tight
+                ? (c.accent, Icons.event_seat_rounded,
+                    tr('requests.capacity.tight'))
+                : (c.good, Icons.event_seat_outlined,
+                    tr('requests.capacity.free'));
+
+    final UgamCardTone cardTone = noBus
+        ? UgamCardTone.warm
+        : full
+            ? UgamCardTone.danger
+            : UgamCardTone.none;
 
     // Decorative glyphs in this banner must shrink WITH the meter text beside
     // them, otherwise they dominate the number they annotate at 0.85x.
@@ -941,7 +1076,7 @@ class _CapacityBannerState extends State<_CapacityBanner> {
           HapticFeedback.selectionClick();
           setState(() => _expanded = !_expanded);
         },
-        tone: noBus ? UgamCardTone.warm : UgamCardTone.none,
+        tone: cardTone,
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.lg,
           vertical: UgamSpacing.md,
@@ -972,6 +1107,18 @@ class _CapacityBannerState extends State<_CapacityBanner> {
                         )
                       : UgamCapacityMeter.tour(cap),
                 ),
+                // Pressure chip — the semantic read the neutral meter bar
+                // cannot give. Shown ONLY for the two states worth
+                // interrupting a scan for, so a healthy bus stays quiet.
+                if (!noBus && (full || tight)) ...[
+                  const SizedBox(width: UgamSpacing.sm),
+                  UgamReqChip(
+                    label: statusLabel.toUpperCase(),
+                    variant: full
+                        ? UgamChipVariant.danger
+                        : UgamChipVariant.accent,
+                  ),
+                ],
                 const SizedBox(width: UgamSpacing.sm),
                 Icon(
                   _expanded
@@ -1246,6 +1393,114 @@ class _RequestCard extends StatelessWidget {
     required this.onLongPress,
     required this.onSelectTap,
   });
+
+  /// Initials for the leading disc — one glyph per name word, max two.
+  /// Built from runes, not `[0]`, so a Gujarati or Devanagari name yields its
+  /// real first character instead of half a code point.
+  String get _initials {
+    final parts = passenger.displayName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    final first = String.fromCharCode(parts.first.runes.first);
+    if (parts.length == 1) return first.toUpperCase();
+    return '$first${String.fromCharCode(parts[1].runes.first)}'.toUpperCase();
+  }
+
+  /// The row's state as ONE chip label + variant.
+  ///
+  /// State used to be encoded by painting the seat-summary subtitle amber,
+  /// which broke the accent's "this is yours" contract (V-09) AND left New /
+  /// Accepted / Allotted rows structurally identical — 48 of them in a column
+  /// with nothing but the words to tell them apart. Colour now lives on the
+  /// chip and the leading disc; the subtitle drops to plain secondary ink.
+  ///
+  /// Labels reuse the tab vocabulary (`requests.filter.*`) on purpose: those
+  /// strings are already length-tuned to survive four abreast in Gujarati, so
+  /// they can never blow out the row's right cluster.
+  (String, UgamChipVariant) get _status {
+    if (passenger.isCancelRequested) {
+      // Warm, matching the full "cancellation requested" chip the expanded
+      // body already renders — one state, one colour.
+      return (tr('requests.status.cancel_short'), UgamChipVariant.warm);
+    }
+    if (passenger.isFullyAssigned) {
+      return (tr('requests.filter.assigned'), UgamChipVariant.good);
+    }
+    if (passenger.isPartiallyAssigned) {
+      return (tr('requests.status.partial'), UgamChipVariant.warm);
+    }
+    if (passenger.isConfirmed) {
+      return (tr('requests.filter.confirmed'), UgamChipVariant.good);
+    }
+    if (passenger.isWaitlisted) {
+      return (tr('requests.filter.waitlist'), UgamChipVariant.warm);
+    }
+    return (tr('requests.filter.new'), UgamChipVariant.neutral);
+  }
+
+  /// (fill, ink) for a chip variant. The leading disc wears the same pair the
+  /// status chip does, so one glance down the left rail reads every row's
+  /// state without reading a single word.
+  (Color, Color) _tonal(UgamChipVariant v) => switch (v) {
+        UgamChipVariant.accent => (c.accentFill, c.accent),
+        UgamChipVariant.warm => (c.warmFill, c.warm),
+        UgamChipVariant.good => (c.goodFill, c.good),
+        UgamChipVariant.danger => (c.dangerFill, c.danger),
+        UgamChipVariant.neutral => (c.cardElev, c.ink2),
+      };
+
+  /// Leading disc: the passenger's initials normally, the selection check
+  /// while multi-selecting. Both are the same diameter so entering selection
+  /// swaps the glyph without reflowing the row. Decorative (the whole card is
+  /// the tap target), hence [UgamScale.px] rather than `tap`.
+  Widget _leadingDisc(BuildContext context, UgamChipVariant variant) {
+    final double d = UgamScale.px(context, 38);
+    if (selectionMode) {
+      return Container(
+        width: d,
+        height: d,
+        decoration: BoxDecoration(
+          // Tonal, not a solid accent disc: selecting five rows used to put
+          // six solid coppers on screen (five discs + the bulk bar's
+          // Confirm), so the bar's Confirm — the one action the bar exists
+          // for — stopped being the eye's landing point.
+          color: selected ? c.accentFill : c.cardElev,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? c.accent : c.border,
+            width: 1.5,
+          ),
+        ),
+        alignment: Alignment.center,
+        child: selected
+            ? Icon(
+                Icons.check_rounded,
+                size: UgamScale.px(context, 18),
+                color: c.accent,
+              )
+            : null,
+      );
+    }
+    final (bg, fg) = _tonal(variant);
+    return Container(
+      width: d,
+      height: d,
+      decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.xs),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          _initials,
+          maxLines: 1,
+          style: UgamText.bodyStrong.copyWith(color: fg),
+        ),
+      ),
+    );
+  }
 
   String _timeAgo(DateTime dt) {
     final diff = DateTime.now().difference(dt);
@@ -1553,30 +1808,7 @@ class _RequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Selection mode keeps a leading checkbox; normal mode drops the avatar so
-    // the name leads the row.
-    final Widget? checkbox = selectionMode
-        ? Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              // Tonal, not a solid accent disc: selecting five rows used to put
-              // six solid coppers on screen (five discs + the bulk bar's
-              // Confirm), so the bar's Confirm — the one action the bar exists
-              // for — stopped being the eye's landing point.
-              color: selected ? c.accentFill : c.cardElev,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: selected ? c.accent : c.border,
-                width: 1.5,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: selected
-                ? Icon(Icons.check_rounded, size: 14, color: c.accent)
-                : null,
-          )
-        : null;
+    final (statusLabel, statusVariant) = _status;
 
     // Attention edge: a pending customer cancellation gets a warm left edge so
     // it pops during a scan; a selected row keeps the accent edge.
@@ -1598,36 +1830,30 @@ class _RequestCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             // ── Collapsed header (always shown) ──
+            //
+            // Two clusters, not a spreadsheet line. LEFT = who: the initial
+            // disc, the name, and the seat summary with its indicator glyphs
+            // hugging it. RIGHT = what state: the status chip on the name's
+            // line, the age under it. The old row put the summary in an
+            // `Expanded` and pushed the glyphs to the far edge, which is what
+            // opened the wide dead gap through the middle of every row.
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (checkbox != null) ...[
-                  checkbox,
-                  const SizedBox(width: UgamSpacing.sm),
-                ],
+                _leadingDisc(context, statusVariant),
+                const SizedBox(width: UgamSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        children: [
-                          // 2 lines before ellipsis — app-wide name rule, see
-                          // UgamRequestRow.
-                          Expanded(
-                            child: Text(
-                              passenger.displayName,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: UgamText.titleS.copyWith(color: c.ink),
-                            ),
-                          ),
-                          const SizedBox(width: UgamSpacing.sm),
-                          Text(
-                            _timeAgo(passenger.createdAt),
-                            style:
-                                UgamText.caption.copyWith(color: c.ink3),
-                          ),
-                        ],
+                      // 2 lines before ellipsis — app-wide name rule, see
+                      // UgamRequestRow.
+                      Text(
+                        passenger.displayName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: UgamText.titleS.copyWith(color: c.ink),
                       ),
                       // Line 2 — seat summary + a Material-icon indicator strip
                       // (priority / group / pickup / note / one-way). Rendered
@@ -1642,18 +1868,22 @@ class _RequestCard extends StatelessWidget {
                           padding: const EdgeInsets.only(top: 2),
                           child: Row(
                             children: [
-                              Expanded(
-                                child: Text(
-                                  summary,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: UgamText.caption.copyWith(
-                                    color: passenger.isPartiallyAssigned
-                                        ? c.warm
-                                        : c.accent,
+                              if (summary.isNotEmpty)
+                                // Flexible, not Expanded: the glyphs sit right
+                                // after the text instead of being flung to the
+                                // opposite margin.
+                                Flexible(
+                                  child: Text(
+                                    summary,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    // ink2, never the accent. Amber means
+                                    // "this is yours" — it is not a subtitle
+                                    // colour (V-09). State is the chip's job.
+                                    style: UgamText.caption
+                                        .copyWith(color: c.ink2),
                                   ),
                                 ),
-                              ),
                               ...indicators,
                             ],
                           ),
@@ -1661,6 +1891,26 @@ class _RequestCard extends StatelessWidget {
                       }),
                     ],
                   ),
+                ),
+                const SizedBox(width: UgamSpacing.sm),
+                // Right cluster — the row's state and its age, both flush to
+                // the margin so the row has two anchors instead of one long
+                // empty middle.
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    UgamReqChip(
+                      label: statusLabel.toUpperCase(),
+                      variant: statusVariant,
+                    ),
+                    const SizedBox(height: UgamSpacing.xs),
+                    Text(
+                      _timeAgo(passenger.createdAt),
+                      maxLines: 1,
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1678,10 +1928,15 @@ class _RequestCard extends StatelessWidget {
       ),
     );
 
-    return GestureDetector(
+    // Same gestures as before, plus the press scale + button semantics the
+    // shared wrapper ships. `haptic: false` because both callbacks already
+    // fire their own (selectionClick on select, mediumImpact on long-press) —
+    // letting the wrapper add its own would double-buzz every selection.
+    return UgamTappable(
       onLongPress: selectionMode ? null : onLongPress,
       onTap: selectionMode ? onSelectTap : onToggleExpand,
-      behavior: HitTestBehavior.opaque,
+      haptic: false,
+      semanticLabel: passenger.displayName,
       child: card,
     );
   }
@@ -1783,7 +2038,7 @@ class _RequestActions {
           // Carry Meta's own rejection text. Dropping it here is what made a
           // refused re-notify look like nothing had happened at all.
           AppSnackBar.error(
-            '${tr('requests.snack.confirm_error')}${firstWaError(result)}',
+            '${tr('requests.snack.confirm_error')}${waFailureAppendix(result)}',
           );
         }
       } catch (e) {

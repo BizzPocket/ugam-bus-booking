@@ -17,6 +17,10 @@ import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_outbound.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
+// `displayPhone` — the shared "strip to a dialable 10 digits" rule, so the
+// number the organiser is told to call reads the same here as on every chart.
+import '../utils/seat_grid_placement.dart' show displayPhone;
+import '../utils/wa_error_text.dart';
 import '../utils/wa_param_error_text.dart';
 
 /// Notify tab — lock gate + post-lock notification tracker.
@@ -39,9 +43,161 @@ class NotifyScreen extends StatefulWidget {
 
 enum _NotifyFilter { all, pending, notified }
 
+// ─── Pure decision logic ──────────────────────────────────────────────
+//
+// Everything below decides WHO gets a paid WhatsApp message and WHEN they are
+// considered done. It is deliberately pure + top-level so each rule can be
+// pinned by a unit test rather than only by driving the widget — see
+// test/screens/notify_decisions_test.dart.
+
+/// Why the Notify screen has (or has not) a tour to work on.
+@visibleForTesting
+enum NotifyTourState {
+  /// A tour is resolved and can be notified.
+  ok,
+
+  /// Legacy global mode with no active tour to fall back to.
+  noActiveTours,
+
+  /// The requested tour exists, but the trip is over — nothing is sent from a
+  /// finished tour.
+  completed,
+
+  /// The requested tour is not in the roster at all (deleted, or not loaded).
+  missing,
+}
+
+/// Which tour the Notify screen is about, given every tour the controller holds
+/// and the currently [selectedId] — the tour this screen was scoped to, or the
+/// one the in-screen selector picked. Null [selectedId] is the legacy global
+/// mode, which may pick the newest active tour for itself.
+///
+/// *** WHY THERE IS NO FALLBACK ***
+/// This used to end in `selected ?? activeTours.first`. Completed tours are
+/// filtered out of the candidate list, and the tour-detail "Lock / Send" row
+/// pushes this screen for a COMPLETED tour — so opening Notify from a finished
+/// trip silently RETARGETED whichever active tour happened to sort first, and
+/// the next tap would have messaged that tour's passengers. Quietly swapping
+/// one set of real people for another is not a recoverable mistake, so an
+/// unresolvable request yields null and the screen says so out loud.
+@visibleForTesting
+({Tour? tour, NotifyTourState state, List<Tour> active}) resolveNotifyTour({
+  required List<Tour> allTours,
+  required String? selectedId,
+}) {
+  final active =
+      allTours.where((t) => t.status != TourStatus.completed).toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  if (selectedId == null) {
+    return active.isEmpty
+        ? (tour: null, state: NotifyTourState.noActiveTours, active: active)
+        : (tour: active.first, state: NotifyTourState.ok, active: active);
+  }
+  for (final t in active) {
+    if (t.id == selectedId) {
+      return (tour: t, state: NotifyTourState.ok, active: active);
+    }
+  }
+  return (
+    tour: null,
+    state: allTours.any((t) => t.id == selectedId)
+        ? NotifyTourState.completed
+        : NotifyTourState.missing,
+    active: active,
+  );
+}
+
+/// The passenger ids a completed send may stamp as notified.
+///
+/// *** WHY NOT PHONE NUMBERS ***
+/// This used to collect the phone numbers that succeeded and mark every rider
+/// in the batch whose number matched. A family booked under ONE handset is
+/// several passenger rows sharing that number, so a single success stamped the
+/// whole family — including rows whose message was never composed, and rows
+/// that were in the batch and FAILED. A rider wrongly stamped notified vanishes
+/// from every later "needs notifying" surface and is never contacted again.
+///
+/// Identity is the passenger id, which each result already carries
+/// ([WaRecipientResult.passengerId], set index-aligned by
+/// [WhatsAppCloudService.send]). Two rules keep this biased toward surfacing:
+///   * a result with no attributable id stamps nobody;
+///   * a rider recorded BOTH ok and failed (a duplicate row, a retry folded
+///     into one batch) stays pending.
+/// A rider messaged twice is a nuisance; a rider silently marked done never
+/// hears from us at all.
+@visibleForTesting
+Set<String> notifiedPassengerIds({
+  required WaSendResult result,
+  required Set<String> requested,
+}) {
+  final ok = <String>{};
+  final bad = <String>{};
+  for (final r in result.results) {
+    final id = r.passengerId;
+    if (id == null || !requested.contains(id)) continue;
+    (r.ok ? ok : bad).add(id);
+  }
+  return ok.difference(bad);
+}
+
+/// How one rider reads in the post-lock tracker.
+@visibleForTesting
+enum NotifyRowState {
+  /// Holds seats their last notification did not cover — send them the chart.
+  pending,
+
+  /// Holds seats and has been told about exactly these ones.
+  notified,
+
+  /// Was told about seats that have since been TAKEN AWAY. No WhatsApp
+  /// template fits this, so it is a call-them task, never an automatic send.
+  seatRemoved,
+}
+
+/// Classify one rider for the tracker. Pure, so the three-way rule can be
+/// pinned without a widget.
+@visibleForTesting
+NotifyRowState notifyRowState(Passenger p) {
+  if (p.seatsRemovedSinceNotified) return NotifyRowState.seatRemoved;
+  return p.seatsChangedSinceNotified
+      ? NotifyRowState.pending
+      : NotifyRowState.notified;
+}
+
+/// Everyone the post-lock tracker must show for [tour], in roster order.
+///
+/// Riders holding a seat, PLUS riders whose seat was withdrawn AFTER they were
+/// notified. That second group used to be filtered out of every notify surface
+/// by `assignedSeats.isNotEmpty`: they hold a WhatsApp message naming a berth
+/// that no longer exists, nothing would ever correct it, and they turn up on
+/// the day expecting to travel.
+@visibleForTesting
+List<Passenger> notifyRoster(Tour tour) => [
+      for (final p in tour.passengers)
+        if (p.assignedSeats.isNotEmpty || p.seatsRemovedSinceNotified) p,
+    ];
+
 class _NotifyScreenState extends State<NotifyScreen> {
-  /// Passenger ids already sent in this session. Reset on app restart.
-  final Set<String> _sentIds = <String>{};
+  /// Whether this rider's CURRENT seats have been sent to them.
+  ///
+  /// *** WHY NOT A SESSION SET ***
+  /// This used to be a `Set<String> _sentIds` populated as messages went out
+  /// and cleared on restart or tour switch. After any reload the whole roster
+  /// read "Pending" and the counts read 0-sent — while the CTA, which already
+  /// read the persisted signature, correctly said there was nothing to send.
+  /// An organiser trusting the list would re-broadcast PAID WhatsApp messages
+  /// to riders who had already received them.
+  ///
+  /// `seatsChangedSinceNotified` is persisted, survives a restart, and flips
+  /// back on the moment a locked tour's seats are edited. `markSeatsNotified`
+  /// writes it optimistically, so a just-sent row updates without waiting for
+  /// the server — which is the only thing the session set was still buying.
+  ///
+  /// Routed through [notifyRowState] so a rider whose seat was WITHDRAWN after
+  /// notifying can never read "Sent": their signature no longer matches
+  /// anything they hold, and they still need a phone call.
+  bool _isSent(Passenger p) => notifyRowState(p) == NotifyRowState.notified;
 
   final TextEditingController _searchCtrl = TextEditingController();
   bool _searchVisible = false;
@@ -76,8 +232,6 @@ class _NotifyScreenState extends State<NotifyScreen> {
     });
   }
 
-  void _resetSent() => setState(_sentIds.clear);
-
   // ── Build ─────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -88,17 +242,12 @@ class _NotifyScreenState extends State<NotifyScreen> {
       body: SafeArea(
         bottom: false,
         child: Obx(() {
-          final activeTours =
-              tourCtrl.tours
-                  .where((t) => t.status != TourStatus.completed)
-                  .toList()
-                ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-          final selected = _selectedTourId != null
-              ? activeTours.firstWhereOrNull((t) => t.id == _selectedTourId)
-              : null;
-          final Tour? tour =
-              selected ?? (activeTours.isEmpty ? null : activeTours.first);
+          final resolved = resolveNotifyTour(
+            allTours: tourCtrl.tours,
+            selectedId: _selectedTourId,
+          );
+          final activeTours = resolved.active;
+          final Tour? tour = resolved.tour;
 
           if (tour == null) {
             return Column(
@@ -109,24 +258,20 @@ class _NotifyScreenState extends State<NotifyScreen> {
                   onBack: () => Navigator.of(context).maybePop(),
                 ),
                 Expanded(
-                  child: UgamEmpty(
-                    icon: Icons.notifications_off_rounded,
-                    title: tr('notify.no_active_tours_title'),
-                    body: tr('notify.no_active_tours_body'),
-                  ),
+                  child: _unresolvedEmpty(resolved.state, activeTours),
                 ),
               ],
             );
           }
 
           final isLocked = tour.status == TourStatus.locked;
-          final assigned = tour.passengers
-              .where((p) => p.assignedSeats.isNotEmpty)
-              .toList();
-          final sentCount = assigned
-              .where((p) => _sentIds.contains(p.id))
-              .length;
-          final pendingCount = assigned.length - sentCount;
+          // Riders holding a seat AND riders whose seat was withdrawn after
+          // they were notified — the second group used to be dropped here.
+          final roster = notifyRoster(tour);
+          final stranded =
+              roster.where((p) => p.seatsRemovedSinceNotified).toList();
+          final sentCount = roster.where(_isSent).length;
+          final pendingCount = roster.length - sentCount;
 
           final busInfo = _resolveBusInfo(tour);
 
@@ -137,12 +282,9 @@ class _NotifyScreenState extends State<NotifyScreen> {
                 showBack: Navigator.canPop(context),
                 onBack: () => Navigator.of(context).maybePop(),
                 actions: [
-                  if (isLocked && _sentIds.isNotEmpty)
-                    UgamAppBarAction(
-                      icon: Icons.refresh_rounded,
-                      onTap: _resetSent,
-                      tooltip: tr('notify.reset_sent'),
-                    ),
+                  // The "reset sent" action is gone with the session set it
+                  // reset. Re-broadcasting is the "Resend all" CTA, which does
+                  // it for real rather than by forgetting.
                   if (isLocked)
                     UgamAppBarAction(
                       icon: _searchVisible
@@ -182,7 +324,6 @@ class _NotifyScreenState extends State<NotifyScreen> {
                   selectedId: tour.id,
                   onSelect: (id) => setState(() {
                     _selectedTourId = id;
-                    _sentIds.clear();
                     _filter = _NotifyFilter.all;
                   }),
                 ),
@@ -191,7 +332,8 @@ class _NotifyScreenState extends State<NotifyScreen> {
                 child: isLocked
                     ? _buildTracker(
                         tour: tour,
-                        assigned: assigned,
+                        roster: roster,
+                        stranded: stranded,
                         sentCount: sentCount,
                         pendingCount: pendingCount,
                         busInfo: busInfo,
@@ -207,16 +349,13 @@ class _NotifyScreenState extends State<NotifyScreen> {
       // behaves like every other action screen and respects the keyboard inset.
       // Its own Obx mirrors the body's derived state.
       bottomNavigationBar: Obx(() {
-        final activeTours =
-            tourCtrl.tours
-                .where((t) => t.status != TourStatus.completed)
-                .toList()
-              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        final selected = _selectedTourId != null
-            ? activeTours.firstWhereOrNull((t) => t.id == _selectedTourId)
-            : null;
-        final Tour? tour =
-            selected ?? (activeTours.isEmpty ? null : activeTours.first);
+        // Same resolution as the body — including its refusal to substitute a
+        // different tour — so the CTA can never target a tour the list above is
+        // not showing.
+        final Tour? tour = resolveNotifyTour(
+          allTours: tourCtrl.tours,
+          selectedId: _selectedTourId,
+        ).tour;
         // Not SizedBox.shrink: a non-null zero-height bar still strips the
         // body's bottom inset (Scaffold checks for non-null, not for height),
         // so reserve the system inset whenever the CTA is absent.
@@ -226,6 +365,9 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
         final isLocked = tour.status == TourStatus.locked;
         if (isLocked) {
+          // Seated riders only. A rider whose seat was WITHDRAWN has no chart
+          // to build, so no bulk send can reach them — the tracker gives them
+          // their own row and a call-them action instead.
           final seated = tour.passengers
               .where((p) => p.assignedSeats.isNotEmpty)
               .toList();
@@ -273,16 +415,57 @@ class _NotifyScreenState extends State<NotifyScreen> {
     );
   }
 
+  // ── Unresolved-tour empty state ────────────────────────────────
+  /// What to show when [resolveNotifyTour] could not produce a tour. Each state
+  /// is named explicitly — the screen used to paper over "this tour is
+  /// finished" by quietly switching to a different tour entirely.
+  Widget _unresolvedEmpty(NotifyTourState state, List<Tour> active) {
+    final (String title, String body) = switch (state) {
+      NotifyTourState.completed => (
+          tr('notify.tour_completed_title'),
+          tr('notify.tour_completed_body'),
+        ),
+      NotifyTourState.missing => (
+          tr('notify.tour_unavailable_title'),
+          tr('notify.tour_unavailable_body'),
+        ),
+      _ => (
+          tr('notify.no_active_tours_title'),
+          tr('notify.no_active_tours_body'),
+        ),
+    };
+    // Legacy global mode: the selector lives inside the resolved branch, so a
+    // tour that completed while selected would otherwise be a dead end with no
+    // way back to the tours that CAN be notified.
+    final canReset = !_scoped && _selectedTourId != null && active.isNotEmpty;
+    return UgamEmpty(
+      icon: Icons.notifications_off_rounded,
+      title: title,
+      body: body,
+      cta: canReset
+          ? UgamCTA(
+              label: tr('notify.choose_another_tour'),
+              leadingIcon: Icons.list_rounded,
+              onPressed: () => setState(() {
+                _selectedTourId = null;
+                _filter = _NotifyFilter.all;
+              }),
+            )
+          : null,
+    );
+  }
+
   // ── Tracker (post-lock) ────────────────────────────────────────
   Widget _buildTracker({
     required Tour tour,
-    required List<Passenger> assigned,
+    required List<Passenger> roster,
+    required List<Passenger> stranded,
     required int sentCount,
     required int pendingCount,
     required _BusInfo busInfo,
     required UgamColorSet c,
   }) {
-    if (assigned.isEmpty) {
+    if (roster.isEmpty) {
       return UgamEmpty(
         icon: Icons.event_seat_outlined,
         title: tr('notify.empty_no_seats'),
@@ -292,11 +475,11 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
     final q = _query.toLowerCase();
     final baseByFilter = switch (_filter) {
-      _NotifyFilter.all => assigned,
-      _NotifyFilter.pending =>
-        assigned.where((p) => !_sentIds.contains(p.id)).toList(),
-      _NotifyFilter.notified =>
-        assigned.where((p) => _sentIds.contains(p.id)).toList(),
+      _NotifyFilter.all => roster,
+      // "Pending" is everyone who still needs something from the organiser —
+      // a chart to send, or a phone call about a withdrawn seat.
+      _NotifyFilter.pending => roster.where((p) => !_isSent(p)).toList(),
+      _NotifyFilter.notified => roster.where(_isSent).toList(),
     };
     final filtered = q.isEmpty
         ? baseByFilter
@@ -321,7 +504,15 @@ class _NotifyScreenState extends State<NotifyScreen> {
       children: [
         _HeroSummaryCard(tour: tour, busInfo: busInfo, c: c),
         const SizedBox(height: UgamSpacing.md),
-        _ProgressCard(c: c, sent: sentCount, total: assigned.length),
+        // Counted over the WHOLE roster, so a stranded rider keeps the bar off
+        // 100% and the card off "Every passenger has been notified" — which it
+        // used to claim while someone sat holding a message about a seat that
+        // had been taken back.
+        _ProgressCard(c: c, sent: sentCount, total: roster.length),
+        if (stranded.isNotEmpty) ...[
+          const SizedBox(height: UgamSpacing.md),
+          _SeatRemovedCard(c: c, count: stranded.length),
+        ],
         if (tour.buses.isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.md),
           _BusMessageCard(c: c, onTap: () => _openBusMessageComposer(tour)),
@@ -331,37 +522,63 @@ class _NotifyScreenState extends State<NotifyScreen> {
           currentIndex: _filter.index,
           onChanged: (i) => setState(() => _filter = _NotifyFilter.values[i]),
           items: [
-            UgamTabItem(label: tr('notify.filter_all'), count: assigned.length),
+            UgamTabItem(label: tr('notify.filter_all'), count: roster.length),
             UgamTabItem(label: tr('notify.filter_pending'), count: pendingCount),
             UgamTabItem(label: tr('notify.filter_notified'), count: sentCount),
           ],
         ),
         const SizedBox(height: UgamSpacing.md),
+        // A dead end with no way out was a bare sentence. This state is only
+        // ever reachable BECAUSE of a filter or a query (an empty roster is
+        // caught above), so there is always exactly one useful action — undo
+        // whichever one is hiding the rows.
         if (filtered.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.md),
-            child: Center(
-              child: Text(
-                _query.isNotEmpty
-                    ? tr('notify.no_matches', namedArgs: {'query': _query})
-                    : tr('notify.nothing_here'),
-                style: UgamText.body.copyWith(color: c.ink2),
-              ),
-            ),
+            padding: const EdgeInsets.symmetric(vertical: UgamSpacing.xl),
+            child: _query.isNotEmpty
+                ? UgamEmpty(
+                    icon: Icons.search_off_rounded,
+                    title: tr('notify.no_matches', namedArgs: {
+                      'query': _query,
+                    }),
+                    cta: UgamCTA(
+                      label: tr('notify.clear_search'),
+                      leadingIcon: Icons.close_rounded,
+                      // Clear the text but LEAVE the field open — the agent is
+                      // mid-search and almost always wants to retype, not to
+                      // lose the search bar as well.
+                      onPressed: () => setState(() {
+                        _searchCtrl.clear();
+                        _query = '';
+                      }),
+                    ),
+                  )
+                : UgamEmpty(
+                    icon: Icons.filter_alt_off_rounded,
+                    title: tr('notify.nothing_here'),
+                    cta: UgamCTA(
+                      label: tr('notify.show_all'),
+                      leadingIcon: Icons.list_rounded,
+                      onPressed: () =>
+                          setState(() => _filter = _NotifyFilter.all),
+                    ),
+                  ),
           )
         else
           for (var i = 0; i < filtered.length; i++) ...[
             _NotifyRow(
               passenger: filtered[i],
               busInfo: busInfo,
-              isSent: _sentIds.contains(filtered[i].id),
+              state: notifyRowState(filtered[i]),
               c: c,
               // Repeat the EXACT after-lock message to just this one person:
               // the `seat_allotment` Cloud API template (highlighted seat-chart
               // image header + boarding/departure/handler body) — the same
               // payload the bulk "send to all pending" CTA fires, scoped to one
               // id. Not the old "Ticket Confirmed!" deep-link/OS-share caption.
-              onSend: () => _dispatchSeatAllocations(tour, {filtered[i].id}),
+              // A rider whose seat was withdrawn takes the call-them path
+              // instead — there is no template that says that truthfully.
+              onSend: () => _rowAction(tour, filtered[i]),
             ),
             if (i != filtered.length - 1)
               const SizedBox(height: UgamSpacing.tight),
@@ -411,18 +628,20 @@ class _NotifyScreenState extends State<NotifyScreen> {
             children: [
               Row(
                 children: [
+                  // Decorative medallion. It labels a card; it is not a berth
+                  // the agent picked, so it carries no accent — see [Brand].
                   Container(
                     width: UgamScale.px(context, 40),
                     height: UgamScale.px(context, 40),
                     decoration: BoxDecoration(
-                      color: c.accentFill,
+                      color: c.cardElev,
                       borderRadius: BorderRadius.circular(UgamRadius.input),
                     ),
                     alignment: Alignment.center,
                     child: Icon(
                       Icons.lock_outline_rounded,
                       size: UgamScale.px(context, 19),
-                      color: c.accent,
+                      color: c.ink2,
                     ),
                   ),
                   const SizedBox(width: UgamSpacing.md),
@@ -562,6 +781,50 @@ class _NotifyScreenState extends State<NotifyScreen> {
     await _dispatchSeatAllocations(tour, ids);
   }
 
+  /// The per-row action. A seated rider gets their seat chart re-sent; a rider
+  /// whose seat was WITHDRAWN gets the follow-up path instead.
+  Future<void> _rowAction(Tour tour, Passenger p) {
+    if (p.seatsRemovedSinceNotified) return _seatRemovedFollowUp(tour, p);
+    return _dispatchSeatAllocations(tour, {p.id});
+  }
+
+  /// Follow-up for a rider who was told about a seat that has since been taken
+  /// away from them.
+  ///
+  /// *** WHY THIS DOES NOT SEND ANYTHING ***
+  /// No approved template fits, and the near misses are all worse than silence:
+  ///   * `seat_allotment` is built around an image header of the rider's OWN
+  ///     highlighted seat. With no seat there is no chart to render, and
+  ///     [WhatsAppOutbound.sendSeatAllocations] filters them out anyway — the
+  ///     bulk path would report a phantom failure and loop on Retry.
+  ///   * `seat_allocation` / the confirm greeting say the OPPOSITE of the truth
+  ///     ("your seat is confirmed") to someone who has just lost their berth.
+  ///   * `bus_msg` is free text, but it is a per-bus announcement template and
+  ///     inventing wording for a withdrawn seat is not a decision this screen
+  ///     should make on the organiser's behalf.
+  /// So the screen names the person and their number and leaves the words to a
+  /// human voice. Confirming records that they were told, which is the only
+  /// thing that takes them off the list. This is the template gap — until a
+  /// "seat withdrawn" template is approved, it stays a phone call.
+  Future<void> _seatRemovedFollowUp(Tour tour, Passenger p) async {
+    final told = await UgamDialog.confirm(
+      context,
+      title: tr('notify.seat_removed_dialog_title'),
+      message: tr('notify.seat_removed_dialog_body', namedArgs: {
+        'name': p.displayName,
+        'phone': displayPhone(p.phone) ?? p.phone,
+      }),
+      cancelLabel: tr('app.action.cancel'),
+      confirmLabel: tr('notify.seat_removed_mark_told'),
+      confirmIcon: Icons.check_rounded,
+    );
+    if (!told) return;
+    // Stamps the rider's CURRENT (empty) seat signature, so they leave the
+    // tracker and stay gone — unless they are seated again, which starts the
+    // ordinary notify cycle over.
+    await Get.find<TourController>().markSeatsNotified(tour.id, {p.id});
+  }
+
   /// Send the seat-allotment messages to [passengerIds] on [t], showing a live
   /// "preparing X of N" dialog while the charts build + upload (the slow part),
   /// then a result summary. On partial/total failure the summary offers a
@@ -597,18 +860,21 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
     // Mark the successfully-notified passengers so the tracker + pending count
     // update and the "Send to all pending" CTA hides once everyone's done.
-    final okPhones = result.results.where((r) => r.ok).map((r) => r.to).toSet();
+    //
+    // Correlated on PASSENGER IDENTITY, never on the phone number — see
+    // [notifiedPassengerIds] for why a family sharing one handset made the old
+    // phone match silence riders whose message never went out.
     final batch =
         t.passengers.where((p) => passengerIds.contains(p.id)).toList();
-    final justSent = batch
-        .where(
-            (p) => okPhones.contains(WhatsAppCloudService.graphPhone(p.phone)))
-        .map((p) => p.id)
-        .toSet();
+    final justSent =
+        notifiedPassengerIds(result: result, requested: passengerIds);
     if (justSent.isNotEmpty) {
-      setState(() => _sentIds.addAll(justSent));
       // Persist the notified seat signature so a later post-lock edit re-flags
       // ONLY the changed riders for re-notify (survives reload / restart).
+      //
+      // This is also what updates the tracker. `markSeatsNotified` writes the
+      // signature OPTIMISTICALLY, so the rows flip to "Sent" on this frame —
+      // no separate session set to keep in step, and nothing to go stale.
       unawaited(
         Get.find<TourController>().markSeatsNotified(t.id, justSent),
       );
@@ -619,6 +885,15 @@ class _NotifyScreenState extends State<NotifyScreen> {
         tr('notify.alloc_sent_body', namedArgs: {'count': '${result.sent}'}),
         title: tr('notify.alloc_sent_title'),
       );
+      return;
+    }
+
+    // Nothing was even attempted: the send returned no per-recipient outcome at
+    // all (every requested rider turned out to hold no seat, so no chart could
+    // be built). Offering "Retry 1 failed" here loops forever on an empty send,
+    // so name the real state instead.
+    if (result.results.isEmpty && result.sent == 0) {
+      AppSnackBar.error(tr('notify.no_seated_passengers'));
       return;
     }
 
@@ -635,8 +910,8 @@ class _NotifyScreenState extends State<NotifyScreen> {
           ? '${tr('notify.alloc_partial_body', namedArgs: {
               'sent': '${result.sent}',
               'failed': '${failedIds.length}',
-            })}${firstWaError(result)}'
-          : '${tr('notify.alloc_failed_body')}${firstWaError(result)}',
+            })}${waFailureAppendix(result)}'
+          : '${tr('notify.alloc_failed_body')}${waFailureAppendix(result)}',
       cancelLabel: tr('app.action.cancel'),
       confirmLabel:
           tr('notify.alloc_retry', namedArgs: {'count': '${failedIds.length}'}),
@@ -678,14 +953,14 @@ class _NotifyScreenState extends State<NotifyScreen> {
               '${tr('bus_message.partial_body', namedArgs: {
                 'sent': '${result.sent}',
                 'failed': '${result.failed}',
-              })}${firstWaError(result)}',
+              })}${waFailureAppendix(result)}',
               title: tr('bus_message.partial_title'),
             );
           } else if (result.results.isEmpty && result.sent == 0) {
             AppSnackBar.warning(tr('bus_message.no_recipients'));
           } else {
             AppSnackBar.error(
-              '${tr('bus_message.failed_body')}${firstWaError(result)}',
+              '${tr('bus_message.failed_body')}${waFailureAppendix(result)}',
               title: tr('bus_message.failed_title'),
             );
           }
@@ -806,9 +1081,23 @@ class _HeroSummaryCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              UgamStatusDot(
-                label: isLocked ? tr('notify.status_locked') : tour.status.displayName,
-                tone: isLocked ? UgamStatusTone.good : UgamStatusTone.accent,
+              const SizedBox(width: UgamSpacing.sm),
+              // [UgamStatusDot] holds its label in a Flexible and documents
+              // that "all call sites pass bounded width" — this one did not.
+              // As a bare Row child it took unbounded constraints, so a long
+              // Gujarati status could squeeze the title to nothing and then
+              // overflow instead of ellipsising.
+              Flexible(
+                child: UgamStatusDot(
+                  label: isLocked
+                      ? tr('notify.status_locked')
+                      : tour.status.displayName,
+                  // Amber is not a status colour. "Locked" is a genuine
+                  // semantic (done → good); everything before it is just the
+                  // ambient state of an in-progress tour, which is what the
+                  // neutral tone is for.
+                  tone: isLocked ? UgamStatusTone.good : UgamStatusTone.neutral,
+                ),
               ),
             ],
           ),
@@ -897,11 +1186,25 @@ class _InfoCell extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 12, color: c.ink3),
+              Icon(icon, size: 12, color: c.ink2),
               const SizedBox(width: 4),
-              Text(
-                label.toUpperCase(),
-                style: UgamText.micro.copyWith(color: c.ink3),
+              // The label half of a value pair, which is [captionStrong]'s
+              // stated job — not `micro`, whose caps are a no-op in Gujarati,
+              // whose tracking breaks conjuncts, and whose 10px lands at 8.5
+              // on a small phone. captionStrong (12) sits on the documented
+              // script floor and stays a step under the bodyStrong value
+              // below it, so the figure still leads. Emphasis is `ink2`, the
+              // one device that survives a fallback Indic face.
+              //
+              // Flexible + ellipsis because this cell is half a card wide and
+              // the label was an unbounded Row child.
+              Flexible(
+                child: Text(
+                  label,
+                  style: UgamText.captionStrong.copyWith(color: c.ink2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
@@ -935,7 +1238,12 @@ class _ProgressCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final pct = total == 0 ? 0.0 : (sent / total).clamp(0.0, 1.0);
     final done = sent >= total && total > 0;
-    final color = done ? c.good : c.accent;
+    // "Everyone has been told" is a genuine semantic (good). Part-way through
+    // is NOT a warning and not an ownership — it is simply an incomplete bar,
+    // so it fills in ink, the same max-contrast neutral the primary control
+    // uses. Amber is not a progress colour.
+    final barColor = done ? c.good : c.ink;
+    final labelColor = done ? c.good : c.ink2;
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
@@ -944,13 +1252,25 @@ class _ProgressCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                done
-                    ? tr('notify.progress_all_notified')
-                    : tr('notify.progress_label'),
-                style: UgamText.micro.copyWith(color: color),
+              // Expanded (not a bare Text + Spacer): the eyebrow was an
+              // unbounded Row child, so a long translation next to a wide
+              // "128 / 250" had nowhere to give.
+              Expanded(
+                child: Text(
+                  done
+                      ? tr('notify.progress_all_notified')
+                      : tr('notify.progress_label'),
+                  // A section eyebrow over translated copy → [UgamText.label].
+                  // The en values for both keys were authored in CAPS for the
+                  // old micro treatment ("NOTIFICATION PROGRESS") and are now
+                  // sentence case, so English no longer shouts a line that is
+                  // quiet in the caseless scripts.
+                  style: UgamText.label.copyWith(color: labelColor),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: UgamSpacing.sm),
               Text(
                 '$sent / $total',
                 style: UgamText.tabular(
@@ -976,7 +1296,73 @@ class _ProgressCard extends StatelessWidget {
               value: pct,
               minHeight: 6,
               backgroundColor: c.cardElev,
-              valueColor: AlwaysStoppedAnimation(color),
+              valueColor: AlwaysStoppedAnimation(barColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Withdrawn-seat banner ────────────────────────────────────────────
+
+/// Names the riders who were told about a seat that has since been taken away.
+///
+/// They are the one group on this screen the app CANNOT reach by itself: the
+/// `seat_allotment` template needs a seat to draw, and no approved template
+/// says "your seat was withdrawn". Before this card they were filtered out of
+/// the tracker entirely and nothing anywhere said they existed — so the card
+/// states the count AND why it is a phone call rather than a Send button.
+class _SeatRemovedCard extends StatelessWidget {
+  final UgamColorSet c;
+  final int count;
+
+  const _SeatRemovedCard({required this.c, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Warm, because this is unresolved work the organiser owns — the one
+          // place on the tracker where a tinted medallion carries a meaning
+          // every other row's neutral disc does not.
+          Container(
+            width: UgamScale.px(context, 40),
+            height: UgamScale.px(context, 40),
+            decoration: BoxDecoration(
+              color: c.warmFill,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.phone_in_talk_rounded,
+              size: UgamScale.px(context, 19),
+              color: c.warm,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr(
+                    'notify.seat_removed_card_title',
+                    namedArgs: {'count': '$count'},
+                  ),
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  tr('notify.seat_removed_card_body'),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                ),
+              ],
             ),
           ),
         ],
@@ -990,17 +1376,26 @@ class _ProgressCard extends StatelessWidget {
 class _NotifyRow extends StatelessWidget {
   final Passenger passenger;
   final _BusInfo busInfo;
-  final bool isSent;
+  final NotifyRowState state;
   final UgamColorSet c;
   final VoidCallback onSend;
 
   const _NotifyRow({
     required this.passenger,
     required this.busInfo,
-    required this.isSent,
+    required this.state,
     required this.c,
     required this.onSend,
   });
+
+  bool get _isSent => state == NotifyRowState.notified;
+  bool get _removed => state == NotifyRowState.seatRemoved;
+
+  String get _statusLabel => switch (state) {
+        NotifyRowState.notified => tr('notify.row_sent'),
+        NotifyRowState.pending => tr('notify.row_pending'),
+        NotifyRowState.seatRemoved => tr('notify.row_seat_removed'),
+      };
 
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -1055,24 +1450,41 @@ class _NotifyRow extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    UgamStatusDot(
-                      label: isSent
-                          ? tr('notify.row_sent')
-                          : tr('notify.row_pending'),
-                      tone: isSent ? UgamStatusTone.good : UgamStatusTone.warm,
+                    // Bounded so the dot's own Flexible/ellipsis can do its
+                    // job — as a bare Row child it took unbounded width.
+                    Flexible(
+                      child: UgamStatusDot(
+                        label: _statusLabel,
+                        // A withdrawn seat is outstanding work, exactly like a
+                        // pending send — warm attention, not a "done" green.
+                        tone:
+                            _isSent ? UgamStatusTone.good : UgamStatusTone.warm,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(Icons.event_seat_rounded, size: 11, color: c.ink3),
+                    Icon(
+                      _removed
+                          ? Icons.event_seat_outlined
+                          : Icons.event_seat_rounded,
+                      size: 11,
+                      color: c.ink3,
+                    ),
                     const SizedBox(width: 4),
                     Flexible(
                       child: Text(
-                        seats.isEmpty
-                            ? '—'
-                            : tr('notify.seat_label', namedArgs: {'seats': seats}),
+                        // Say WHAT happened rather than printing a bare dash:
+                        // this rider is on the list precisely because the seat
+                        // they were told about is gone.
+                        _removed
+                            ? tr('notify.seat_removed_line')
+                            : (seats.isEmpty
+                                ? '—'
+                                : tr('notify.seat_label',
+                                    namedArgs: {'seats': seats})),
                         style: UgamText.tabular(
                           UgamText.caption.copyWith(color: c.ink2),
                         ),
@@ -1086,21 +1498,23 @@ class _NotifyRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          // Tonal per-row send, never solid gold — solid champagne is reserved
-          // for the sticky send-all CTA so ~30 rows don't flood the accent.
-          // The `good`/`accent` TONES on the shared [UgamIconButton] resolve to
-          // exactly the goodFill/accentFill + coloured-ink pair this row used
-          // to hand-roll, so the treatment is preserved and the 44pt box now
-          // rides UgamScale like every other round action in the app.
+          // A BUTTON, so it never wears the brand hue — even tonally. Thirty
+          // rows of amber-tinted discs was the single largest accent spill on
+          // this screen and it meant nothing: every row has this button, sent
+          // or not. `good` still marks the ones already delivered (a real
+          // semantic); the rest are plain neutral chrome. The row's own status
+          // dot carries "pending".
+          //
+          // The withdrawn-seat row wears a HANDSET, not the chat glyph: its
+          // action opens a call-them follow-up, not a WhatsApp send, and the
+          // two must not look like the same button.
           UgamIconButton(
-            icon: Icons.chat_rounded,
+            icon: _removed ? Icons.call_rounded : Icons.chat_rounded,
             onTap: onSend,
-            tone: isSent
+            tone: _isSent
                 ? UgamIconButtonTone.good
-                : UgamIconButtonTone.accent,
-            semanticLabel: isSent
-                ? tr('notify.row_sent')
-                : tr('notify.row_pending'),
+                : UgamIconButtonTone.neutral,
+            semanticLabel: _statusLabel,
           ),
         ],
       ),
@@ -1218,18 +1632,19 @@ class _BusMessageCard extends StatelessWidget {
       padding: const EdgeInsets.all(UgamSpacing.md),
       child: Row(
         children: [
+          // Decorative medallion on a navigation row — not a selection.
           Container(
             width: UgamScale.px(context, 40),
             height: UgamScale.px(context, 40),
             decoration: BoxDecoration(
-              color: c.accentFill,
+              color: c.cardElev,
               borderRadius: BorderRadius.circular(UgamRadius.input),
             ),
             alignment: Alignment.center,
             child: Icon(
               Icons.campaign_rounded,
               size: UgamScale.px(context, 19),
-              color: c.accent,
+              color: c.ink2,
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
@@ -1398,9 +1813,12 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
           ),
           const SizedBox(height: UgamSpacing.lg),
           if (multiBus) ...[
+            // [UgamText.label], the script-safe eyebrow step. Not `micro`
+            // (Latin/numeric only) and not [UgamSectionLabel], which still
+            // uppercases onto micro — see the note in create_tour_screen.
             Text(
-              tr('bus_message.pick_bus').toUpperCase(),
-              style: UgamText.micro.copyWith(color: c.ink2),
+              tr('bus_message.pick_bus'),
+              style: UgamText.label.copyWith(color: c.ink2),
             ),
             const SizedBox(height: UgamSpacing.sm),
             // The shared pill strip — this was a THIRD hand-rolled selector in
@@ -1419,6 +1837,11 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
             ),
             const SizedBox(height: UgamSpacing.lg),
           ],
+          // Recipient read-back. NOT the selector — the pills above are what
+          // the agent picks, and they already wear the accent for it. This is
+          // a confirmation line, so it splits on meaning instead: nothing
+          // chosen yet is an unresolved blocker (warm attention), a resolved
+          // destination is plain information (neutral surface, ink).
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(
@@ -1426,7 +1849,7 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
               vertical: UgamSpacing.sm,
             ),
             decoration: BoxDecoration(
-              color: c.accentFill,
+              color: busId == null ? c.warmFill : c.cardElev,
               borderRadius: BorderRadius.circular(UgamRadius.input),
             ),
             child: Row(
@@ -1436,7 +1859,7 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
                       ? Icons.info_outline_rounded
                       : Icons.group_rounded,
                   size: 15,
-                  color: c.accent,
+                  color: busId == null ? c.warm : c.ink2,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -1452,7 +1875,9 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
                             ),
                             'count': '$count',
                           }),
-                    style: UgamText.caption.copyWith(color: c.accent),
+                    style: UgamText.caption.copyWith(
+                      color: busId == null ? c.warm : c.ink,
+                    ),
                   ),
                 ),
               ],
@@ -1514,8 +1939,10 @@ class _SendProgressDialog extends StatelessWidget {
                     height: UgamScale.px(context, 52),
                     width: UgamScale.px(context, 52),
                     child: CircularProgressIndicator(
+                      // Progress, not ownership — ink, like the bar on
+                      // [_ProgressCard].
                       value: ready ? null : pct,
-                      color: c.accent,
+                      color: c.ink,
                       backgroundColor: c.cardElev,
                       strokeWidth: 4,
                     ),

@@ -48,8 +48,36 @@ class MyApp extends StatelessWidget {
         initialRoute: AppRoutes.splash,
         getPages: AppRoutes.routes,
         initialBinding: AppBinding(),
-        defaultTransition: Transition.fadeIn,
+        // Navigation has to have a direction. `Transition.fadeIn` made push and
+        // pop visually IDENTICAL — screens blinked in place, the app carried no
+        // spatial model, and going deeper looked exactly like coming back. The
+        // cupertino transition slides the incoming screen in from the trailing
+        // edge and parallaxes the outgoing one away, so forward and back are
+        // opposite motions and the user keeps a sense of stack depth.
+        //
+        // This also makes the default agree with what the app already does by
+        // hand: 27 imperative `Get.to(...)` call sites already pass
+        // `transition: Transition.cupertino`. Every *named* route (all 18 in
+        // AppRoutes) and every `Get.to` that omitted the argument fell through
+        // to the fade instead, so the same app animated two different ways
+        // depending on how a screen happened to be pushed. Those 27 explicit
+        // arguments are now redundant but harmless — they are not this file's
+        // to clean up.
+        defaultTransition: Transition.cupertino,
+        // Token, never a literal: route timing is tuned centrally in UgamMotion
+        // so push, pop and the back-swipe settle all stay in step.
         transitionDuration: UgamMotion.route,
+        // iOS edge-swipe-back, stated rather than inherited. Left unset, GetX
+        // 4.7.3 falls back to `GetMaterialController.defaultPopGesture` — which
+        // is `GetPlatform.isIOS` today, but that is a package internal we
+        // should not be silently depending on across a `get` bump.
+        //
+        // Deliberately platform-gated rather than plain `true`. On iOS the
+        // drag-from-the-left-edge is a system-level expectation. On Android the
+        // OS owns that edge (predictive back) and delivers a back *event*, not
+        // a drag, so an app-level drag detector there competes with the system
+        // gesture instead of adding anything.
+        popGesture: GetPlatform.isIOS,
         // App-wide, theme-aware system chrome. This is the ONE place the OS
         // status/navigation bars are styled — the builder sits under the
         // MaterialApp's resolved Theme, so `Theme.of` gives the live brightness

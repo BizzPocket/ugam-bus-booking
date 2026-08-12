@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
@@ -18,12 +19,13 @@ import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
 
 
-/// List of buses attached to a tour. Topbar + capacity stat tiles +
-/// photo-anchored bus cards (matching image-5 list pattern) + sticky
-/// bottom CTA to add a new bus.
+/// List of buses attached to a tour. Topbar + photo-anchored bus cards
+/// (matching the image-5 list pattern) + sticky bottom CTA to add a new bus.
 ///
 /// Post-lock (and completed): seat edits stay allowed elsewhere, but bus
 /// layout add/edit/duplicate/delete is frozen — see [TourStatus.allowsLayoutEdit].
+/// That freeze is announced with a caveat strip rather than by silently
+/// removing the Add-bus CTA and every menu entry.
 class ManageBusesScreen extends StatelessWidget {
   final String tourId;
 
@@ -92,18 +94,31 @@ class ManageBusesScreen extends StatelessWidget {
                   PhoneDialer.call(bus.driverPhone);
                 },
               ),
-            if (canEditLayout)
+            if (canEditLayout) ...[
+              // The gap is the separation: delete must not sit in the same
+              // rhythm as the harmless entries above it.
+              const SizedBox(height: UgamSpacing.md),
               _BusMenuTile(
                 c: c,
                 icon: Icons.delete_outline_rounded,
                 label: tr('manage_buses.menu_delete'),
-                tint: c.danger,
+                subtitle: tr('manage_buses.menu_delete_subtitle'),
                 danger: true,
                 onTap: () {
                   Navigator.of(ctx).pop();
                   _confirmDelete(context, tour, bus);
                 },
               ),
+            ],
+            // A locked tour with no driver number used to open a sheet with a
+            // title and NOTHING under it. Say why instead.
+            if (!canEditLayout) ...[
+              const SizedBox(height: UgamSpacing.sm),
+              UgamCaveat(
+                message: tr('manage_buses.layout_locked_body'),
+                icon: Icons.lock_outline_rounded,
+              ),
+            ],
           ],
         );
       },
@@ -212,6 +227,12 @@ class ManageBusesScreen extends StatelessWidget {
     }
   }
 
+  void _openAddBus(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (context) => AddBusScreen(tourId: tourId)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -223,10 +244,16 @@ class ManageBusesScreen extends StatelessWidget {
       body: SafeArea(
         child: Obx(() {
           final tour = _tourCtrl.getTour(tourId);
+
+          // The app bar is rendered on EVERY path now. It used to be inside the
+          // "tour found" branch only, so any of the states below stranded the
+          // agent on a screen with no back button.
           if (tour == null) {
-            return UgamEmpty(
-              icon: Icons.search_off_rounded,
-              title: tr('manage_buses.tour_not_found'),
+            return Column(
+              children: [
+                UgamAppBar(title: tr('manage_buses.title')),
+                Expanded(child: _missingTourState()),
+              ],
             );
           }
 
@@ -235,6 +262,7 @@ class ManageBusesScreen extends StatelessWidget {
           // (via cap.byBus[bus.id]) so the list never re-derives its own count.
           final cap = _tourCtrl.capacityFor(tour);
           final totalCapacity = cap.capacity;
+          final canEdit = _layoutEditable(tour);
 
           // "N buses · X free of Y" — the old 2-col stat strip folded into the
           // app-bar subtitle so the list starts higher (mobile-native: one
@@ -259,6 +287,22 @@ class ManageBusesScreen extends StatelessWidget {
                 title: tr('manage_buses.title'),
                 subtitle: summaryLine,
               ),
+              // Why the Add-bus CTA and the per-bus edit/delete entries are
+              // gone. Wraps (a Gujarati sentence runs ~30% long), so it says
+              // the whole thing rather than trailing off.
+              if (!canEdit)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    UgamSpacing.xs,
+                    UgamSpacing.gutter,
+                    0,
+                  ),
+                  child: UgamCaveat(
+                    message: tr('manage_buses.layout_locked_body'),
+                    icon: Icons.lock_outline_rounded,
+                  ),
+                ),
               const SizedBox(height: UgamSpacing.sm),
               Expanded(
                 child: tour.buses.isEmpty
@@ -266,13 +310,28 @@ class ManageBusesScreen extends StatelessWidget {
                         icon: Icons.directions_bus_outlined,
                         title: tr('manage_buses.empty_title'),
                         body: tr('manage_buses.empty_body'),
+                        // From zero buses there is exactly one thing to do, and
+                        // it belongs here — not 500px away behind a sticky bar
+                        // at the foot of an otherwise blank screen.
+                        cta: canEdit
+                            ? UgamButton(
+                                label: tr('manage_buses.add_bus'),
+                                icon: Icons.add_rounded,
+                                onPressed: () => _openAddBus(context),
+                              )
+                            : null,
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(
                           UgamSpacing.gutter,
                           0,
                           UgamSpacing.gutter,
-                          120,
+                          // Was a flat 120. This Scaffold HAS a
+                          // bottomNavigationBar, so the body already stops
+                          // above the sticky CTA (which pays for the floating
+                          // dock through its own SafeArea) — the 120 was dead
+                          // space under the last card, not clearance.
+                          UgamSpacing.lg,
                         ),
                         itemCount: tour.buses.length,
                         separatorBuilder: (_, _) =>
@@ -308,27 +367,69 @@ class ManageBusesScreen extends StatelessWidget {
         }),
       ),
       // Add-bus CTA — hidden once the tour is locked/completed (seats still
-      // editable elsewhere; bus layout is frozen).
+      // editable elsewhere; bus layout is frozen) and while the list is empty,
+      // where the empty state owns the action instead.
       bottomNavigationBar: Obx(() {
         final tour = _tourCtrl.getTour(tourId);
-        if (tour == null || !_layoutEditable(tour)) {
+        final showCta =
+            tour != null && _layoutEditable(tour) && tour.buses.isNotEmpty;
+        if (!showCta) {
           // A zero-height bar still strips the body SafeArea's bottom inset
           // (Scaffold checks for non-null, not for height), so reserve the
-          // system inset when the add-bus CTA is hidden.
+          // inset when the add-bus CTA is hidden. Pushed on the shell's nested
+          // navigator this measures the floating dock, not just the system bar.
           return SizedBox(height: MediaQuery.paddingOf(context).bottom);
         }
         return UgamStickyCTA(
           child: UgamCTA(
             label: tr('manage_buses.add_bus'),
             leadingIcon: Icons.add_rounded,
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => AddBusScreen(tourId: tourId),
-              ),
-            ),
+            onPressed: () => _openAddBus(context),
           ),
         );
       }),
+    );
+  }
+
+  /// Body for "the controller has no tour with this id" — which is three
+  /// different situations the screen used to collapse into one bald "Tour not
+  /// found": the first load is still running, the load failed, or the tour is
+  /// genuinely gone.
+  Widget _missingTourState() {
+    if (_tourCtrl.isLoading.value) return const _BusListSkeleton();
+    if (_tourCtrl.hasError.value) {
+      // The localised default, NOT `errorMessage` — that carries a raw
+      // Postgrest string ("column … does not exist (42703)") which is English
+      // and meaningless to the Gujarati-first operators this app is built for.
+      return UgamEmpty.error(onRetry: () => _tourCtrl.refreshTours());
+    }
+    return UgamEmpty(
+      icon: Icons.search_off_rounded,
+      title: tr('manage_buses.tour_not_found'),
+    );
+  }
+}
+
+/// First-load placeholder shaped like the bus list it becomes, instead of a
+/// centred spinner that pops.
+class _BusListSkeleton extends StatelessWidget {
+  const _BusListSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        0,
+        UgamSpacing.gutter,
+        UgamSpacing.lg,
+      ),
+      children: [
+        for (var i = 0; i < 3; i++) ...[
+          const UgamSkeleton(height: 176, radius: UgamRadius.card),
+          const SizedBox(height: UgamSpacing.md),
+        ],
+      ],
     );
   }
 }
@@ -374,6 +475,8 @@ class _BusListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Decorative thumbnail — [px], not [tap]: nothing lands on it.
+    final photo = UgamScale.px(context, 76);
     return UgamCard.media(
       onTap: onOpen,
       elev: true,
@@ -386,8 +489,8 @@ class _BusListItem extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(UgamRadius.photo),
                   child: SizedBox(
-                    width: 76,
-                    height: 76,
+                    width: photo,
+                    height: photo,
                     child: UgamBusBackdrop(seed: bus.id),
                   ),
                 ),
@@ -399,10 +502,7 @@ class _BusListItem extends StatelessWidget {
                     children: [
                       Text(
                         bus.displayLabel,
-                        style: UgamText.titleS.copyWith(
-                          color: c.ink,
-                          fontSize: 15,
-                        ),
+                        style: UgamText.titleS.copyWith(color: c.ink),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -410,13 +510,10 @@ class _BusListItem extends StatelessWidget {
                       // departure (muted). Phone is no longer crammed here — it
                       // moved into the bus action sheet ("Call driver").
                       if (_driverLine.isNotEmpty) ...[
-                        const SizedBox(height: 3),
+                        const SizedBox(height: UgamSpacing.xs),
                         Text(
                           _driverLine,
-                          style: UgamText.bodyStrong.copyWith(
-                            color: c.ink,
-                            fontSize: 13,
-                          ),
+                          style: UgamText.bodyStrong.copyWith(color: c.ink),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -425,11 +522,8 @@ class _BusListItem extends StatelessWidget {
                         const SizedBox(height: 2),
                         Text(
                           _departureLine,
-                          style: UgamText.caption.copyWith(
-                            color: c.ink2,
-                            fontSize: 12,
-                          ),
-                          maxLines: 1,
+                          style: UgamText.caption.copyWith(color: c.ink2),
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -443,7 +537,7 @@ class _BusListItem extends StatelessWidget {
                 UgamIconButton(
                   icon: Icons.more_vert_rounded,
                   onTap: onMore,
-                  semanticLabel: tr('manage_buses.menu_edit'),
+                  semanticLabel: tr('manage_buses.menu_more'),
                 ),
               ],
             ),
@@ -484,17 +578,24 @@ class _HandlerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasHandler = handlerName != null && handlerName!.trim().isNotEmpty;
-    return GestureDetector(
+    return UgamTappable(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+      semanticLabel: hasHandler
+          ? tr('bus_handler.row_current', namedArgs: {'name': handlerName!})
+          : tr('bus_handler.row_empty'),
       child: Container(
+        // Was ~32pt tall (sm padding around a 12pt caption) on a row that is
+        // the only way into the handler picker.
+        constraints: BoxConstraints(minHeight: UgamScale.tap(context, 44)),
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.md,
           vertical: UgamSpacing.sm,
         ),
         // No hand-rolled border on the neutral state — depth comes from a
         // recessed fill (base card tone, sunk into the elevated bus card)
-        // instead of a hairline. The set state keeps the copper accent tint.
+        // instead of a hairline. The set state keeps the copper accent tint:
+        // an assigned handler is an ownership marker, which is exactly what
+        // the accent is rationed for.
         decoration: BoxDecoration(
           color: hasHandler ? c.accentFill : c.card,
           borderRadius: BorderRadius.circular(UgamRadius.row),
@@ -517,7 +618,9 @@ class _HandlerRow extends StatelessWidget {
                   color: hasHandler ? c.ink : c.ink2,
                   fontWeight: hasHandler ? FontWeight.w700 : FontWeight.w500,
                 ),
-                maxLines: 1,
+                // Two lines: "Handler: <Gujarati name>" is the longest string
+                // on the card and a single line ellipsised the name away.
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -547,11 +650,13 @@ class _HandlerPickTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final avatar = UgamScale.px(context, 36);
+    return UgamTappable(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+      semanticLabel: passenger.displayName,
       child: Container(
         margin: const EdgeInsets.only(bottom: UgamSpacing.sm),
+        constraints: BoxConstraints(minHeight: UgamScale.tap(context, 56)),
         padding: const EdgeInsets.all(UgamSpacing.md),
         decoration: BoxDecoration(
           color: c.cardElev,
@@ -561,8 +666,8 @@ class _HandlerPickTile extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 36,
-              height: 36,
+              width: avatar,
+              height: avatar,
               decoration: BoxDecoration(
                 color: isCurrent ? c.accent : c.card,
                 shape: BoxShape.circle,
@@ -574,7 +679,6 @@ class _HandlerPickTile extends StatelessWidget {
                     : '?',
                 style: UgamText.bodyStrong.copyWith(
                   color: isCurrent ? c.onAccent : c.ink,
-                  fontSize: 14,
                 ),
               ),
             ),
@@ -602,8 +706,10 @@ class _HandlerPickTile extends StatelessWidget {
                 ],
               ),
             ),
-            if (isCurrent)
+            if (isCurrent) ...[
+              const SizedBox(width: UgamSpacing.sm),
               Icon(Icons.check_circle_rounded, size: 20, color: c.accent),
+            ],
           ],
         ),
       ),
@@ -617,9 +723,8 @@ class _BusMenuTile extends StatelessWidget {
   final String label;
 
   /// Optional muted second line under the label (e.g. the driver's phone
-  /// number on the "Call driver" tile).
+  /// number on the "Call driver" tile, or what deleting actually costs).
   final String? subtitle;
-  final Color? tint;
   final bool danger;
   final VoidCallback onTap;
 
@@ -629,70 +734,90 @@ class _BusMenuTile extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.subtitle,
-    this.tint,
     this.danger = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final iconColor = tint ?? c.ink;
-    final labelColor = danger ? c.danger : c.ink;
+    final fg = danger ? c.danger : c.ink;
     // InkWell (ripple + 48dp tap target) replaces the raw GestureDetector;
     // selection haptic on tap for native feel.
+    //
+    // The destructive tile's fill rides an [Ink] ABOVE the InkWell rather than
+    // a Container below it: a decorated child paints over the Material the
+    // splash lands on, which would have left the one tile that most needs to
+    // acknowledge the finger as the only tile with no visible press at all.
     return Material(
       color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onTap();
-        },
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            vertical: UgamSpacing.md,
-            horizontal: UgamSpacing.sm,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: danger ? c.warmFill : c.cardElev,
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: Icon(icon, size: 18, color: iconColor),
+      child: Ink(
+        // A destructive entry carries its own tonal danger surface, so it is
+        // recognisable before the label is read. `warmFill` (rose) on the old
+        // medallion said "a lady is seated here", not "this destroys data".
+        decoration: danger
+            ? BoxDecoration(
+                color: c.dangerFill,
+                borderRadius: BorderRadius.circular(UgamRadius.row),
+                border: Border.all(color: c.danger.withValues(alpha: 0.28)),
+              )
+            : null,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTap();
+          },
+          borderRadius: BorderRadius.circular(UgamRadius.row),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: UgamScale.tap(context, 56)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: UgamSpacing.md,
+                horizontal: UgamSpacing.md,
               ),
-              const SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      label,
-                      style: UgamText.bodyStrong.copyWith(
-                        color: labelColor,
-                        fontSize: 14,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Container(
+                    width: UgamScale.px(context, 36),
+                    height: UgamScale.px(context, 36),
+                    decoration: BoxDecoration(
+                      color: danger
+                          ? c.danger.withValues(alpha: 0.14)
+                          : c.cardElev,
+                      shape: BoxShape.circle,
                     ),
-                    if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        style: UgamText.caption.copyWith(color: c.ink2),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ],
-                ),
+                    alignment: Alignment.center,
+                    child: Icon(icon, size: 18, color: fg),
+                  ),
+                  const SizedBox(width: UgamSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          label,
+                          style: UgamText.bodyStrong.copyWith(color: fg),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (subtitle != null &&
+                            subtitle!.trim().isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          // Wraps rather than truncating: the delete tile's
+                          // subtitle is a full Gujarati sentence and it is the
+                          // line that says what the tap costs.
+                          Text(
+                            subtitle!,
+                            style: UgamText.caption.copyWith(color: c.ink2),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: UgamSpacing.sm),
+                  Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+                ],
               ),
-              Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
-            ],
+            ),
           ),
         ),
       ),

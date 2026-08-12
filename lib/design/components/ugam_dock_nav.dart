@@ -3,15 +3,27 @@ import 'package:flutter/services.dart';
 
 import '../text_styles.dart';
 import '../tokens.dart';
+import '../ui_scale.dart';
 
 /// Floating capsule dock nav. Replaces the prior `_PillBottomNav`.
 ///
 /// Anatomy: a single capsule pinned 12 px from the bottom with 12 px
-/// lateral padding, holding 3–5 nav targets. The ACTIVE item expands into a
-/// champagne pill that shows its icon *and* label; inactive items collapse to
-/// a muted icon-only circle. Only one label is ever visible at a time, so the
-/// destinations are legible (icon-only docks force users to guess) while the
-/// accent stays rationed to the single current tab.
+/// lateral padding, holding 2–5 nav targets. EVERY target shows its icon
+/// *and* its label, stacked — both Apple HIG and Material require a label on
+/// primary navigation, and these destinations (Tours / Charts / Requests) are
+/// not guessable from a glyph, least of all for the Gujarati-first operators
+/// this app is built for.
+///
+/// The current tab is distinguished by *fill, weight and colour* rather than
+/// by being the only one with text: it sits in a cabin-lamp amber pill with
+/// near-black ink at a heavier weight, while the rest stay transparent with
+/// secondary ink. The accent is still rationed to exactly one tab.
+///
+/// Layout: the targets are equal-width [Expanded] cells, so the row can never
+/// overflow the capsule (the old content-sized + `spaceBetween` row did on a
+/// narrow phone whenever the widest tab was active — which is what made the
+/// last item's pill look like it ran into the dock's right edge). Labels
+/// shrink to fit their cell via [BoxFit.scaleDown] instead of disappearing.
 class UgamDockNav extends StatelessWidget {
   final List<UgamDockItem> items;
   final int currentIndex;
@@ -66,27 +78,46 @@ class UgamDockNav extends StatelessWidget {
                     : Colors.black.withValues(alpha: 0.06),
                 width: 1.0,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.32 : 0.12),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+              // Level 2. The dock is not a card ON the page — the body uses
+              // extendBody, so the page scrolls UNDER it: it is a persistent
+              // layer above everything, which is the same contract a sheet or
+              // dialog has, and it is the only chrome that never moves out of
+              // the way. `rest` would put it at the same height as the cards
+              // sliding beneath it.
+              //
+              // Was a hand-rolled 32% black in Midnight — the exact value the
+              // scale was cut back from, and the reason the capsule sat in a
+              // visible smudge. Depth in Midnight comes from `cardElev` being
+              // lighter than the ground, which this surface already is.
+              boxShadow: UgamElevation.of(context).raised,
             ),
+            // Lateral inset is one step wider than the vertical one. The
+            // capsule's ends are a 26 px arc; at a 4 px inset the last tab's
+            // amber pill nests exactly concentric with it and reads as if it
+            // were running into (or being clipped by) the dock's edge. 8 px
+            // leaves a visible, even gap at the caps no matter how wide the
+            // outermost label grows. Vertical stays at 4 — the dock's height
+            // is not what needs air.
             child: Padding(
-              padding: const EdgeInsets.all(UgamSpacing.xs),
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.sm,
+                vertical: UgamSpacing.xs,
+              ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: List.generate(items.length, (i) {
                   final active = i == currentIndex;
-                  return _DockButton(
-                    item: items[i],
-                    active: active,
-                    onTap: () {
-                      HapticFeedback.selectionClick();
-                      onTap(i);
-                    },
+                  // Equal-width cells: every tab owns the same slice of the
+                  // capsule whichever one is active, so nothing can be pushed
+                  // past the right edge and the row never overflows.
+                  return Expanded(
+                    child: _DockButton(
+                      item: items[i],
+                      active: active,
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        onTap(i);
+                      },
+                    ),
                   );
                 }),
               ),
@@ -101,8 +132,8 @@ class UgamDockNav extends StatelessWidget {
 class UgamDockItem {
   final IconData icon;
 
-  /// Short uppercase label (e.g. "HOME"). Shown only when this item is the
-  /// active tab; otherwise it lives in the [tooltip] for long-press.
+  /// Short uppercase label (e.g. "HOME"). Always rendered under the icon —
+  /// keep it to one short word so it survives the dock's narrow cell.
   final String label;
   final String tooltip;
 
@@ -133,46 +164,88 @@ class _DockButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
 
+    // `micro` is the smallest step on the ladder, and its eyebrow tracking
+    // (1.4) is far too wide for a ~55 px cell — it alone costs 11 px on an
+    // 8-character label like SETTINGS. Tightened to 0.3 here, and the line
+    // box opened to 1.3 so Gujarati/Devanagari matras (બુકિંગ, સેટિંગ) have
+    // room above and below the baseline.
+    final labelStyle = UgamText.micro.copyWith(
+      letterSpacing: 0.3,
+      height: 1.3,
+      fontWeight: active ? FontWeight.w700 : FontWeight.w600,
+      color: active ? c.onAccent : c.ink2,
+    );
+
     return Tooltip(
       message: item.tooltip,
       child: GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: UgamMotion.sheet,
-          curve: UgamMotion.easeOut,
-          height: 44,
-          padding: EdgeInsets.symmetric(
-            horizontal: active ? UgamSpacing.lg : UgamSpacing.md,
-          ),
-          decoration: BoxDecoration(
-            color: active ? c.accent : Colors.transparent,
-            borderRadius: BorderRadius.circular(UgamRadius.chip),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _badged(
-                c,
-                Icon(item.icon, size: 19, color: active ? c.onAccent : c.ink3),
+        // The whole cell is the tap target (44 pt floor), not just the pill,
+        // so the finger has the full width of the slice to land in. Min — not
+        // fixed — height, so an accessibility text scale grows the dock
+        // instead of overflowing it.
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: UgamScale.tap(context, 44)),
+          // `heightFactor: 1` makes this shrink-wrap the pill. Scaffold hands
+          // the dock LOOSE (not unbounded) constraints, so a plain Center
+          // would stretch to the full screen height instead of hugging.
+          child: Align(
+            alignment: Alignment.center,
+            heightFactor: 1,
+            child: AnimatedContainer(
+              duration: UgamMotion.dock,
+              curve: UgamMotion.easeOut,
+              padding: const EdgeInsets.symmetric(
+                horizontal: UgamSpacing.sm,
+                vertical: UgamSpacing.xs,
               ),
-              // The label collapses to zero width when inactive, so only the
-              // current tab's name is ever shown — keeps the dock compact for
-              // 5 items while making the active destination unambiguous.
-              AnimatedSize(
-                duration: UgamMotion.sheet,
-                curve: UgamMotion.easeOut,
-                child: active
-                    ? Padding(
-                        padding: const EdgeInsets.only(left: UgamSpacing.sm),
-                        child: Text(
-                          item.label,
-                          style: UgamText.micro.copyWith(color: c.onAccent),
-                        ),
-                      )
-                    : const SizedBox.shrink(),
+              // At least as wide as it is tall, so a short label (Gujarati
+              // "ટૂર") gives a round pill instead of a narrow vertical slab.
+              // The 8 pt lateral padding is also the minimum that keeps the
+              // label inside the stadium's curved cap: the label sits below
+              // the pill's centre line, where the fill has already started
+              // curving inward.
+              constraints: BoxConstraints(minWidth: UgamScale.tap(context, 44)),
+              decoration: BoxDecoration(
+                color: active ? c.accent : Colors.transparent,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
               ),
-            ],
+              // Hugs its content and is centred in the cell, so the pill can
+              // never reach the capsule's rounded end — the last tab's pill is
+              // inset by the same gap as every other tab's.
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _badged(
+                    c,
+                    Icon(
+                      item.icon,
+                      size: 19,
+                      color: active ? c.onAccent : c.ink2,
+                    ),
+                  ),
+                  const SizedBox(height: UgamSpacing.xs),
+                  // Every destination keeps its name. When the label cannot
+                  // fit its cell (long word, large accessibility text scale)
+                  // it scales down rather than being dropped or clipped.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: AnimatedDefaultTextStyle(
+                      duration: UgamMotion.dock,
+                      curve: UgamMotion.easeOut,
+                      style: labelStyle,
+                      child: Text(
+                        item.label,
+                        maxLines: 1,
+                        softWrap: false,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

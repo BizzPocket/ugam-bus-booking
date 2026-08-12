@@ -16,6 +16,13 @@ import '../tokens.dart';
 ///   [rightIcon], fires [onRight], and then snaps the row back (the row is
 ///   NOT removed). Use it for "mark", "collect", etc.
 ///
+/// The destructive swipe is only *armed* when a caller actually handles the
+/// removal ([onDelete] or [confirmDelete]). A row nobody removes must never
+/// leave the tree: dismissing it out of a list that still contains it trips
+/// Flutter's "A dismissed Dismissible widget is still part of the tree"
+/// assertion and kills the screen. So a right-action-only row stays
+/// startToEnd, and an action-less row is not dismissible at all.
+///
 /// The caller MUST pass a unique [ValueKey] so the Dismissible can track the
 /// item across rebuilds.
 class UgamSwipeAction extends StatelessWidget {
@@ -53,6 +60,11 @@ class UgamSwipeAction extends StatelessWidget {
     this.borderRadius,
   });
 
+  /// Whether anyone is actually prepared to take this row out of its list.
+  /// Without one of these the destructive swipe has no owner and must stay
+  /// disarmed.
+  bool get _handlesDelete => onDelete != null || confirmDelete != null;
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -60,11 +72,23 @@ class UgamSwipeAction extends StatelessWidget {
         borderRadius ?? BorderRadius.circular(UgamRadius.row);
     final right = rightColor ?? c.accent;
 
+    // Arm each direction independently: the right action needs [rightIcon],
+    // the destructive left swipe needs a delete handler. Anything else would
+    // let the user fling a row off a list that still holds it.
+    final DismissDirection direction;
+    if (rightIcon != null && _handlesDelete) {
+      direction = DismissDirection.horizontal;
+    } else if (rightIcon != null) {
+      direction = DismissDirection.startToEnd;
+    } else if (_handlesDelete) {
+      direction = DismissDirection.endToStart;
+    } else {
+      direction = DismissDirection.none;
+    }
+
     return Dismissible(
       key: key!,
-      direction: rightIcon != null
-          ? DismissDirection.horizontal
-          : DismissDirection.endToStart,
+      direction: direction,
       background: rightIcon == null
           ? const SizedBox.shrink()
           : _ActionPane(
@@ -90,7 +114,10 @@ class UgamSwipeAction extends StatelessWidget {
           onRight?.call();
           return false;
         }
-        // Left swipe — destructive.
+        // Left swipe — destructive. Belt and braces behind `direction`: if no
+        // caller owns the removal, refuse the dismiss instead of orphaning the
+        // row.
+        if (!_handlesDelete) return false;
         if (confirmDelete != null) {
           final ok = await confirmDelete!();
           if (ok) HapticFeedback.mediumImpact();

@@ -320,8 +320,40 @@ class Passenger {
   /// True when this rider holds a seat whose CURRENT allocation has not been
   /// notified — never sent, or changed since the last send. Drives the Notify
   /// screen's "re-notify changed" action after a post-lock seat edit.
+  ///
+  /// Deliberately false for a rider holding NO seat: there is no seat chart to
+  /// send them. That is NOT the same as "nothing is owed to them" — see
+  /// [seatsRemovedSinceNotified], which covers the rider this one skips.
   bool get seatsChangedSinceNotified =>
       assignedSeats.isNotEmpty && seatsNotifiedSig != seatSignature;
+
+  /// True when this rider was told about seats they NO LONGER HOLD — the
+  /// organiser removed every one of their seats AFTER the allocation went out.
+  ///
+  /// *** WHY THIS IS SEPARATE FROM [seatsChangedSinceNotified] ***
+  /// That getter is false once [assignedSeats] is empty, so an unseated rider
+  /// fell out of every Notify surface: they had a WhatsApp message in hand
+  /// saying "seat DL3", the seat was gone, and nothing would ever correct it.
+  /// They turn up on the day expecting a berth. This flags exactly that person.
+  ///
+  /// A non-empty [seatsNotifiedSig] is the proof a message actually went out
+  /// naming seats; a rider who was never notified (null) or who was last
+  /// notified while holding nothing (`''`) is not stranded, just unseated.
+  ///
+  /// It is deliberately NOT folded into [seatsChangedSinceNotified]: the two
+  /// need different HANDLING, not just different copy. There is no approved
+  /// WhatsApp template for "your seat was withdrawn" and the seat-allotment
+  /// template cannot be built without a seat to highlight, so this state is a
+  /// call-them-by-phone task, never an automatic send.
+  bool get seatsRemovedSinceNotified =>
+      assignedSeats.isEmpty && (seatsNotifiedSig ?? '').isNotEmpty;
+
+  /// True when what this rider was last told no longer matches reality — their
+  /// seats moved ([seatsChangedSinceNotified]) or were withdrawn entirely
+  /// ([seatsRemovedSinceNotified]). The single question every "does this rider
+  /// still need telling?" surface should ask.
+  bool get notifiedSeatsAreStale =>
+      seatsChangedSinceNotified || seatsRemovedSinceNotified;
 
   /// Short summary of request lines for chips, e.g. "1 DL + 1 SU + 2 ST".
   String get requestSummary {

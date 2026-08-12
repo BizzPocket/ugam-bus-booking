@@ -21,10 +21,26 @@ enum UgamButtonKind {
   /// accent. Do not "fix" the dock pill per-screen — that ruling is settled.
   primary,
 
-  /// Tonal accent — champagne ink on [accentFill] with a hairline accent
-  /// border. The canonical "quiet primary": repeated/per-row primaries
-  /// (Confirm, Collect, Send, Book, Apply) so solid gold stays rationed to
-  /// one focal point per screen.
+  /// Tonal — full-contrast [UgamColorSet.ink] on the amber [accentFill], with
+  /// a hairline accent border. The canonical "quiet primary": repeated/per-row
+  /// primaries (Confirm, Collect, Send, Book, Apply) so solid gold stays
+  /// rationed to one focal point per screen.
+  ///
+  /// **The ink is deliberately NOT the accent** (it was, until this was the
+  /// last amber-inked control left in the app). Per [Brand] the accent means
+  /// exactly one thing — "this is yours", a selection or an ownership state —
+  /// and spending it on a *control* is what makes a UI read cheap, because
+  /// then nothing is left to carry meaning. Every one of the ~22 call sites is
+  /// a verb (Add, Collect, Call, Apply, Accept, Update, Send); none of them is
+  /// a thing the user owns, so none of them earns the hue.
+  ///
+  /// The tonal WASH stays amber. A fill is a surface, not ink: it is what
+  /// keeps this readable as the quiet primary rather than as [neutral], and it
+  /// is the same construction [goodTonal] and [warmTonal] use. What was
+  /// retired is the amber *lettering*, which is the part that reads as "an
+  /// amber button". The swap also buys real contrast — worst surface in each
+  /// theme, accent ink on this fill measured 4.57:1 (Daylight) and 6.37:1
+  /// (Midnight); `ink` measures 17.05:1 and 9.27:1.
   tonal,
 
   /// Quiet, transparent. Cancel / dismiss — never competes with primary.
@@ -91,9 +107,12 @@ class UgamButton extends StatelessWidget {
       // Neutral by design — max contrast against the ground, no brand hue.
       // The accent is reserved for meaning ("this is yours"), not for controls.
       UgamButtonKind.primary => (c.action, c.onAction, null),
+      // Ink, not accent — see [UgamButtonKind.tonal]. `c.ink` and `c.action`
+      // carry the same value in both themes, but this is text on a surface,
+      // so it takes the ink token rather than the control-FILL token.
       UgamButtonKind.tonal => (
         c.accentFill,
-        c.accent,
+        c.ink,
         c.accent.withValues(alpha: 0.28),
       ),
       UgamButtonKind.ghost => (Colors.transparent, c.ink2, null),

@@ -9,6 +9,14 @@ import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/settings_scaffold.dart';
 
+/// ── Canonical settings-row geometry ────────────────────────────────────────
+/// Kept identical to the block at the top of `settings_screen.dart`. See the
+/// note there for why these exist; change both together.
+const double _rowIconBox = 40;
+const double _rowIconGlyph = 20;
+const double _rowIconRadius = 12;
+const double _rowMinHeight = 64;
+
 /// Settings → Notifications. Per-admin preferences for which alerts the
 /// organiser wants. Persisted to the `admins` row so they follow the
 /// account across devices.
@@ -86,49 +94,141 @@ class _NotificationsSettingsScreenState
       saveLabel: tr('settings_pages.save'),
       onSave: _save,
       children: [
-        // Master switch — its own floating surface. The dependent alerts below
-        // are quieter rows that gate on this being on.
-        _ToggleRow(
-          c: c,
-          icon: Icons.notifications_active_rounded,
-          title: tr('settings_pages.notifications.push_label'),
-          subtitle: tr('settings_pages.notifications.push_hint'),
-          value: _push,
-          onChanged: (v) => setState(() => _push = v),
+        // Master switch — its own card, so it reads as the thing everything
+        // below depends on rather than as the first of four equals.
+        _GroupCard(
+          children: [
+            _ToggleRow(
+              c: c,
+              icon: Icons.notifications_active_rounded,
+              title: tr('settings_pages.notifications.push_label'),
+              subtitle: tr('settings_pages.notifications.push_hint'),
+              value: _push,
+              onChanged: (v) => setState(() => _push = v),
+            ),
+          ],
         ),
         const SizedBox(height: UgamSpacing.xl),
-        // Per-alert toggles — separated by space, not dividers, so each reads as
-        // its own soft tile floating on the ground.
-        _ToggleRow(
-          c: c,
-          icon: Icons.inbox_rounded,
-          title: tr('settings_pages.notifications.booking_label'),
-          subtitle: tr('settings_pages.notifications.booking_hint'),
-          value: _bookingRequests,
-          enabled: _push,
-          onChanged: (v) => setState(() => _bookingRequests = v),
+        // These three used to be loose tiles separated by 8px of air. Now that
+        // every card carries elevation that reads as three stacked shadows;
+        // one grouped card with hairlines is also exactly what the Settings hub
+        // does, and this cluster has to look like one app.
+        UgamSectionLabel(
+          tr('settings_pages.notifications.section_alerts'),
+          color: c.ink2,
         ),
         const SizedBox(height: UgamSpacing.sm),
-        _ToggleRow(
-          c: c,
-          icon: Icons.payments_rounded,
-          title: tr('settings_pages.notifications.payment_label'),
-          subtitle: tr('settings_pages.notifications.payment_hint'),
-          value: _paymentReminders,
-          enabled: _push,
-          onChanged: (v) => setState(() => _paymentReminders = v),
-        ),
-        const SizedBox(height: UgamSpacing.sm),
-        _ToggleRow(
-          c: c,
-          icon: Icons.directions_bus_rounded,
-          title: tr('settings_pages.notifications.departure_label'),
-          subtitle: tr('settings_pages.notifications.departure_hint'),
-          value: _departureReminders,
-          enabled: _push,
-          onChanged: (v) => setState(() => _departureReminders = v),
+        _GroupCard(
+          children: [
+            _ToggleRow(
+              c: c,
+              icon: Icons.inbox_rounded,
+              title: tr('settings_pages.notifications.booking_label'),
+              subtitle: tr('settings_pages.notifications.booking_hint'),
+              value: _bookingRequests,
+              enabled: _push,
+              onChanged: (v) => setState(() => _bookingRequests = v),
+            ),
+            _Divider(c: c),
+            _ToggleRow(
+              c: c,
+              icon: Icons.payments_rounded,
+              title: tr('settings_pages.notifications.payment_label'),
+              subtitle: tr('settings_pages.notifications.payment_hint'),
+              value: _paymentReminders,
+              enabled: _push,
+              onChanged: (v) => setState(() => _paymentReminders = v),
+            ),
+            _Divider(c: c),
+            _ToggleRow(
+              c: c,
+              icon: Icons.directions_bus_rounded,
+              title: tr('settings_pages.notifications.departure_label'),
+              subtitle: tr('settings_pages.notifications.departure_hint'),
+              value: _departureReminders,
+              enabled: _push,
+              onChanged: (v) => setState(() => _departureReminders = v),
+            ),
+          ],
         ),
       ],
+    );
+  }
+}
+
+/// Grouped rows on one card surface. Mirrors `_GroupCard` in
+/// `settings_screen.dart` — see the note there on why the [Material] matters.
+class _GroupCard extends StatelessWidget {
+  final List<Widget> children;
+  const _GroupCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    // SettingsScaffold uses CrossAxisAlignment.start, so claim the width.
+    return SizedBox(
+      width: double.infinity,
+      child: UgamCard.plain(
+        elev: true,
+        padding: EdgeInsets.zero,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(UgamRadius.card),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(children: children),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Mirrors `_Divider` in `settings_screen.dart`.
+class _Divider extends StatelessWidget {
+  final UgamColorSet c;
+  const _Divider({required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: UgamSpacing.lg +
+            UgamScale.px(context, _rowIconBox) +
+            UgamSpacing.md,
+        right: UgamSpacing.lg,
+      ),
+      child: Divider(height: 1, color: c.border),
+    );
+  }
+}
+
+/// Mirrors `_RowIcon` in `settings_screen.dart`.
+class _RowIcon extends StatelessWidget {
+  final IconData icon;
+  final Color background;
+  final Color foreground;
+
+  const _RowIcon({
+    required this.icon,
+    required this.background,
+    required this.foreground,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final box = UgamScale.px(context, _rowIconBox);
+    return Container(
+      width: box,
+      height: box,
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(_rowIconRadius),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        icon,
+        size: UgamScale.px(context, _rowIconGlyph),
+        color: foreground,
+      ),
     );
   }
 }
@@ -156,60 +256,70 @@ class _ToggleRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final on = value && enabled;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.lg,
-        vertical: UgamSpacing.lg - 2,
-      ),
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-      ),
-      child: Row(
-        children: [
-          // Single neutral icon tile — the Switch is the only colour signal.
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.input),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 18, color: enabled ? c.ink2 : c.ink3),
+    return InkWell(
+      // The whole row toggles, not just the ~50px switch. The nav rows on the
+      // Settings hub have always been fully tappable; these looked identical
+      // but only responded to a hit on the control itself.
+      onTap: enabled ? () => onChanged(!value) : null,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: UgamScale.tap(context, _rowMinHeight),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: UgamSpacing.lg,
+            vertical: UgamSpacing.md,
           ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: UgamText.titleS.copyWith(
-                    color: enabled ? c.ink : c.ink3,
-                  ),
+          child: Row(
+            children: [
+              // Single neutral icon tile — the Switch is the only colour
+              // signal. `card` on a `cardElev` group, matching the hub: this
+              // pairing used to be inverted (a cardElev tile on a card row).
+              _RowIcon(
+                icon: icon,
+                background: c.card,
+                foreground: enabled ? c.ink2 : c.ink3,
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Nothing here is clamped to one line: the Hindi
+                    // `turn_on_hint` overruns the space left beside a switch at
+                    // 375px, so it has to be free to wrap rather than ellipsis.
+                    Text(
+                      title,
+                      style: UgamText.titleS.copyWith(
+                        color: enabled ? c.ink : c.ink3,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    // When the master Push switch is off, dependent rows can't
+                    // be toggled — say so inline instead of dimming the row.
+                    Text(
+                      enabled
+                          ? subtitle
+                          : tr('settings_pages.notifications.turn_on_hint'),
+                      style: UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                // When the master Push switch is off, dependent rows can't be
-                // toggled — say so inline instead of dimming the whole row.
-                Text(
-                  enabled
-                      ? subtitle
-                      : tr('settings_pages.notifications.turn_on_hint'),
-                  style: UgamText.caption.copyWith(color: c.ink3),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+              // Was a raw Material Switch that set only the two ACTIVE colours,
+              // so the off state fell back to Material's grey. UgamSwitch tints
+              // all four, adds the haptic, guarantees the 44pt box and
+              // announces the toggled state to a screen reader.
+              UgamSwitch(
+                value: on,
+                onChanged: enabled ? onChanged : null,
+                semanticLabel: title,
+              ),
+            ],
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          Switch(
-            value: on,
-            onChanged: enabled ? onChanged : null,
-            activeTrackColor: c.accent,
-            activeThumbColor: c.onAccent,
-          ),
-        ],
+        ),
       ),
     );
   }

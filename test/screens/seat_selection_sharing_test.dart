@@ -294,4 +294,80 @@ void main() {
           'cell-based cap would have allowed 8 berths here.',
     );
   });
+
+  group('the sheet only asks a question that is genuinely open', () {
+    testWidgets('one tap takes a whole sofa when the bucket needs two',
+        (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(oneRow())],
+        intent: const PartyIntent(roundTrip: 4),
+      ));
+      await tester.pumpAndSettle();
+      await clearPrefill(tester);
+
+      await tapSeat(tester, 'DU1');
+
+      expect(
+        find.byKey(SofaShareSheet.wholeKey),
+        findsNothing,
+        reason:
+            'the party needs two berths — whole-or-half is not a real question',
+      );
+      expect(selectedBerths(tester, 'DU1'), 2);
+    });
+
+    testWidgets('the sheet appears when the bucket has one berth left',
+        (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(oneRow())],
+        intent: const PartyIntent(roundTrip: 3),
+      ));
+      await tester.pumpAndSettle();
+      await clearPrefill(tester);
+
+      // Two singles first, leaving exactly one berth of the bucket to place.
+      await tapSeat(tester, 'SU1');
+      await tapSeat(tester, 'SL1');
+      await tapSeat(tester, 'DU1');
+
+      expect(find.byKey(SofaShareSheet.wholeKey), findsOneWidget);
+      expect(find.byKey(SofaShareSheet.halfKey), findsOneWidget);
+    });
+
+    testWidgets('the bucket remainder decides, not the global one',
+        (tester) async {
+      // 1 round-trip berth and 3 go-only. The FIRST tap fills the round-trip
+      // bucket, which needs exactly one — so it must ask, even though 4 berths
+      // remain unplaced overall.
+      await tester.pumpWidget(harness(
+        [bus(oneRow())],
+        intent: const PartyIntent(roundTrip: 1, outboundOnly: 3),
+      ));
+      await tester.pumpAndSettle();
+      await clearPrefill(tester);
+
+      await tapSeat(tester, 'DU1');
+
+      expect(
+        find.byKey(SofaShareSheet.halfKey),
+        findsOneWidget,
+        reason: 'the global remainder would have silently overshot the bucket',
+      );
+    });
+
+    testWidgets('refusing to share still takes the whole sofa in one tap',
+        (tester) async {
+      await tester.pumpWidget(harness(
+        [bus(oneRow())],
+        intent: const PartyIntent(roundTrip: 1, shareOk: false),
+      ));
+      await tester.pumpAndSettle();
+      await clearPrefill(tester);
+
+      await tapSeat(tester, 'DU1');
+
+      expect(find.byKey(SofaShareSheet.halfKey), findsNothing);
+      expect(selectedBerths(tester, 'DU1'), 2);
+    });
+  });
 }

@@ -11,6 +11,8 @@ import '../models/collection.dart';
 import '../models/expense.dart';
 import '../models/income_entry.dart';
 import '../models/handler_manifest.dart';
+import '../models/handler_phase.dart';
+import '../models/handler_report.dart';
 import '../models/handler_tour_ref.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_ticket.dart';
@@ -1064,6 +1066,83 @@ class CustomerRequestsStore {
       params: {'p_request_id': requestId, 'p_bus_id': busId},
     );
     return (result as num?)?.toInt();
+  }
+
+  // ── Trip milestones (migration 090) ───────────────────────
+
+  /// The departure / arrival / completion stamps for every bus this handler
+  /// runs. These drive [resolveHandlerPhase], so they decide what the whole
+  /// handler surface points at.
+  ///
+  /// Its own RPC for the same reason as leg state and handovers: the manifest's
+  /// live body has drifted from the migration files and is never rewritten.
+  /// Returns an empty list when the caller isn't a handler.
+  Future<List<HandlerTripState>> handlerBusTripState(String requestId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_bus_trip_state',
+      params: {'p_request_id': requestId},
+    );
+    if (result is! List) return const [];
+    return result.whereType<Map>().map(HandlerTripState.fromMap).toList();
+  }
+
+  /// Stamps one trip milestone on one bus and returns the bus's whole updated
+  /// state.
+  ///
+  /// The milestone is sent by NAME and the server stamps `now()` itself rather
+  /// than trusting a client clock — a handler's phone can be hours out, and
+  /// these timestamps order the trip. The RPC is idempotent per milestone: a
+  /// retry on a flaky link re-stamps nothing and returns the existing row, so
+  /// the double-tap and the lost-response retry are both harmless.
+  Future<HandlerTripState?> handlerStampMilestone(
+    String requestId,
+    String busId,
+    HandlerMilestone milestone,
+  ) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_stamp_milestone',
+      params: {
+        'p_request_id': requestId,
+        'p_bus_id': busId,
+        'p_milestone': milestone.name,
+      },
+    );
+    if (result is! Map) return null;
+    return HandlerTripState.fromMap(result);
+  }
+
+  // ── Problem reports (migration 090) ───────────────────────
+
+  /// Reports this handler has already raised, newest first — so the Trip tab
+  /// can show what was sent and whether the agent has seen it.
+  Future<List<HandlerReport>> handlerReports(String requestId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_reports',
+      params: {'p_request_id': requestId},
+    );
+    if (result is! List) return const [];
+    return result.whereType<Map>().map(HandlerReport.fromMap).toList();
+  }
+
+  /// Raises a problem with the agent from the bus.
+  ///
+  /// The client mints the id so a retry after a lost response updates the same
+  /// row instead of filing the breakdown twice — the same idempotency the cash
+  /// writes needed. Returns the saved row, or null when rejected.
+  Future<HandlerReport?> handlerCreateReport(
+    String requestId,
+    HandlerReport report,
+  ) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_create_report',
+      params: {'p_request_id': requestId, 'p_report': report.toMap()},
+    );
+    if (result is! Map) return null;
+    return HandlerReport.fromMap(result);
   }
 }
 

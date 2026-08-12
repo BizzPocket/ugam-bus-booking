@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../utils/party_fit.dart';
@@ -127,7 +128,15 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
         bottom: false,
         child: Column(
           children: [
-            UgamAppBar(showBack: true, title: tr('party_gate.title')),
+            // The route is the answer to "which tour am I answering FOR?" —
+            // this screen carried the tour the whole time and never showed it,
+            // so a customer arriving from a list of six pilgrimages had no
+            // confirmation they were about to book seats on the right one.
+            UgamAppBar(
+              showBack: true,
+              title: tr('party_gate.title'),
+              subtitle: widget.tour.route,
+            ),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(
@@ -184,25 +193,54 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
                         const SizedBox(height: UgamSpacing.sm),
                         // The mismatch is stated in WORDS. A silently dead CTA
                         // teaches the customer nothing about why they are stuck.
+                        //
+                        // Danger ink AND a glyph AND words, matching the error
+                        // line UgamInput paints under a bad field — the failure
+                        // has to survive a colour-blind reader. It was `warm`,
+                        // which the token set reserves for "a lady is seated
+                        // here"; borrowing a seat-occupancy signal for form
+                        // validation made both of them mean less.
                         if (_unassigned != 0)
-                          Text(
-                            _unassigned > 0
-                                ? tr(
-                                    'party_gate.split_short',
-                                    namedArgs: {'n': '$_unassigned'},
-                                  )
-                                : tr(
-                                    'party_gate.split_over',
-                                    namedArgs: {'n': '${-_unassigned}'},
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(top: 1),
+                                child: Icon(
+                                  Icons.error_outline_rounded,
+                                  size: UgamScale.px(context, 14),
+                                  color: c.danger,
+                                ),
+                              ),
+                              const SizedBox(width: UgamSpacing.xs),
+                              Expanded(
+                                child: Semantics(
+                                  liveRegion: true,
+                                  child: Text(
+                                    _unassigned > 0
+                                        ? tr(
+                                            'party_gate.split_short',
+                                            namedArgs: {'n': '$_unassigned'},
+                                          )
+                                        : tr(
+                                            'party_gate.split_over',
+                                            namedArgs: {
+                                              'n': '${-_unassigned}',
+                                            },
+                                          ),
+                                    style: UgamText.caption
+                                        .copyWith(color: c.danger),
                                   ),
-                            style: UgamText.caption.copyWith(color: c.warm),
+                                ),
+                              ),
+                            ],
                           ),
                       ],
                     ),
                   ],
                   const SizedBox(height: UgamSpacing.xl),
                   _Question(c: c, label: tr('party_gate.share_q')),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: UgamSpacing.xs),
                   Text(
                     tr('party_gate.share_hint'),
                     style: UgamText.caption.copyWith(color: c.ink2),
@@ -213,6 +251,31 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
                     c: c,
                     value: _shareOk,
                     onChanged: (v) => setState(() => _shareOk = v),
+                  ),
+                  // Closes the list instead of trailing off into ~180pt of
+                  // empty page above the CTA, and answers the question the
+                  // button raises: pressing "Show seats" does not hand back a
+                  // blank chart, it hands back a filled one you can still edit.
+                  const SizedBox(height: UgamSpacing.xl),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          Icons.event_seat_rounded,
+                          size: UgamScale.px(context, 14),
+                          color: c.ink3,
+                        ),
+                      ),
+                      const SizedBox(width: UgamSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          tr('party_gate.next_hint'),
+                          style: UgamText.caption.copyWith(color: c.ink3),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -246,19 +309,27 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
     required int value,
     required ValueChanged<int> onChanged,
   }) {
+    // 44 square, up from 44×40. Forty is under the minimum tap target, and
+    // these are the smallest controls on a screen aimed at people who are not
+    // confident with apps, on cheap phones, often in bright sun.
+    final box = UgamScale.tap(context, 44);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
-        const SizedBox(height: 6),
+        const SizedBox(height: UgamSpacing.sm),
         Wrap(
           key: rowKey,
           spacing: UgamSpacing.sm,
           runSpacing: UgamSpacing.sm,
           children: [
             for (var n = 0; n <= _people; n++)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
+              UgamTappable(
+                // The selection click below IS this control's haptic; the
+                // wrapper's default lightImpact would stack a second buzz on
+                // every tap.
+                haptic: false,
+                pressedScale: 0.93,
                 onTap: () {
                   HapticFeedback.selectionClick();
                   onChanged(n);
@@ -266,8 +337,8 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
                 child: AnimatedContainer(
                   duration: UgamMotion.tab,
                   curve: UgamMotion.easeOut,
-                  width: 44,
-                  height: 40,
+                  width: box,
+                  height: box,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: value == n ? c.accentFill : c.cardElev,
@@ -295,14 +366,17 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
   }
 
   Widget _peopleChips(UgamColorSet c) {
+    final w = UgamScale.tap(context, 52);
+    final h = UgamScale.tap(context, 48);
     return Wrap(
       key: PartyGateScreen.peopleKey,
       spacing: UgamSpacing.sm,
       runSpacing: UgamSpacing.sm,
       children: [
         for (var n = 1; n <= PartyGateScreen.maxPeople; n++)
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
+          UgamTappable(
+            haptic: false,
+            pressedScale: 0.93,
             onTap: () {
               HapticFeedback.selectionClick();
               // Re-zero the split: a breakdown of four people is nonsense the
@@ -316,8 +390,8 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
             child: AnimatedContainer(
               duration: UgamMotion.tab,
               curve: UgamMotion.easeOut,
-              width: 52,
-              height: 48,
+              width: w,
+              height: h,
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: _people == n ? c.accentFill : c.cardElev,
@@ -371,12 +445,16 @@ class _YesNo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final height = UgamScale.tap(context, 52);
+
     Widget button({required bool mine, required Key key, required String text}) {
       final on = value == mine;
       return Expanded(
-        child: GestureDetector(
+        child: UgamTappable(
           key: key,
-          behavior: HitTestBehavior.opaque,
+          // Selection click below is this control's haptic — see the note on
+          // the party chips.
+          haptic: false,
           onTap: () {
             HapticFeedback.selectionClick();
             onChanged(mine);
@@ -384,8 +462,9 @@ class _YesNo extends StatelessWidget {
           child: AnimatedContainer(
             duration: UgamMotion.tab,
             curve: UgamMotion.easeOut,
-            height: 52,
+            height: height,
             alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.sm),
             decoration: BoxDecoration(
               color: on ? c.accentFill : c.cardElev,
               borderRadius: BorderRadius.circular(UgamRadius.card),
@@ -393,8 +472,12 @@ class _YesNo extends StatelessWidget {
                 color: on ? c.accent.withValues(alpha: 0.32) : c.border,
               ),
             ),
+            // Wraps rather than ellipsising. "Yes"/"No" is two glyphs in every
+            // locale today, but this widget takes arbitrary label text and the
+            // box is a fixed height with no give.
             child: Text(
               text,
+              textAlign: TextAlign.center,
               style: UgamText.bodyStrong.copyWith(
                 color: on ? c.accent : c.ink2,
               ),

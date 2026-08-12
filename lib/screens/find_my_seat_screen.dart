@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 
 import '../components/combined_seat_grid.dart';
 import '../components/seat_chart_tile.dart';
+import '../design/components/ugam_tappable.dart';
 import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
@@ -13,7 +14,7 @@ import '../models/seat_ticket.dart';
 import '../models/trip_type.dart';
 import '../services/customer_requests_store.dart';
 import '../utils/formatters.dart';
-import 'handler_bus_chart_screen.dart';
+import 'handler/handler_shell.dart';
 
 /// The one glyph that means "your seat on the bus", used by every surface that
 /// opens this flow. Deliberately NOT `event_seat`: that bare-seat glyph is the
@@ -413,6 +414,11 @@ class _TicketCard extends StatelessWidget {
           ),
           if (ticket.seatIds.isNotEmpty) ...[
             const SizedBox(height: UgamSpacing.sm),
+            // THE accent site on this screen, and the textbook one: "the berth
+            // you picked". Everything else here — the tour title, the route,
+            // the bus header, the rider's own name — is context; this chip and
+            // the `mine` seat tiles below are the only marks that answer the
+            // question the rider opened the screen to ask. Keep.
             Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: UgamSpacing.md,
@@ -444,7 +450,7 @@ class _TicketCard extends StatelessWidget {
               label: tr('find_seat.manage_as_handler'),
               leadingIcon: Icons.manage_accounts_rounded,
               onPressed: () => Get.to(
-                () => HandlerBusChartScreen(requestId: handlerRequestId!),
+                () => HandlerShell(requestId: handlerRequestId!),
                 transition: Transition.cupertino,
               ),
             ),
@@ -501,7 +507,7 @@ class _HandlerEntryCard extends StatelessWidget {
             label: tr('find_seat.manage_as_handler'),
             leadingIcon: Icons.manage_accounts_rounded,
             onPressed: () => Get.to(
-              () => HandlerBusChartScreen(requestId: ref.requestId),
+              () => HandlerShell(requestId: ref.requestId),
               transition: Transition.cupertino,
             ),
           ),
@@ -561,23 +567,37 @@ class _QueryChip extends StatelessWidget {
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          GestureDetector(
+          // The only way back into the number field, and it was a ~28pt pill.
+          // The ConstrainedBox raises the TARGET to the 44pt floor while the
+          // Center(widthFactor: 1) keeps the PAINTED pill its original size —
+          // without it the minHeight propagates into the Container and the
+          // chip inflates to fill the row.
+          UgamTappable(
             onTap: onChange,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: UgamSpacing.md,
-                vertical: 6,
+            pressedScale: 0.93,
+            semanticLabel: tr('find_seat.change_number'),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: UgamScale.tap(context, 44),
               ),
-              decoration: BoxDecoration(
-                color: c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-              ),
-              child: Text(
-                tr('find_seat.change_number'),
-                style: UgamText.caption.copyWith(
-                  color: c.ink,
-                  fontWeight: FontWeight.w600,
+              child: Center(
+                widthFactor: 1,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.md,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: c.cardElev,
+                    borderRadius: BorderRadius.circular(UgamRadius.chip),
+                  ),
+                  child: Text(
+                    tr('find_seat.change_number'),
+                    style: UgamText.caption.copyWith(
+                      color: c.ink,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -608,7 +628,13 @@ class _BusDiagram extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(Icons.directions_bus_rounded, size: 18, color: c.accent),
+            // Section glyph, NOT an ownership mark. Every bus rendered on this
+            // card is one the rider holds a seat on, so an amber bus icon
+            // distinguishes nothing — and it competed with the seats below it,
+            // which are the only thing on this screen that is genuinely
+            // "yours". The accent is spent on the seat tiles and the
+            // "Your seats: …" chip; the header glyph stays neutral.
+            Icon(Icons.directions_bus_rounded, size: 18, color: c.ink3),
             const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: Text(

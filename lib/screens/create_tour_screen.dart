@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../config/whatsapp_cloud_config.dart';
 import '../controllers/tour_controller.dart';
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../services/whatsapp_cloud_service.dart';
 import '../services/whatsapp_service.dart';
@@ -121,6 +122,13 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
         } else {
           _departureDate = picked;
           _dateError = null;
+          // Moving departure LATER can strand a return date already chosen
+          // before it. The picker's firstDate only guards the other order.
+          // Mirrors edit_tour_screen's guard.
+          if (_returnDate != null && _returnDate!.isBefore(picked)) {
+            _returnDate = null;
+            _returnTime = null;
+          }
         }
       });
     }
@@ -297,9 +305,19 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                       errorText: _titleError,
                     ),
                     const SizedBox(height: UgamSpacing.xl),
+                    // [UgamText.label] — the script-safe eyebrow step — not
+                    // `micro` + `.toUpperCase()`. In Gujarati (the primary
+                    // language) the caps are a no-op, micro's 1.4 tracking
+                    // pulls conjuncts apart, and 10px lands at 8.5 under the
+                    // small-phone scale. Emphasis is weight + colour instead.
+                    //
+                    // Deliberately NOT [UgamSectionLabel]: that component still
+                    // uppercases onto `micro`, so it reproduces the exact bug
+                    // for every translated string. It lives in lib/design and
+                    // is not this wave's to change — flagged for its owner.
                     Text(
-                      tr('create_tour.label.route').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink2),
+                      tr('create_tour.label.route'),
+                      style: UgamText.label.copyWith(color: c.ink2),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     if (MediaQuery.of(context).size.width < 400) ...[
@@ -309,22 +327,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                         errorText: _fromError,
                       ),
                       const SizedBox(height: UgamSpacing.xs),
-                      Center(
-                        child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: c.accentFill,
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.arrow_downward_rounded,
-                            size: 14,
-                            color: c.accent,
-                          ),
-                        ),
-                      ),
+                      Center(child: _RouteArrow(c: c, vertical: true)),
                       const SizedBox(height: UgamSpacing.xs),
                       UgamInput(
                         hint: tr('create_tour.hint.to_city'),
@@ -341,22 +344,11 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                               errorText: _fromError,
                             ),
                           ),
-                          Container(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: UgamSpacing.sm + 2,
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: UgamSpacing.tight,
                             ),
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: c.accentFill,
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 14,
-                              color: c.accent,
-                            ),
+                            child: _RouteArrow(c: c, vertical: false),
                           ),
                           Expanded(
                             child: UgamInput(
@@ -370,8 +362,8 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                     ],
                     const SizedBox(height: UgamSpacing.xl),
                     Text(
-                      tr('create_tour.label.date_range').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink2),
+                      tr('create_tour.label.date_range'),
+                      style: UgamText.label.copyWith(color: c.ink2),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     // Departure date paired with its departure time.
@@ -453,8 +445,9 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     Text(
-                      '${tr('create_tour.label.broadcast').toUpperCase()}  ·  ${tr('create_tour.label.optional').toUpperCase()}',
-                      style: UgamText.micro.copyWith(color: c.ink2),
+                      '${tr('create_tour.label.broadcast')}  ·  '
+                      '${tr('create_tour.label.optional')}',
+                      style: UgamText.label.copyWith(color: c.ink2),
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     UgamInput(
@@ -584,7 +577,13 @@ class _TourPreviewCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    UgamReqChip(label: tr('create_tour.preview.eyebrow')),
+                    // A section eyebrow, not a selection: [UgamReqChip]'s
+                    // DEFAULT variant is `accent`, which spent the one "this is
+                    // yours" colour on the word PREVIEW. Neutral.
+                    UgamReqChip(
+                      label: tr('create_tour.preview.eyebrow'),
+                      variant: UgamChipVariant.neutral,
+                    ),
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
@@ -620,6 +619,10 @@ class _TourPreviewCard extends StatelessWidget {
                   spacing: 6,
                   runSpacing: 6,
                   children: [
+                    // The ONE accent on this screen, and it is the rule's own
+                    // case: "the currently-selected value" — the date the agent
+                    // picked. Still un-picked → neutral, because there is
+                    // nothing of theirs in it yet.
                     UgamReqChip(
                       label: dateText,
                       variant: departureDate == null
@@ -656,11 +659,14 @@ class _BroadcastImagePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (image == null) {
-      return GestureDetector(
+      return UgamTappable(
         onTap: onPick,
-        behavior: HitTestBehavior.opaque,
+        semanticLabel: tr('create_tour.broadcast_add_image'),
         child: Container(
-          height: 52,
+          // Tappable box → UgamScale.tap, which shrinks with the device but
+          // never below the 44pt floor. A bare `52` shrank nothing and a bare
+          // UgamScale.px would have taken it to 44.2 on a small phone.
+          height: UgamScale.tap(context, 52),
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
           decoration: BoxDecoration(
             color: c.cardElev,
@@ -708,15 +714,57 @@ class _BroadcastImagePicker extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          GestureDetector(
+          // Was a bare GestureDetector around an 18pt glyph in 6pt padding —
+          // a 30×30 target with no press feedback at all.
+          //
+          // NOT [UgamIconButton]: its neutral tone paints a `cardElev` disc,
+          // and this strip is already `cardElev`, so the button would have
+          // been an invisible circle. [UgamTappable] is the documented case
+          // for the leftovers the three components don't fit — same scale +
+          // haptic + a11y, no fill of its own — and the box is squared up to
+          // the 44pt floor via [UgamScale.tap].
+          UgamTappable(
             onTap: onRemove,
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Icon(Icons.close_rounded, size: 18, color: c.ink3),
+            semanticLabel: tr('create_tour.broadcast_remove_image'),
+            pressedScale: 0.93,
+            child: SizedBox(
+              width: UgamScale.tap(context, 44),
+              height: UgamScale.tap(context, 44),
+              child: Center(
+                child: Icon(Icons.close_rounded, size: 18, color: c.ink2),
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The circular from → to connector between the two city fields.
+///
+/// Decorative chrome: it separates two inputs, it is not a thing the agent
+/// selected, so it carries no accent (see [Brand] — the amber means "this is
+/// yours" and nothing else). Identical to the sibling edit_tour_screen's arrow
+/// so the two forms stay one design.
+class _RouteArrow extends StatelessWidget {
+  final UgamColorSet c;
+  final bool vertical;
+
+  const _RouteArrow({required this.c, required this.vertical});
+
+  @override
+  Widget build(BuildContext context) {
+    final d = UgamScale.px(context, 30);
+    return Container(
+      width: d,
+      height: d,
+      decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: Icon(
+        vertical ? Icons.arrow_downward_rounded : Icons.arrow_forward_rounded,
+        size: UgamScale.px(context, 14),
+        color: c.ink2,
       ),
     );
   }

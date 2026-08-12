@@ -34,6 +34,12 @@
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  CONSERVATIVE_STATIC_CHARS,
+  sanitize,
+  validateRendered,
+  violationSummary,
+} from "../_shared/wa_rules.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -106,9 +112,26 @@ Deno.serve(async (req: Request) => {
 
   const requestId = (payload.requestId ?? "").trim();
   const busId = (payload.busId ?? "").trim();
-  const message = (payload.message ?? "").trim();
-  if (!requestId || !busId || !message) {
+  const rawMessage = (payload.message ?? "").trim();
+  if (!requestId || !busId || !rawMessage) {
     return json({ error: "Missing requestId, busId or message" }, 400);
+  }
+
+  // The handler app is the ONLY caller that reaches Meta without the admin
+  // app's composer in front of it, and until now neither side checked anything.
+  // A handler typing a two-paragraph announcement produced a per-recipient
+  // 132000 for the whole bus, with nothing anywhere explaining it.
+  //
+  // REPAIR rather than refuse: collapsing a paragraph break to a space is the
+  // only way that text can legally travel, and a flattened announcement beats
+  // one that reaches nobody. Only what survives the repair is refused.
+  const message = sanitize(rawMessage);
+  const violations = validateRendered([message], CONSERVATIVE_STATIC_CHARS);
+  if (violations.length > 0) {
+    return json({
+      error: `Message rejected before sending: ${violationSummary(violations)}`,
+      code: 132000,
+    }, 400);
   }
 
   // Service-role client — bypasses RLS; we do the authorization ourselves below.
@@ -200,7 +223,7 @@ Deno.serve(async (req: Request) => {
     `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`;
 
   const results: Array<
-    { to: string; ok: boolean; id?: string; error?: string }
+    { to: string; ok: boolean; id?: string; error?: string; code?: number }
   > = [];
 
   // Sequential send keeps us under Cloud API burst limits and makes
@@ -230,10 +253,17 @@ Deno.serve(async (req: Request) => {
       if (res.ok) {
         results.push({ to, ok: true, id: data?.messages?.[0]?.id });
       } else {
+        // Keep Meta's numeric code AND its specific `details` line — the code
+        // is what the app maps to a remedy, the details say which value was
+        // at fault. Dropping either is how a failure became unexplainable.
+        const err = data?.error;
+        const details = err?.error_data?.details;
         results.push({
           to,
           ok: false,
-          error: data?.error?.message ?? `HTTP ${res.status}`,
+          error: [err?.message, details].filter(Boolean).join(" — ") ||
+            `HTTP ${res.status}`,
+          code: typeof err?.code === "number" ? err.code : undefined,
         });
       }
     } catch (e) {

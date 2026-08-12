@@ -118,4 +118,115 @@ void main() {
       );
     });
   });
+
+  group('counting characters the way the sender sees them', () {
+    test('an emoji is one character, not two UTF-16 code units', () {
+      expect('🙏'.length, 2, reason: 'the miscount that refused a legal message');
+      expect(WaTemplateParams.characterCount('🙏'), 1);
+    });
+
+    test('a ZWJ family emoji is one character, not seven runes', () {
+      const family = '👨‍👩‍👧‍👦';
+      expect(family.runes.length, greaterThan(1),
+          reason: 'runes were the previous, still-wrong measure');
+      expect(WaTemplateParams.characterCount(family), 1);
+    });
+
+    test('a Gujarati consonant carrying a matra is one character', () {
+      // 'ક' + 'ા' renders as a single glyph the sender counts once.
+      expect('કા'.runes.length, 2);
+      expect(WaTemplateParams.characterCount('કા'), 1);
+    });
+
+    test('plain ASCII is unaffected', () {
+      expect(WaTemplateParams.characterCount('Bus 1'), 5);
+    });
+  });
+
+  group('the rendered-body budget', () {
+    test('a legal parameter still busts the limit once the template is added',
+        () {
+      // THE defect a per-parameter check cannot see. 900 characters is a
+      // perfectly legal {{1}}, but bus_msg wraps it in a greeting and a closing
+      // blessing — and Meta measures the assembled body, returning
+      // "132005 Translated text is too long" for every recipient.
+      final param = 'ક' * 900;
+      expect(WaTemplateParams.validateOne(param), isEmpty,
+          reason: 'the parameter alone is under 1024 and looks fine');
+
+      final issues = WaTemplateParams.validateRendered(
+        params: [param],
+        staticBodyChars: 200,
+      );
+      expect(issues.map((v) => v.issue), [WaParamIssue.renderedTooLong]);
+      expect(issues.single.count, 1100);
+      expect(issues.single.paramIndex, WaParamViolation.whole,
+          reason: 'the message is too long, not any one parameter');
+    });
+
+    test('the same text fits when the template body is short', () {
+      final param = 'ક' * 900;
+      expect(
+        WaTemplateParams.validateRendered(params: [param], staticBodyChars: 100),
+        isEmpty,
+      );
+    });
+
+    test('exactly 1024 rendered is legal, 1025 is not', () {
+      expect(
+        WaTemplateParams.validateRendered(
+          params: ['ક' * 24],
+          staticBodyChars: 1000,
+        ),
+        isEmpty,
+      );
+      expect(
+        WaTemplateParams.validateRendered(
+          params: ['ક' * 25],
+          staticBodyChars: 1000,
+        ).map((v) => v.issue),
+        [WaParamIssue.renderedTooLong],
+      );
+    });
+
+    test('seven seat_allotment values are measured together', () {
+      final params = List.filled(7, 'ક' * 150); // 1050 across the batch
+      expect(
+        params.every((p) => WaTemplateParams.validateOne(p).isEmpty),
+        isTrue,
+        reason: 'every value passes on its own',
+      );
+      expect(
+        WaTemplateParams.validateRendered(params: params, staticBodyChars: 0)
+            .map((v) => v.issue),
+        [WaParamIssue.renderedTooLong],
+      );
+    });
+
+    test('per-parameter faults are still reported alongside the total', () {
+      final issues = WaTemplateParams.validateRendered(
+        params: ['fine', 'has\nbreak'],
+        staticBodyChars: 0,
+      );
+      expect(issues.map((v) => v.issue), [WaParamIssue.newline]);
+      expect(issues.single.paramIndex, 1,
+          reason: 'the aggregate must not hide WHICH value is wrong');
+    });
+
+    test('free-text budget subtracts the template, and never goes negative',
+        () {
+      expect(WaTemplateParams.freeTextBudget(200), 824);
+      expect(WaTemplateParams.freeTextBudget(0), 1024);
+      expect(WaTemplateParams.freeTextBudget(2000), 0);
+    });
+
+    test('the conservative fallback is stricter than Meta, never looser', () {
+      expect(
+        WaTemplateParams.conservativeStaticChars,
+        greaterThan(0),
+        reason: 'a catalog-less composer must assume the template costs '
+            'something, or it re-creates the bug it fixes',
+      );
+    });
+  });
 }

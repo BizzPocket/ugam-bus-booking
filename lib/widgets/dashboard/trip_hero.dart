@@ -7,6 +7,7 @@ import '../../controllers/tour_controller.dart';
 import '../../design/ugam.dart';
 import '../../models/money_summary.dart';
 import '../../models/tour.dart';
+import '../../models/pnl_confidence.dart';
 import '../../models/tour_status.dart';
 import '../../screens/create_tour_screen.dart';
 import '../../screens/tour_detail_screen.dart';
@@ -189,7 +190,7 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
           const SizedBox(height: UgamSpacing.md),
           // Lower panel: seat-fill gauge while filling, inline P&L once the
           // tour is locked and its departure date has arrived.
-          if (pnl) _pnlBreakdown(c, m) else _seatGauge(c, tour, cap),
+          if (pnl) _pnlBreakdown(c, m, tour) else _seatGauge(c, tour, cap),
           const SizedBox(height: UgamSpacing.md),
           // Footer — pax + open affordance.
           Row(
@@ -264,15 +265,33 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
     );
   }
 
+  /// Net label for the inline P&L — a projected net is named as one so the
+  /// dashboard never reports a forecast as money the trip has made.
+  String _netLabel(bool isProfit, PnlConfidence confidence) {
+    if (isProfit) {
+      return confidence.isProjected
+          ? tr('trip_pnl.net_projected')
+          : tr('trip_pnl.net_profit');
+    }
+    return confidence.isProjected
+        ? tr('trip_pnl.net_projected_loss')
+        : tr('trip_pnl.net_loss');
+  }
+
   /// Inline P&L: revenue / costs (/ income) and the net profit or loss — the
   /// same `totalNetBilled` basis as the full Trip P&L screen, so they agree.
-  Widget _pnlBreakdown(UgamColorSet c, TourMoneySummary? m) {
+  Widget _pnlBreakdown(UgamColorSet c, TourMoneySummary? m, Tour tour) {
     if (m == null) {
       return Text('—', style: UgamText.caption.copyWith(color: c.ink3));
     }
     final profit = m.totalNetBilled;
     final isProfit = profit >= 0;
-    final tone = isProfit ? c.good : c.danger;
+    final confidence = PnlConfidence.of(m, tour.status);
+    // Same rule the Trip P&L hero and the money-board card apply: green means
+    // a settled result, so a forecast or a cost-incomplete figure stays ink.
+    final tone = !isProfit
+        ? c.danger
+        : (confidence.isProvisional ? c.ink : c.good);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -286,6 +305,17 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
           _pnlLine(c, tr('bus_money.stat_income'),
               Formatters.formatMoneyInr(m.totalIncome), c.ink2),
         ],
+        if (confidence.costsIncomplete) ...[
+          const SizedBox(height: UgamSpacing.sm),
+          UgamCaveat(
+            message: m.busesMissingRent == 1
+                ? tr('trip_pnl.rent_missing_one')
+                : tr(
+                    'trip_pnl.rent_missing_many',
+                    namedArgs: {'n': '${m.busesMissingRent}'},
+                  ),
+          ),
+        ],
         const SizedBox(height: UgamSpacing.md),
         Container(height: 1, color: c.border),
         const SizedBox(height: UgamSpacing.md),
@@ -293,7 +323,7 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
           children: [
             Expanded(
               child: Text(
-                isProfit ? tr('trip_pnl.net_profit') : tr('trip_pnl.net_loss'),
+                _netLabel(isProfit, confidence),
                 style: UgamText.micro.copyWith(color: c.ink3),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -351,6 +381,23 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
         );
       }
     }
+    // A rider told about a seat that was then taken back. Ranked above the
+    // seating branches on purpose: the removal ALSO makes their berths
+    // unassigned, so `needsDecision` / `pendingSeatsToAssign` below would
+    // answer "1 seat unassigned" and the stale-notification check further down
+    // could never be reached for a withdrawal. Re-seating them does not undo
+    // the wrong seat number already in their hand.
+    if (tour.status == TourStatus.locked) {
+      final stranded =
+          tour.passengers.where((p) => p.seatsRemovedSinceNotified).length;
+      if (stranded > 0) {
+        return _HeroAction(
+          tr('dashboard.attention_seat_removed',
+              namedArgs: {'n': '$stranded'}),
+          urgent: true,
+        );
+      }
+    }
     if (tour.passengers.isNotEmpty && tour.buses.isEmpty) {
       return _HeroAction(
         tr('dashboard.attention_no_bus',
@@ -373,11 +420,14 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
       );
     }
     // Locked tours: never claim "ready to lock". Surface re-notify first.
+    // Asks the canonical [Passenger.notifiedSeatsAreStale] instead of the old
+    // `assignedSeats.isNotEmpty && seatsChangedSinceNotified`, whose first half
+    // was redundant and whose effect was to hide withdrawn-seat riders.
+    // Withdrawals are answered by the higher-ranked block above, so this count
+    // is seat MOVES only and its "seat change(s)" copy stays true.
     if (tour.status == TourStatus.locked) {
-      final changed = tour.passengers
-          .where((p) =>
-              p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified)
-          .length;
+      final changed =
+          tour.passengers.where((p) => p.notifiedSeatsAreStale).length;
       if (changed > 0) {
         return _HeroAction(
           tr('dashboard.attention_renotify', namedArgs: {'n': '$changed'}),

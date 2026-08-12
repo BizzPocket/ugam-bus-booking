@@ -123,6 +123,16 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final shell = Get.find<ShellController>();
 
+    // The Scaffold resizes to avoid the IME, and `bottomNavigationBar` is
+    // inside that resized area — so with the keyboard up the floating dock
+    // rode ON TOP of it, eating ~90 px of the little viewport that is left
+    // exactly when a form is being filled (Requests search, the booking
+    // capture fields, the money numpad). Nothing navigates while typing, so
+    // the dock stands down and gives the field its space back. Read OUTSIDE
+    // the Obx so the inset is a dependency of this element, not of the
+    // reactive closure.
+    final imeUp = MediaQuery.viewInsetsOf(context).bottom > 0;
+
     return Obx(() {
       final currentIndex = shell.currentIndex.value;
       _visitedTabs.add(currentIndex);
@@ -192,18 +202,22 @@ class _MainShellState extends State<MainShell> {
               ),
             ),
           ),
-          bottomNavigationBar: Align(
-            alignment: Alignment.center,
-            heightFactor: 1.0,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: _kAdminMaxWidth),
-              child: UgamDockNav(
-                currentIndex: shell.currentIndex.value,
-                onTap: shell.onTabTapped,
-                items: buildAdminDockItems(),
-              ),
-            ),
-          ),
+          bottomNavigationBar: imeUp
+              ? null
+              : Align(
+                  alignment: Alignment.center,
+                  heightFactor: 1.0,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: _kAdminMaxWidth,
+                    ),
+                    child: UgamDockNav(
+                      currentIndex: shell.currentIndex.value,
+                      onTap: shell.onTabTapped,
+                      items: buildAdminDockItems(),
+                    ),
+                  ),
+                ),
         ),
       );
     });

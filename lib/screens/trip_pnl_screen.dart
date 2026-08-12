@@ -7,9 +7,12 @@ import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/money_summary.dart';
+import '../models/pnl_confidence.dart';
 import '../models/tour.dart';
+import '../utils/app_nav.dart';
 import '../utils/formatters.dart';
 import '../widgets/money_loading_skeleton.dart';
+import 'add_bus_screen.dart';
 import 'bus_money_screen.dart';
 
 /// Per-trip Profit & Loss — the breakdown the agent lands on when they open a
@@ -99,6 +102,13 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                   return UgamEmpty(
                     icon: Icons.search_off_rounded,
                     title: tr('tour_money_board.tour_not_found'),
+                    // A dead end otherwise: the P&L of a tour that no longer
+                    // exists offered nothing but the OS back gesture.
+                    cta: UgamCTA(
+                      label: tr('app.action.back'),
+                      leadingIcon: Icons.arrow_back_rounded,
+                      onPressed: () => AppNav.pop(context),
+                    ),
                   );
                 }
                 if (_money.isLoading.value && !_money.loadedOnce.value) {
@@ -107,9 +117,22 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
 
                 final buses = tour.buses;
                 if (buses.isEmpty) {
+                  // "No buses YET" — a setup gap, not a zero P&L, so it gets
+                  // the action that closes it rather than leaving the agent to
+                  // back out twice to find the bus wizard. (A tour that HAS
+                  // buses and simply hasn't earned anything falls through to
+                  // the real breakdown below, which prints honest zeroes.)
                   return UgamEmpty(
-                    icon: Icons.insights_outlined,
+                    icon: Icons.directions_bus_outlined,
                     title: tr('tour_money_board.no_buses'),
+                    cta: UgamCTA(
+                      label: tr('add_bus.title'),
+                      leadingIcon: Icons.add_rounded,
+                      onPressed: () => Get.to(
+                        () => AddBusScreen(tourId: tour.id),
+                        transition: Transition.cupertino,
+                      ),
+                    ),
                   );
                 }
 
@@ -130,6 +153,11 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                 final busById = {for (final b in buses) b.id: b};
 
                 return RefreshIndicator(
+                  // Chrome, not ownership — the pull spinner is neutral ink2
+                  // in every screen, so it never changes hue between tabs.
+                  // (Unset used to mean `colorScheme.primary`, i.e. the accent;
+                  // there is no theme hook for a refresh spinner.)
+                  color: c.ink2,
                   onRefresh: () => _money.refreshForTour(widget.tourId),
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(
@@ -142,7 +170,11 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                       parent: BouncingScrollPhysics(),
                     ),
                     children: [
-                      _TripTotalCard(total: total, c: c),
+                      _TripTotalCard(
+                        total: total,
+                        confidence: PnlConfidence.of(total, tour.status),
+                        c: c,
+                      ),
                       const SizedBox(height: UgamSpacing.xl),
                       if (handlers.isNotEmpty) ...[
                         UgamSectionLabel(tr('trip_pnl.by_handler')),
@@ -183,14 +215,19 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                                 ? null
                                 : () => _openBus(tour, busById[s.busId]!),
                             title: busById[s.busId]?.name ?? '',
-                            subtitle: tr(
-                              'trip_pnl.rent',
-                              namedArgs: {
-                                'n': Formatters.formatMoneyInr(
-                                  busById[s.busId]?.busPrice ?? 0,
-                                ),
-                              },
-                            ),
+                            // "Rent ₹0" is the exact ambiguity that lets a
+                            // missing cost pass for a free bus, so an unentered
+                            // rent says so in words instead of printing a zero.
+                            subtitle: (busById[s.busId]?.busPrice ?? 0) <= 0
+                                ? tr('trip_pnl.rent_not_set')
+                                : tr(
+                                    'trip_pnl.rent',
+                                    namedArgs: {
+                                      'n': Formatters.formatMoneyInr(
+                                        busById[s.busId]!.busPrice,
+                                      ),
+                                    },
+                                  ),
                             revenueBilled: s.revenueBilled,
                             collected: s.collected,
                             costs: s.expensesTotal,
@@ -218,13 +255,38 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
 /// revenue / costs / collected stat triple.
 class _TripTotalCard extends StatelessWidget {
   final TourMoneySummary total;
+  final PnlConfidence confidence;
   final UgamColorSet c;
-  const _TripTotalCard({required this.total, required this.c});
+  const _TripTotalCard({
+    required this.total,
+    required this.confidence,
+    required this.c,
+  });
+
+  /// Headline label. A projected net is named as a projection so the number is
+  /// never read as money the trip has already made; a loss keeps its own
+  /// wording either way.
+  String get _headline {
+    if (total.totalNetBilled >= 0) {
+      return confidence.isProjected
+          ? tr('trip_pnl.net_projected')
+          : tr('trip_pnl.net_profit');
+    }
+    return confidence.isProjected
+        ? tr('trip_pnl.net_projected_loss')
+        : tr('trip_pnl.net_loss');
+  }
 
   @override
   Widget build(BuildContext context) {
     final billed = total.totalNetBilled;
-    final tone = billed >= 0 ? c.good : c.danger;
+    // A provisional positive net is painted neutral rather than "good": green
+    // is the app's signal for a settled, trustworthy result, and this figure is
+    // either a forecast or missing a cost. A negative net stays red — a loss
+    // that might be understated still deserves the alarm.
+    final tone = billed < 0
+        ? c.danger
+        : (confidence.isProvisional ? c.ink : c.good);
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.xl),
       tone: billed >= 0 ? UgamCardTone.none : UgamCardTone.danger,
@@ -232,7 +294,7 @@ class _TripTotalCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            billed >= 0 ? tr('trip_pnl.net_profit') : tr('trip_pnl.net_loss'),
+            _headline,
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
           const SizedBox(height: UgamSpacing.sm),
@@ -258,6 +320,34 @@ class _TripTotalCard extends StatelessWidget {
             tr('money.basis_billed'),
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
+          // A projection is not a fault — it is the same class of thing as the
+          // basis line above, so it is set the same way. Only the rent gap
+          // below earns a container; giving both one would leave the hero with
+          // two competing alarms and no hierarchy between them.
+          if (confidence.isProjected) ...[
+            const SizedBox(height: 2),
+            Text(
+              tr('trip_pnl.projected_note'),
+              style: UgamText.micro.copyWith(color: c.ink3, height: 1.35),
+            ),
+          ],
+          // A missing rent, by contrast, is a data gap the agent can close, and
+          // it names the direction of the error ("overstated") rather than just
+          // reporting that something is absent. This is the hero's one point of
+          // emphasis — and it is [UgamCaveat]'s WARM tone, not the amber
+          // accent: this screen deliberately spends no accent at all, because
+          // nothing on a P&L is "yours" in the sense the accent means.
+          if (confidence.costsIncomplete) ...[
+            const SizedBox(height: UgamSpacing.md),
+            UgamCaveat(
+              message: total.busesMissingRent == 1
+                  ? tr('trip_pnl.rent_missing_one')
+                  : tr(
+                      'trip_pnl.rent_missing_many',
+                      namedArgs: {'n': '${total.busesMissingRent}'},
+                    ),
+            ),
+          ],
           const SizedBox(height: UgamSpacing.lg),
           _NetLine(
             label: tr('trip_pnl.cash_collected'),

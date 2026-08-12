@@ -21,6 +21,7 @@ import '../models/seat_type.dart';
 import '../models/trip_type.dart';
 import 'chart_seat_availability.dart';
 import 'chart_selection.dart';
+import 'party_fit.dart';
 
 /// One way of taking one cell: a whole double, half a double, or a single.
 class _Option {
@@ -64,8 +65,11 @@ class _Packing {
   int get lowerBerths =>
       options.fold<int>(0, (sum, o) => sum + o.lowerBerths);
 
-  List<ChartPick> get picks => [
-        for (final o in options) ChartPick(cell: o.cell, berths: o.berths),
+  /// The picks this packing represents, each stamped with the leg of the
+  /// bucket that produced it.
+  List<ChartPick> picksFor(TripType leg) => [
+        for (final o in options)
+          ChartPick(cell: o.cell, berths: o.berths, leg: leg),
       ];
 }
 
@@ -75,12 +79,16 @@ List<_Option> _optionsFor({
   required Map<String, SeatAvailability> availability,
   required TripType leg,
   required bool shareOk,
+  required Set<String> claimed,
 }) {
   final out = <_Option>[];
   for (final cell in bus.layout?.grid ?? const <SeatCell>[]) {
     if (!cell.hasSeat) continue;
     final seatId = cell.seatId;
     if (seatId == null || seatId.isEmpty) continue;
+    // An earlier leg's pass already took this berth. One tile, one person —
+    // even though disjoint legs could physically share it.
+    if (claimed.contains(SeatAvailability.keyFor(bus.id, seatId))) continue;
 
     final free = freeBerths(
       cell: cell,
@@ -193,6 +201,7 @@ _Packing? _packBus({
   required TripType leg,
   required int people,
   required bool shareOk,
+  required Set<String> claimed,
 }) {
   if (people <= 0) return null;
   final options = _optionsFor(
@@ -200,6 +209,7 @@ _Packing? _packBus({
     availability: availability,
     leg: leg,
     shareOk: shareOk,
+    claimed: claimed,
   );
   if (options.isEmpty) return null;
 
@@ -228,26 +238,103 @@ bool _betterPacking(_Packing a, _Packing b) {
   return false;
 }
 
-/// Seats the whole party, or nothing at all.
+/// What the picker managed to do, and what it could not.
 ///
-/// Returns one [ChartBusSelection] per bus used — usually one. It only spans
-/// buses when NO single bus can hold the party, and the caller is expected to
-/// say so on the summary bar: discovering a split at the boarding point is the
-/// failure this is designed to avoid.
+/// *** WHY THIS IS NOT JUST A LIST ***
+/// The old signature returned a bare list and signalled "no room" by returning
+/// it empty. That cannot express the ordinary mixed-party outcome where the
+/// outbound leg fits and the return leg does not: the go picks are real, the
+/// customer should keep them, and the gap belongs in a sentence on the summary
+/// bar naming the leg that is short.
+class AutoPickResult {
+  final List<ChartBusSelection> selections;
+
+  /// Berths the picker could NOT place, per bucket. An absent key means that
+  /// bucket was fully seated.
+  final Map<TripType, int> shortfall;
+
+  const AutoPickResult({
+    this.selections = const [],
+    this.shortfall = const {},
+  });
+
+  bool get isEmpty => selections.isEmpty;
+  bool get hasShortfall => shortfall.isNotEmpty;
+}
+
+/// Propose seats for a party, one LEG BUCKET at a time.
 ///
-/// An empty result means the party cannot be seated. A partial pick is never
-/// returned, because silently under-booking a family of four is worse than
-/// telling them plainly that there is not room.
-List<ChartBusSelection> autoPick({
+/// Buckets are filled in [PartyIntent.activeLegs] order — round-trip first,
+/// because its berth must be free on BOTH legs and therefore has the fewest
+/// candidates. Letting a one-way pass take those cells first would strand it.
+///
+/// A cell taken by one pass is invisible to the next. Disjoint legs could in
+/// principle share a berth (an outbound-only and a return-only passenger; see
+/// `seating_engine.dart`), but the customer picker deliberately never does:
+/// one tile is always one person. That keeps the chart honest across the two
+/// leg tabs and keeps the claim payload free of duplicate seat ids, which the
+/// server's uniqueness handling was never written for.
+AutoPickResult autoPick({
+  required List<Bus> buses,
+  required Map<String, SeatAvailability> availability,
+  required PartyIntent intent,
+}) {
+  if (intent.people <= 0 || buses.isEmpty) return const AutoPickResult();
+
+  // Keyed exactly as availability is, so a seat id shared between two buses
+  // cannot collide.
+  final claimed = <String>{};
+  final byBus = <String, List<ChartPick>>{};
+  final shortfall = <TripType, int>{};
+
+  for (final leg in intent.activeLegs) {
+    final want = intent.countFor(leg);
+    final placed = _pickOneLeg(
+      buses: buses,
+      availability: availability,
+      leg: leg,
+      people: want,
+      shareOk: intent.shareOk,
+      claimed: claimed,
+    );
+
+    var covered = 0;
+    for (final selection in placed) {
+      for (final pick in selection.picks) {
+        claimed.add(SeatAvailability.keyFor(selection.bus.id, pick.seatId));
+        covered += pick.berths;
+        (byBus[selection.bus.id] ??= []).add(pick);
+      }
+    }
+    if (covered < want) shortfall[leg] = want - covered;
+  }
+
+  // Rebuilt in bus tab order so the chart's tabs and the checkout list agree.
+  final selections = <ChartBusSelection>[
+    for (final bus in buses)
+      if (byBus[bus.id] != null)
+        ChartBusSelection(bus: bus, picks: byBus[bus.id]!),
+  ];
+
+  return AutoPickResult(selections: selections, shortfall: shortfall);
+}
+
+/// One bucket's worth of picking.
+///
+/// Returns whatever it could place. Partial is allowed HERE, unlike the old
+/// all-or-nothing whole-party version, because the caller reports the gap per
+/// leg rather than throwing every other leg's picks away with it.
+List<ChartBusSelection> _pickOneLeg({
   required List<Bus> buses,
   required Map<String, SeatAvailability> availability,
   required TripType leg,
   required int people,
-  bool shareOk = true,
+  required bool shareOk,
+  required Set<String> claimed,
 }) {
-  if (people <= 0 || buses.isEmpty) return const [];
+  if (people <= 0) return const [];
 
-  // ── 1. Whole party on ONE bus, in tab order ──────────────────────────────
+  // ── 1. Whole bucket on ONE bus, in tab order ─────────────────────────────
   for (final bus in buses) {
     final packing = _packBus(
       bus: bus,
@@ -255,14 +342,18 @@ List<ChartBusSelection> autoPick({
       leg: leg,
       people: people,
       shareOk: shareOk,
+      claimed: claimed,
     );
     if (packing != null) {
-      return [ChartBusSelection(bus: bus, picks: packing.picks)];
+      return [ChartBusSelection(bus: bus, picks: packing.picksFor(leg))];
     }
   }
 
   // ── 2. Split, only because nothing else fits ─────────────────────────────
   final out = <ChartBusSelection>[];
+  // A local copy: seats taken during THIS bucket's split must also be hidden
+  // from the buses considered after them.
+  final used = <String>{...claimed};
   var remaining = people;
 
   for (final bus in buses) {
@@ -276,15 +367,18 @@ List<ChartBusSelection> autoPick({
         leg: leg,
         people: want,
         shareOk: shareOk,
+        claimed: used,
       );
       if (packing == null) continue;
-      out.add(ChartBusSelection(bus: bus, picks: packing.picks));
+      final picks = packing.picksFor(leg);
+      out.add(ChartBusSelection(bus: bus, picks: picks));
+      for (final p in picks) {
+        used.add(SeatAvailability.keyFor(bus.id, p.seatId));
+      }
       remaining -= packing.covered;
       break;
     }
   }
 
-  // All or nothing.
-  if (remaining > 0) return const [];
   return out;
 }

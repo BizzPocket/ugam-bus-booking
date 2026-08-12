@@ -151,6 +151,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
     return UgamScaffold(
       body: SafeArea(
         child: Column(
@@ -180,7 +181,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
                 _applyHighlightIfNeeded();
 
                 final s = controller.summaryForBus(widget.bus.id);
-                final lines = _seatLines.where(_passesFilter).toList();
+                // Kept apart so the empty state can tell "the filter is hiding
+                // them" from "nobody is seated on this bus at all" — two very
+                // different situations that used to share one sentence.
+                final allLines = _seatLines;
+                final lines = allLines.where(_passesFilter).toList();
 
                 return Column(
                   children: [
@@ -220,11 +225,32 @@ class _CollectionScreenState extends State<CollectionScreen> {
                     ),
                     Expanded(
                       child: lines.isEmpty
-                          ? UgamEmpty(
-                              icon: Icons.account_balance_wallet_rounded,
-                              title: tr('collection.empty_no_match'),
-                            )
+                          ? (allLines.isEmpty
+                              // Genuinely zero: there is no roster to filter.
+                              // The fix lives on the seat chart, so this state
+                              // says so instead of offering a dead button.
+                              ? UgamEmpty(
+                                  icon: Icons.event_seat_outlined,
+                                  title: tr('collection.empty_no_seats_title'),
+                                  body: tr('collection.empty_no_seats_body'),
+                                )
+                              // Filtered to nothing — one action, and it is
+                              // always the right one.
+                              : UgamEmpty(
+                                  icon: Icons.filter_alt_off_rounded,
+                                  title: tr('collection.empty_no_match'),
+                                  cta: UgamCTA(
+                                    label: tr('collection.empty_show_all'),
+                                    leadingIcon: Icons.list_rounded,
+                                    onPressed: () =>
+                                        setState(() => _filter = 0),
+                                  ),
+                                ))
                           : RefreshIndicator(
+                              // Chrome, not ownership — the pull spinner is
+                              // neutral ink2 in every screen, so it never
+                              // changes hue between tabs.
+                              color: c.ink2,
                               onRefresh: () =>
                                   controller.refreshForTour(widget.tour.id),
                               child: ListView.separated(
@@ -386,7 +412,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
 
 /// Live status under the amount hero in the collect sheet. Reads the cash typed
 /// so far against the resolved due and tells the handler exactly what to do with
-/// the difference: hand back change (warm), keep collecting (accent), or it's
+/// the difference: hand back change (warm), still owed (danger), or it's
 /// square (good). This is what makes "₹500 to return" visible at the moment of
 /// collection instead of a silent calculation.
 class _ChangeStatusPill extends StatelessWidget {
@@ -424,8 +450,12 @@ class _ChangeStatusPill extends StatelessWidget {
     final String label;
     if (shortfall > 0.005) {
       icon = Icons.south_west_rounded;
-      tone = c.accent;
-      fill = c.accentFill;
+      // Money still owed is a SEMANTIC state, and the palette already has the
+      // token for "something needs you". It was amber, which on this screen
+      // competed with the amber on the seat chart, the row chips and the
+      // settle button until none of them meant anything.
+      tone = c.danger;
+      fill = c.dangerFill;
       label = tr(
         'collection.still_to_collect',
         namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
@@ -522,7 +552,10 @@ class _SummaryHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final settled = toCollect.abs() <= 0.005;
-    final figureColor = settled ? c.good : c.accent;
+    // Outstanding cash is a semantic state (danger — "something needs you"),
+    // not an ownership. Matches the live pill inside the collect sheet, so the
+    // header figure and the sheet agree on what red means.
+    final figureColor = settled ? c.good : c.danger;
 
     // ── ONE compact summary card ───────────────────────────────────────
     // Hero = the action number (still to collect); collected / to-return are
@@ -543,7 +576,7 @@ class _SummaryHeader extends StatelessWidget {
                 width: UgamScale.px(context, 42),
                 height: UgamScale.px(context, 42),
                 decoration: BoxDecoration(
-                  color: settled ? c.goodFill : c.accentFill,
+                  color: settled ? c.goodFill : c.dangerFill,
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
@@ -559,25 +592,40 @@ class _SummaryHeader extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // The eyebrow over the screen's hero figure → the
+                    // script-safe [UgamText.label] step (Inter 13 / w700 /
+                    // zero tracking), not `micro`. This site was the ladder's
+                    // worst case in one line: `.toUpperCase()` (a no-op in
+                    // Gujarati), a forked `letterSpacing` (tracking splits
+                    // conjuncts), and a hand-set w700 on a 10px Sora step that
+                    // renders at 8.5 on a small phone. All three are gone; the
+                    // emphasis is weight + `ink2`, the one device that
+                    // survives a fallback Indic face.
                     Text(
-                      tr('collection.filter_to_collect').toUpperCase(),
-                      style: UgamText.micro.copyWith(
-                        color: c.ink3,
-                        letterSpacing: 0.6,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: UgamSpacing.xs),
-                    Text(
-                      Formatters.formatMoneyInr(toCollect),
-                      style: UgamText.tabular(
-                        UgamText.numLg.copyWith(
-                          color: figureColor,
-                          fontSize: 30,
-                        ),
-                      ),
+                      tr('collection.filter_to_collect'),
+                      style: UgamText.label.copyWith(color: c.ink2),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: UgamSpacing.xs),
+                    // LADDER GAP: this was a raw `fontSize: 30`. The numeric
+                    // ladder runs numLg 20 → numXl 26 → hero 56, so 30 is not
+                    // a step and there is nothing between 26 and 56 for a
+                    // "card hero figure". Taken to numXl (26) rather than
+                    // hardcoded; if a 30-ish numeric step is wanted it belongs
+                    // in UgamText, not here.
+                    // scaleDown, not ellipsis: an ellipsised total is a WRONG
+                    // total, and this is the number the handler settles on.
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        Formatters.formatMoneyInr(toCollect),
+                        style: UgamText.tabular(
+                          UgamText.numXl.copyWith(color: figureColor),
+                        ),
+                        maxLines: 1,
+                      ),
                     ),
                   ],
                 ),
@@ -643,18 +691,23 @@ class _SummaryChip extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                value,
-                style: UgamText.tabular(
-                  UgamText.bodyStrong.copyWith(color: c.ink),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: UgamText.tabular(
+                    UgamText.bodyStrong.copyWith(color: c.ink),
+                  ),
+                  maxLines: 1,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 1),
+              // The label half of a value pair → [captionStrong] (12, the
+              // documented script floor), not `micro`, which is Latin-only.
               Text(
-                label.toUpperCase(),
-                style: UgamText.micro.copyWith(color: c.ink3),
+                label,
+                style: UgamText.captionStrong.copyWith(color: c.ink2),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -699,10 +752,12 @@ class _PassengerRow extends StatelessWidget {
     final isShortfall = line.isShortfall;
     final shortfall = line.stillToCollect;
 
-    // Status chip resolution. UgamReqChip carries the tone via variant; the
-    // shortfall ("due") state maps to the accent attention variant since the
-    // chip set has no danger tone (the row's Mark-paid action + danger metric
-    // already flag the owed amount).
+    // Status chip resolution. UgamReqChip carries the tone via variant, and
+    // every state here has a real semantic token: money handed back is warm,
+    // money still owed is danger, settled is good, untouched is neutral. The
+    // "due" state used to borrow the accent on the stated grounds that the
+    // chip set had no danger tone — [UgamChipVariant.danger] exists, so that
+    // note was stale and the amber was buying nothing.
     late final String chipLabel;
     late final UgamChipVariant chipVariant;
     if (line.isReturnDue) {
@@ -716,7 +771,7 @@ class _PassengerRow extends StatelessWidget {
         'collection.chip_due',
         namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
       );
-      chipVariant = UgamChipVariant.accent;
+      chipVariant = UgamChipVariant.danger;
     } else if (received > 0) {
       chipLabel = tr('collection.chip_paid');
       chipVariant = UgamChipVariant.good;
@@ -725,7 +780,7 @@ class _PassengerRow extends StatelessWidget {
       chipVariant = UgamChipVariant.neutral;
     }
 
-    return UgamCard.plain(
+    final card = UgamCard.plain(
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -800,7 +855,39 @@ class _PassengerRow extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
                           trip,
-                          style: UgamText.micro.copyWith(color: c.warm),
+                          // A status word that must hold against the caption
+                          // copy around it → [captionStrong]. `micro` is
+                          // Latin-only and "ફક્ત પાછા આવવાનું" is not.
+                          style: UgamText.captionStrong.copyWith(color: c.warm),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    // The unverified-UPI hint moved DOWN here, onto the same
+                    // line as the rest of the rider's detail — the pattern
+                    // [UgamRequestRow] already uses for secondary chips.
+                    //
+                    // It used to be a second natural-width chip in the trailing
+                    // cluster. Row lays non-flex children out with UNBOUNDED
+                    // main-axis constraints, so a money chip + this chip + the
+                    // 44pt settle button could together exceed the card at
+                    // 320px with Gujarati labels at the 1.3x text scale
+                    // app.dart permits: the Expanded name got 0 and the row
+                    // overflowed. Only ONE natural-width chip rides the top
+                    // line now, and it can no longer be starved.
+                    if (line.pendingClaim != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: UgamReqChip(
+                          label: tr(
+                            'collection.upi_pending_chip',
+                            namedArgs: {
+                              'n': Formatters.formatMoneyInr(
+                                line.pendingClaim!.amountRupees,
+                              ),
+                            },
+                          ),
+                          variant: UgamChipVariant.warm,
                         ),
                       ),
                   ],
@@ -808,18 +895,25 @@ class _PassengerRow extends StatelessWidget {
               ),
               const SizedBox(width: UgamSpacing.sm),
               UgamReqChip(label: chipLabel, variant: chipVariant),
-              if (line.pendingClaim != null) ...[
+              // Settle-in-full, on the row. 44×44 (the touch floor) and 8dp
+              // clear of the chip beside it, so it can be hit one-handed
+              // without opening the sheet by mistake.
+              if (isShortfall) ...[
                 const SizedBox(width: UgamSpacing.sm),
-                UgamReqChip(
-                  label: tr(
-                    'collection.upi_pending_chip',
+                UgamIconButton(
+                  key: ValueKey('mark-paid-${line.seatId}-${passenger.id}'),
+                  icon: Icons.check_rounded,
+                  // A BUTTON — never the brand hue. The danger chip beside it
+                  // already says how much is owed; the control itself is plain
+                  // chrome, exactly as `action` is a neutral in the palette.
+                  tone: UgamIconButtonTone.neutral,
+                  semanticLabel: tr(
+                    'collection.mark_paid',
                     namedArgs: {
-                      'n': Formatters.formatMoneyInr(
-                        line.pendingClaim!.amountRupees,
-                      ),
+                      'amount': Formatters.formatMoneyInr(shortfall),
                     },
                   ),
-                  variant: UgamChipVariant.warm,
+                  onTap: onMarkPaid,
                 ),
               ],
             ],
@@ -854,23 +948,27 @@ class _PassengerRow extends StatelessWidget {
                 ),
             ],
           ),
-          // One-tap full settlement — only when the seat still owes money.
-          // Tonal (never solid gold) per the accent-rationing law.
-          if (isShortfall) ...[
-            const SizedBox(height: UgamSpacing.md),
-            UgamButton(
-              label: tr(
-                'collection.mark_paid',
-                namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
-              ),
-              icon: Icons.check_rounded,
-              kind: UgamButtonKind.tonal,
-              expand: true,
-              onPressed: onMarkPaid,
-            ),
-          ],
         ],
       ),
+    );
+
+    // Nothing owed → a plain row, no action affordance at all.
+    if (!isShortfall) return card;
+
+    // One-tap full settlement. It rides ON the row (44×44, next to the status
+    // chip) instead of a full-width button stacked underneath: the row is a
+    // list item in a long seat list, and a stacked CTA per seat turned the
+    // list into a column of web cards. Swipe-right settles too.
+    return UgamSwipeAction(
+      key: ValueKey('collect-swipe-${line.seatId}-${passenger.id}'),
+      rightIcon: Icons.check_rounded,
+      rightLabel: tr(
+        'collection.mark_paid',
+        namedArgs: {'amount': Formatters.formatMoneyInr(shortfall)},
+      ),
+      onRight: onMarkPaid,
+      borderRadius: BorderRadius.circular(UgamRadius.card),
+      child: card,
     );
   }
 }
@@ -888,14 +986,28 @@ class _MetricCol extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Due / Received / Returned — the label half of a value pair, so
+        // [captionStrong] (Inter 12/w600), not `micro`. It stays a step below
+        // the bodyStrong figure under it, so the money still leads the cell.
         Text(
-          label.toUpperCase(),
-          style: UgamText.micro.copyWith(color: c.ink3),
+          label,
+          style: UgamText.captionStrong.copyWith(color: c.ink2),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 2),
-        Text(
-          value,
-          style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
+        // A money figure must never lose a digit, so it scales down to fit
+        // rather than ellipsising — three of these share the card width and a
+        // lakh-sized fare at the 1.3x text scale does not fit a third of it.
+        // Same treatment the money board gives its figures.
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
+            maxLines: 1,
+          ),
         ),
       ],
     );

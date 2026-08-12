@@ -22,6 +22,13 @@ class _LoginScreenState extends State<LoginScreen> {
   /// point anywhere in the app before this.
   bool _lookupFailed = false;
 
+  /// Inline validation on the phone field. The controller reports a short
+  /// number as a TOAST, which floats at the far end of the screen from the
+  /// field that is actually wrong — so the length check is made here and the
+  /// message is rendered by [UgamPhoneInput]'s own error slot, next to the
+  /// input the user has to fix.
+  String? _phoneError;
+
   @override
   void initState() {
     super.initState();
@@ -30,11 +37,36 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  /// Clears whatever the last attempt left on screen. Called from `onChanged`
+  /// so an error never outlives the value that caused it.
+  void _clearPhoneFeedback() {
+    if (_phoneError == null && !_lookupFailed) return;
+    setState(() {
+      _phoneError = null;
+      _lookupFailed = false;
+    });
+  }
+
   /// Wraps [AuthController.submitPhone] to notice a failed lookup without
   /// reaching into the controller: `submitPhone` only sets
   /// `awaitingAdminPassword` when it actually found an admin, so if the flag
   /// is still down after it returns, this number cannot sign in.
   Future<void> _submitPhone() async {
+    // Re-entrancy guard. The CTA disables itself while `isLoading`, but the
+    // keyboard's submit key does not — without this, holding the return key
+    // fires a second (and third) admin lookup over the first.
+    if (controller.isLoading.value) return;
+
+    final phone = controller.phoneController.text.trim();
+    if (phone.length < 10) {
+      setState(() {
+        _phoneError = tr('errors.phone_invalid');
+        _lookupFailed = false;
+      });
+      return;
+    }
+    if (_phoneError != null) setState(() => _phoneError = null);
+
     await controller.submitPhone();
     if (!mounted) return;
     final failed = !controller.awaitingAdminPassword.value;
@@ -66,114 +98,179 @@ class _LoginScreenState extends State<LoginScreen> {
               constraints: const BoxConstraints(maxWidth: 480),
               child: Column(
                 children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: UgamSpacing.xxl,
+                  // Pinned OUTSIDE the scroll body. It used to be the first
+                  // child of the centred form column, which dragged it into
+                  // the middle of the screen and let it scroll away under the
+                  // keyboard — a dismiss control has to stay where the user
+                  // left it.
+                  if (canPop)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        UgamSpacing.xxl,
+                        UgamSpacing.sm,
+                        UgamSpacing.xxl,
+                        0,
                       ),
-                      child: AutofillGroup(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if (canPop) ...[
-                              const SizedBox(height: UgamSpacing.sm),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: UgamIconButton(
-                                  icon: Icons.close_rounded,
-                                  onTap: Get.back,
-                                  semanticLabel: tr('app.action.back'),
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: UgamSpacing.xl),
-                            // Brand block — centred logo (on a soft copper halo),
-                            // Sora wordmark, and tagline. The radial glow is the
-                            // signature futuristic flourish, echoing the dashboard
-                            // passenger hero.
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.center,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: UgamIconButton(
+                          icon: Icons.close_rounded,
+                          onTap: Get.back,
+                          semanticLabel: tr('app.action.back'),
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    // The form is CENTRED in whatever height is left rather
+                    // than stacked against the top: at 812pt the brand + one
+                    // phone field left ~330pt of undesigned void between the
+                    // field and the sticky CTA. `minHeight` makes the column
+                    // fill the viewport so `center` has something to centre
+                    // in, and the moment the content (password step) or the
+                    // keyboard makes it taller, it simply scrolls as before.
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: UgamSpacing.xxl,
+                        ),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: constraints.maxHeight,
+                          ),
+                          child: AutofillGroup(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                // Decorative brand block -> px(), never tap().
-                                // All four numbers scale together so the halo
-                                // keeps its proportion to the mark instead of
-                                // towering over text textScaler already shrank.
+                                const SizedBox(height: UgamSpacing.xl),
+                                // Brand block — centred logo (on a soft copper
+                                // halo), Sora wordmark, and tagline. The radial
+                                // glow is the signature futuristic flourish,
+                                // echoing the dashboard passenger hero.
+                                //
+                                // The `double.infinity` width is load-bearing:
+                                // this column's intrinsic width is the 188pt
+                                // halo, and under the parent's
+                                // CrossAxisAlignment.start that pinned the
+                                // whole brand block to the left edge while the
+                                // full-width phone field sat beneath it. It
+                                // has to claim the row before its own
+                                // `center` can mean anything.
                                 SizedBox(
-                                  height: UgamScale.px(context, 132),
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    clipBehavior: Clip.none,
+                                  width: double.infinity,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
                                     children: [
-                                      Container(
-                                        width: UgamScale.px(context, 188),
-                                        height: UgamScale.px(context, 188),
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          gradient: RadialGradient(
-                                            colors: [
-                                              c.glow,
-                                              c.glow.withValues(alpha: 0),
-                                            ],
-                                            stops: const [0.0, 0.7],
-                                          ),
+                                      // Decorative brand block -> px(), never
+                                      // tap(). All four numbers scale together
+                                      // so the halo keeps its proportion to the
+                                      // mark instead of towering over text
+                                      // textScaler already shrank.
+                                      SizedBox(
+                                        height: UgamScale.px(context, 132),
+                                        child: Stack(
+                                          alignment: Alignment.center,
+                                          clipBehavior: Clip.none,
+                                          children: [
+                                            Container(
+                                              width:
+                                                  UgamScale.px(context, 188),
+                                              height:
+                                                  UgamScale.px(context, 188),
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                gradient: RadialGradient(
+                                                  colors: [
+                                                    c.glow,
+                                                    c.glow
+                                                        .withValues(alpha: 0),
+                                                  ],
+                                                  stops: const [0.0, 0.7],
+                                                ),
+                                              ),
+                                            ),
+                                            UgamLogo(
+                                              size: UgamScale.px(context, 64),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      UgamLogo(size: UgamScale.px(context, 64)),
+                                      const SizedBox(height: UgamSpacing.lg),
+                                      // Wraps rather than ellipsising: the
+                                      // wordmark is Latin in every locale
+                                      // today, but at the 1.3x text scale
+                                      // app.dart permits a hero step is one
+                                      // long word away from clipping.
+                                      Text(
+                                        tr('login.brand_name'),
+                                        textAlign: TextAlign.center,
+                                        style: UgamText.hero.copyWith(
+                                          color: c.ink,
+                                          letterSpacing: 2.0,
+                                        ),
+                                      ),
+                                      const SizedBox(height: UgamSpacing.sm),
+                                      Text(
+                                        tr('login.tagline'),
+                                        textAlign: TextAlign.center,
+                                        style: UgamText.body
+                                            .copyWith(color: c.ink2),
+                                      ),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(height: UgamSpacing.lg),
-                                Text(
-                                  tr('login.brand_name'),
-                                  style: UgamText.hero.copyWith(
-                                    color: c.ink,
-                                    letterSpacing: 2.0,
-                                  ),
+                                const SizedBox(height: UgamSpacing.huge),
+                                UgamPhoneInput(
+                                  controller: controller.phoneController,
+                                  label: tr('login.phone_label'),
+                                  autofillHints: const [
+                                    AutofillHints.username,
+                                  ],
+                                  errorText: _phoneError,
+                                  // Editing the number after the password step
+                                  // has opened backs out of it — this replaces
+                                  // the old "use another number" link, so
+                                  // switching numbers stays possible without a
+                                  // dedicated button.
+                                  onChanged: (_) {
+                                    if (controller
+                                        .awaitingAdminPassword.value) {
+                                      controller.cancelAdminPassword();
+                                    }
+                                    _clearPhoneFeedback();
+                                  },
+                                  onSubmitted: (_) {
+                                    if (!controller
+                                        .awaitingAdminPassword.value) {
+                                      _submitPhone();
+                                    }
+                                  },
                                 ),
-                                const SizedBox(height: UgamSpacing.sm),
-                                Text(
-                                  tr('login.tagline'),
-                                  textAlign: TextAlign.center,
-                                  style: UgamText.body.copyWith(color: c.ink2),
-                                ),
+                                // Password step slides open smoothly instead of
+                                // popping in, so the two-step flow reads as one
+                                // form.
+                                Obx(() {
+                                  final showStep =
+                                      controller.awaitingAdminPassword.value;
+                                  return AnimatedSize(
+                                    duration: UgamMotion.sheet,
+                                    curve: UgamMotion.easeOut,
+                                    alignment: Alignment.topCenter,
+                                    child: showStep
+                                        ? _PasswordStep(
+                                            c: c,
+                                            controller: controller,
+                                          )
+                                        : const SizedBox(
+                                            width: double.infinity,
+                                          ),
+                                  );
+                                }),
+                                const SizedBox(height: UgamSpacing.xl),
                               ],
                             ),
-                            const SizedBox(height: UgamSpacing.huge),
-                            UgamPhoneInput(
-                              controller: controller.phoneController,
-                              label: tr('login.phone_label'),
-                              autofillHints: const [AutofillHints.username],
-                              // Editing the number after the password step has
-                              // opened backs out of it — this replaces the old
-                              // "use another number" link, so switching numbers
-                              // stays possible without a dedicated button.
-                              onChanged: (_) {
-                                if (controller.awaitingAdminPassword.value) {
-                                  controller.cancelAdminPassword();
-                                }
-                              },
-                              onSubmitted: (_) {
-                                if (!controller.awaitingAdminPassword.value) {
-                                  _submitPhone();
-                                }
-                              },
-                            ),
-                            // Password step slides open smoothly instead of
-                            // popping in, so the two-step flow reads as one form.
-                            Obx(() {
-                              final showStep =
-                                  controller.awaitingAdminPassword.value;
-                              return AnimatedSize(
-                                duration: UgamMotion.sheet,
-                                curve: UgamMotion.easeOut,
-                                alignment: Alignment.topCenter,
-                                child: showStep
-                                    ? _PasswordStep(c: c, controller: controller)
-                                    : const SizedBox(width: double.infinity),
-                              );
-                            }),
-                            const SizedBox(height: UgamSpacing.xl),
-                          ],
+                          ),
                         ),
                       ),
                     ),
@@ -199,10 +296,23 @@ class _LoginScreenState extends State<LoginScreen> {
                           }
                           // Was a bare Row in a GestureDetector — copper text
                           // with no button surface and a ~20pt hit box. TONAL,
-                          // not ghost: ghost resolves to c.ink2 and would grey
-                          // out the copper this affordance is built on. It also
-                          // costs no solid-accent budget, so the UgamCTA below
-                          // stays this screen's one solid fill.
+                          // not ghost: tonal gives it a real surface (the amber
+                          // wash + hairline) where ghost is transparent, so the
+                          // affordance still reads as a button. It also costs no
+                          // solid-accent budget, so the UgamCTA below stays this
+                          // screen's one solid fill.
+                          //
+                          // NOTE: tonal's INK is `c.ink`, not the accent — the
+                          // accent was retired from every control because it
+                          // means "this is yours" (a selection or ownership
+                          // state), and biometric unlock is a verb. Only the
+                          // wash and hairline are still amber.
+                          //
+                          // Goes disabled with the CTA. The controller already
+                          // refuses a re-entrant unlock, but a button that
+                          // still LOOKS live during a sign-in invites the
+                          // second tap that the guard then silently eats.
+                          final loading = controller.isLoading.value;
                           return Padding(
                             padding:
                                 const EdgeInsets.only(bottom: UgamSpacing.md),
@@ -210,7 +320,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               kind: UgamButtonKind.tonal,
                               label: tr('login.unlock_biometric'),
                               icon: Icons.fingerprint_rounded,
-                              onPressed: controller.unlockWithBiometric,
+                              expand: true,
+                              onPressed: loading
+                                  ? null
+                                  : controller.unlockWithBiometric,
                             ),
                           );
                         }),
@@ -336,7 +449,16 @@ class _PasswordStepState extends State<_PasswordStep>
               errorText: widget.controller.passwordError.value,
               inputFormatters: const [],
               onChanged: (_) => widget.controller.passwordError.value = null,
-              onSubmitted: (_) => widget.controller.verifyAdminPassword(),
+              // Re-entrancy guard. The CTA disables itself while `isLoading`
+              // but the keyboard's submit key does not, so a held return key
+              // could queue a second sign-in behind the first. Deliberately
+              // NOT `enabled: !isLoading` — disabling a focused field drops
+              // the keyboard, and on a wrong password the user would have to
+              // tap back in before they could correct it.
+              onSubmitted: (_) {
+                if (widget.controller.isLoading.value) return;
+                widget.controller.verifyAdminPassword();
+              },
             )),
         if (adminName.isNotEmpty) ...[
           const SizedBox(height: UgamSpacing.sm),

@@ -33,6 +33,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import {
   type BookingEvent,
   buildFcmMessage,
+  buildHandlerReportFcm,
   buildWaMessageFcm,
   getFcmAccessToken,
   isDeadTokenStatus,
@@ -57,6 +58,9 @@ interface Payload {
   title?: string;
   body?: string;
   conversation_id?: string;
+  // handler_report path
+  tour_id?: string;
+  report_id?: string;
 }
 
 Deno.serve(async (req: Request) => {
@@ -96,6 +100,9 @@ Deno.serve(async (req: Request) => {
 
   if (payload.type === "wa_message") {
     return await handleWaMessage(sb, sa, payload);
+  }
+  if (payload.type === "handler_report") {
+    return await handleHandlerReport(sb, sa, payload);
   }
   return await handleBookingRequest(sb, sa, payload);
 });
@@ -176,6 +183,43 @@ async function handleWaMessage(
 
   return await deliver(sb, sa, ownerId, (token) =>
     buildWaMessageFcm({ token, title, body, conversationId }));
+}
+
+// ── Handler problem report ─────────────────────────────────────────────────
+// Invoked by the `handler_reports_notify_push` trigger (090), and only for the
+// urgent kinds — the trigger filters, so anything arriving here is a breakdown
+// or a seat dispute.
+//
+// Gated on push_enabled alone, deliberately: a handler reporting that the bus
+// has stopped is an operational emergency, not a notification preference, and
+// there is no per-category toggle for it to read.
+async function handleHandlerReport(
+  sb: SupabaseClient,
+  sa: ServiceAccount,
+  payload: Payload,
+): Promise<Response> {
+  const ownerId = (payload.owner_id ?? "").trim();
+  if (!ownerId) return json({ skipped: "no_owner" });
+  const title = (payload.title ?? "Handler report").toString();
+  const body = (payload.body ?? "").toString();
+
+  const { data: admin } = await sb
+    .from("admins")
+    .select("push_enabled")
+    .eq("id", ownerId)
+    .single();
+  if (!shouldNotifyMessage(admin)) {
+    return json({ skipped: "prefs_off_or_missing" });
+  }
+
+  return await deliver(sb, sa, ownerId, (token) =>
+    buildHandlerReportFcm({
+      token,
+      title,
+      body,
+      tourId: payload.tour_id,
+      reportId: payload.report_id,
+    }));
 }
 
 // ── Shared delivery: every device for an admin, prune dead tokens ───────────

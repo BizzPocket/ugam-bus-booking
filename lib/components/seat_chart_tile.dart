@@ -220,6 +220,16 @@ class SeatChartTile extends StatelessWidget {
     // chair silhouette. Fill / border / child pass through unchanged, so every
     // seat state keeps its exact colours and content, just on a rounded rect.
     // Content is clipped to the same radius so split halves round their corners.
+    //
+    // ELEVATION: deliberately [UgamElevationSet.flat] — no boxShadow, ever. A
+    // berth is not a surface ON the chart, it IS the chart: the tiles tile the
+    // plane edge to edge, so giving each one a cast would turn a seating chart
+    // into a field of bumps and destroy the one signal that matters here —
+    // booked vs free, which is carried by fill and by the dashed FREE hairline.
+    // It is also the hot path: a 2+1 sleeper draws up to 74 of these at once,
+    // and 74 blur layers per frame is the kind of cost this file has already
+    // been through one pass to remove (the painted silhouette). Depth on this
+    // screen lives on the chart's own card and on the drag chip, nowhere else.
     return Container(
       width: width,
       height: height,
@@ -1089,13 +1099,17 @@ class _SeatDragChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: c.warm,
           borderRadius: BorderRadius.circular(8),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x40000000),
-              offset: Offset(0, 4),
-              blurRadius: 12,
-            ),
-          ],
+          // Level 2 — the ONE thing on a seat chart that genuinely floats. It
+          // rides under the finger, above every berth and the chart plane
+          // itself, which is the same contract a sheet or dialog has. There is
+          // exactly one of these alive at a time, so it can afford the full
+          // two-layer shadow; the 74 berths behind it deliberately cast nothing
+          // (see [_chairFrame]).
+          //
+          // Was a hand-rolled 25% black that predated the scale: identical in
+          // both themes, so it was a hard smudge on Midnight's near-black
+          // ground and too cold under Daylight's warm neutrals.
+          boxShadow: UgamElevation.of(context).raised,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

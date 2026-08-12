@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/bus_type.dart';
@@ -43,11 +44,23 @@ class AddBusScreen extends StatefulWidget {
   /// a brand-new bus exactly like a normal add.
   final Bus? templateBus;
 
+  /// Which wizard step to open on (0 = identity, 1 = capacity, 2 = price).
+  ///
+  /// Defaults to the start. Deep-links that already know what the agent came to
+  /// fix — the Board's `BoardEmptyAction.setFares`, which means "this bus has no
+  /// fares", or `createSeatPlan`, which means "this bus has no layout" — pass
+  /// the step that actually holds those fields instead of making the agent walk
+  /// the whole wizard to reach it. Out-of-range values fall back to 0, and the
+  /// Back pill still walks the full sequence, so nothing entered earlier is
+  /// skipped over silently.
+  final int initialStep;
+
   const AddBusScreen({
     super.key,
     required this.tourId,
     this.existing,
     this.templateBus,
+    this.initialStep = 0,
   });
 
   bool get isEditing => existing != null;
@@ -70,6 +83,18 @@ class _AddBusScreenState extends State<AddBusScreen> {
   final _rearRows = TextEditingController();
   final _rearPrice = TextEditingController();
 
+  /// Focus on the registration-plate field. Owned here (rather than left to
+  /// [UgamInput]'s internal node) so the duplicate check can run **on blur**
+  /// instead of on every keystroke: typing "GJ-05" through a plate that is
+  /// already taken would otherwise flash an error at almost every character.
+  final _busNumberFocus = FocusNode();
+
+  /// Set by [_validateBusNumber] when this plate is already on another bus of
+  /// the SAME tour. Rendered in the field's own `errorText` slot and blocks
+  /// both Next and Save — the plate carries a unique index, so saving it would
+  /// come back as an unattributable "could not save bus".
+  String? _busNumberError;
+
   /// Per-bus departure time. Stored as a [TimeOfDay] while editing the form and
   /// serialized to canonical 'HH:mm' (via [hhmmFromTimeOfDay]) on save.
   TimeOfDay? _departureTime;
@@ -78,6 +103,19 @@ class _AddBusScreenState extends State<AddBusScreen> {
   /// or any explicit row range). Edited via the Step 3 "Price bands"
   /// sub-section; serialized onto the Bus at save time.
   List<PriceBand> _priceBands = const [];
+
+  /// Whether Step 3 is showing uniform pricing or explicit per-row bands, and
+  /// the bands stashed when the agent switches back to "Same for all".
+  ///
+  /// Both live HERE, not inside `_Step3PriceState`. The wizard swaps steps
+  /// through an [AnimatedSwitcher] keyed on [_currentStep], so stepping back to
+  /// Capacity DISPOSES the price step's State — which used to drop the chosen
+  /// mode (silently reverting a bands-mode bus to "Same for all" on return) and
+  /// throw the stash away with it. Owning them at wizard level is what makes
+  /// "Back preserves what I entered" true for this step too.
+  _PriceMode _priceMode = _PriceMode.fixed;
+  List<PriceBand> _stashedBands = const [];
+
   bool _isAC = true;
   int _totalSeats = 40;
   // Every bus is a sleeper coach — no seater/mixed types in this app.
@@ -132,9 +170,26 @@ class _AddBusScreenState extends State<AddBusScreen> {
   bool get _isFirstStep => _indexInSequence == 0;
   bool get _isLastStep => _indexInSequence == _stepSequence.length - 1;
 
+  /// Name of the step being shown, used by the progress bar so "where am I"
+  /// is a word and not three anonymous bars.
+  String get _stepLabel {
+    switch (_currentStep) {
+      case 0:
+        return tr('add_bus.step1.eyebrow');
+      case 1:
+        return tr('add_bus.step2.eyebrow');
+      default:
+        return tr('add_bus.step3.eyebrow');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    if (_stepSequence.contains(widget.initialStep)) {
+      _currentStep = widget.initialStep;
+    }
+    _busNumberFocus.addListener(_onBusNumberFocusChanged);
     final e = widget.existing;
     if (e != null) {
       // Editing: seed every field from the bus, identity included.
@@ -146,6 +201,47 @@ class _AddBusScreenState extends State<AddBusScreen> {
       _seedFromBus(widget.templateBus!, asTemplate: true);
       _priceInitialized = true;
     }
+    // Seeded bands mean the bus is priced by row, so Step 3 opens on that tab.
+    _priceMode =
+        _priceBands.isNotEmpty ? _PriceMode.bands : _PriceMode.fixed;
+  }
+
+  // ── Registration-plate validation (on blur, not per keystroke) ──────
+
+  /// Comparable form of a registration plate: case- and separator-insensitive,
+  /// so `gj 05 ab 1234` and `GJ-05-AB-1234` are recognised as the same vehicle.
+  static String _plateKey(String raw) =>
+      raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+
+  void _onBusNumberFocusChanged() {
+    if (_busNumberFocus.hasFocus) return;
+    _validateBusNumber();
+  }
+
+  /// Flag a plate already carried by another bus on this tour. Runs on blur and
+  /// again just before saving; returns true when the field is usable.
+  ///
+  /// Blank is always valid — the plate is deliberately optional here (the owner
+  /// often confirms the vehicle days later), and a NULL plate does not collide.
+  bool _validateBusNumber() {
+    final key = _plateKey(_busNumber.text.trim());
+    String? error;
+    if (key.isNotEmpty) {
+      final tour = _tour;
+      final clash = tour?.buses.where(
+        (b) => b.id != widget.existing?.id && _plateKey(b.busNumber) == key,
+      );
+      if (clash != null && clash.isNotEmpty) {
+        error = tr(
+          'add_bus.error.duplicate_bus_number',
+          namedArgs: {'name': clash.first.name},
+        );
+      }
+    }
+    if (error != _busNumberError && mounted) {
+      setState(() => _busNumberError = error);
+    }
+    return error == null;
   }
 
   /// Copy a source bus's fields into the form controllers. Shared by EDIT mode
@@ -232,6 +328,8 @@ class _AddBusScreenState extends State<AddBusScreen> {
     _doubleSofaPrice.dispose();
     _rearRows.dispose();
     _rearPrice.dispose();
+    _busNumberFocus.removeListener(_onBusNumberFocusChanged);
+    _busNumberFocus.dispose();
     super.dispose();
   }
 
@@ -366,6 +464,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
   // ── Navigation ──────────────────────────────────────────────────────
 
   void _goNext() {
+    // Leaving Identity is a blur for the whole step, so run the plate check
+    // here too: tapping Next straight off the keyboard never blurs the field,
+    // and the collision would otherwise only surface two steps later on Save.
+    if (_currentStep == 0 && !_validateBusNumber()) return;
     HapticFeedback.selectionClick();
     final idx = _indexInSequence;
     if (idx < _stepSequence.length - 1) {
@@ -415,8 +517,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
     switch (_currentStep) {
       case 0:
         // Identity has no hard-required field — bus number is optional and can
-        // be filled in later when the owner confirms the vehicle.
-        return true;
+        // be filled in later when the owner confirms the vehicle. It must not
+        // COLLIDE, though: a duplicate plate fails at the database with an
+        // error no one can act on, so the blur check gates Next.
+        return _busNumberError == null;
       case 1:
         // Capacity advances only when the layout is buildable. The invalid
         // state is shown inline under the single-sofa stepper.
@@ -482,6 +586,17 @@ class _AddBusScreenState extends State<AddBusScreen> {
         _forceRegenerate = false;
         return;
       }
+    }
+
+    // Re-run the plate check here as well as on blur: the agent can reach Save
+    // from Step 3 without the identity field ever losing focus (tapping Next
+    // while the keyboard is up), and a collision must not reach the wire.
+    if (!_validateBusNumber()) {
+      _forceRegenerate = false;
+      // Send them to the field that is wrong instead of leaving a dead Save.
+      setState(() => _currentStep = 0);
+      AppSnackBar.error(_busNumberError ?? tr('add_bus.snackbar.error_save'));
+      return;
     }
 
     final tour = _tour;
@@ -686,6 +801,34 @@ class _AddBusScreenState extends State<AddBusScreen> {
     _maybeSeedFromTour();
     final c = UgamColors.of(context);
 
+    // The tour is the wizard's whole context: its title, the slot number, the
+    // per-seat default, and the row every save writes into. Without it the form
+    // used to render as if fine and only fail at Save with "Tour not found" —
+    // after the agent had typed the entire bus in. State it up front, and offer
+    // the retry, because the usual cause is a list that has not finished
+    // loading rather than a tour that is genuinely gone.
+    if (_tour == null) return _missingTour(c);
+
+    return PopScope(
+      // Android's back gesture and iOS's edge-swipe are the SAME intent as the
+      // Back pill and the chevron, and they used to bypass both: a system back
+      // popped the whole wizard, discarding every step, without a word. Held
+      // whenever there is somewhere to walk back to OR anything to lose.
+      canPop: _isFirstStep && !_dirty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        // Mid-wizard, back means "previous step" — never "throw this away".
+        if (!_isFirstStep) {
+          _goBack();
+          return;
+        }
+        _confirmExit();
+      },
+      child: _wizard(c),
+    );
+  }
+
+  Widget _wizard(UgamColorSet c) {
     return UgamScaffold(
       body: SafeArea(
         child: Column(
@@ -703,6 +846,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
               c: c,
               steps: _stepSequence.length,
               index: _indexInSequence,
+              label: _stepLabel,
             ),
             Expanded(
               child: AnimatedSwitcher(
@@ -741,6 +885,38 @@ class _AddBusScreenState extends State<AddBusScreen> {
     );
   }
 
+  /// Shown instead of the form when [_tour] cannot be resolved. Retry simply
+  /// re-reads the controller — the tour list is in memory, so a tour that
+  /// arrives a beat after the push resolves on the first tap.
+  Widget _missingTour(UgamColorSet c) {
+    return UgamScaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            UgamAppBar(
+              title: widget.isEditing
+                  ? tr('add_bus.title_edit')
+                  : tr('add_bus.title'),
+            ),
+            Expanded(
+              child: UgamEmpty(
+                icon: Icons.directions_bus_filled_outlined,
+                title: tr('add_bus.not_found.title'),
+                body: tr('add_bus.not_found.body'),
+                cta: UgamButton(
+                  label: tr('app.action.retry'),
+                  icon: Icons.refresh_rounded,
+                  kind: UgamButtonKind.neutral,
+                  onPressed: () => setState(() {}),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildStep(UgamColorSet c) {
     switch (_currentStep) {
       case 0:
@@ -754,12 +930,23 @@ class _AddBusScreenState extends State<AddBusScreen> {
           driverPhone: _driverPhone,
           isAC: _isAC,
           slotBadge: _slotPositionLabel,
+          busNumberFocus: _busNumberFocus,
+          busNumberError: _busNumberError,
           onToggleAC: (v) => setState(() {
             _isAC = v;
             _dirty = true;
           }),
           onPickDepartureTime: _pickDepartureTime,
           onAnyChange: _markDirty,
+          // Typing clears a stale collision immediately (the check itself only
+          // re-runs on blur) so the agent is not left staring at an error that
+          // no longer describes what is in the field.
+          onBusNumberChanged: () {
+            _markDirty();
+            if (_busNumberError != null) {
+              setState(() => _busNumberError = null);
+            }
+          },
         );
       case 1:
         return _Step2Capacity(
@@ -816,6 +1003,12 @@ class _AddBusScreenState extends State<AddBusScreen> {
           tour: _tour,
           totalSeats: _totalSeats,
           onChanged: _markDirty,
+          // Mode + stash are wizard-level so stepping back to Capacity and
+          // returning does not silently reset the pricing tab.
+          mode: _priceMode,
+          onModeChanged: (m) => setState(() => _priceMode = m),
+          stashedBands: _stashedBands,
+          onStashBands: (b) => _stashedBands = b,
         );
     }
   }
@@ -830,10 +1023,17 @@ class _WizardProgress extends StatelessWidget {
   final int steps;
   final int index;
 
+  /// Name of the current step ("Capacity"). Three anonymous bars told the agent
+  /// how far along they were but never WHAT they were being asked for, and the
+  /// step's own eyebrow — the only place that word appeared — was below the
+  /// fold as soon as a keyboard opened. It lives here now, next to the count.
+  final String label;
+
   const _WizardProgress({
     required this.c,
     required this.steps,
     required this.index,
+    required this.label,
   });
 
   @override
@@ -845,33 +1045,65 @@ class _WizardProgress extends StatelessWidget {
         UgamSpacing.gutter,
         UgamSpacing.sm,
       ),
-      child: Row(
-        children: List.generate(steps, (i) {
-          final active = i == index;
-          final done = i < index;
-          return Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(
-                right: i == steps - 1 ? 0 : UgamSpacing.xs,
-              ),
-              child: AnimatedContainer(
-                duration: UgamMotion.tab,
-                curve: UgamMotion.easeOut,
-                height: 4,
-                decoration: BoxDecoration(
-                  // Accent-rationing: only the ACTIVE segment is solid copper.
-                  // Completed segments go tonal, so Step 3 no longer shows
-                  // three filled bars competing with the copper Save CTA.
-                  color: active
-                      ? c.accent
-                      : (done ? c.accent.withValues(alpha: 0.45) : c.cardElev),
-                  borderRadius: BorderRadius.circular(UgamRadius.chip),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              // Expanded, not natural width: the Gujarati step names run well
+              // past the English ones and the counter beside them must never be
+              // the child that decides this row's width.
+              Expanded(child: UgamSectionLabel(label, color: c.ink2)),
+              const SizedBox(width: UgamSpacing.sm),
+              Text(
+                tr(
+                  'add_bus.step_progress',
+                  namedArgs: {
+                    'current': '${index + 1}',
+                    'total': '$steps',
+                  },
+                ),
+                style: UgamText.tabular(
+                  UgamText.micro.copyWith(color: c.ink3),
                 ),
               ),
-            ),
-          );
-        }),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          _bars(),
+        ],
       ),
+    );
+  }
+
+  Widget _bars() {
+    return Row(
+      children: List.generate(steps, (i) {
+        final active = i == index;
+        final done = i < index;
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(
+              right: i == steps - 1 ? 0 : UgamSpacing.xs,
+            ),
+            child: AnimatedContainer(
+              duration: UgamMotion.tab,
+              curve: UgamMotion.easeOut,
+              height: 4,
+              decoration: BoxDecoration(
+                // Accent-rationing: only the ACTIVE segment is solid copper.
+                // Completed segments go tonal, so Step 3 no longer shows
+                // three filled bars competing with the copper Save CTA.
+                color: active
+                    ? c.accent
+                    : (done ? c.accent.withValues(alpha: 0.45) : c.cardElev),
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+              ),
+            ),
+          ),
+        );
+      }),
     );
   }
 }
@@ -943,9 +1175,13 @@ class _BackPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return UgamTappable(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+      semanticLabel: tr('app.action.back'),
+      // The CTA beside it answers a finger with a scale + haptic; this pill
+      // did nothing at all, which read as "disabled" next to a live button.
+      // 0.96 matches UgamCTA's travel rather than the card default.
+      pressedScale: 0.96,
       child: Container(
         // Pixel-matched to the UgamCTA sitting beside it in the same Row.
         // UgamCTA resolves as max(44, md*2 + titleS) — so this uses the SAME
@@ -994,6 +1230,11 @@ class _Step1Identity extends StatelessWidget {
   final TextEditingController driverPhone;
   final bool isAC;
   final String slotBadge;
+
+  /// Owned by the wizard so the duplicate-plate check can fire on blur.
+  final FocusNode busNumberFocus;
+  final String? busNumberError;
+  final VoidCallback onBusNumberChanged;
   final ValueChanged<bool> onToggleAC;
   final VoidCallback onPickDepartureTime;
   final VoidCallback onAnyChange;
@@ -1008,6 +1249,9 @@ class _Step1Identity extends StatelessWidget {
     required this.driverPhone,
     required this.isAC,
     required this.slotBadge,
+    required this.busNumberFocus,
+    required this.busNumberError,
+    required this.onBusNumberChanged,
     required this.onToggleAC,
     required this.onPickDepartureTime,
     required this.onAnyChange,
@@ -1049,8 +1293,10 @@ class _Step1Identity extends StatelessWidget {
         UgamInput(
           label: tr('add_bus.label.bus_number'),
           controller: busNumber,
+          focusNode: busNumberFocus,
           hint: tr('add_bus.hint.bus_number_plain'),
-          onChanged: (_) => onAnyChange(),
+          errorText: busNumberError,
+          onChanged: (_) => onBusNumberChanged(),
         ),
         const SizedBox(height: UgamSpacing.lg),
         _ToggleRow(
@@ -1150,9 +1396,9 @@ class _ToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return UgamTappable(
       onTap: () => onChanged(!value),
-      behavior: HitTestBehavior.opaque,
+      semanticLabel: label,
       child: Container(
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.lg,
@@ -1267,7 +1513,6 @@ class _Step2Capacity extends StatelessWidget {
       children: [
         _StepIntro(
           c: c,
-          eyebrow: tr('add_bus.step2.eyebrow'),
           title: tr('add_bus.step2.title'),
           body: tr('add_bus.step2.body'),
         ),
@@ -1446,14 +1691,19 @@ class _StepperBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return UgamTappable(
       onTap: enabled
           ? () {
               HapticFeedback.selectionClick();
               onTap();
             }
           : null,
-      behavior: HitTestBehavior.opaque,
+      // The callback already fires its own selection click, and a stepper is
+      // the one control here a finger can hammer — a second buzz per tap turns
+      // into a rattle when the agent holds 40 seats down to 32.
+      haptic: false,
+      // Small chrome needs more travel than a card to read as pressed.
+      pressedScale: 0.90,
       child: Container(
         // Same helper as _StepperRow's shell (see the note there).
         width: UgamScale.tap(context, 56),
@@ -1495,6 +1745,15 @@ class _Step3Price extends StatefulWidget {
   final int totalSeats;
   final VoidCallback onChanged;
 
+  /// Uniform vs per-row pricing, and the bands parked while uniform is active.
+  /// Both are owned by the WIZARD, not by this step's State — the step is
+  /// disposed every time the agent walks back to Capacity, which used to reset
+  /// the chosen tab and bin the stash.
+  final _PriceMode mode;
+  final ValueChanged<_PriceMode> onModeChanged;
+  final List<PriceBand> stashedBands;
+  final ValueChanged<List<PriceBand>> onStashBands;
+
   const _Step3Price({
     required this.c,
     required this.price,
@@ -1507,6 +1766,10 @@ class _Step3Price extends StatefulWidget {
     required this.tour,
     required this.totalSeats,
     required this.onChanged,
+    required this.mode,
+    required this.onModeChanged,
+    required this.stashedBands,
+    required this.onStashBands,
   });
 
   @override
@@ -1515,14 +1778,8 @@ class _Step3Price extends StatefulWidget {
 
 class _Step3PriceState extends State<_Step3Price> {
   /// Whether this bus uses one uniform price ([_PriceMode.fixed]) or explicit
-  /// per-row price bands ([_PriceMode.bands]). Seeded from whether the bus
-  /// already carries bands.
-  late _PriceMode _mode;
-
-  /// Bands stashed when the agent switches back to "Same for all" — keeping them
-  /// here lets a same-session toggle to "Price bands" restore the work, while
-  /// the parent state (and thus _save) sees an empty band list meaning uniform.
-  List<PriceBand> _stashedBands = const [];
+  /// per-row price bands ([_PriceMode.bands]). Lives on the wizard.
+  _PriceMode get _mode => widget.mode;
 
   /// The per-person base the sofa fields were last auto-seeded from. A later
   /// base change re-seeds a field only while it still equals this base's default
@@ -1533,7 +1790,6 @@ class _Step3PriceState extends State<_Step3Price> {
   @override
   void initState() {
     super.initState();
-    _mode = widget.priceBands.isNotEmpty ? _PriceMode.bands : _PriceMode.fixed;
     // Pre-fill any empty sofa field with its base-derived default; a value
     // already present (edit-mode override, or a default seeded before navigating
     // away) is preserved.
@@ -1656,15 +1912,15 @@ class _Step3PriceState extends State<_Step3Price> {
   void _onModeChanged(int i) {
     final next = _PriceMode.values[i];
     if (next == _PriceMode.fixed && widget.priceBands.isNotEmpty) {
-      _stashedBands = List<PriceBand>.of(widget.priceBands);
+      widget.onStashBands(List<PriceBand>.of(widget.priceBands));
       widget.onBandsChanged(const []);
     } else if (next == _PriceMode.bands &&
         widget.priceBands.isEmpty &&
-        _stashedBands.isNotEmpty) {
-      widget.onBandsChanged(List<PriceBand>.of(_stashedBands));
+        widget.stashedBands.isNotEmpty) {
+      widget.onBandsChanged(List<PriceBand>.of(widget.stashedBands));
     }
     HapticFeedback.selectionClick();
-    setState(() => _mode = next);
+    widget.onModeChanged(next);
   }
 
   @override
@@ -1689,7 +1945,6 @@ class _Step3PriceState extends State<_Step3Price> {
       children: [
         _StepIntro(
           c: c,
-          eyebrow: tr('add_bus.step3.eyebrow'),
           title: tr('add_bus.step3.title'),
           body: tr('add_bus.step3.body'),
         ),
@@ -1855,6 +2110,10 @@ class _Step3PriceState extends State<_Step3Price> {
           : '',
     );
 
+    // Four controllers per open, and the sheet can be opened once per band per
+    // visit — none of them were ever disposed, so every trip through the band
+    // editor leaked a TextEditingController (and its listeners) for the life of
+    // the screen. Tear them down when the sheet route is gone.
     UgamSheet.show<void>(
       context,
       title: existing == null
@@ -1877,12 +2136,43 @@ class _Step3PriceState extends State<_Step3Price> {
               final to =
                   toCtrl.text.trim().isEmpty ? from : parseRow(toCtrl);
               final price = double.tryParse(priceCtrl.text.trim()) ?? 0;
+
+              // Out-of-range rows used to sail through: the CTA stayed live and
+              // the commit below silently clamped "rows 12–20" to the bus's real
+              // last row, so the range the agent typed changed by itself the
+              // moment the sheet closed. Say it in the field instead — cause
+              // ("this bus has 7 rows") and fix ("use 1 to 7") in one line — and
+              // hold the CTA until it is true.
+              String? rowError(int? v, String raw) {
+                if (raw.trim().isEmpty || v == null) return null;
+                if (v < 0) return tr('add_bus.band_sheet.err_row_min');
+                if (maxRow != null && v > maxRow) {
+                  return tr(
+                    'add_bus.band_sheet.err_row_range',
+                    namedArgs: {'max': '${maxRow + 1}'},
+                  );
+                }
+                return null;
+              }
+
+              final fromError = rowError(from, fromCtrl.text);
+              final toError = rowError(
+                toCtrl.text.trim().isEmpty ? null : to,
+                toCtrl.text,
+              );
+              final priceError = priceCtrl.text.trim().isEmpty || price > 0
+                  ? null
+                  : tr('add_bus.band_sheet.err_price');
+
               final valid =
                   from != null &&
                   to != null &&
                   from >= 0 &&
                   to >= 0 &&
-                  price > 0;
+                  price > 0 &&
+                  fromError == null &&
+                  toError == null &&
+                  priceError == null;
 
               return Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1903,6 +2193,7 @@ class _Step3PriceState extends State<_Step3Price> {
                           label: tr('add_bus.band_sheet.from_row'),
                           controller: fromCtrl,
                           hint: '1',
+                          errorText: fromError,
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: false,
                           ),
@@ -1918,6 +2209,7 @@ class _Step3PriceState extends State<_Step3Price> {
                           label: tr('add_bus.band_sheet.to_row'),
                           controller: toCtrl,
                           hint: tr('add_bus.band_sheet.to_row_hint'),
+                          errorText: toError,
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: false,
                           ),
@@ -1944,6 +2236,7 @@ class _Step3PriceState extends State<_Step3Price> {
                     label: tr('add_bus.band_sheet.price_per_person'),
                     controller: priceCtrl,
                     hint: tr('add_bus.band_sheet.price_hint'),
+                    errorText: priceError,
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
@@ -1993,9 +2286,13 @@ class _Step3PriceState extends State<_Step3Price> {
           ),
         );
       },
-    );
+    ).whenComplete(() {
+      labelCtrl.dispose();
+      fromCtrl.dispose();
+      toCtrl.dispose();
+      priceCtrl.dispose();
+    });
   }
-
 }
 
 /// One row in the "Price bands" list: the band's label, its 1-based row range,
@@ -2022,9 +2319,9 @@ class _BandRow extends StatelessWidget {
             'add_bus.band_row.range',
             namedArgs: {'from': '${band.fromRow + 1}', 'to': '${band.toRow + 1}'},
           );
-    return GestureDetector(
+    return UgamTappable(
       onTap: onEdit,
-      behavior: HitTestBehavior.opaque,
+      semanticLabel: tr('add_bus.band_sheet.title_edit'),
       child: Container(
         padding: const EdgeInsets.symmetric(
           horizontal: UgamSpacing.lg,
@@ -2085,15 +2382,20 @@ class _BandRow extends StatelessWidget {
 // Shared form pieces
 // ════════════════════════════════════════════════════════════════════════
 
+/// Step heading: title + one explanatory line.
+///
+/// It used to open with a copper eyebrow repeating the step's name. That was
+/// two problems in one line — the accent is reserved for "this is yours" and an
+/// eyebrow is neither a selection nor an ownership state, and the same word now
+/// sits in the progress bar where it stays visible once the keyboard covers the
+/// step body. The eyebrow moved there; only the title and body remain.
 class _StepIntro extends StatelessWidget {
   final UgamColorSet c;
-  final String eyebrow;
   final String title;
   final String body;
 
   const _StepIntro({
     required this.c,
-    required this.eyebrow,
     required this.title,
     required this.body,
   });
@@ -2104,8 +2406,6 @@ class _StepIntro extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(eyebrow, style: UgamText.micro.copyWith(color: c.accent)),
-        const SizedBox(height: UgamSpacing.sm),
         Text(title, style: UgamText.titleXl.copyWith(color: c.ink)),
         const SizedBox(height: UgamSpacing.sm),
         Text(
@@ -2203,7 +2503,13 @@ class _SlotBadge extends StatelessWidget {
             color: c.ink3,
           ),
           const SizedBox(width: UgamSpacing.sm),
-          Text(label, style: UgamText.bodyStrong.copyWith(color: c.ink)),
+          // Expanded, not natural width: this Row had three unbounded children
+          // and nothing to give. It also pins the "auto" note to the trailing
+          // edge, which reads as a state on the badge rather than a third word
+          // floating after it.
+          Expanded(
+            child: Text(label, style: UgamText.bodyStrong.copyWith(color: c.ink)),
+          ),
           const SizedBox(width: UgamSpacing.sm),
           Text(
             tr('add_bus.slot_auto'),

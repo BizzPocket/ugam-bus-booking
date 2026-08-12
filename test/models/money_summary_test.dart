@@ -130,4 +130,48 @@ void main() {
       expect(t.totalExpectedHandover, t.totalNet + 20000);
     });
   });
+
+  // A bus whose owner rent was never entered reads as ₹0 — indistinguishable
+  // from a genuinely free bus (`bus_price` is `not null default 0`). The billed
+  // P&L then counts that bus's fares as pure profit, so the headline is
+  // overstated by a whole missing cost. These flag that state so the UI can say
+  // so instead of painting a confident green number.
+  group('unrecorded bus rent', () {
+    test('no rents missing when every bus has one', () {
+      final t = TourMoneySummary.compute(
+        collections: const [],
+        expenses: const [],
+        handovers: const [],
+        busRentsTotal: 100000,
+        busesMissingRent: 0,
+      );
+      expect(t.busesMissingRent, 0);
+      expect(t.hasUnrecordedRent, isFalse);
+    });
+
+    test('flags the count of buses with no rent recorded', () {
+      final t = TourMoneySummary.compute(
+        collections: const [],
+        expenses: const [],
+        handovers: const [],
+        busRentsTotal: 50000,
+        busesMissingRent: 1,
+      );
+      expect(t.busesMissingRent, 1);
+      expect(t.hasUnrecordedRent, isTrue);
+    });
+
+    // Same "0 means unknown, never a false alarm" rule the orphan and
+    // detached-cash figures follow: an unresolvable fleet must not accuse the
+    // agent of forgetting a rent.
+    test('stays silent when the caller supplied no bus rents at all', () {
+      final t = TourMoneySummary.compute(
+        collections: const [],
+        expenses: const [],
+        handovers: const [],
+      );
+      expect(t.busesMissingRent, 0);
+      expect(t.hasUnrecordedRent, isFalse);
+    });
+  });
 }

@@ -54,6 +54,14 @@ class CustomerTourDetailScreen extends StatefulWidget {
 class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
   TourPublicSummary _summary = TourPublicSummary.pending;
 
+  /// The fetch came back without answering. Distinguishes "still in flight"
+  /// (draw a skeleton) from "we asked and got nothing" (offer a retry) — both
+  /// of which look identical on [TourPublicSummary] itself, because
+  /// `publicSummary` swallows its own errors and returns `pending` either way.
+  /// Without this the seats block would shimmer forever on a dropped
+  /// connection, which is a worse lie than an error.
+  bool _summaryFailed = false;
+
   @override
   void initState() {
     super.initState();
@@ -65,11 +73,15 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
   /// environment without migration 052 simply sees the page without a price
   /// and seat count rather than an error.
   Future<void> _loadSummary() async {
+    if (_summaryFailed) setState(() => _summaryFailed = false);
     final summary = await SeatChartBookingService().publicSummary(
       widget.tour.id,
     );
     if (!mounted) return;
-    setState(() => _summary = summary);
+    setState(() {
+      _summary = summary;
+      _summaryFailed = !summary.loaded;
+    });
   }
 
   @override
@@ -78,6 +90,10 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
     final t = widget.tour;
     final hasDescription = (t.description ?? '').trim().isNotEmpty;
     final hasOrganiser = (t.createdBy ?? '').trim().isNotEmpty;
+    // The RPC is still in flight. Distinct from "it answered and there are no
+    // buses" (render nothing) and from "it failed" (the summary card already
+    // says so and offers the retry — no need for a second complaint here).
+    final busesLoading = !_summary.loaded && !_summaryFailed;
 
     return UgamScaffold(
       extendBody: true,
@@ -88,6 +104,8 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
             child: _Header(
               tour: t,
               summary: _summary,
+              summaryFailed: _summaryFailed,
+              onRetrySummary: _loadSummary,
               onBack: () => AppNav.pop(context),
               onShare: () async {
                 HapticFeedback.lightImpact();
@@ -137,11 +155,7 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
                     ),
                     child: Text(
                       t.description!.trim(),
-                      style: UgamText.body.copyWith(
-                        color: c.ink,
-                        fontSize: 14,
-                        height: 1.55,
-                      ),
+                      style: UgamText.body.copyWith(color: c.ink),
                     ),
                   ),
                   const SizedBox(height: UgamSpacing.xl),
@@ -164,19 +178,42 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
                 // Buses come from the public RPC, never from `tour.buses` —
                 // that list is empty for anon, which is why this section never
                 // rendered for a customer before.
-                if (_summary.hasBuses) ...[
+                //
+                // The section now holds its shape while the RPC is in flight
+                // instead of appearing out of nowhere a beat after the page
+                // does: a bus card either exists or it doesn't, and the reader
+                // should not have to watch the page decide.
+                if (busesLoading || _summary.hasBuses) ...[
                   const SizedBox(height: UgamSpacing.xl),
                   _SectionEyebrow(
                     label: tr('customer_tour_detail.section_bus'),
                     c: c,
                   ),
                   const SizedBox(height: UgamSpacing.md),
-                  for (final bus in _summary.buses) ...[
-                    _BusCard(bus: bus, c: c),
-                    if (bus != _summary.buses.last)
-                      const SizedBox(height: UgamSpacing.sm),
-                  ],
+                  if (busesLoading)
+                    const _BusCardSkeleton()
+                  else
+                    for (final bus in _summary.buses) ...[
+                      _BusCard(bus: bus, c: c),
+                      if (bus != _summary.buses.last)
+                        const SizedBox(height: UgamSpacing.sm),
+                    ],
                 ],
+                // The code the customer quotes when they message the organiser
+                // — the same one the WhatsApp greeting embeds. It was reachable
+                // only by sending a message; stating it here closes the page
+                // with a fact instead of with dead space.
+                const SizedBox(height: UgamSpacing.xxl),
+                Center(
+                  child: Text(
+                    '${tr('customer_tour_detail.label_tour_id')}'
+                    '  ·  ${WhatsAppService.tourCode(t.id)}',
+                    style: UgamText.tabular(
+                      UgamText.caption.copyWith(color: c.ink3),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
               ]),
             ),
           ),
@@ -194,12 +231,16 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
 class _Header extends StatelessWidget {
   final Tour tour;
   final TourPublicSummary summary;
+  final bool summaryFailed;
+  final VoidCallback onRetrySummary;
   final VoidCallback onBack;
   final VoidCallback onShare;
 
   const _Header({
     required this.tour,
     required this.summary,
+    required this.summaryFailed,
+    required this.onRetrySummary,
     required this.onBack,
     required this.onShare,
   });
@@ -218,7 +259,12 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final topInset = MediaQuery.of(context).padding.top;
     final hasPhoto = (tour.broadcastImageUrl ?? '').trim().isNotEmpty;
-    final card = _SummaryCard(tour: tour, summary: summary);
+    final card = _SummaryCard(
+      tour: tour,
+      summary: summary,
+      summaryFailed: summaryFailed,
+      onRetrySummary: onRetrySummary,
+    );
 
     if (!hasPhoto) {
       // The 99% case. No photo means no illustration — a generated backdrop
@@ -366,9 +412,12 @@ class _ChromeCircle extends StatelessWidget {
       },
       behavior: HitTestBehavior.opaque,
       child: Container(
-        width: 42,
-        height: 42,
+        width: UgamScale.tap(context, 44),
+        height: UgamScale.tap(context, 44),
         decoration: BoxDecoration(
+          // Over a photo neither of these can be a token: the control floats on
+          // an arbitrary uploaded image, so its contrast cannot come from the
+          // theme. Off the photo it is fully tokenized.
           color: onPhoto ? const Color(0x73000000) : c.cardElev,
           shape: BoxShape.circle,
         ),
@@ -394,8 +443,15 @@ class _ChromeCircle extends StatelessWidget {
 class _SummaryCard extends StatelessWidget {
   final Tour tour;
   final TourPublicSummary summary;
+  final bool summaryFailed;
+  final VoidCallback onRetrySummary;
 
-  const _SummaryCard({required this.tour, required this.summary});
+  const _SummaryCard({
+    required this.tour,
+    required this.summary,
+    required this.summaryFailed,
+    required this.onRetrySummary,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -412,53 +468,212 @@ class _SummaryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // titleL, not titleM. This page has no app-bar title, so the tour
+          // name IS the page heading and was being set two ladder steps below
+          // the one the system reserves for a page title.
           Text(
             tour.title,
-            style: UgamText.titleM.copyWith(color: c.ink, fontSize: 18),
+            style: UgamText.titleL.copyWith(color: c.ink),
             // Two lines before ellipsing: a tour title carries the festival
             // name AND the date, and truncating it to one line loses which
             // trip this is.
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: UgamSpacing.xs),
+          // Wraps. "અમદાવાદ → અંબાજી" and its Hindi equivalent run well past
+          // the width a single clamped line allows on a 375 pt phone, and the
+          // route is not a fact this page can afford to clip.
           Text(
             '${tour.fromCity} → ${tour.toCity}',
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            style: UgamText.bodyStrong.copyWith(color: c.ink2),
+            maxLines: 2,
           ),
           if (countdown != null) ...[
             const SizedBox(height: 2),
             Text(
               countdown,
               style: UgamText.tabular(
-                UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
+                UgamText.caption.copyWith(color: c.ink3),
               ),
             ),
           ],
-          const SizedBox(height: UgamSpacing.tight),
-          // Left-anchored. There is nothing to balance it against now that the
-          // price is gone, so a Row with a trailing Spacer would only push it
-          // into dead space.
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _AvailabilityChip(tour: tour, summary: summary),
+          const SizedBox(height: UgamSpacing.md),
+          _AvailabilityBlock(
+            tour: tour,
+            summary: summary,
+            summaryFailed: summaryFailed,
+            onRetry: onRetrySummary,
           ),
         ],
       ),
     );
   }
-
 }
 
-/// The ONE status signal on this page.
+/// Availability, in whichever of its four states applies.
 ///
-/// There used to be two that could disagree: a lifecycle chip in the top chrome
-/// (which truncated to "સીટ ગોઠવ…" in Gujarati and told the customer nothing)
-/// and an availability chip in the card. Lock beats sold-out beats a live seat
-/// count beats the generic open state — the same order the CTA resolves in, so
-/// the chip and the button can never contradict each other.
+/// This is the ONE status signal on the page, and it now covers the whole
+/// lifecycle of the fetch rather than just its happy ending:
+///
+///  * in flight — a skeleton the size of the meter that replaces it;
+///  * failed    — says so, and offers a retry (the RPC swallows its own
+///                errors, so silence here used to be indistinguishable from
+///                a tour that simply has no buses);
+///  * counted   — a real capacity meter, because "68 / 80 · 12 free" is a
+///                different decision from "12 SEATS LEFT" and the numbers were
+///                already fetched;
+///  * otherwise — the single lock / sold-out / open chip.
+///
+/// Lock beats sold-out beats a live seat count beats the generic open state —
+/// the same order the CTA resolves in, so the two can never contradict.
+class _AvailabilityBlock extends StatelessWidget {
+  final Tour tour;
+  final TourPublicSummary summary;
+  final bool summaryFailed;
+  final VoidCallback onRetry;
+
+  const _AvailabilityBlock({
+    required this.tour,
+    required this.summary,
+    required this.summaryFailed,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+
+    if (tour.acceptsBookings && !summary.loaded) {
+      if (summaryFailed) {
+        return _SeatsUnavailable(onRetry: onRetry, c: c);
+      }
+      return const _SeatsSkeleton();
+    }
+
+    if (tour.acceptsBookings && summary.hasSeatCount && !summary.isSoldOut) {
+      final left = summary.berthsFree;
+      final taken = summary.berthsTotal - left;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  tr('customer_tour_detail.label_seats'),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              // Scarcity is worth saying out loud, but it is availability, not
+              // "this is yours" — so it borrows the warm tone, never the accent.
+              if (left <= 5)
+                UgamReqChip(
+                  label: tr(
+                    'customer_tour_detail.chip_seats_left',
+                    namedArgs: {'n': '$left'},
+                  ),
+                  variant: UgamChipVariant.warm,
+                ),
+            ],
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          // `berthsFree` is already limited by the BUSIER leg (see
+          // summariseTourForPublic), so both legs carry the same figure here
+          // and the meter collapses to the single honest bar.
+          UgamCapacityMeter.tourCounts(
+            capacity: summary.berthsTotal,
+            goOccupied: taken,
+            retOccupied: taken,
+          ),
+        ],
+      );
+    }
+
+    // Left-anchored. There is nothing to balance it against now that the price
+    // is gone, so a Row with a trailing Spacer would only push it into dead
+    // space.
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: _AvailabilityChip(tour: tour, summary: summary),
+    );
+  }
+}
+
+/// Meter-shaped placeholder — a label bar over a bar the height of the real
+/// one, so the card does not resize when the count lands.
+class _SeatsSkeleton extends StatelessWidget {
+  const _SeatsSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            UgamSkeleton(height: 13, width: 64, radius: 4),
+            Spacer(),
+            UgamSkeleton(height: 13, width: 82, radius: 4),
+          ],
+        ),
+        SizedBox(height: UgamSpacing.sm),
+        UgamSkeleton(height: 7, radius: UgamRadius.chip),
+      ],
+    );
+  }
+}
+
+/// "We couldn't check the seats" + Retry. Replaces a permanently shimmering
+/// meter on a dropped connection.
+class _SeatsUnavailable extends StatelessWidget {
+  final VoidCallback onRetry;
+  final UgamColorSet c;
+
+  const _SeatsUnavailable({required this.onRetry, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(Icons.cloud_off_rounded, size: 16, color: c.ink3),
+        const SizedBox(width: UgamSpacing.sm),
+        Expanded(
+          child: Text(
+            tr('customer_tour_detail.seats_unavailable'),
+            style: UgamText.caption.copyWith(color: c.ink2),
+            maxLines: 2,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.sm),
+        GestureDetector(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onRetry();
+          },
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            height: UgamScale.tap(context, 44),
+            padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.md),
+            alignment: Alignment.center,
+            child: Text(
+              tr('app.action.retry'),
+              style: UgamText.bodyStrong.copyWith(color: c.ink),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The lock / sold-out / open fallback, for when there is no real seat count to
+/// draw a meter from. [_AvailabilityBlock] owns the counted case and the
+/// precedence between them.
 class _AvailabilityChip extends StatelessWidget {
   final Tour tour;
   final TourPublicSummary summary;
@@ -479,21 +694,13 @@ class _AvailabilityChip extends StatelessWidget {
         variant: UgamChipVariant.warm,
       );
     }
-    if (summary.hasSeatCount) {
-      final left = summary.berthsFree;
-      return UgamReqChip(
-        label: tr(
-          'customer_tour_detail.chip_seats_left',
-          namedArgs: {'n': '$left'},
-        ),
-        // Scarcity is worth saying out loud, but it is availability, not
-        // "this is yours" — so it borrows the warm tone, never the accent.
-        variant: left <= 5 ? UgamChipVariant.warm : UgamChipVariant.good,
-      );
-    }
+    // `good`, not `accent`. Nothing on a public tour page is YOURS yet — you
+    // haven't booked — and the accent is defined as exactly that claim. "Open
+    // for requests" is a positive availability state, which is what mint means
+    // everywhere else in the app.
     return UgamReqChip(
       label: tr('customer_tour_detail.chip_open_requests'),
-      variant: UgamChipVariant.accent,
+      variant: UgamChipVariant.good,
     );
   }
 }
@@ -629,16 +836,21 @@ class _JourneyStopRow extends StatelessWidget {
                           child: Container(width: 2, height: 10, color: c.border),
                         ),
                 ),
+                // Neutral, not amber. Three copper-ringed nodes on a public
+                // page is the accent spent on decoration: nothing in this rail
+                // is the customer's — they have not booked yet — and amber is
+                // defined as "this is yours". Weight and the connector line
+                // carry the structure instead.
                 Container(
                   width: 26,
                   height: 26,
                   decoration: BoxDecoration(
-                    color: c.accentFill,
+                    color: c.card,
                     shape: BoxShape.circle,
-                    border: Border.all(color: c.accent, width: 1.5),
+                    border: Border.all(color: c.border, width: 1.5),
                   ),
                   alignment: Alignment.center,
-                  child: Icon(stop.icon, size: 13, color: c.accent),
+                  child: Icon(stop.icon, size: 13, color: c.ink2),
                 ),
                 if (!isLast)
                   Expanded(child: Container(width: 2, color: c.border)),
@@ -656,14 +868,18 @@ class _JourneyStopRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // caption, not the micro eyebrow. "નીકળવાની તારીખ" at 10 px
+                  // with 1.4 letter-spacing is barely legible, and micro is the
+                  // UPPERCASE style — which does nothing at all in Gujarati.
                   Text(
                     stop.label,
-                    style: UgamText.micro.copyWith(color: c.ink3),
+                    style: UgamText.caption.copyWith(color: c.ink3),
+                    maxLines: 2,
                   ),
                   const SizedBox(height: 3),
                   Text(
                     stop.place,
-                    style: UgamText.titleS.copyWith(color: c.ink, fontSize: 16),
+                    style: UgamText.titleS.copyWith(color: c.ink),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -672,7 +888,7 @@ class _JourneyStopRow extends StatelessWidget {
                     Text(
                       _whenLabel(stop),
                       style: UgamText.tabular(
-                        UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+                        UgamText.caption.copyWith(color: c.ink2),
                       ),
                     ),
                   ],
@@ -717,28 +933,29 @@ class _BusCard extends StatelessWidget {
         children: [
           Text(
             bus.customerLabel,
-            style: UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
-            maxLines: 1,
+            style: UgamText.titleS.copyWith(color: c.ink),
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 2),
           Text(
             bus.busType,
-            style: UgamText.caption.copyWith(color: c.ink2, fontSize: 12),
+            style: UgamText.caption.copyWith(color: c.ink2),
           ),
           if (departure != null) ...[
             const SizedBox(height: 6),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.place_outlined, size: 12, color: c.ink3),
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Icon(Icons.place_outlined, size: 13, color: c.ink3),
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     departure,
-                    style: UgamText.caption.copyWith(
-                      color: c.ink2,
-                      fontSize: 12,
-                    ),
+                    style: UgamText.caption.copyWith(color: c.ink2),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -828,18 +1045,21 @@ class _ContactOrganiserButton extends StatelessWidget {
           ),
           child: Row(
             children: [
+              // Neutral medallion. This is a control, and the accent is
+              // explicitly not the button colour — the label already says
+              // WhatsApp, so the copper added nothing but noise.
               Container(
-                width: 42,
-                height: 42,
+                width: UgamScale.px(context, 42),
+                height: UgamScale.px(context, 42),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: c.accentFill,
+                  color: c.card,
                   borderRadius: BorderRadius.circular(UgamRadius.input),
                 ),
                 child: Icon(
                   Icons.chat_bubble_outline_rounded,
                   size: 20,
-                  color: c.accent,
+                  color: c.ink2,
                 ),
               ),
               const SizedBox(width: UgamSpacing.md),
@@ -848,20 +1068,19 @@ class _ContactOrganiserButton extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Both lines wrap. The Gujarati title is "આયોજક સાથે
+                    // WhatsApp પર સંપર્ક કરો" — it does not fit one line at
+                    // 375 pt next to a medallion and an arrow.
                     Text(
                       tr('customer_tour_detail.contact_organiser'),
-                      style: UgamText.bodyStrong.copyWith(
-                        color: c.ink,
-                        fontSize: 14,
-                      ),
+                      style: UgamText.bodyStrong.copyWith(color: c.ink),
+                      maxLines: 2,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       tr('customer_tour_detail.contact_organiser_subtitle'),
-                      style: UgamText.caption.copyWith(
-                        color: c.ink2,
-                        fontSize: 12,
-                      ),
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                      maxLines: 3,
                     ),
                   ],
                 ),
@@ -938,6 +1157,11 @@ class _StickyBookCta extends StatelessWidget {
 
 // ─── SHARED BITS ──────────────────────────────────────────────────────
 
+/// Section heading. See the note on `customer_more_screen._SectionLabel`: the
+/// uppercase `UgamText.micro` eyebrow is a device that does not exist in
+/// Gujarati or Hindi, so on the primary language it left a 10 px ink3 whisper
+/// with 1.4 letter-spacing wedged between the conjuncts. Weight plus colour
+/// works in every script.
 class _SectionEyebrow extends StatelessWidget {
   final String label;
   final UgamColorSet c;
@@ -946,7 +1170,45 @@ class _SectionEyebrow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(label, style: UgamText.micro.copyWith(color: c.ink3));
+    return Text(label, style: UgamText.bodyStrong.copyWith(color: c.ink2));
+  }
+}
+
+/// Bus-card-shaped placeholder for the window between the page appearing and
+/// `public_tour_buses` answering.
+class _BusCardSkeleton extends StatelessWidget {
+  const _BusCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      decoration: BoxDecoration(
+        color: c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          UgamSkeleton(height: 16, width: 150, radius: 6),
+          SizedBox(height: 6),
+          UgamSkeleton(height: 13, width: 96, radius: 6),
+          SizedBox(height: UgamSpacing.tight),
+          UgamSkeleton(height: 13, width: 190, radius: 6),
+          SizedBox(height: UgamSpacing.sm),
+          Row(
+            children: [
+              UgamSkeleton(height: 16, width: 34, radius: 6),
+              SizedBox(width: 5),
+              UgamSkeleton(height: 16, width: 62, radius: 6),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 

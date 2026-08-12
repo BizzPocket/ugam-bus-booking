@@ -6,10 +6,16 @@
     "maintenance_body": "उगम में अभी काम चल रहा है। कुछ भी नहीं गया — आपकी टूर और बुकिंग सुरक्षित हैं।",
     "recommended_title": "नया वर्शन आया है",
     "update_action": "अपडेट करें",
-    "later_action": "बाद में"
+    "later_action": "बाद में",
+    "check_again": "फिर से जाँचें",
+    "still_down": "अभी भी काम चल रहा है। कुछ मिनट बाद फिर कोशिश करें।",
+    "store_unavailable_title": "स्टोर नहीं खुला",
+    "store_unavailable_body": "अपडेट करने के लिए अपने ऐप स्टोर में \"Ugam Booking\" खोजें।"
   },
   "actions": {
-    "retry": "फिर से प्रयास करें"
+    "retry": "फिर से प्रयास करें",
+    "undo": "वापस लें",
+    "undo_semantic": "आखिरी बदलाव वापस लें"
   },
   "seat_leg": {
     "half_label": "{leg} ½"
@@ -39,7 +45,16 @@
     "delete_title": "पिकअप स्थान हटाएँ?",
     "delete_body": "यह उसे उस सूची से हटा देता है जिसमें से ग्राहक चुनते हैं। पुरानी विनंतियों में सहेजा गया पिकअप बना रहता है।",
     "delete": "हटाएँ",
-    "name_required": "नाम दर्ज करें"
+    "name_required": "नाम दर्ज करें",
+    "section_visible": "ग्राहकों को दिखते हैं",
+    "section_hidden": "ग्राहकों से छिपे हुए",
+    "reorder_hint": "ग्राहकों को दिखने वाला क्रम बदलने के लिए खींचें",
+    "reorder_handle": "क्रम बदलें",
+    "more_actions": "और विकल्प",
+    "hide_subtitle": "यहीं रहेगा — ग्राहकों को दिखना बंद हो जाएगा",
+    "delete_subtitle": "हमेशा के लिए हट जाएगा — वापस नहीं आएगा",
+    "count_visible": "{n} दिख रहे",
+    "count_hidden": "{n} छिपे"
   },
   "swap_reason": {
     "swap_seats": "सीट अदला-बदली",
@@ -58,7 +73,8 @@
     "ret_short": "वापसी",
     "free_n": "{n} खाली",
     "full": "भर गई",
-    "demand_legs": "चाहिए: {go} जाने · {ret} वापसी"
+    "demand_legs": "चाहिए: {go} जाने · {ret} वापसी",
+    "no_layout": "अभी सीट प्लान नहीं"
   },
   "app": {
     "title": "उगम बुकिंग",
@@ -127,7 +143,7 @@
     "title": "सेटिंग्स",
     "profile_title": "प्रोफ़ाइल",
     "welcome": "स्वागत है",
-    "admin_badge": "ADMIN",
+    "admin_badge": "एडमिन",
     "appearance": "दिखावट",
     "dark_mode": "डार्क मोड",
     "dark_mode_on": "डार्क थीम चालू है",
@@ -148,12 +164,13 @@
     "theme_system": "सिस्टम",
     "theme_light": "लाइट",
     "theme_dark": "डार्क",
-    "footer_version": "Ugam Booking v{version}",
+    "footer_version": "उगम बुकिंग v{version}",
     "security_section": "सुरक्षा",
     "biometric_title": "फ़िंगरप्रिंट / फ़ेस अनलॉक",
     "biometric_subtitle": "अपनी फ़िंगरप्रिंट या फ़ेस से साइन इन करें",
     "biometric_unavailable": "इस डिवाइस पर उपलब्ध नहीं है",
-    "biometric_enable_password_prompt": "फ़िंगरप्रिंट लॉगिन चालू करने के लिए पासवर्ड डालें"
+    "biometric_enable_password_prompt": "फ़िंगरप्रिंट लॉगिन चालू करने के लिए पासवर्ड डालें",
+    "whatsapp_subtitle": "हैंडऑफ़ नंबर और संदेश हस्ताक्षर"
   },
   "settings_pages": {
     "save": "बदलाव सहेजें",
@@ -198,7 +215,8 @@
       "payment_hint": "बकाया संग्रह और देय",
       "departure_label": "प्रस्थान रिमाइंडर",
       "departure_hint": "टूर के प्रस्थान से पहले",
-      "turn_on_hint": "सक्षम करने के लिए नोटिफिकेशन चालू करें"
+      "turn_on_hint": "सक्षम करने के लिए नोटिफिकेशन चालू करें",
+      "section_alerts": "कौन-से अलर्ट"
     }
   },
   "language": {
@@ -226,7 +244,8 @@
     "chip_open": "खुली",
     "chip_from_price": "₹{price} से",
     "book_button": "बुक करें",
-    "chip_closed": "बंद"
+    "chip_closed": "बंद",
+    "returns_on": "वापसी {date}"
   },
   "customer_more": {
     "title": "और",
@@ -276,12 +295,14 @@
     "attention_pick_handler": "सभी सीटें असाइन · हैंडलर चुनें",
     "attention_ready_lock": "लॉक और नोटिफाई के लिए तैयार",
     "attention_renotify": "{n} सीट बदलाव को फिर WhatsApp चाहिए",
+    "attention_seat_removed": "{n} यात्री(यों) को बताई गई सीट चली गई",
     "cta_add_bus": "बस जोड़ें",
     "cta_assign": "असाइन करें",
     "cta_decide": "तय करें",
     "cta_pick": "चुनें",
     "cta_lock": "लॉक करें",
     "cta_renotify": "फिर सूचित करें",
+    "cta_call": "फ़ोन करें",
     "countdown_now": "अभी",
     "countdown_minutes": "{n}M में",
     "countdown_hours": "{n}H में",
@@ -340,7 +361,10 @@
     "seats_left_n": "{n} बाकी",
     "left_behind": "{n} छूट गए",
     "attention_cancel_requests": "{} लोग सीट कैंसल करना चाहते हैं",
-    "cta_review": "देखें"
+    "cta_review": "देखें",
+    "recent_empty_title": "अभी कोई अनुरोध नहीं",
+    "recent_empty_body": "नई यात्री बुकिंग यहाँ दिखेगी।",
+    "completed_tours": "{n} पूरी हुई यात्राएँ"
   },
   "tours": {
     "title": "मेरी यात्राएँ",
@@ -365,6 +389,9 @@
     },
     "no_matches_title": "कोई मेल नहीं",
     "no_matches_body": "\"{query}\" से कोई टूर मेल नहीं खाता.",
+    "only_past_title": "आगे कुछ नहीं",
+    "only_past_body": "आपकी सभी {n} यात्राएँ पूरी हो चुकी हैं। पुरानी देखने के लिए खोजें, या अगली शुरू करें।",
+    "new_tour": "नई यात्रा",
     "pax": "{count} यात्री",
     "search_hint": "टूर, शहर खोजें…",
     "action": {
@@ -383,7 +410,8 @@
       "assigned": "आवंटित"
     },
     "status": {
-      "partial": "आंशिक"
+      "partial": "आंशिक",
+      "cancel_short": "रद्द विनती"
     },
     "time": {
       "just_now": "अभी-अभी",
@@ -542,7 +570,8 @@
       "reclaim_ret": "{n} केवल-वापसी सीटें खाली",
       "reclaim_go": "{n} केवल-जाने सीटें खाली",
       "free_by_type": "प्रकार अनुसार खाली",
-      "needs_decision": "{n} को आपके निर्णय की ज़रूरत है"
+      "needs_decision": "{n} को आपके निर्णय की ज़रूरत है",
+      "tight": "भर रही है"
     },
     "group": {
       "no_bus": "ग्रुप का आकार जानने के लिए बस जोड़ें"
@@ -657,7 +686,17 @@
     "chip_cancel_requested": "कैंसलेशन विनती की",
     "cancel_requested_state": "कैंसलेशन विनती की — आयोजक के जवाब का इंतज़ार",
     "seats_more": "{shown}… (+{count})",
-    "actions_title": "अनुरोध प्रबंधित करें"
+    "actions_title": "अनुरोध प्रबंधित करें",
+    "add_another_pick_title": "कौन सी ट्रिप?",
+    "empty_cta": "ट्रिप देखें",
+    "empty_filter_cta": "सभी दिखाएँ",
+    "departs_today": "आज रवाना",
+    "departs_tomorrow": "कल रवाना",
+    "departs_in_days": "{count} दिन में रवाना",
+    "next_steps_title": "आगे क्या होगा",
+    "next_steps_1": "आपका अनुरोध आयोजक तक पहुँचता है।",
+    "next_steps_2": "वे पुष्टि करके आपकी सीट तय करते हैं।",
+    "next_steps_3": "ट्रिप पक्की होते ही आपका सीट नंबर यहाँ दिखेगा।"
   },
   "add_bus": {
     "title": "बस जोड़ें",
@@ -815,7 +854,10 @@
       "price_hint": "जैसे 1500",
       "cta_add": "बैंड जोड़ें",
       "cta_save": "बैंड सहेजें",
-      "default_label": "बैंड"
+      "default_label": "बैंड",
+      "err_row_min": "पंक्तियाँ 1 से शुरू होती हैं।",
+      "err_row_range": "इस बस में {max} पंक्तियाँ हैं — 1 से {max} तक चुनें।",
+      "err_price": "0 से ज़्यादा रकम डालें।"
     },
     "overrides": {
       "single_price": "सिंगल सोफ़ा मूल्य",
@@ -835,10 +877,17 @@
     },
     "per_seat": {
       "auto_note": "पूरे बस दाम ÷ {seats} सीट से अपने-आप भरता है — अपना दाम रखने के लिए टैप करें."
+    },
+    "error": {
+      "duplicate_bus_number": "इस टूर की {name} पर यही बस नंबर है। दूसरा नंबर डालें, या मालिक की पुष्टि होने तक खाली छोड़ें।"
+    },
+    "not_found": {
+      "title": "टूर लोड नहीं हुआ",
+      "body": "यह हटा दिया गया है, या टूर सूची अभी लोड नहीं हुई है।"
     }
   },
   "admin_setup": {
-    "title": "व्यवस्थापक सेटअप",
+    "title": "एडमिन सेटअप",
     "mail_subject": "एडमिन एक्सेस अनुरोध",
     "heading": "पहला व्यवस्थापक खाता बनाएँ।",
     "subtitle": "ये क्रेडेंशियल आपके Appwrite admins कलेक्शन में संग्रहित हैं। इस फ़ोन नंबर और सही पासवर्ड का उपयोग करने वाले किसी भी व्यक्ति को ऐप में पूरी व्यवस्थापक पहुँच मिलेगी।",
@@ -865,7 +914,9 @@
     "support_heading": "व्यवस्थापक खाते Ugam टीम संभालती है",
     "support_body": "व्यवस्थापक पहुँच जोड़ने या बदलने के लिए हमारी सपोर्ट टीम से संपर्क करें। 24 घंटे में आपको सिस्टम में जोड़ दिया जाएगा।",
     "btn_contact_support": "सपोर्ट से संपर्क करें",
-    "email_copied": "{email} कॉपी हो गया"
+    "email_copied": "{email} कॉपी हो गया",
+    "copy_email": "ईमेल पता कॉपी करें",
+    "support_include": "अपना नाम, अपनी ट्रैवल्स का नाम और जिस फ़ोन नंबर से साइन इन करेंगे, वह ज़रूर लिखें।"
   },
   "bus_status": {
     "bus_not_found": "बस नहीं मिली",
@@ -935,6 +986,7 @@
     "broadcast_note": "सभी WhatsApp संपर्कों को प्रसारित किया जाएगा",
     "broadcast_add_image": "छवि जोड़ें (वैकल्पिक)",
     "broadcast_image_added": "ब्रॉडकास्ट में छवि जोड़ी गई",
+    "broadcast_remove_image": "छवि हटाएँ",
     "broadcast_image_upload_failed": "छवि अपलोड नहीं हुई — यात्रा बिना छवि के सहेजी गई।",
     "preview": {
       "eyebrow": "प्रीव्यू",
@@ -1004,7 +1056,19 @@
     "err_too_fast": "दोबारा भेजने से पहले कुछ सेकंड प्रतीक्षा करें।",
     "cta_seat_count": "{n} सीटें",
     "cta_seat_count_one": "1 सीट",
-    "estimated_total_label": "अनुमानित कुल"
+    "estimated_total_label": "अनुमानित कुल",
+    "brief_departs": "प्रस्थान",
+    "brief_returns": "वापसी",
+    "brief_per_seat": "प्रति सीट",
+    "next_title": "आगे क्या होगा",
+    "next_s1_title": "आप अनुरोध भेजें",
+    "next_s1_body": "हम इसे सहेजकर WhatsApp खोल देंगे — संदेश पहले से तैयार होगा, बस Send दबाएँ।",
+    "next_s1_title_edit": "आप बदलाव भेजें",
+    "next_s1_body_edit": "हम आपके बदलाव सहेजकर WhatsApp खोलेंगे, ताकि आयोजक को नई जानकारी मिल जाए।",
+    "next_s2_title": "आयोजक जवाब देंगे",
+    "next_s2_body": "वे खाली सीटें देखकर WhatsApp पर आपकी सीट पक्की करेंगे।",
+    "next_s3_title": "आपकी बर्थ तय होगी",
+    "next_s3_body": "‘मेरी अनुरोध’ में कभी भी स्थिति देख सकते हैं।"
   },
   "booking_form": {
     "label_name": "आपका नाम",
@@ -1066,8 +1130,8 @@
     "label_price_per_seat": "प्रति सीट कीमत",
     "label_tour_status": "टूर स्थिति",
     "bus_confirmed": "बस की पुष्टि हो गई",
-    "bus_ac": "AC",
-    "bus_non_ac": "Non-AC",
+    "bus_ac": "एसी",
+    "bus_non_ac": "नॉन-एसी",
     "tab_about": "के बारे में",
     "tab_schedule": "समय सारिणी",
     "section_trip_summary": "यात्रा सारांश",
@@ -1104,7 +1168,8 @@
     "departs_in_days": "{n} दिन में प्रस्थान",
     "label_seats": "सीटें",
     "seats_free_of_total": "{total} में से {free} खाली",
-    "label_destination": "गंतव्य"
+    "label_destination": "गंतव्य",
+    "seats_unavailable": "सीटों की उपलब्धता जाँच नहीं सके।"
   },
   "edit_tour": {
     "title": "टूर संपादित करें",
@@ -1162,7 +1227,19 @@
     },
     "error_name_required": "कृपया टूर का नाम दर्ज करें",
     "error_from_required": "कृपया प्रस्थान शहर दर्ज करें",
-    "error_to_required": "कृपया गंतव्य शहर दर्ज करें"
+    "error_to_required": "कृपया गंतव्य शहर दर्ज करें",
+    "exit_confirm_title": "बिना सहेजे बाहर निकलें?",
+    "exit_confirm_msg": "इस टूर में किए आपके बदलाव सहेजे नहीं गए हैं। फिर भी बाहर निकलें?",
+    "exit_confirm_cta": "छोड़ दें",
+    "cancel_confirm_title": "सभी बदलाव पलट दें?",
+    "cancel_confirm_msg": "हर फ़ील्ड वैसी हो जाएगी जैसी टूर खोलते समय थी।",
+    "cancel_confirm_cta": "बदलाव पलटें",
+    "desc_counter": "{count}/{max}",
+    "return_time_locked": "पहले तारीख़",
+    "not_found": {
+      "title": "टूर लोड नहीं हुआ",
+      "body": "यह हटा दिया गया है, या टूर सूची अभी लोड नहीं हुई है।"
+    }
   },
   "login": {
     "brand_name": "UGAM",
@@ -1199,6 +1276,9 @@
     "driver_label": "ड्राइवर",
     "edit_seats": "सीटें संपादित करें",
     "no_layout": "इस बस के लिए अभी सीट लेआउट नहीं है.",
+    "no_layout_body": "बस की क्षमता सेट करें, सीट मैप बन जाएगा.",
+    "create_layout": "सीट मैप बनाएँ",
+    "legend_toggle": "रंगों का मतलब क्या है?",
     "layout_loading": "सीट मैप लोड हो रहा है…",
     "sheet_bus": "बस",
     "sheet_seats": "इस बस में सीटें",
@@ -1234,7 +1314,18 @@
     "media_open_failed": "यह अटैचमेंट नहीं खुल सका",
     "you": "आप",
     "new_label": "नया",
-    "card_unread": "{count} अपठित"
+    "card_unread": "{count} अपठित",
+    "today": "आज",
+    "yesterday": "कल",
+    "empty_cta": "WhatsApp सेटअप जाँचें",
+    "thread_empty_title": "यहाँ अभी कुछ नहीं",
+    "thread_empty_body": "आपका जवाब यह बातचीत शुरू करेगा।",
+    "send_failed_reason": "भेजा नहीं जा सका — {reason}",
+    "status_sending": "भेजा जा रहा है",
+    "status_sent": "भेजा गया",
+    "status_delivered": "पहुँचा",
+    "status_read": "पढ़ा गया",
+    "status_failed": "नहीं पहुँचा"
   },
   "broadcast_fallback": {
     "label_route": "रूट",
@@ -1342,6 +1433,7 @@
     "group_locked_msg": "ग्रुप के सदस्य एक ही बस में रहने चाहिए। इसके बजाय पूरा ग्रुप ले जाएँ।",
     "group_move_failed": "ग्रुप नहीं ले जाया जा सका। कृपया फिर प्रयास करें।",
     "group_move_no_fit": "पूरा ग्रुप इस बस में नहीं समाता।",
+    "group_move_no_fit_on": "{bus} में इस ग्रुप के सभी {count} लोग नहीं समाते — किसी को नहीं ले जाया गया।",
     "group_move_save": "पूरा ग्रुप ले जाएँ",
     "auto_confirm_sent_one": "कन्फर्म करके {name} को WhatsApp भेजा",
     "auto_confirm_sent_many": "कन्फर्म करके {count} यात्रियों को WhatsApp पर सूचित किया"
@@ -1359,8 +1451,8 @@
     "empty_body": "जब आपके बस मालिक पुष्टि करें, तो ड्राइवर और सीट की जानकारी दर्ज करने के लिए \"बस जोड़ें\" टैप करें.",
     "bus_number": "बस #{number}",
     "bus_number_blank": "बस #—",
-    "tag_ac": "AC",
-    "tag_non_ac": "नॉन-AC",
+    "tag_ac": "एसी",
+    "tag_non_ac": "नॉन-एसी",
     "occupancy_label": "उपयोग",
     "occupancy_count": "{assigned}/{capacity} सीटें",
     "menu_edit": "बस की जानकारी संपादित करें",
@@ -1377,7 +1469,11 @@
     "subtitle_seats": "{assigned}/{capacity} सीटें",
     "subtitle_seats_free": "{capacity} में से {free} खाली",
     "menu_call_driver": "ड्राइवर को कॉल करें",
-    "menu_duplicate": "बस की कॉपी बनाएँ"
+    "menu_duplicate": "बस की कॉपी बनाएँ",
+    "layout_locked_title": "बसें लॉक हैं",
+    "layout_locked_body": "यह यात्रा लॉक है — आप सीटें बदल सकते हैं, पर बस जोड़, बदल या हटा नहीं सकते।",
+    "menu_more": "बस के विकल्प",
+    "menu_delete_subtitle": "बस और उसकी सीट असाइनमेंट हटा देगा"
   },
   "notify": {
     "no_active_tours_title": "कोई सक्रिय टूर नहीं",
@@ -1443,6 +1539,8 @@
     "filter_pending": "बाकी",
     "filter_notified": "भेजा गया",
     "nothing_here": "यहाँ कुछ नहीं है",
+    "show_all": "सभी दिखाएँ",
+    "clear_search": "खोज साफ़ करें",
     "lock_gate_ready": "लॉक करने के लिए तैयार?",
     "status_locked": "लॉक",
     "info_departure": "प्रस्थान",
@@ -1462,14 +1560,26 @@
     "no_seated_passengers": "सूचित करने के लिए अभी कोई सीट वाले यात्री नहीं हैं. पहले सीटें असाइन करें.",
     "lock_send_dialog_title": "टूर लॉक करें और सीटें भेजें?",
     "lock_send_dialog_body": "एक बार लॉक होने पर अनलॉक किए बिना सीट बदलाव नहीं होगा। लॉक करते ही {count} बैठे यात्री(यों) को उनकी सीट संख्या और बस चार्ट WhatsApp पर भेज दिया जाएगा।",
-    "lock_send_dialog_confirm": "लॉक करें और भेजें"
+    "lock_send_dialog_confirm": "लॉक करें और भेजें",
+    "tour_completed_title": "टूर पूरा हो चुका है",
+    "tour_completed_body": "यह यात्रा खत्म हो चुकी है, इसलिए यहाँ से अब कुछ नहीं भेजा जा सकता. यात्रियों को सूचित करने के लिए कोई चालू टूर खोलें.",
+    "tour_unavailable_title": "टूर उपलब्ध नहीं है",
+    "tour_unavailable_body": "यह टूर अब आपकी सूची में नहीं है, इसलिए सूचित करने के लिए कोई नहीं है. वापस जाकर कोई टूर चुनें.",
+    "choose_another_tour": "दूसरा टूर चुनें",
+    "row_seat_removed": "सीट हटा दी गई",
+    "seat_removed_line": "सूचित करने के बाद सीट वापस ले ली गई",
+    "seat_removed_card_title": "{count} यात्री(यों) की सीट चली गई",
+    "seat_removed_card_body": "उन्हें भेजी गई सीट बाद में हटा दी गई है. इसके लिए कोई WhatsApp टेम्पलेट नहीं है, इसलिए उन्हें फ़ोन करें और फिर 'बता दिया' के रूप में चिह्नित करें.",
+    "seat_removed_dialog_title": "हटाई गई सीट के लिए कोई संदेश नहीं",
+    "seat_removed_dialog_body": "{name} को बताया गया था कि उनकी सीट है, और वह सीट बाद में हटा दी गई है. ऐसा कहने वाला कोई स्वीकृत WhatsApp टेम्पलेट नहीं है, इसलिए कृपया उन्हें {phone} पर फ़ोन करें. बात हो जाने के बाद 'बता दिया' के रूप में चिह्नित करें.",
+    "seat_removed_mark_told": "मैंने उन्हें बता दिया"
   },
   "seat_assignment": {
     "title": "सीट आवंटन",
     "fleet_badge": "फ्लीट",
     "tour_subtitle": "{title} · {busCount} बसें · {assigned}/{total} सीटें आवंटित",
-    "ac": "AC",
-    "non_ac": "Non-AC",
+    "ac": "एसी",
+    "non_ac": "नॉन-एसी",
     "driver_label": "ड्राइवर",
     "driver_info": "ड्राइवर: {name} · {count} सीटें",
     "pct_full": "{pct}% भरी",
@@ -1555,7 +1665,8 @@
     "brand_name": "Ugam Booking",
     "tagline": "उगम फौज बस बुकिंग",
     "restore_timeout_title": "धीमा कनेक्शन",
-    "restore_timeout_message": "सामान्य से अधिक समय लग रहा है। जारी है — ऑनलाइन होने पर कुछ जानकारी लोड होगी।"
+    "restore_timeout_message": "सामान्य से अधिक समय लग रहा है। जारी है — ऑनलाइन होने पर कुछ जानकारी लोड होगी।",
+    "still_connecting": "अभी कनेक्ट हो रहा है…"
   },
   "tour_detail": {
     "duration_day_one": "1 दिन",
@@ -1646,7 +1757,7 @@
     "stat_assigned": "असाइन किया",
     "stat_revenue": "आय",
     "per_seat": "/ सीट",
-    "chip_ac": "AC",
+    "chip_ac": "एसी",
     "broadcast_this_tour": "यह टूर ब्रॉडकास्ट करें",
     "broadcast_copy_hint": "पेस्ट करने के लिए तैयार WhatsApp मैसेज कॉपी करें",
     "copy_broadcast_message": "ब्रॉडकास्ट मैसेज कॉपी करें",
@@ -1743,6 +1854,9 @@
     "action_renotify_title": "सीट बदलाव को WhatsApp चाहिए",
     "action_renotify_subtitle": "पिछले सेंड के बाद {n} यात्री बदले",
     "action_renotify_cta": "फिर सूचित करें",
+    "action_seat_removed_title": "{n} यात्री(यों) की सीट चली गई",
+    "action_seat_removed_subtitle": "उन्हें बताई गई सीट बाद में वापस ले ली गई है. इसके लिए कोई WhatsApp टेम्पलेट नहीं है, इसलिए उन्हें फ़ोन करें.",
+    "action_seat_removed_cta": "फ़ोन करें",
     "action_complete_title": "ट्रिप पूर्ण के रूप में चिह्नित करें",
     "action_complete_subtitle": "लॉक और नोटिफाई हो गया। ट्रिप पूरी होने पर इसे बंद करें।",
     "action_complete_go_title": "GO लेग पूरा करें",
@@ -1788,6 +1902,7 @@
       "swap_confirm_body": "सीट {seat} पर {mover} की {other} से अदला-बदली करें?",
       "swap_confirm_yes": "अदला-बदली",
       "swapped": "{mover} ↔ {other} अदला-बदली हुई",
+      "group_moved": "{name} ग्रुप के साथ यात्रा करते हैं, इसलिए पूरा ग्रुप एक साथ {bus} पर चला गया। उनकी सीटें अपने आप चुनी गईं, इसलिए सीट {seat} इस्तेमाल नहीं हुई।",
       "too_small": "सीट {seat} {name} के लिए छोटी है"
     },
     "picker_title": "सीट {seat} · {bus}",
@@ -1946,7 +2061,11 @@
   },
   "fullscreen_chart": {
     "empty": "दिखाने के लिए कोई सीट चार्ट नहीं है।",
-    "open": "फुल स्क्रीन चार्ट"
+    "open": "फुल स्क्रीन चार्ट",
+    "close": "बंद करें",
+    "reset_zoom": "स्क्रीन में फ़िट करें",
+    "zoom_hint": "ज़ूम के लिए पिंच करें · खिसकाने के लिए खींचें",
+    "empty_body": "इस बस का सीट लेआउट अभी सहेजा नहीं गया है।"
   },
   "occupant_sheet": {
     "seat_on": "सीट {seat} · {bus}",
@@ -2001,6 +2120,8 @@
     "field_handed_over": "सौंप दिया",
     "field_note": "नोट",
     "handed_of": "{expected} में से {handed} सौंपा",
+    "handover_by_handler": "हैंडलर ने दर्ज किया",
+    "handover_by_admin": "एडमिन ने दर्ज किया",
     "tour_totals": "टूर का कुल हिसाब",
     "rollup_total_collected": "कुल एकत्रित",
     "rollup_total_expenses": "कुल खर्च",
@@ -2035,6 +2156,9 @@
     "filter_to_return": "वापस करना है",
     "filter_to_collect": "एकत्र करना है",
     "empty_no_match": "इस फ़िल्टर में कोई यात्री नहीं।",
+    "empty_show_all": "सभी सीटें दिखाएँ",
+    "empty_no_seats_title": "इस बस में कोई यात्री नहीं बैठा",
+    "empty_no_seats_body": "चार्ट में सीट आवंटित करें — यात्री और उनकी बकाया रकम यहाँ दिखेंगे।",
     "collected": "एकत्रित",
     "amount_due": "बकाया राशि",
     "received": "प्राप्त",
@@ -2192,7 +2316,16 @@
     "leg_done_body": "{bus} पर {count} वन-वे यात्री यहीं उतरते हैं। उनकी सीटें रिटर्न चार्ट के लिए खाली होंगी। राउंड-ट्रिप यात्रियों पर असर नहीं होगा।",
     "leg_done_confirm": "GO लेग बंद करें",
     "leg_done_ok": "GO लेग बंद — {count} यात्रियों की सीट खाली हुई।",
-    "leg_done_failed": "लेग बंद नहीं हो सका। फिर कोशिश करें।"
+    "leg_done_failed": "लेग बंद नहीं हो सका। फिर कोशिश करें।",
+    "stop_progress": "{total} में से {boarded} चढ़े",
+    "stop_all_aboard": "सभी {count} चढ़ गए",
+    "stop_here": "यहाँ",
+    "stop_board_all": "यहाँ के सभी {count} चढ़ाएं",
+    "stop_board_all_partial": "{done} चढ़ाए, {failed} विफल — फिर कोशिश करें",
+    "stops_done": "स्टॉप पूरे",
+    "att_none_go_body": "जाते समय की यात्रा के लिए इस बस में कोई बुक नहीं है।",
+    "att_none_ret_body": "लौटती यात्रा के लिए इस बस में कोई बुक नहीं है।",
+    "collect_section": "यात्रियों से लें"
   },
   "seat_legend": {
     "free": "खाली",
@@ -2389,7 +2522,6 @@
     "to_collect_amount": "एकत्र करना है {n}",
     "settled": "निपट गया",
     "no_activity": "कोई गतिविधि नहीं",
-    "all_settled": "सब निपट गया",
     "open": "खुला",
     "no_buses": "इस टूर में अभी कोई बस नहीं है.",
     "collect": "वसूली करें",
@@ -2417,7 +2549,10 @@
     "holds_berths": "{n} सीटें",
     "holds_time_left": "{time} बाकी",
     "holds_finalized": "सीट लॉक — बस में वसूलें।",
-    "holds_finalize_failed": "सीट लॉक नहीं हुई। होल्ड खत्म हो सकता है।"
+    "holds_finalize_failed": "सीट लॉक नहीं हुई। होल्ड खत्म हो सकता है।",
+    "trip_projected_profit": "ट्रिप मुनाफ़े में रहने का अनुमान",
+    "trip_projected_loss": "ट्रिप घाटे में रहने का अनुमान",
+    "handover_settled": "सौंपना पूरा"
   },
   "tour_overview": {
     "tour_not_found": "टूर नहीं मिला.",
@@ -2583,6 +2718,13 @@
       "admin": "एडमिन",
       "handler": "हैंडलर",
       "passenger": "यात्री"
+    },
+    "handler_report_kind": {
+      "breakdown": "बस खराब",
+      "delay": "देरी",
+      "passenger": "यात्री",
+      "seat": "सीट की दिक्कत",
+      "other": "अन्य"
     }
   },
   "seat_ui": {
@@ -2697,7 +2839,8 @@
   },
   "money": {
     "basis_cash": "नकद आधार पर — वास्तव में मिला पैसा, बिल किया गया नहीं।",
-    "basis_billed": "बिल आधार पर — सीटों का मूल्य, वसूली गई रकम नहीं।"
+    "basis_billed": "बिल आधार पर — सीटों का मूल्य, वसूली गई रकम नहीं।",
+    "reconcile_unavailable": "सीटें बदल गईं, लेकिन ऑफ़लाइन होने से पैसों की दोबारा गणना नहीं हो सकी। ऑनलाइन होने पर कलेक्शन खोलें।"
   },
   "finance": {
     "eyebrow": "वित्त",
@@ -2737,7 +2880,25 @@
     "row_state_completed": "पूरा हुआ",
     "row_state_running": "चालू",
     "ledger_empty_title": "यह रिपोर्ट अधूरी है",
-    "ledger_empty_body": "वित्तीय बहीखाते में अभी कोई रिकॉर्ड नहीं है, इसलिए जहाँ पैसा चला भी है वहाँ ये कुल ₹0 दिखते हैं। सही आंकड़ों के लिए यात्रा का पैसा बोर्ड खोलें।"
+    "ledger_empty_body": "वित्तीय बहीखाते में अभी कोई रिकॉर्ड नहीं है, इसलिए जहाँ पैसा चला भी है वहाँ ये कुल ₹0 दिखते हैं। सही आंकड़ों के लिए यात्रा का पैसा बोर्ड खोलें।",
+    "net_pending": "अभी कोई आंकड़ा नहीं",
+    "chip_no_trips": "कोई यात्रा नहीं",
+    "row_no_money": "अभी कोई पैसा नहीं",
+    "zero_period_title": "इस अवधि में कोई यात्रा पूरी नहीं हुई",
+    "zero_period_body": "यात्रा उसी अवधि में गिनी जाती है जिसमें वह पूरी होती है। अपनी मौजूदा यात्राएँ देखने के लिए अवधि बढ़ाएँ।",
+    "zero_period_cta": "सभी समय दिखाएँ",
+    "zero_start_title": "आपका पहला आंकड़ा एक यात्रा से शुरू होता है",
+    "zero_start_body": "यह रिपोर्ट तीन चीज़ों से बनती है। एक बार कर लें, फिर आंकड़े अपने आप भर जाएँगे।",
+    "zero_start_cta": "यात्रा बनाएँ",
+    "zero_money_title": "इन यात्राओं में अभी कोई पैसा दर्ज नहीं हुआ",
+    "zero_money_body": "यह शून्य लाभ नहीं है। अभी न कुछ वसूला गया है न खर्च हुआ है, इसलिए जोड़ने को कुछ नहीं है।",
+    "zero_money_cta": "पैसा बोर्ड खोलें",
+    "zero_step_trip_title": "यात्रा बनाएँ",
+    "zero_step_trip_body": "रूट, तारीख़ और बसें। बस का किराया पहला खर्च बनता है।",
+    "zero_step_cash_title": "किराया वसूलें",
+    "zero_step_cash_body": "सीट चार्ट पर ली गई नकद और ऑनलाइन भुगतान प्राप्त नकद बनते हैं।",
+    "zero_step_expense_title": "खर्च दर्ज करें",
+    "zero_step_expense_body": "डीज़ल, टोल, खाना और किराया — यात्रा के पैसा बोर्ड पर।"
   },
   "trip_pnl": {
     "eyebrow": "पैसा",
@@ -2761,7 +2922,13 @@
     "entry_sub": "बस और हैंडलर अनुसार",
     "detached_cash_bus": "इसमें से {n} उन यात्रियों का है जो अब इस बस में नहीं बैठे (दूसरी बस में गए या सीट हटा दी गई), इसलिए यहाँ की उगाही से रोकड़ ज़्यादा दिख रही है.",
     "detached_cash_handler": "इसमें से {n} उन यात्रियों का है जो अब उनकी किसी भी बस में नहीं हैं, इसलिए यहाँ की उगाही से रोकड़ ज़्यादा दिख रही है.",
-    "detached_cash_trip": "इसमें से {n} उन यात्रियों का है जिनकी इस यात्रा में अब कोई सीट नहीं है."
+    "detached_cash_trip": "इसमें से {n} उन यात्रियों का है जिनकी इस यात्रा में अब कोई सीट नहीं है.",
+    "net_projected": "अनुमानित शुद्ध लाभ",
+    "net_projected_loss": "अनुमानित शुद्ध हानि",
+    "projected_note": "ट्रिप ने अभी कुछ नहीं कमाया — यह सीट चार्ट का मूल्य है, कमाया हुआ पैसा नहीं।",
+    "rent_missing_one": "1 बस का किराया दर्ज नहीं है, इसलिए यह आंकड़ा ज़्यादा दिख रहा है",
+    "rent_missing_many": "{n} बसों का किराया दर्ज नहीं है, इसलिए यह आंकड़ा ज़्यादा दिख रहा है",
+    "rent_not_set": "किराया दर्ज नहीं"
   },
   "seat_move_money": {
     "title": "सीट बदलने पर किराया बदला",
@@ -2804,15 +2971,22 @@
     "berth_one": "1 बर्थ",
     "berth_many": "{n} बर्थ",
     "continue": "आगे बढ़ें",
-    "warn_max": "एक बार में ज़्यादा से ज़्यादा {n} बर्थ बुक हो सकती हैं।"
+    "warn_max": "एक बार में ज़्यादा से ज़्यादा {n} बर्थ बुक हो सकती हैं।",
+    "tab_go": "जाना",
+    "tab_return": "वापसी",
+    "both_legs": "दोनों"
   },
   "seat_confirm": {
     "title": "आपकी जानकारी",
     "name_label": "नाम",
+    "name_hint": "यात्री का पूरा नाम",
     "phone_label": "फ़ोन",
+    "phone_hint": "10 अंकों का मोबाइल नंबर",
     "pickup_label": "पिकअप जगह",
     "pickup_hint": "पिकअप जगह चुनें",
     "note_label": "आयोजक के लिए नोट",
+    "note_hint": "आयोजक को कुछ बताना है?",
+    "gender_label": "यात्री कौन है",
     "gender_female": "महिला",
     "gender_male": "पुरुष",
     "gender_skip": "नहीं बताना",
@@ -2828,7 +3002,10 @@
     "total": "कुल",
     "pay_on_bus": "बस में देना है",
     "advance_title": "एडवांस दें",
-    "advance_note": "बाकी {total} बस में देना है।"
+    "advance_note": "बाकी {total} बस में देना है।",
+    "leg_mixed": "मिश्रित — कुछ एक तरफ़",
+    "next_hold": "कन्फर्म करते ही बर्थ 5 मिनट के लिए रुकेंगी — लॉक करने के लिए एडवांस भरें।",
+    "next_confirm": "कन्फर्म करते ही बर्थ बुक हो जाएँगी और आपकी जानकारी आयोजक तक पहुँच जाएगी।"
   },
   "booking_settings": {
     "title": "बुकिंग और भुगतान",
@@ -2864,7 +3041,8 @@
     "share_hint": "सोफ़े पर दो लोग बैठते हैं। बाँटने पर आधा किराया — ना कहें तो पूरा सोफ़ा ही बुक होगा।",
     "yes": "हाँ",
     "no": "नहीं",
-    "continue": "सीटें दिखाएँ"
+    "continue": "सीटें दिखाएँ",
+    "next_hint": "आपके ग्रुप के लिए हम साथ वाली सीटें चुनकर चार्ट खोलेंगे — वहाँ कोई भी सीट बदल सकते हैं।"
   },
   "sofa_share": {
     "title": "यह सोफ़ा कैसे लेना है?",
@@ -2881,7 +3059,10 @@
     "pick_prompt": "{n} सीटें चुनें",
     "no_room": "अभी {n} लोगों के लिए जगह नहीं",
     "lower_n": "{n} नीचे",
-    "upper_n": "{n} ऊपर"
+    "upper_n": "{n} ऊपर",
+    "short_round": "अभी आने-जाने के लिए {n} सीट नहीं है",
+    "short_go": "अभी जाने के लिए {n} सीट नहीं है",
+    "short_return": "अभी वापसी के लिए {n} सीट नहीं है"
   },
   "tracking": {
     "notification_title": "बस की लोकेशन साझा हो रही है",
@@ -2911,7 +3092,14 @@
     "map_last_seen": "आख़िरी बार {n}",
     "map_moving": "{n} किमी/घंटा",
     "map_parked": "खड़ी है",
-    "map_stale": "रिपोर्ट नहीं हो रही"
+    "map_stale": "रिपोर्ट नहीं हो रही",
+    "ago_now": "अभी-अभी",
+    "ago_minutes": "{n} मिनट पहले",
+    "ago_hours": "{n} घंटे पहले",
+    "map_fit_all": "सभी बसें दिखाएँ",
+    "map_reporting": "{m} में से {n} रिपोर्ट कर रही हैं",
+    "map_not_started": "अभी साझा नहीं हो रही",
+    "map_check_again": "फिर से जाँचें"
   },
   "wa_error": {
     "auth_failed": {
@@ -2990,5 +3178,206 @@
       "cause": "व्हाट्सएप ने संदेश स्वीकार नहीं किया.",
       "fix": "फिर कोशिश करें. बार-बार हो तो यह संदेश डेवलपर को दिखाएँ."
     }
+  },
+  "handler_tabs": {
+    "board": "चढ़ाई",
+    "money": "पैसे",
+    "chart": "चार्ट",
+    "trip": "यात्रा"
+  },
+  "handler_phase": {
+    "boarding_go": "चढ़ाई · जाते समय",
+    "en_route_go": "रास्ते में · जाते समय",
+    "boarding_ret": "चढ़ाई · लौटते समय",
+    "en_route_ret": "रास्ते में · लौटते समय",
+    "settling": "हिसाब चुकता",
+    "closed": "यात्रा पूरी",
+    "milestone_depart_go": "हम निकल गए",
+    "milestone_arrive_go": "हम पहुँच गए",
+    "milestone_depart_ret": "वापस जा रहे हैं",
+    "milestone_end_trip": "यात्रा पूरी हुई",
+    "confirm_depart_go": "बस जाते समय की यात्रा पर निकल गई, ऐसा दर्ज करें? जो नहीं चढ़े वे छूटे हुए दर्ज रहेंगे।",
+    "confirm_arrive_go": "जाते समय की यात्रा पूरी हुई, ऐसा दर्ज करें? एकतरफ़ा यात्रियों की सीटें लौटते चार्ट के लिए खाली हो जाएँगी।",
+    "confirm_depart_ret": "बस लौटती यात्रा पर निकल गई, ऐसा दर्ज करें?",
+    "confirm_end_trip": "यह यात्रा पूरी हुई, ऐसा दर्ज करें? इसके बाद भी आप पैसे दर्ज कर सकते हैं।",
+    "milestone_ok": "सहेजा गया",
+    "milestone_failed": "सहेजा नहीं जा सका। फिर कोशिश करें।",
+    "action_settle": "नकद सौंपें",
+    "detail_boarding": "{total} में से {boarded} चढ़े",
+    "detail_at_stop": "{stop} पर",
+    "detail_all_aboard": "सब चढ़ गए",
+    "detail_to_collect": "{amount} अभी लेने हैं",
+    "detail_all_collected": "सारा किराया ले लिया",
+    "detail_in_hand": "{amount} हाथ में",
+    "detail_outstanding": "{amount} सौंपने हैं",
+    "detail_closed": "हिसाब पूरा",
+    "log_title": "यात्रा लॉग",
+    "log_departed_go": "निकले (जाते समय)",
+    "log_arrived_go": "पहुँचे (जाते समय)",
+    "log_departed_ret": "निकले (लौटते समय)",
+    "log_completed": "यात्रा पूरी"
+  },
+  "handler_trip": {
+    "actions": "क्रियाएँ",
+    "broadcast_body": "इस बस के सभी यात्रियों को संदेश भेजें",
+    "report_body": "एजेंट को समस्या बताएं"
+  },
+  "handler_report": {
+    "title": "समस्या बताएं",
+    "kind_label": "क्या दिक्कत है?",
+    "message_label": "क्या हुआ",
+    "message_hint": "एजेंट को जो जानना ज़रूरी है वह लिखें",
+    "note_urgent": "एजेंट को तुरंत सूचना जाएगी।",
+    "note_normal": "एजेंट को यात्रा के बोर्ड पर दिखेगा।",
+    "send": "एजेंट को भेजें",
+    "sent": "एजेंट को भेज दिया",
+    "error_empty": "पहले लिखें कि क्या हुआ",
+    "error_send": "भेजा नहीं जा सका। फिर कोशिश करें।",
+    "sent_section": "बताई गई",
+    "status_sent": "भेजा गया",
+    "status_seen": "एजेंट ने देखा",
+    "alerts_title": "हैंडलर रिपोर्ट",
+    "alerts_open": "{count} नए",
+    "alerts_ack": "देखा हुआ दर्ज करें",
+    "alerts_ack_all": "सभी देखे हुए दर्ज करें",
+    "alerts_empty": "कोई समस्या नहीं बताई गई।",
+    "alerts_from": "{name} से · {bus}",
+    "alerts_failed": "अपडेट नहीं हो सका। फिर कोशिश करें।"
+  },
+  "board_lens": {
+    "name_occupancy": "सीट",
+    "name_money": "पैसा",
+    "name_pickup": "पिकअप",
+    "name_group": "ग्रुप",
+    "name_boarding": "बोर्डिंग",
+    "state_occupied": "बैठे हैं",
+    "state_ladies": "महिला",
+    "state_empty": "खाली",
+    "state_blocked": "ब्लॉक की हुई",
+    "state_paid": "चुका दिया",
+    "state_half": "आधा चुकाया",
+    "state_due": "बकाया",
+    "state_due_amount": "{amount} बकाया",
+    "state_half_amount": "आधा चुकाया, {amount} बकाया",
+    "state_change_owed": "{amount} वापस करने हैं",
+    "state_no_fare": "किराया नहीं",
+    "state_boarded": "चढ़े",
+    "state_expected": "चढ़ना बाकी",
+    "state_no_show": "नहीं आए",
+    "state_no_stop": "पिकअप स्थान नहीं",
+    "state_no_group": "ग्रुप नहीं",
+    "other_stops": "{count} अन्य स्थान",
+    "other_groups": "{count} अन्य ग्रुप",
+    "action_call": "कॉल करें",
+    "action_collect": "वसूलें",
+    "action_move": "सीट बदलें",
+    "action_check_in": "चढ़ा हुआ लगाएँ",
+    "a11y_at_stop": "{stop} से चढ़ेंगे"
+  },
+  "board_berth": {
+    "unnamed": "नाम नहीं",
+    "a11y_selected": "चुनी हुई",
+    "a11y_current": "मौजूदा सीट"
+  },
+  "board_lens_switcher": {
+    "a11y_group": "बस को किस हिसाब से रंगें",
+    "a11y_tab": "{lens}, {total} में से {index}"
+  },
+  "board_legend": {
+    "a11y_group": "रंग की कुंजी — सिर्फ़ वही सीटें देखने के लिए रंग पर टैप करें",
+    "a11y_filter": "सिर्फ़ {label} दिखाएँ",
+    "a11y_clear": "सिर्फ़ {label} दिख रहे हैं। सब दिखाने के लिए टैप करें।"
+  },
+  "passenger_sheet": {
+    "more_actions": "और",
+    "field_leg": "लेग",
+    "field_payment": "भुगतान",
+    "field_pickup": "पिकअप",
+    "field_group": "ग्रुप",
+    "field_fare": "किराया",
+    "field_paid": "चुकाया",
+    "field_due": "अभी बाकी",
+    "field_change": "वापस करने हैं",
+    "confirm_collect_title": "नकद ले लें?",
+    "confirm_collect_body": "{name} से {amount} मिले, यह दर्ज होगा। सिंक होने के बाद इसे पलटना मुश्किल है।",
+    "confirm_collect_action": "हाँ, वसूलें",
+    "confirm_return_title": "छुट्टे पैसे वापस करें?",
+    "confirm_return_body": "{name} को {amount} वापस किए, यह दर्ज होगा। सिंक होने के बाद इसे पलटना मुश्किल है।",
+    "confirm_return_action": "हाँ, वापस करें",
+    "collected_toast": "{name} से {amount} वसूले",
+    "returned_toast": "{name} को {amount} वापस किए",
+    "checked_in_toast": "{name} बस में चढ़ गए",
+    "checked_out_toast": "{name} चढ़े नहीं, यह दर्ज किया",
+    "freed_toast": "सीट {seat} खाली की — {name} फिर से बाकी सूची में",
+    "undo_free_semantic": "{name} की सीट {seat} खाली करना वापस लें",
+    "action_return_change": "छुट्टे पैसे वापस करें",
+    "action_undo_check_in": "चढ़े नहीं, ऐसा करें",
+    "write_failed": "सेव नहीं हुआ। फिर से कोशिश करें।"
+  },
+  "board_canvas": {
+    "no_layout_title": "इस बस का सीट प्लान अभी बना नहीं है",
+    "no_layout_body": "यात्रियों को बैठाने के लिए सीट प्लान बनाएँ।",
+    "bus_n": "बस {n}",
+    "bus_position": "बस {index} / {total}"
+  },
+  "board_strip": {
+    "seats_empty": "{count} खाली",
+    "seats_full": "बस भर गई",
+    "money_due": "{amount} बकाया",
+    "money_collected_pct": "{pct}% वसूल",
+    "money_no_fares": "वसूली देखने के लिए किराया तय करें",
+    "boarded": "चढ़े",
+    "no_stops": "अभी पिकअप स्थान नहीं",
+    "groups": "{count} ग्रुप",
+    "groups_split": "{count} अलग-अलग",
+    "offline_pending": "{count} क्रियाएँ बाकी · सिंक होंगी"
+  },
+  "board_empty": {
+    "kind_missing": "सेट करें",
+    "kind_not_yet": "अभी नहीं",
+    "kind_all_clear": "सब पूरा",
+    "no_layout_title": "इस बस का सीट प्लान अभी बना नहीं है",
+    "no_layout_body": "प्लान बनाएँ, फिर हर व्यू में बस दिखेगी।",
+    "no_riders_title": "इस बस में अभी कोई नहीं है",
+    "no_riders_body": "प्लान में यात्री बैठाएँ, वे यहाँ दिखेंगे।",
+    "no_fares_title": "वसूली देखने के लिए किराया तय करें",
+    "no_fares_body": "किराया तय न हो तो ₹0 का मतलब चुकाया नहीं।",
+    "all_collected_title": "पूरी वसूली हो गई",
+    "all_collected_body": "{count} यात्री · {amount} जमा",
+    "boarding_not_open_title": "बोर्डिंग {date} से शुरू होगी",
+    "boarding_not_open_title_no_date": "बोर्डिंग अभी शुरू नहीं हुई",
+    "boarding_not_open_body": "उस दिन आकर यात्रियों को चढ़ा हुआ लगाएँ।",
+    "all_boarded_title": "सब बस में चढ़ गए",
+    "all_boarded_body": "{total} में से {done} चढ़े",
+    "no_stops_title": "अभी पिकअप स्थान नहीं",
+    "no_stops_body": "जोड़ें, फिर कौन कहाँ से चढ़ता है वह रंग से दिखेगा।",
+    "no_groups_title": "अभी कोई ग्रुप नहीं",
+    "no_groups_body": "साथ यात्रा करने वालों का ग्रुप बनाएँ।",
+    "preview_expected": "चढ़ने वाले",
+    "preview_stops": "पिकअप स्थान",
+    "action_create_seat_plan": "सीट प्लान बनाएँ",
+    "action_place_riders": "यात्री बैठाएँ",
+    "action_set_fares": "किराया तय करें",
+    "action_review_collection": "पैसे का बोर्ड",
+    "action_preview_expected": "कौन आएगा देखें",
+    "action_add_pickup_points": "पिकअप स्थान जोड़ें",
+    "action_create_group": "ग्रुप बनाएँ"
+  },
+  "board_screen": {
+    "title": "बोर्ड",
+    "no_tour_title": "यह यात्रा अभी खुली नहीं है",
+    "no_tour_body": "यात्रा सूची से खोलें, बोर्ड उसी के साथ आ जाएगा।",
+    "no_bus_title": "इस यात्रा में अभी कोई बस नहीं है",
+    "no_bus_body": "बस जोड़ें, उसका बोर्ड यहीं खुलेगा।",
+    "search_open": "इस बस में खोजें",
+    "search_close": "खोज बंद करें",
+    "search_hint": "नाम या बर्थ खोजें",
+    "density_compact": "पूरी बस दिखाएँ",
+    "density_comfortable": "नाम दिखाएँ",
+    "next_outstanding": "अगला बकाया",
+    "next_outstanding_a11y": "अगला बकाया, {count} बाकी",
+    "round_done": "इस बस में कुछ बाकी नहीं",
+    "round_done_a11y": "फेरा पूरा हुआ",
+    "undo_collect_semantic": "{name} से लिए गए {amount} वापस लें"
   }
 }

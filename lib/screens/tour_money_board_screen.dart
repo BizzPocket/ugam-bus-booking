@@ -9,6 +9,7 @@ import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/money_summary.dart';
 import '../models/payment_claim.dart';
+import '../models/pnl_confidence.dart';
 import '../models/tour.dart';
 import '../services/chart_hold_status.dart';
 import '../utils/app_snackbar.dart';
@@ -29,6 +30,16 @@ import 'trip_pnl_screen.dart';
 /// All aggregation is delegated to [MoneyController] (read-only helpers); this
 /// screen never mutates money state. Colour comes exclusively from
 /// [UgamColors.of] and every figure uses tabular numerals, per the locked DNA.
+/// Pads a full-height state (empty / error / skeleton) back out to the whole
+/// body slot.
+///
+/// The board's body sits in a LOOSE flex child so a short list can shrink-wrap
+/// and let the totals capsule rise to meet it. A scrollable fills a loose slot
+/// on its own, but [UgamEmpty] is a [Center] — under loose constraints it
+/// shrink-wraps to its own content and its "centred" state would clamp itself
+/// to the app bar instead of the screen.
+Widget _fillSlot(Widget child) => SizedBox.expand(child: child);
+
 class TourMoneyBoardScreen extends StatefulWidget {
   final String tourId;
 
@@ -96,35 +107,52 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
           children: [
             Obx(() {
               final title = _tours.getTour(widget.tourId)?.title ?? '';
+              // The tour title is USER data and the longest string on this
+              // screen. In the title slot (titleL, ~291pt beside the back
+              // button) a Gujarati tour name clips after ~14 glyphs — it read
+              // as "શ્રી દ્વારકા-સોમ…". So the FIXED screen name takes the
+              // title slot, where the length is known in all three locales,
+              // and the tour name drops to the subtitle: caption metrics fit
+              // roughly 2.5× the glyphs, so the name survives whole. The
+              // eyebrow goes with it — "TOUR MONEY" stacked over "Tour money"
+              // was the same words twice.
               return UgamAppBar(
-                eyebrow: tr('tour_money_board.eyebrow'),
-                title: title.isEmpty
-                    ? tr('tour_money_board.tour_money')
-                    : title,
+                title: tr('tour_money_board.tour_money'),
+                subtitle: title.isEmpty ? null : title,
               );
             }),
-            Expanded(
+            // LOOSE flex child, not Expanded: a short board (one or two buses)
+            // used to strand ~250pt of undesigned void between the last bus
+            // card and the bottom-anchored totals capsule. Shrink-wrapped, the
+            // list takes only the height it needs and the capsule rises to
+            // meet it; once the board outgrows the viewport the list is capped
+            // at the remaining space and the capsule pins to the bottom again.
+            Flexible(
               child: Obx(() {
                 final tour = _tours.getTour(widget.tourId);
                 if (tour == null) {
                   // Same key, same shape as trip_pnl_screen's not-found state —
                   // a bare centred sentence read as a half-built screen.
-                  return UgamEmpty(
-                    icon: Icons.search_off_rounded,
-                    title: tr('tour_money_board.tour_not_found'),
+                  return _fillSlot(
+                    UgamEmpty(
+                      icon: Icons.search_off_rounded,
+                      title: tr('tour_money_board.tour_not_found'),
+                    ),
                   );
                 }
 
                 if (_money.isLoading.value && !_money.loadedOnce.value) {
-                  return const MoneyLoadingSkeleton();
+                  return _fillSlot(const MoneyLoadingSkeleton());
                 }
 
                 // A failed money load leaves the obs lists empty; without this
                 // the board would render every bus at ₹0 as if the trip had no
                 // money. Swap in the shared retry only when nothing is held.
                 if (_showLoadError) {
-                  return UgamEmpty.error(
-                    onRetry: () => _money.loadForTour(widget.tourId),
+                  return _fillSlot(
+                    UgamEmpty.error(
+                      onRetry: () => _money.loadForTour(widget.tourId),
+                    ),
                   );
                 }
 
@@ -138,20 +166,33 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                 final tourSummary = _money.tourSummary();
 
                 if (buses.isEmpty) {
-                  return UgamEmpty(
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: tr('tour_money_board.no_buses'),
+                  return _fillSlot(
+                    UgamEmpty(
+                      icon: Icons.account_balance_wallet_outlined,
+                      title: tr('tour_money_board.no_buses'),
+                    ),
                   );
                 }
 
                 return RefreshIndicator(
+                  // Chrome, not ownership — the pull spinner is neutral ink2
+                  // in every screen, so it never changes hue between tabs.
+                  // (Unset used to mean `colorScheme.primary`, i.e. the accent;
+                  // there is no theme hook for a refresh spinner.)
+                  color: c.ink2,
                   onRefresh: () => _money.refreshForTour(widget.tourId),
                   child: ListView(
+                    // Sizes to its content inside the loose slot above, so the
+                    // totals capsule follows the last bus card up the screen.
+                    shrinkWrap: true,
                     padding: const EdgeInsets.fromLTRB(
                       UgamSpacing.gutter,
                       UgamSpacing.sm,
                       UgamSpacing.gutter,
-                      UgamSpacing.xl,
+                      // The capsule's own UgamStickyCTA adds `lg` above itself;
+                      // `xl` here on top of that opened a 32pt seam that read
+                      // as another gap once the two met.
+                      UgamSpacing.sm,
                     ),
                     physics: const AlwaysScrollableScrollPhysics(
                       parent: BouncingScrollPhysics(),
@@ -167,6 +208,10 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                       ),
                       _PnlEntryCard(
                         summary: tourSummary,
+                        confidence: PnlConfidence.of(
+                          tourSummary,
+                          tour.status,
+                        ),
                         onTap: _openPnl,
                         c: c,
                       ),
@@ -542,20 +587,39 @@ class _OrphanMoneyCard extends StatelessWidget {
 /// so the headline answer is visible before tapping in.
 class _PnlEntryCard extends StatelessWidget {
   final TourMoneySummary summary;
+  final PnlConfidence confidence;
   final VoidCallback onTap;
   final UgamColorSet c;
 
   const _PnlEntryCard({
     required this.summary,
+    required this.confidence,
     required this.onTap,
     required this.c,
   });
+
+  /// "Trip is in profit" is a claim about an outcome. Before the trip has
+  /// earned anything it can only be a projection, so the card says which.
+  String get _verdict {
+    if (summary.totalNetBilled >= 0) {
+      return confidence.isProjected
+          ? tr('tour_money_board.trip_projected_profit')
+          : tr('tour_money_board.trip_in_profit');
+    }
+    return confidence.isProjected
+        ? tr('tour_money_board.trip_projected_loss')
+        : tr('tour_money_board.trip_at_loss');
+  }
 
   @override
   Widget build(BuildContext context) {
     final billed = summary.totalNetBilled;
     final inProfit = billed >= 0;
-    final tone = inProfit ? c.good : c.danger;
+    // Neutral ink for a figure that is a forecast or is missing a cost —
+    // green is reserved for a settled result (mirrors _TripTotalCard).
+    final tone = !inProfit
+        ? c.danger
+        : (confidence.isProvisional ? c.ink : c.good);
     return UgamCard.plain(
       key: const ValueKey('pnl-hero'),
       onTap: onTap,
@@ -586,6 +650,9 @@ class _PnlEntryCard extends StatelessWidget {
             ),
           ),
           Row(
+            // Top-anchored: the text column now grows by a whole caveat strip,
+            // and a centred icon drifted away from the title it belongs to.
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: UgamScale.px(context, 40),
@@ -616,11 +683,9 @@ class _PnlEntryCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      inProfit
-                          ? tr('tour_money_board.trip_in_profit')
-                          : tr('tour_money_board.trip_at_loss'),
+                      _verdict,
                       style: UgamText.titleS.copyWith(color: c.ink),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: UgamSpacing.sm),
@@ -632,11 +697,18 @@ class _PnlEntryCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      tr('trip_pnl.entry_sub'),
-                      style: UgamText.caption.copyWith(color: c.ink3),
-                    ),
+                    // "Per bus & per handler" describes what a tap reveals —
+                    // useful when the figure is calm, but it is the first thing
+                    // to go once something is wrong with the number itself. The
+                    // chevron already promises detail; three stacked meta lines
+                    // buried the one line that actually matters.
+                    if (!confidence.costsIncomplete) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        tr('trip_pnl.entry_sub'),
+                        style: UgamText.caption.copyWith(color: c.ink3),
+                      ),
+                    ],
                     // This card headlines BILLED net while the sticky capsule at
                     // the foot of the same screen headlines CASH net. Two right
                     // answers to two different questions — but unlabelled, one
@@ -646,11 +718,36 @@ class _PnlEntryCard extends StatelessWidget {
                       tr('money.basis_billed'),
                       style: UgamText.micro.copyWith(color: c.ink3),
                     ),
+                    // An unentered rent inflates the very figure this card
+                    // headlines, so the caveat travels with the number rather
+                    // than waiting to be discovered one screen deeper.
+                    if (confidence.costsIncomplete) ...[
+                      const SizedBox(height: UgamSpacing.sm),
+                      UgamCaveat(
+                        message: summary.busesMissingRent == 1
+                            ? tr('trip_pnl.rent_missing_one')
+                            : tr(
+                                'trip_pnl.rent_missing_many',
+                                namedArgs: {
+                                  'n': '${summary.busesMissingRent}',
+                                },
+                              ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               const SizedBox(width: UgamSpacing.sm),
-              Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+              // Pinned to the top rather than floating at the vertical centre
+              // of a column whose height swings with the caveat strip.
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: c.ink3,
+                ),
+              ),
             ],
           ),
         ],
@@ -683,9 +780,8 @@ class _BusMoneyRow extends StatelessWidget {
     // A bus that still owes money leads with its ONE action figure — the
     // handover still due, else the passenger shortfall to collect. A settled
     // bus shows what it collected in mint; a bus with nothing owed and nothing
-    // collected reads as a quiet "no activity". The card tone carries the same
-    // attention signal the old ring did; a status WORD is added only where it
-    // says something the tinted figure doesn't (settled / not-started).
+    // collected reads as a quiet "no activity". A status WORD is added only
+    // where it says something the figure doesn't (settled / not-started).
     final hasHandoverDue = summary.outstandingHandover > 0.005;
     final (
       UgamCardTone cardTone,
@@ -696,14 +792,21 @@ class _BusMoneyRow extends StatelessWidget {
       UgamStatusTone statusTone,
     ) = switch (state) {
       BusMoneyState.actionNeeded => (
-        // Tone tracks the figure: a collect shortfall is red, a handover due
-        // is rose — so the card's tint says WHICH action at a glance (§A2/§A4).
-        hasHandoverDue ? UgamCardTone.warm : UgamCardTone.danger,
+        // Money still TO COLLECT is a normal operating state — every bus looks
+        // like this the morning it departs — so the card stays neutral and the
+        // figure carries the weight typographically (full `ink`, w700, see
+        // below). It used to wear `UgamCardTone.danger`: a red hairline, a red
+        // tint and red numerals. `danger` means "something needs you" (see the
+        // token doc), and spending it on the everyday state is what teaches a
+        // handler to scroll past red — which then costs us the one place red
+        // has to work. A handover still DUE keeps the rose `warm` tint: that
+        // is an open obligation on the operator, attention without alarm.
+        hasHandoverDue ? UgamCardTone.warm : UgamCardTone.none,
         hasHandoverDue
             ? tr('tour_money_board.handover')
             : tr('tour_money_board.to_collect'),
         hasHandoverDue ? summary.outstandingHandover : summary.toCollectTotal,
-        hasHandoverDue ? c.warm : c.danger,
+        hasHandoverDue ? c.warm : c.ink,
         null,
         UgamStatusTone.warm,
       ),
@@ -715,15 +818,23 @@ class _BusMoneyRow extends StatelessWidget {
         tr('tour_money_board.settled'),
         UgamStatusTone.good,
       ),
+      // Neutral and settled never paint the figure (see `leadsWithFigure`) —
+      // their label/amount/ink entries keep the record shape uniform.
       BusMoneyState.neutral => (
         UgamCardTone.none,
         tr('tour_money_board.to_collect'),
         summary.toCollectTotal,
-        c.ink2,
+        c.ink3,
         tr('tour_money_board.no_activity'),
         UgamStatusTone.neutral,
       ),
     };
+
+    // With the red tint gone, the to-collect figure IS the signal, so it is the
+    // only thing on the row set in full ink at w700 — heavier than the bus name
+    // beside it. Everything else on a calm card sits at ink2/ink3.
+    final leadsWithFigure = state == BusMoneyState.actionNeeded;
+    final emphasiseFigure = leadsWithFigure && !hasHandoverDue;
 
     // Collected / handover only carry information once cash has changed hands —
     // until then they are ₹0 filler, so the strip is hidden and the card
@@ -733,12 +844,20 @@ class _BusMoneyRow extends StatelessWidget {
         summary.handedOver > 0.005 ||
         summary.income > 0.005;
 
-    return UgamCard.plain(
-      key: ValueKey('bus-money-row-${bus.id}'),
-      tone: cardTone,
-      onTap: onTap,
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      child: Column(
+    return UgamSwipeAction(
+      key: ValueKey('bus-money-swipe-${bus.id}'),
+      // Right-swipe only: collecting is the accelerator, and a bus row must
+      // never be dismissible — there is no "delete a bus" here.
+      rightIcon: Icons.groups_rounded,
+      rightLabel: tr('tour_money_board.collect'),
+      onRight: onCollect,
+      borderRadius: BorderRadius.circular(UgamRadius.card),
+      child: UgamCard.plain(
+        key: ValueKey('bus-money-row-${bus.id}'),
+        tone: cardTone,
+        onTap: onTap,
+        padding: const EdgeInsets.all(UgamSpacing.md),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -796,37 +915,84 @@ class _BusMoneyRow extends StatelessWidget {
               ),
               const SizedBox(width: UgamSpacing.sm),
               // The action figure rides on the identity line — right-aligned,
-              // tabular, tinted by state — so the row answers "how much?" in
-              // one glance without a second full-width headline block. Skipped
-              // when settled: the mint "Settled" dot + the collected/handover
-              // pills below already tell that story, so a figure here would
-              // just duplicate a pill.
-              if (state != BusMoneyState.settled) ...[
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      numLabel.toUpperCase(),
-                      style: UgamText.micro.copyWith(
-                        color: c.ink3,
-                        letterSpacing: 0.5,
-                        fontWeight: FontWeight.w700,
+              // tabular — so the row answers "how much?" in one glance without
+              // a second full-width headline block. Shown ONLY when there is
+              // an action: a settled bus already says so with the mint dot +
+              // the collected/handover pills, and a bus with no activity was
+              // spending this whole column on a "TO COLLECT ₹0" that carried
+              // nothing — and, at 375pt, squeezed the Gujarati "કોઈ પ્રવૃત્તિ
+              // નથી" status dot hard enough to crush the bus type beside it
+              // down to two characters. Dropping the ₹0 hands that width back.
+              if (leadsWithFigure) ...[
+                ConstrainedBox(
+                  // This column is the only child of the row with a variable
+                  // width and no flex factor, so it used to size itself first
+                  // and let the identity absorb whatever was left: at a 1.3×
+                  // accessibility scale a seven-figure amount plus a Gujarati
+                  // label pushed the row 27pt past its own card and squeezed
+                  // the bus name to zero width. Capped at a third of the row,
+                  // the amount scales down INSIDE the cap instead of being
+                  // clipped — money is never ellipsized, the same rule the
+                  // totals capsule follows — and the identity keeps a
+                  // readable share.
+                  constraints: BoxConstraints(
+                    maxWidth: UgamScale.px(context, 128),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        numLabel.toUpperCase(),
+                        style: UgamText.micro.copyWith(
+                          color: emphasiseFigure ? c.ink2 : c.ink3,
+                          letterSpacing: 0.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      Formatters.formatMoneyInr(numAmount),
-                      style: UgamText.tabular(
-                        UgamText.numLg.copyWith(color: numColor),
+                      const SizedBox(height: 1),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          Formatters.formatMoneyInr(numAmount),
+                          style: UgamText.tabular(
+                            UgamText.numLg.copyWith(
+                              color: numColor,
+                              // Weight, not colour, is what makes the neutral
+                              // card still lead with its number.
+                              fontWeight:
+                                  emphasiseFigure ? FontWeight.w700 : null,
+                            ),
+                          ),
+                          maxLines: 1,
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 const SizedBox(width: UgamSpacing.xs),
               ],
+              // The collect shortcut rides ON the row as a 44×44 round action
+              // instead of a full-width button stacked beneath it. That kept
+              // the shortcut one tap away while halving the row's height and
+              // leaving the row itself as the only large tap target (it opens
+              // the bus detail). Swipe-right does the same thing.
+              // Default 44×44 — the Apple HIG / Material touch floor. Do not
+              // shrink it to buy width: a mis-tap here opens the wrong screen
+              // mid-collection.
+              UgamIconButton(
+                key: ValueKey('bus-collect-${bus.id}'),
+                icon: Icons.groups_rounded,
+                tone: UgamIconButtonTone.accent,
+                semanticLabel: tr('tour_money_board.collect'),
+                onTap: onCollect,
+              ),
+              // 8dp minimum between adjacent touch targets (the button vs the
+              // row's own tap).
+              const SizedBox(width: UgamSpacing.sm),
               Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
             ],
           ),
@@ -870,19 +1036,8 @@ class _BusMoneyRow extends StatelessWidget {
               ],
             ),
           ],
-          const SizedBox(height: UgamSpacing.md),
-          // One-tap shortcut straight into this bus's CollectionScreen. The row
-          // itself still opens the full per-bus detail view (to-collect,
-          // to-return, expenses live there). Tonal so it never competes with the
-          // single solid-champagne totals capsule below.
-          UgamButton(
-            label: tr('tour_money_board.collect'),
-            icon: Icons.groups_rounded,
-            kind: UgamButtonKind.tonal,
-            expand: true,
-            onPressed: onCollect,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -915,15 +1070,26 @@ class _MoneyPill extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-          const SizedBox(height: UgamSpacing.xs),
           Text(
-            value,
-            style: UgamText.tabular(
-              UgamText.numLg.copyWith(color: c.ink2, fontSize: 15),
-            ),
-            maxLines: 1,
+            label,
+            style: UgamText.micro.copyWith(color: c.ink3),
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: UgamSpacing.xs),
+          // A money figure scales down to fit; it is never ellipsized. "₹1,8…"
+          // is not a smaller number, it is a wrong one.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              // `titleS` (15) off the ladder, not `numLg` shrunk with a raw
+              // fontSize — same Sora face at the same size, one less hardcoded
+              // number, and `tabular()` keeps the figures aligned.
+              style: UgamText.tabular(UgamText.titleS.copyWith(color: c.ink2)),
+              maxLines: 1,
+            ),
           ),
         ],
       ),
@@ -944,83 +1110,108 @@ class _TotalsCapsule extends StatelessWidget {
     final outstanding = summary.totalOutstandingHandover;
     final settled = outstanding.abs() <= 0.005;
 
-    // One hero number (outstanding) on the left, two compact pills (collected,
-    // net) on the right — a single tight strip in the thumb zone instead of the
-    // old 5-number grid. Kept short (~88dp content) so the chart still breathes.
+    // TWO ROWS, not a four-up strip.
+    //
+    // This was one Row: the hero column, then the two pills, each at flex 1.
+    // At a 375pt width that leaves the hero 98pt — and the hero's own
+    // label + status Row halved THAT again, so at 45pt a side the two labels
+    // it carries rendered as "OUT…" and "Handov…" in English, and as "બા…"
+    // and "સોંપ…" in Gujarati. Re-measured against the longest gu.json
+    // strings instead of the English ones: the label line now owns the full
+    // 315pt of card interior (longest label + status ≈ 235pt, so it never
+    // ellipsizes and may wrap to a second line if a locale runs longer
+    // still), and each pill below owns 153pt — 129pt of text for a
+    // "એકઠી કરેલ" that needs ~55pt and a "₹1,81,000" that needs ~78pt.
+    //
+    // The extra ~55pt of height is deliberate: this capsule reports the
+    // tour's three headline figures and it is now the thing the board's
+    // short-board whitespace was wasted on (see the Flexible body slot).
     return UgamStickyCTA(
       child: UgamCard.plain(
         elev: true,
         padding: const EdgeInsets.all(UgamSpacing.lg),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             // ── Hero: outstanding handover ─────────────────────────
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          tr(
-                            'tour_money_board.outstanding_handover',
-                          ).toUpperCase(),
-                          style: UgamText.micro.copyWith(color: c.ink3),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: UgamSpacing.sm),
-                      UgamStatusDot(
-                        label: settled
-                            ? tr('tour_money_board.all_settled')
-                            : tr('tour_money_board.open'),
-                        tone: settled
-                            ? UgamStatusTone.good
-                            : UgamStatusTone.warm,
-                      ),
-                    ],
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    tr('tour_money_board.outstanding_handover').toUpperCase(),
+                    style: UgamText.micro.copyWith(color: c.ink3),
+                    // Wraps rather than ellipsizes: a three-character stub of
+                    // a label is worse than a second 12pt line.
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: UgamSpacing.xs),
-                  // Scale a long outstanding figure down to fit rather than
-                  // ellipsize it — the thumb-zone capsule must never clip the
-                  // very number it exists to show (e.g. "-₹1,81,000").
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      Formatters.formatMoneyInr(outstanding),
-                      style: UgamText.tabular(
-                        UgamText.numXl.copyWith(
-                          color: settled ? c.good : c.warm,
-                        ),
-                      ),
-                      maxLines: 1,
+                ),
+                const SizedBox(width: UgamSpacing.sm),
+                // Scoped to the HANDOVER, which is what this capsule
+                // reports. A bare "all settled" sat directly above bus
+                // rows still owing their full fares and read as "nothing
+                // left to collect" — the handover can be square while the
+                // trip has taken no money at all.
+                // Flexible so the longer, scoped label ellipsizes inside
+                // the capsule instead of overflowing the row —
+                // UgamStatusDot only self-ellipsizes under bounded width.
+                Flexible(
+                  child: UgamStatusDot(
+                    label: settled
+                        ? tr('tour_money_board.handover_settled')
+                        : tr('tour_money_board.open'),
+                    tone: settled ? UgamStatusTone.good : UgamStatusTone.warm,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: UgamSpacing.xs),
+            // Scale a long outstanding figure down to fit rather than
+            // ellipsize it — the thumb-zone capsule must never clip the
+            // very number it exists to show (e.g. "-₹1,81,000").
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                Formatters.formatMoneyInr(outstanding),
+                style: UgamText.tabular(
+                  UgamText.numXl.copyWith(color: settled ? c.good : c.warm),
+                ),
+                maxLines: 1,
+              ),
+            ),
+            const SizedBox(height: UgamSpacing.md),
+            // ── Two compact pills: collected + net ─────────────────
+            // Equal halves, equal heights: if one locale wraps its label to two
+            // lines the other pill grows with it instead of the pair sitting at
+            // two different heights. `stretch` alone can't do that inside a
+            // Column (the Row's height is unbounded there, and stretching
+            // against infinity asserts), so the height is pinned to the taller
+            // pill first — two children, so the intrinsic pass is cheap.
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _CapsulePill(
+                      label: tr('tour_money_board.collected'),
+                      value: Formatters.formatMoneyInr(summary.totalCollected),
+                      c: c,
+                    ),
+                  ),
+                  const SizedBox(width: UgamSpacing.sm),
+                  Expanded(
+                    child: _CapsulePill(
+                      // "NET (CASH)", not "NET": the P&L card higher up this
+                      // same screen headlines the BILLED net. The pill is too
+                      // small for a caption, so the basis rides in the label.
+                      label: tr('tour_money_board.net_cash'),
+                      value: Formatters.formatMoneyInr(summary.totalNet),
+                      c: c,
                     ),
                   ),
                 ],
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            // ── Two compact pills: collected + net ─────────────────
-            Flexible(
-              child: _CapsulePill(
-                label: tr('tour_money_board.collected'),
-                value: Formatters.formatMoneyInr(summary.totalCollected),
-                c: c,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            Flexible(
-              child: _CapsulePill(
-                // "NET (CASH)", not "NET": the P&L card higher up this same
-                // screen headlines the BILLED net. The pill is too small for a
-                // caption, so the basis rides in the label itself.
-                label: tr('tour_money_board.net_cash'),
-                value: Formatters.formatMoneyInr(summary.totalNet),
-                c: c,
               ),
             ),
           ],
@@ -1058,15 +1249,26 @@ class _CapsulePill extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
-          const SizedBox(height: UgamSpacing.xs),
           Text(
-            value,
-            style: UgamText.tabular(
-              UgamText.numLg.copyWith(color: c.ink, fontSize: 15),
-            ),
-            maxLines: 1,
+            label,
+            style: UgamText.micro.copyWith(color: c.ink3),
+            // Two lines of a long Gujarati label beats an ellipsis; both pills
+            // grow together (the Row above stretches).
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: UgamSpacing.xs),
+          // Scaled down to fit rather than ellipsized — see _MoneyPill.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              // `titleS` (15) off the ladder, not `numLg` shrunk with a raw
+              // fontSize — see _MoneyPill.
+              style: UgamText.tabular(UgamText.titleS.copyWith(color: c.ink)),
+              maxLines: 1,
+            ),
           ),
         ],
       ),

@@ -6,6 +6,7 @@ import 'tour_status.dart';
 import 'bus_details.dart';
 import 'passenger.dart';
 import 'passenger_group.dart';
+import 'trip_type.dart';
 
 /// A tour planned and managed by the agent.
 ///
@@ -174,10 +175,42 @@ class Tour {
       .where((p) => !p.journeyDone)
       .fold(0, (sum, p) => sum + math.max(0, p.seatBerths - p.totalSeatsAssigned));
 
-  /// True once the GO (outbound) leg has been completed: completeOutboundLeg
-  /// marks every one-way rider [Passenger.journeyDone], so that flag IS the
-  /// "GO done" signal — no separate DB column needed.
-  bool get goLegCompleted => passengers.any((p) => p.journeyDone);
+  /// True once the GO (outbound) leg has been completed for the WHOLE tour.
+  ///
+  /// [Passenger.journeyDone] is the only leg signal we have, and only ONE-WAY
+  /// (outbound-only) riders ever carry it: `completeOutboundLeg` retires them
+  /// when their single leg ends, while round-trip riders keep their seats for
+  /// the ride home and are never flagged. So the tour-level question is "is
+  /// EVERY one-way rider retired", not "is ANY passenger retired" — the old
+  /// `any` reported the tour's outbound complete off ONE retired rider, and a
+  /// rider gets retired for reasons that say nothing about the whole tour:
+  ///
+  /// - `handler_complete_outbound_leg` (migration 046) retires only the riders
+  ///   whose seats are ON THAT ONE BUS, so the first bus to arrive flipped a
+  ///   multi-bus tour into its return phase while the others were still
+  ///   boarding — freeing the "cancel return seat" action on riders who hadn't
+  ///   travelled and defaulting the chart export to the return leg;
+  /// - `cancelReturnSeatTransform` (tour_controller.dart) demotes a round-trip
+  ///   rider whose return was dropped to outbound-only + [Passenger.journeyDone].
+  ///
+  /// This is the rule `tour_detail_screen._nextActionFor` already applies by
+  /// ordering (it offers "Complete GO leg" ahead of the return-phase action
+  /// while any outbound-only rider is active); stating it here fixes the
+  /// consumers that read the flag with no such guard — `chart_footer_sheet`
+  /// (default export leg), `trip_hero`, and the cancel-return gates in
+  /// `occupant_action_sheet` / `passenger_sheet`.
+  ///
+  /// KNOWN GAP (needs a tour-level milestone stamp this model cannot set on its
+  /// own): a cancel-demoted rider is data-identical to a retired one-way rider,
+  /// so on a tour whose ONLY outbound-only rider is a cancel-demotion this
+  /// still reads true. Closing it needs `tours.go_completed_at` (migration),
+  /// written by `TourController.completeOutboundLeg`, selected in
+  /// `sync_read_projections`, and preferred over this quantifier here.
+  bool get goLegCompleted {
+    final oneWay =
+        passengers.where((p) => p.tripType == TripType.outboundOnly);
+    return oneWay.isNotEmpty && oneWay.every((p) => p.journeyDone);
+  }
 
   /// The tour is locked AND its GO leg is done → the RETURN-leg phase: outbound
   /// riders have left, their seats are free to resell as return tickets, and the

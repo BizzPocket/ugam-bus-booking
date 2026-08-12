@@ -7,6 +7,7 @@ import '../design/ugam.dart';
 import '../models/tour_finance.dart';
 import '../utils/formatters.dart';
 import '../widgets/money_loading_skeleton.dart';
+import 'create_tour_screen.dart';
 import 'tour_money_board_screen.dart';
 
 /// FINANCE — the cross-tour Profit & Loss report.
@@ -26,6 +27,22 @@ class FinanceScreen extends StatefulWidget {
   @override
   State<FinanceScreen> createState() => _FinanceScreenState();
 }
+
+/// What the period's numbers actually MEAN — the distinction the report used to
+/// throw away by rendering every one of these as the same confident `₹0`.
+///
+/// The three "no data" shapes are genuinely different problems with genuinely
+/// different fixes, and the screen now says which one you are looking at:
+///
+/// * [periodEmpty] — trips exist, none of them ENDED inside the chosen period.
+///   Nothing is wrong; the filter is too narrow. Fix = widen the period.
+/// * [noTrips]     — there is no trip anywhere, in any period. Fix = make one.
+/// * [noMoney]     — trips exist in the period but not one rupee has been
+///   collected or spent against them. Fix = record the first entry.
+/// * [breakEven]   — money genuinely moved and cancelled out. This is the ONLY
+///   one of the four where `₹0` is a real answer, and it is the reading the old
+///   screen silently gave to all four.
+enum _ReportState { periodEmpty, noTrips, noMoney, breakEven, profit, loss }
 
 class _FinanceScreenState extends State<FinanceScreen> {
   FinanceController get _finance => Get.find<FinanceController>();
@@ -53,6 +70,33 @@ class _FinanceScreenState extends State<FinanceScreen> {
       () => TourMoneyBoardScreen(tourId: tf.tourId),
       transition: Transition.cupertino,
     );
+  }
+
+  /// The real create-trip destination, pushed exactly the way the charts screen
+  /// empty state pushes it (charts_screen.dart:205) — an invented route or a
+  /// second animation for the same screen is how an app starts feeling stitched
+  /// together.
+  void _createTour() {
+    Get.to(
+      () => const CreateTourScreen(),
+      transition: Transition.cupertino,
+    );
+  }
+
+  /// Classify the period. See [_ReportState] for why this exists.
+  _ReportState _stateFor(FinanceTotals t) {
+    if (t.tourCount == 0) {
+      // Only worth asking on a narrowed period — "all time" is already the
+      // widest answer there is, so an empty all-time really means no trips.
+      final anyEver = _period != FinancePeriod.allTime &&
+          _finance.financesFor(FinancePeriod.allTime).isNotEmpty;
+      return anyEver ? _ReportState.periodEmpty : _ReportState.noTrips;
+    }
+    if (t.revenue == 0 && t.income == 0 && t.expenses == 0) {
+      return _ReportState.noMoney;
+    }
+    if (t.net.round() == 0) return _ReportState.breakEven;
+    return t.net > 0 ? _ReportState.profit : _ReportState.loss;
   }
 
   @override
@@ -100,11 +144,31 @@ class _FinanceScreenState extends State<FinanceScreen> {
 
                 final tours = _finance.financesFor(_period);
                 final totals = FinanceTotals.from(tours);
+                final state = _stateFor(totals);
+                final hasFigures = state == _ReportState.profit ||
+                    state == _ReportState.loss ||
+                    state == _ReportState.breakEven;
+
+                final ledgerEmpty = _finance.ledgerEmpty;
+                // The coaching card and the broken-ledger notice answer the
+                // same ₹0 with opposite explanations ("record your first
+                // entry" vs "the records exist, the ledger lost them"), so
+                // only one of them is ever allowed on screen. The notice wins:
+                // it is the more specific diagnosis.
+                final showZeroCard = !hasFigures &&
+                    !(ledgerEmpty && state == _ReportState.noMoney);
 
                 return RefreshIndicator(
-                  // Theme-driven, exactly like the four sibling money screens —
-                  // a per-screen copper spinner made one pull-to-refresh look
-                  // different from every other.
+                  // Chrome, not ownership — the pull spinner is neutral ink2
+                  // in every screen, so it never changes hue between tabs.
+                  //
+                  // This used to pass nothing and call itself "theme-driven",
+                  // but RefreshIndicator falls back to
+                  // `Theme.colorScheme.primary`, which this app seeds with the
+                  // accent — so the money screens were painting the same amber
+                  // as the screens that named it, just implicitly. Explicit
+                  // now: there is no theme hook for a refresh spinner.
+                  color: c.ink2,
                   onRefresh: _finance.reload,
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(
@@ -120,17 +184,34 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       // A silent ₹0 is the one thing this report must never
                       // show: it reads as "you made nothing", not "I could not
                       // find out". See FinanceController.ledgerEmpty.
-                      if (_finance.ledgerEmpty) ...[
+                      if (ledgerEmpty) ...[
                         const _LedgerEmptyNotice(),
                         const SizedBox(height: UgamSpacing.md),
                       ],
-                      _HeroCard(totals: totals, c: c),
-                      const SizedBox(height: UgamSpacing.md),
-                      _StatTriple(totals: totals),
-                      const SizedBox(height: UgamSpacing.xl),
-                      if (tours.isEmpty)
-                        const _Empty()
-                      else ...[
+                      _HeroCard(totals: totals, state: state, c: c),
+                      // Three tiles reading `0 / — / —` under a headline that
+                      // already says "no figures yet" is the same nothing said
+                      // twice. They come back the moment a trip exists.
+                      if (totals.tourCount > 0) ...[
+                        const SizedBox(height: UgamSpacing.md),
+                        _StatTriple(totals: totals),
+                      ],
+                      const SizedBox(height: UgamSpacing.lg),
+                      if (showZeroCard) ...[
+                        _ZeroStateCard(
+                          state: state,
+                          onShowAllTime: () => setState(
+                            () => _period = FinancePeriod.allTime,
+                          ),
+                          onCreateTour: _createTour,
+                          onOpenMoney: tours.isEmpty
+                              ? null
+                              : () => _openTour(tours.first),
+                        ),
+                        if (tours.isNotEmpty)
+                          const SizedBox(height: UgamSpacing.lg),
+                      ],
+                      if (tours.isNotEmpty) ...[
                         Text(
                           tr('finance.per_tour'),
                           style: UgamText.micro.copyWith(color: c.ink3),
@@ -162,6 +243,11 @@ class _FinanceScreenState extends State<FinanceScreen> {
 // ── Money formatting ─────────────────────────────────────────────────────────
 // All rupee grouping is delegated to the shared [Formatters]; these thin
 // wrappers only add the explicit +/− sign presentation the report needs.
+
+/// The "there is no figure here" glyph. A dash is NOT ₹0 — it is the report
+/// saying it has nothing to report, which is the whole distinction this screen
+/// used to lose.
+const String _noFigure = '—';
 
 /// Unsigned amount, e.g. `₹1,72,000`.
 String _inr(num v) => Formatters.formatMoneyInr(v.abs());
@@ -204,12 +290,14 @@ class _LedgerEmptyNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return Container(
+    // Was a hand-rolled Container: warm fill, no border, and — because it
+    // predates the elevation scale — no shadow, so the one thing on the screen
+    // that most needed to be noticed sat FLATTER than the cards under it.
+    // `UgamCardTone.warm` is the same fill plus the system's hairline and
+    // `UgamElevation.rest`.
+    return UgamCard.plain(
+      tone: UgamCardTone.warm,
       padding: const EdgeInsets.all(UgamSpacing.md),
-      decoration: BoxDecoration(
-        color: c.warmFill,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -242,15 +330,55 @@ class _LedgerEmptyNotice extends StatelessWidget {
 
 class _HeroCard extends StatelessWidget {
   final FinanceTotals totals;
+  final _ReportState state;
   final UgamColorSet c;
-  const _HeroCard({required this.totals, required this.c});
+  const _HeroCard({
+    required this.totals,
+    required this.state,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final profit = totals.isProfit;
-    final netColor = totals.net.round() == 0
-        ? c.ink
-        : (profit ? c.good : c.danger);
+    // "Has a real answer" — the only three states where a rupee figure is an
+    // honest thing to print. Everything below branches on this.
+    final hasFigures = state == _ReportState.profit ||
+        state == _ReportState.loss ||
+        state == _ReportState.breakEven;
+
+    final label = switch (state) {
+      _ReportState.profit => tr('finance.net_profit'),
+      _ReportState.loss => tr('finance.net_loss'),
+      _ReportState.breakEven => tr('finance.flat'),
+      _ => tr('finance.net_pending'),
+    };
+
+    // A dash, not ₹0. Break-even keeps ink (a real zero); profit/loss keep
+    // their semantic colour.
+    final value = hasFigures ? _signedInr(totals.net) : _noFigure;
+    final netColor = switch (state) {
+      _ReportState.profit => c.good,
+      _ReportState.loss => c.danger,
+      _ReportState.breakEven => c.ink,
+      _ => c.ink3,
+    };
+
+    // The badge used to paint a green "from 0 tours" over ₹0 — a confident
+    // success signal attached to nothing. Neutral for every non-answer.
+    final (Color chipBg, Color chipFg, IconData chipIcon) = switch (state) {
+      _ReportState.profit => (c.goodFill, c.good, Icons.trending_up_rounded),
+      _ReportState.loss => (c.dangerFill, c.danger, Icons.trending_down_rounded),
+      _ReportState.breakEven => (c.cardElev, c.ink2, Icons.trending_flat_rounded),
+      _ReportState.noMoney => (c.cardElev, c.ink2, Icons.hourglass_empty_rounded),
+      _ => (c.cardElev, c.ink3, Icons.event_busy_rounded),
+    };
+    final chipText = totals.tourCount == 0
+        ? tr('finance.chip_no_trips')
+        : (totals.tourCount == 1
+            ? tr('finance.from_tours_one',
+                namedArgs: {'n': '${totals.tourCount}'})
+            : tr('finance.from_tours_other',
+                namedArgs: {'n': '${totals.tourCount}'}));
 
     return UgamCard.plain(
       elev: true,
@@ -259,103 +387,117 @@ class _HeroCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 3:2 split rather than `spaceBetween`: in Gujarati the label
+          // ("હજી કોઈ આંકડો નથી") and the badge ("કોઈ પ્રવાસ નથી") are BOTH
+          // long, and two intrinsically-sized children on one line is exactly
+          // how that row used to overflow.
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                profit ? tr('finance.net_profit') : tr('finance.net_loss'),
-                style: UgamText.micro.copyWith(color: c.ink3),
+              Expanded(
+                flex: 3,
+                child: Text(
+                  label,
+                  style: UgamText.micro.copyWith(color: c.ink3),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: UgamSpacing.sm,
-                  vertical: UgamSpacing.xs,
-                ),
-                decoration: BoxDecoration(
-                  color: profit ? c.goodFill : c.dangerFill,
-                  borderRadius: BorderRadius.circular(UgamRadius.chip),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      profit
-                          ? Icons.trending_up_rounded
-                          : Icons.trending_down_rounded,
-                      size: 13,
-                      color: profit ? c.good : c.danger,
+              const SizedBox(width: UgamSpacing.sm),
+              Flexible(
+                flex: 2,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: UgamSpacing.sm,
+                      vertical: UgamSpacing.xs,
                     ),
-                    const SizedBox(width: UgamSpacing.xs),
-                    Text(
-                      totals.tourCount == 1
-                          ? tr('finance.from_tours_one',
-                              namedArgs: {'n': '${totals.tourCount}'})
-                          : tr('finance.from_tours_other',
-                              namedArgs: {'n': '${totals.tourCount}'}),
-                      style: UgamText.micro.copyWith(
-                        color: profit ? c.good : c.danger,
-                      ),
+                    decoration: BoxDecoration(
+                      color: chipBg,
+                      borderRadius: BorderRadius.circular(UgamRadius.chip),
                     ),
-                  ],
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(chipIcon, size: 13, color: chipFg),
+                        const SizedBox(width: UgamSpacing.xs),
+                        Flexible(
+                          child: Text(
+                            chipText,
+                            style: UgamText.micro.copyWith(color: chipFg),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: UgamSpacing.sm),
           Text(
-            _signedInr(totals.net),
+            value,
             style: UgamText.tabular(UgamText.numXl.copyWith(color: netColor)),
           ),
-          const SizedBox(height: UgamSpacing.md),
-          _MarginBar(
-            revenue: totals.revenue + totals.income,
-            expenses: totals.expenses,
-            c: c,
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          Divider(height: 1, color: c.border),
-          const SizedBox(height: UgamSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: _HeroMetric(
-                  label: tr('finance.revenue'),
-                  value: _inr(totals.revenue),
-                  color: c.ink,
-                  dot: c.good,
-                  c: c,
-                ),
-              ),
-              if (totals.income != 0)
+          // Everything below the headline is an ANSWER about money that moved.
+          // With no figures there is no proportion to draw, no legend to read
+          // and no accounting basis to disclaim — an empty grey bar over three
+          // ₹0 columns is four separate pieces of furniture communicating
+          // nothing. The zero-state card below carries the meaning instead.
+          if (hasFigures) ...[
+            const SizedBox(height: UgamSpacing.md),
+            _MarginBar(
+              revenue: totals.revenue + totals.income,
+              expenses: totals.expenses,
+              c: c,
+            ),
+            const SizedBox(height: UgamSpacing.md),
+            Divider(height: 1, color: c.border),
+            const SizedBox(height: UgamSpacing.md),
+            Row(
+              children: [
                 Expanded(
                   child: _HeroMetric(
-                    label: tr('bus_money.stat_income'),
-                    value: _inr(totals.income),
+                    label: tr('finance.revenue'),
+                    value: _inr(totals.revenue),
                     color: c.ink,
-                    dot: c.accent,
+                    dot: c.good,
                     c: c,
                   ),
                 ),
-              Expanded(
-                child: _HeroMetric(
-                  label: tr('finance.expenses'),
-                  value: _inr(totals.expenses),
-                  color: c.ink2,
-                  dot: c.warm,
-                  c: c,
+                if (totals.income != 0)
+                  Expanded(
+                    child: _HeroMetric(
+                      label: tr('bus_money.stat_income'),
+                      value: _inr(totals.income),
+                      color: c.ink,
+                      dot: c.accent,
+                      c: c,
+                    ),
+                  ),
+                Expanded(
+                  child: _HeroMetric(
+                    label: tr('finance.expenses'),
+                    value: _inr(totals.expenses),
+                    color: c.ink2,
+                    dot: c.warm,
+                    c: c,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          // This report is CASH basis (FinanceController sums `collected`),
-          // while a trip's own P&L headlines the BILLED net. Both are right;
-          // comparing them without knowing which is which is what makes the app
-          // look like it cannot add up. Naming the basis costs one line.
-          const SizedBox(height: UgamSpacing.sm),
-          Text(
-            tr('money.basis_cash'),
-            style: UgamText.micro.copyWith(color: c.ink3),
-          ),
+              ],
+            ),
+            // This report is CASH basis (FinanceController sums `collected`),
+            // while a trip's own P&L headlines the BILLED net. Both are right;
+            // comparing them without knowing which is which is what makes the
+            // app look like it cannot add up. Naming the basis costs one line.
+            const SizedBox(height: UgamSpacing.sm),
+            Text(
+              tr('money.basis_cash'),
+              style: UgamText.micro.copyWith(color: c.ink3),
+            ),
+          ],
         ],
       ),
     );
@@ -392,7 +534,14 @@ class _HeroMetric extends StatelessWidget {
               decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
             ),
             const SizedBox(width: UgamSpacing.sm),
-            Text(label, style: UgamText.micro.copyWith(color: c.ink3)),
+            Expanded(
+              child: Text(
+                label,
+                style: UgamText.micro.copyWith(color: c.ink3),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: UgamSpacing.xs),
@@ -408,8 +557,12 @@ class _HeroMetric extends StatelessWidget {
 }
 
 /// Slim proportion bar: warm = the slice of revenue eaten by expenses, good =
-/// the profit slice. A loss paints the whole bar danger. Hidden when there is
-/// no money at all.
+/// the profit slice. A loss paints the whole bar danger.
+///
+/// It draws a PROPORTION, so with nothing to divide it has nothing to say — the
+/// old empty grey capsule under a ₹0 was pure furniture, and worse, it looked
+/// like a progress bar stuck at 0%, implying the report was still loading. It
+/// now renders nothing at all; the caller only mounts it when money moved.
 class _MarginBar extends StatelessWidget {
   final double revenue;
   final double expenses;
@@ -422,12 +575,7 @@ class _MarginBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (revenue <= 0 && expenses <= 0) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-        child: Container(height: 10, color: c.border),
-      );
-    }
+    if (revenue <= 0 && expenses <= 0) return const SizedBox.shrink();
 
     final net = revenue - expenses;
     Widget bar;
@@ -456,6 +604,11 @@ class _MarginBar extends StatelessWidget {
 
 // ── Stat triple ──────────────────────────────────────────────────────────────
 
+/// Trips / average / best. Each tile is a [UgamStatTile], which is a
+/// [UgamCard] — so all three sit at `UgamElevation.rest` while the hero above
+/// them sits on the `cardElev` fill, and the two rows read as two surfaces
+/// rather than one flat block. Values come from [UgamText.numLg], which carries
+/// `FontFeature.tabularFigures` already.
 class _StatTriple extends StatelessWidget {
   final FinanceTotals totals;
   const _StatTriple({required this.totals});
@@ -471,12 +624,16 @@ class _StatTriple extends StatelessWidget {
       (
         icon: Icons.bar_chart_rounded,
         label: tr('finance.stat_avg'),
-        value: totals.tourCount == 0 ? '—' : _compactSigned(totals.avgNet),
+        value: totals.tourCount == 0
+            ? _noFigure
+            : _compactSigned(totals.avgNet),
       ),
       (
         icon: Icons.workspace_premium_rounded,
         label: tr('finance.stat_best'),
-        value: totals.best == null ? '—' : _compactSigned(totals.best!.net),
+        value: totals.best == null
+            ? _noFigure
+            : _compactSigned(totals.best!.net),
       ),
     ];
 
@@ -498,6 +655,223 @@ class _StatTriple extends StatelessWidget {
   }
 }
 
+// ── Zero state ───────────────────────────────────────────────────────────────
+
+/// The screen's answer to "so what would put a number here?".
+///
+/// This replaces (a) the centred [UgamEmpty] that said "no trips with money
+/// yet" and offered no way to change that, and (b) the half-viewport of void
+/// underneath it. It is a card, so it takes `UgamElevation.rest` from
+/// [UgamCard] like everything else on the page, and it always ends in ONE
+/// button that goes to a destination that really exists:
+///
+/// * [_ReportState.periodEmpty] → widen the period, in place. No navigation:
+///   the trips are already loaded, the filter was just narrower than the data.
+/// * [_ReportState.noTrips]     → `CreateTourScreen`.
+/// * [_ReportState.noMoney]     → the newest trip's `TourMoneyBoardScreen`,
+///   the same destination a trip row opens.
+class _ZeroStateCard extends StatelessWidget {
+  final _ReportState state;
+  final VoidCallback onShowAllTime;
+  final VoidCallback onCreateTour;
+
+  /// Null when the period holds no trip to open — the button is disabled
+  /// rather than hidden, so the card never changes shape mid-refresh.
+  final VoidCallback? onOpenMoney;
+
+  const _ZeroStateCard({
+    required this.state,
+    required this.onShowAllTime,
+    required this.onCreateTour,
+    required this.onOpenMoney,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final noMoney = state == _ReportState.noMoney;
+    final periodEmpty = state == _ReportState.periodEmpty;
+
+    final (IconData icon, String title, String body) = switch (state) {
+      _ReportState.periodEmpty => (
+        Icons.event_busy_rounded,
+        tr('finance.zero_period_title'),
+        tr('finance.zero_period_body'),
+      ),
+      _ReportState.noMoney => (
+        Icons.savings_rounded,
+        tr('finance.zero_money_title'),
+        tr('finance.zero_money_body'),
+      ),
+      _ => (
+        Icons.route_rounded,
+        tr('finance.zero_start_title'),
+        tr('finance.zero_start_body'),
+      ),
+    };
+
+    final (String ctaLabel, IconData ctaIcon, VoidCallback? onCta) =
+        switch (state) {
+      _ReportState.periodEmpty => (
+        tr('finance.zero_period_cta'),
+        Icons.all_inclusive_rounded,
+        onShowAllTime,
+      ),
+      _ReportState.noMoney => (
+        tr('finance.zero_money_cta'),
+        Icons.account_balance_wallet_rounded,
+        onOpenMoney,
+      ),
+      _ => (
+        tr('finance.zero_start_cta'),
+        Icons.add_rounded,
+        onCreateTour,
+      ),
+    };
+
+    // The three things that actually create a rupee in this report, in the
+    // order they happen. Skipped when the only problem is the period filter,
+    // and the "create a trip" step is dropped once trips exist.
+    final steps = <Widget>[
+      if (!periodEmpty && !noMoney)
+        _ZeroStep(
+          icon: Icons.add_road_rounded,
+          title: tr('finance.zero_step_trip_title'),
+          body: tr('finance.zero_step_trip_body'),
+        ),
+      if (!periodEmpty) ...[
+        _ZeroStep(
+          icon: Icons.payments_rounded,
+          title: tr('finance.zero_step_cash_title'),
+          body: tr('finance.zero_step_cash_body'),
+        ),
+        _ZeroStep(
+          icon: Icons.receipt_long_rounded,
+          title: tr('finance.zero_step_expense_title'),
+          body: tr('finance.zero_step_expense_body'),
+        ),
+      ],
+    ];
+
+    return UgamCard.plain(
+      padding: const EdgeInsets.all(UgamSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Decorative medallion — [UgamScale.px], never `tap`: nothing
+              // here takes a finger, the button at the bottom does.
+              Container(
+                width: UgamScale.px(context, 40),
+                height: UgamScale.px(context, 40),
+                decoration: BoxDecoration(
+                  color: c.cardElev,
+                  borderRadius: BorderRadius.circular(UgamRadius.input),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  icon,
+                  size: UgamScale.px(context, 20),
+                  color: c.ink2,
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // No maxLines anywhere in this card: Gujarati runs ~30%
+                    // longer and these sentences carry the whole explanation,
+                    // so they wrap rather than ellipsise.
+                    Text(
+                      title,
+                      style: UgamText.titleM.copyWith(color: c.ink),
+                    ),
+                    const SizedBox(height: UgamSpacing.xs),
+                    Text(
+                      body,
+                      style: UgamText.body.copyWith(color: c.ink2),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (steps.isNotEmpty) ...[
+            const SizedBox(height: UgamSpacing.lg),
+            Divider(height: 1, color: c.border),
+            const SizedBox(height: UgamSpacing.md),
+            for (var i = 0; i < steps.length; i++) ...[
+              steps[i],
+              if (i < steps.length - 1) const SizedBox(height: UgamSpacing.md),
+            ],
+          ],
+          const SizedBox(height: UgamSpacing.lg),
+          // The screen's single primary control. `UgamButton` floors itself at
+          // the 44pt tap target via UgamScale.tap, and `primary` is the neutral
+          // max-contrast fill — it spends no accent, so the rationing law is
+          // untouched.
+          UgamButton(
+            label: ctaLabel,
+            icon: ctaIcon,
+            kind: UgamButtonKind.primary,
+            expand: true,
+            onPressed: onCta,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One "this is what creates a number" line inside [_ZeroStateCard].
+class _ZeroStep extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+  const _ZeroStep({
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: UgamScale.px(context, 30),
+          height: UgamScale.px(context, 30),
+          decoration: BoxDecoration(
+            color: c.cardElev,
+            borderRadius: BorderRadius.circular(UgamRadius.input),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: UgamScale.px(context, 15), color: c.ink2),
+        ),
+        const SizedBox(width: UgamSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(title, style: UgamText.titleS.copyWith(color: c.ink)),
+              const SizedBox(height: 2),
+              Text(body, style: UgamText.caption.copyWith(color: c.ink3)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ── Per-tour row ─────────────────────────────────────────────────────────────
 
 class _TourFinanceRow extends StatelessWidget {
@@ -513,12 +887,24 @@ class _TourFinanceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final profit = tf.isProfit;
-    final zero = tf.net.round() == 0;
-    final netColor = zero ? c.ink2 : (profit ? c.good : c.danger);
-    final (iconBg, iconFg) = zero
-        ? (c.cardElev, c.ink2)
-        : (profit ? c.goodFill : c.dangerFill,
-            profit ? c.good : c.danger);
+    // Same distinction as the headline, one row down: a trip with no entries at
+    // all is not a break-even trip. They used to share one dash-in-a-grey-box
+    // thumbnail, which is exactly what read as an unloaded placeholder.
+    final untouched = tf.revenue == 0 && tf.income == 0 && tf.expenses == 0;
+    final zero = !untouched && tf.net.round() == 0;
+
+    final (IconData rowIcon, Color iconBg, Color iconFg) = untouched
+        ? (Icons.hourglass_empty_rounded, c.cardElev, c.ink3)
+        : zero
+            ? (Icons.trending_flat_rounded, c.cardElev, c.ink2)
+            : profit
+                ? (Icons.trending_up_rounded, c.goodFill, c.good)
+                : (Icons.trending_down_rounded, c.dangerFill, c.danger);
+    final netColor = untouched
+        ? c.ink3
+        : zero
+            ? c.ink2
+            : (profit ? c.good : c.danger);
 
     final busLabel = tf.buses == 1
         ? tr('finance.bus_one', namedArgs: {'n': '${tf.buses}'})
@@ -537,133 +923,107 @@ class _TourFinanceRow extends StatelessWidget {
     final marginPct = grossIn > 0
         ? tr('finance.margin_pct',
             namedArgs: {'n': '${(tf.net / grossIn * 100).round()}'})
-        : '—';
+        : null;
 
     return UgamCard.plain(
       onTap: onTap,
       padding: const EdgeInsets.all(UgamSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
         children: [
-          Row(
-            children: [
-              // Decorative leading tile — [UgamScale.px], so the glyph box
-              // tracks the label text instead of staying full-size while the
-              // row's type shrinks on a narrow phone.
-              Container(
-                width: UgamScale.px(context, 38),
-                height: UgamScale.px(context, 38),
-                decoration: BoxDecoration(
-                  color: iconBg,
-                  borderRadius: BorderRadius.circular(UgamRadius.input),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  zero
-                      ? Icons.remove_rounded
-                      : (profit
-                          ? Icons.trending_up_rounded
-                          : Icons.trending_down_rounded),
-                  size: UgamScale.px(context, 18),
-                  color: iconFg,
-                ),
-              ),
-              const SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+          // Decorative leading tile — [UgamScale.px], so the glyph box
+          // tracks the label text instead of staying full-size while the
+          // row's type shrinks on a narrow phone.
+          Container(
+            width: UgamScale.px(context, 38),
+            height: UgamScale.px(context, 38),
+            decoration: BoxDecoration(
+              color: iconBg,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              rowIcon,
+              size: UgamScale.px(context, 18),
+              color: iconFg,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Title line carries the margin% as a small badge chip so
+                // the headline answer (how good was this trip) rides
+                // alongside the name — no separate metric strip needed.
+                Row(
                   children: [
-                    // Title line carries the margin% as a small badge chip so
-                    // the headline answer (how good was this trip) rides
-                    // alongside the name — no separate metric strip needed.
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            tf.title.isEmpty ? tf.route : tf.title,
-                            style: UgamText.titleS.copyWith(color: c.ink),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                    Flexible(
+                      child: Text(
+                        tf.title.isEmpty ? tf.route : tf.title,
+                        style: UgamText.titleS.copyWith(color: c.ink),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (marginPct != null) ...[
+                      const SizedBox(width: UgamSpacing.sm),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: UgamSpacing.sm,
+                          vertical: UgamSpacing.badgeV,
+                        ),
+                        decoration: BoxDecoration(
+                          color: c.cardElev,
+                          borderRadius: BorderRadius.circular(UgamRadius.chip),
+                        ),
+                        child: Text(
+                          marginPct,
+                          style: UgamText.tabular(
+                            UgamText.micro.copyWith(color: c.ink2),
                           ),
                         ),
-                        if (marginPct != '—') ...[
-                          const SizedBox(width: UgamSpacing.sm),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: UgamSpacing.sm,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: c.cardElev,
-                              borderRadius:
-                                  BorderRadius.circular(UgamRadius.chip),
-                            ),
-                            child: Text(
-                              marginPct,
-                              style: UgamText.tabular(
-                                UgamText.micro.copyWith(color: c.ink2),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      meta,
-                      style: UgamText.caption.copyWith(color: c.ink3),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                      ),
+                    ],
                   ],
                 ),
+                const SizedBox(height: 2),
+                Text(
+                  meta,
+                  style: UgamText.caption.copyWith(color: c.ink3),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          // Net big, revenue small beneath — the trip's bottom line and the
+          // gross it came from, stacked on the right. Both are tabular, so the
+          // rupee digits line up down the column of rows.
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                untouched ? _noFigure : _signedInr(tf.net),
+                style: UgamText.tabular(
+                  UgamText.numLg.copyWith(color: netColor),
+                ),
               ),
-              const SizedBox(width: UgamSpacing.sm),
-              // Net big, revenue small beneath — the trip's bottom line and the
-              // gross it came from, stacked on the right. The old divider + 3-col
-              // revenue/expenses/margin strip is gone.
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _signedInr(tf.net),
-                    style:
-                        UgamText.tabular(UgamText.numLg.copyWith(color: netColor)),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    tr('finance.row_revenue_value',
+              const SizedBox(height: 2),
+              Text(
+                untouched
+                    ? tr('finance.row_no_money')
+                    : tr('finance.row_revenue_value',
                         namedArgs: {'n': _inr(tf.revenue)}),
-                    style: UgamText.tabular(
-                      UgamText.micro.copyWith(color: c.ink3),
-                    ),
-                  ),
-                ],
+                style: UgamText.tabular(
+                  UgamText.micro.copyWith(color: c.ink3),
+                ),
               ),
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ── Empty / loading / error states ───────────────────────────────────────────
-
-class _Empty extends StatelessWidget {
-  const _Empty();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: UgamSpacing.lg),
-      child: UgamEmpty(
-        icon: Icons.insights_rounded,
-        title: tr('finance.empty_title'),
-        body: tr('finance.empty_body'),
       ),
     );
   }
@@ -674,3 +1034,9 @@ class _Empty extends StatelessWidget {
 // screens. The private `_Loading` / `_ErrorState` copies that used to live here
 // had already drifted from them (three stat boxes vs two, a tonal retry vs the
 // shared solid one) and were deleted.
+//
+// The private `_Empty` that used to sit here is gone too: a centred icon over
+// "No trips with money yet" is a statement, and what this screen owed the agent
+// was an explanation plus a way out. That is `_ZeroStateCard`. The
+// `finance.empty_title` / `finance.empty_body` strings are left in the
+// translation files rather than deleted.

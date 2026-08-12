@@ -222,6 +222,46 @@ void main() {
       expect(cap.needsDecision, 0, reason: 'a finished rider is not pending');
       expect(cap.returnSeatsFree, 1, reason: 'one return seat is sellable');
     });
+
+    test('completing the GO leg frees GO capacity and ZERO return capacity',
+        () {
+      // Pins the design an operator can reasonably misread: finishing the
+      // outbound releases the one-way rider's berth, but that berth was NEVER
+      // charged to the return leg — `TripType.outboundOnly.usesReturn` is false
+      // (trip_type.dart:20), so it never entered `retOccupied`, and
+      // `returnSeatsFree = capacity − retOccupied` (tour_capacity.dart:224) was
+      // already counting it as sellable for the ride home. Intentional, not a
+      // bug: the return seat is on offer from the moment the rider books
+      // one-way, not from the moment they get off.
+      final buses = [
+        _bus('b1', [
+          _seat(0, 0, SeatType.singleSofa, SeatPosition.upper, 'SU1'),
+          _seat(0, 1, SeatType.singleSofa, SeatPosition.lower, 'SL1'),
+        ])
+      ];
+      final roundTrip = _pSeated('B',
+          lines: [_line(SeatType.singleSofa, 1)],
+          seats: [SeatAssignment(busId: 'b1', seatId: 'SL1')]);
+
+      final before = computeTourCapacity(_tour(buses, [
+        _pSeated('A',
+            lines: [_line(SeatType.singleSofa, 1)],
+            seats: [SeatAssignment(busId: 'b1', seatId: 'SU1')],
+            trip: TripType.outboundOnly),
+        roundTrip,
+      ]));
+      final after = computeTourCapacity(_tour(buses, [
+        _pDone('A', lines: [_line(SeatType.singleSofa, 1)]),
+        roundTrip,
+      ]));
+
+      expect(before.returnSeatsFree, 1);
+      expect(after.returnSeatsFree, before.returnSeatsFree,
+          reason: 'the one-way berth was already free on the return leg');
+      expect(before.goSeatsFree, 0);
+      expect(after.goSeatsFree, 1,
+          reason: 'the outbound slot is what completion actually releases');
+    });
   });
 
   group('computeTourCapacity — same-type one-way split (the matrix bug)', () {

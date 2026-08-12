@@ -19,6 +19,7 @@ import '../models/tour_status.dart';
 import '../models/trip_type.dart';
 import '../services/chart_footer_store.dart';
 import '../services/seat_chart_pdf.dart';
+import '../services/seat_move_flow.dart';
 import '../services/seat_swap_guard.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
@@ -825,8 +826,17 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
         .length;
   }
 
-  /// Move [mover] onto a FREE [cell] of [bus] after a confirm. Guards seat size
-  /// so a whole-double mover can't be crammed onto a single-capacity cell.
+  /// Move [mover] onto a FREE [cell] of [bus] after a confirm.
+  ///
+  /// The write goes through [SeatMoveFlow.moveTo] rather than
+  /// [TourController.moveSeat] directly, so this tap-to-place path inherits the
+  /// SAME guards the board's move flow has always had: the whole-double seat-size
+  /// cap, the "move whole group (N people)?" confirm, and the blocked dialog
+  /// naming why a destination cannot take the party. It also gets back what
+  /// actually happened — previously the grid announced "moved" and dismissed the
+  /// banner unconditionally, so a group the destination could not fit reported
+  /// success while nobody moved. On a locked tour that means the family is never
+  /// re-notified and shows up at the wrong bus.
   Future<void> _relocateOntoFree(
     SeatCell cell,
     Bus bus,
@@ -836,17 +846,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   ) async {
     final seatId = cell.seatId;
     if (seatId == null) return;
-    final targetCap = cell.seatType == SeatType.doubleSofa ? 2 : 1;
     final moverBerths = _relocateMoverBerths(reloc, mover);
-    // When the mover holds MORE berths on the source cell than the target can
-    // take — e.g. two single-request berths cross-filled onto one Double Sofa,
-    // now moving back to a Single Sofa (2 > 1) — PEEL a single berth onto the
-    // target instead of refusing the move. The remaining berth(s) stay on the
-    // source cell, so a second drag relocates them too. This mirrors
-    // SeatMoveFlow.moveTo / the swap-sheet "take free" path, so drag and sheet
-    // behave identically (previously the drag path alone rejected with a
-    // "too small" warning, stranding split berths on a double).
-    final berthsToMove = moverBerths > targetCap ? targetCap : null;
 
     // Dropping ONE single berth onto a FREE Double Sofa, and the passenger holds
     // another single elsewhere on this bus? Offer to pair BOTH singles onto the
@@ -857,15 +857,20 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       if (otherSeatId != null) {
         final both = await _askMoveBothOrOne(seatId: seatId, name: mover.displayName);
         if (both == null) return; // cancelled
-        await _ctrl.moveSeat(
+        if (!mounted) return;
+        final outcome = await SeatMoveFlow.moveTo(
+          context,
           tourId: tour.id,
-          passengerId: mover.id,
-          busId: reloc.fromBusId,
+          sourceBusId: reloc.fromBusId,
+          mover: mover,
           fromSeatId: reloc.fromSeatId,
+          destination: bus,
           toSeatId: seatId,
-          toBusId: bus.id,
         );
-        if (both) {
+        // Only chase the second single when the first berth actually landed on
+        // the seat that was picked. A refused move has nothing to pair, and a
+        // group cascade already re-seated everyone at berths of its own.
+        if (both && outcome == SeatMoveOutcome.moved) {
           await _ctrl.moveSeat(
             tourId: tour.id,
             passengerId: mover.id,
@@ -876,13 +881,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
           );
         }
         if (!mounted) return;
-        setState(() => _relocate = null);
-        AppSnackBar.success(
-          tr(
-            'tour_seat_assignment.relocate.moved',
-            namedArgs: {'name': mover.displayName, 'seat': seatId},
-          ),
-        );
+        _finishRelocate(outcome, mover: mover, bus: bus, seatId: seatId);
         return;
       }
     }
@@ -897,24 +896,59 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       confirmLabel: tr('tour_seat_assignment.relocate.move_confirm_yes'),
     );
     if (!confirmed) return;
+    if (!mounted) return;
 
-    await _ctrl.moveSeat(
+    final outcome = await SeatMoveFlow.moveTo(
+      context,
       tourId: tour.id,
-      passengerId: mover.id,
-      busId: reloc.fromBusId,
+      sourceBusId: reloc.fromBusId,
+      mover: mover,
       fromSeatId: reloc.fromSeatId,
+      destination: bus,
       toSeatId: seatId,
-      toBusId: bus.id,
-      berths: berthsToMove,
     );
     if (!mounted) return;
-    setState(() => _relocate = null);
-    AppSnackBar.success(
-      tr(
-        'tour_seat_assignment.relocate.moved',
-        namedArgs: {'name': mover.displayName, 'seat': seatId},
-      ),
-    );
+    _finishRelocate(outcome, mover: mover, bus: bus, seatId: seatId);
+  }
+
+  /// Close out a relocate according to what the move actually did.
+  ///
+  /// The banner is the operator's "still holding someone" indicator, so it is
+  /// dismissed ONLY when somebody really moved. A refusal leaves it up (with the
+  /// reason already on screen from the move flow) so the next tap can try a
+  /// different seat or bus, and a group cascade says plainly that the tapped
+  /// seat was not the seat used.
+  void _finishRelocate(
+    SeatMoveOutcome outcome, {
+    required Passenger mover,
+    required Bus bus,
+    required String seatId,
+  }) {
+    switch (outcome) {
+      case SeatMoveOutcome.failed:
+      case SeatMoveOutcome.cancelled:
+        return;
+      case SeatMoveOutcome.groupReseated:
+        setState(() => _relocate = null);
+        AppSnackBar.info(
+          tr(
+            'tour_seat_assignment.relocate.group_moved',
+            namedArgs: {
+              'name': mover.displayName,
+              'bus': bus.name,
+              'seat': seatId,
+            },
+          ),
+        );
+      case SeatMoveOutcome.moved:
+        setState(() => _relocate = null);
+        AppSnackBar.success(
+          tr(
+            'tour_seat_assignment.relocate.moved',
+            namedArgs: {'name': mover.displayName, 'seat': seatId},
+          ),
+        );
+    }
   }
 
   /// The seatId of ANOTHER single-sofa berth [mover] holds on [bus] (other than
@@ -2281,7 +2315,15 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                           opacity: animation,
                           child: SizeTransition(
                             sizeFactor: animation,
-                            axisAlignment: -1.0,
+                            // `axisAlignment: -1.0` is deprecated. On the
+                            // default vertical axis the framework mapped that
+                            // to `AlignmentDirectional(-1.0, axisAlignment)`,
+                            // so topStart is the exact equivalent — the banner
+                            // still grows DOWNWARD from its top edge instead of
+                            // splitting open from the middle. Directional (not
+                            // `Alignment.topLeft`) so the horizontal term stays
+                            // RTL-correct, matching what the old property did.
+                            alignment: AlignmentDirectional.topStart,
                             child: SlideTransition(
                               position: Tween<Offset>(
                                 begin: const Offset(0, -0.15),
@@ -3395,22 +3437,29 @@ class _AssignmentDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
+    final e = UgamElevation.of(context);
     final hasActive = passenger != null;
     final showDetail = expanded && hasActive;
 
     return Container(
       decoration: BoxDecoration(
         color: c.card,
-        // Lift the sheet off the chart only while it overlays it (expanded).
-        boxShadow: showDetail
-            ? [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.22),
-                  blurRadius: 20,
-                  offset: const Offset(0, -8),
-                ),
-              ]
-            : null,
+        // Lift the sheet off the chart only while it overlays it (expanded);
+        // deliberately flush with the page when collapsed.
+        //
+        // This was a hand-rolled `Colors.black @ 22%, blur 20, offset (0,-8)`
+        // that painted IDENTICALLY in both themes. On the near-black Midnight
+        // ground that is exactly the pooled "dirty halo" [UgamElevation] was
+        // written to stop; on Daylight it was an untinted grey that reads as
+        // dirt under the warm neutral surfaces.
+        //
+        // `raised` (level 2), not `rest`: while expanded this dock OVERLAYS the
+        // seat chart, which is the sheet role the token names. It is also the
+        // only level whose wide layer is deliberately offset-free, so a surface
+        // anchored to the BOTTOM edge still casts upward — `rest` is two
+        // downward layers that would fall off the bottom of the screen and
+        // leave the dock looking pasted on.
+        boxShadow: showDetail ? e.raised : e.flat,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

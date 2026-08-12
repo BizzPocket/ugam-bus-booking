@@ -620,8 +620,11 @@ class MoneyController extends GetxController {
   /// whole point of this method, so it is worth a round trip when the money
   /// tables are not loaded. A same-bus move only re-stamps a stale `seat_id`,
   /// which is not worth a fetch on every drag — it reconciles for free when the
-  /// tour's rows happen to be loaded, and otherwise waits for the next
-  /// cross-bus move or collection-screen visit.
+  /// tour's rows happen to be loaded, and otherwise waits for the next write
+  /// that touches this passenger's seats. Nothing reconciles on a
+  /// collection-screen visit; this method has exactly one caller
+  /// ([TourController] after a seat write), so a skipped pass stays skipped
+  /// until the seats move again.
   Future<List<SeatMoveMoneyDelta>> reconcileAfterSeatMove({
     required Tour tour,
     required Iterable<String> passengerIds,
@@ -647,7 +650,16 @@ class MoneyController extends GetxController {
         filters: {'tour_id': tour.id},
         orderBy: 'created_at',
       );
-      if (res.failed) return const [];
+      if (res.failed) {
+        // Offline, or the read failed. We now know NOTHING about this tour's
+        // collections, so returning an empty plan is not "nothing to do" — it
+        // is "we did not look". Staying silent here is what let a paid rider
+        // cross buses and quietly keep the full destination fare outstanding
+        // with their cash stranded on the old bus. Say so; the reconcile is
+        // idempotent, so the next seat write (online) puts it right.
+        AppSnackBar.warning(tr('money.reconcile_unavailable'));
+        return const [];
+      }
       rows = res.rows.map(Collection.fromMap).toList();
     }
 
@@ -868,6 +880,16 @@ class MoneyController extends GetxController {
     return {for (final b in buses) b.id: b.busPrice};
   }
 
+  /// How many of the tour's buses have no owner rent recorded — see
+  /// [TourMoneySummary.busesMissingRent] for why it matters. Reads the tour's
+  /// own bus list (not the ledger roll-ups) so both aggregation paths agree,
+  /// and so a bus the ledger has no rows for yet is still checked.
+  ///
+  /// An unresolvable fleet yields an empty map and therefore 0 — "unknown",
+  /// never a false accusation, matching [_busRents]'s own guard.
+  int _busesMissingRent() =>
+      _busRents().values.where((rent) => rent <= 0).length;
+
   /// Per-bus BILLED revenue — the sum of fares owed by every passenger seated
   /// on the bus (via [Bus.amountDueFor], which is already bus-scoped and trip-
   /// factor aware). This is ACCRUAL revenue: what the trip earns regardless of
@@ -1068,6 +1090,7 @@ class MoneyController extends GetxController {
         totalToCollect: toCollect,
         totalIncome: buses.fold(0.0, (s, b) => s + b.income),
         totalBusRent: buses.fold(0.0, (s, b) => s + b.busRent),
+        busesMissingRent: _busesMissingRent(),
         orphanCollected: orphanCollected,
         orphanExpenses: orphanExpenses,
         orphanIncome: orphanIncome,
@@ -1100,6 +1123,7 @@ class MoneyController extends GetxController {
       // row as orphaned.
       knownBusIds: busById.isEmpty ? null : busById.keys.toSet(),
       busRentsTotal: _busRents().values.fold(0.0, (sum, r) => sum + r),
+      busesMissingRent: _busesMissingRent(),
       totalRevenueBilled: _billedRevenues().values.fold(
         0.0,
         (sum, r) => sum + r,

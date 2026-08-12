@@ -7,6 +7,7 @@ import 'package:get/get.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
+import '../models/tour.dart';
 import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
@@ -22,6 +23,10 @@ class EditTourScreen extends StatefulWidget {
 }
 
 class _EditTourScreenState extends State<EditTourScreen> {
+  /// Hard cap on the description, mirrored by the visible counter below the
+  /// field. Named so the cap and the counter can never drift apart.
+  static const int _descMaxLength = 300;
+
   late final TextEditingController _titleCtrl;
   late final TextEditingController _fromCtrl;
   late final TextEditingController _toCtrl;
@@ -131,8 +136,49 @@ class _EditTourScreenState extends State<EditTourScreen> {
     return false;
   }
 
+  /// Leave the screen, asking first when there is unsaved work.
+  ///
+  /// Wired to BOTH the app-bar chevron and [PopScope], because the two used to
+  /// disagree: the screen computed [_isDirty] only to decide whether to SHOW a
+  /// "Cancel changes" button, while the chevron and the Android back gesture
+  /// both threw a fully edited tour away without a word.
+  Future<void> _confirmExit() async {
+    if (_isDirty) {
+      final ok = await UgamDialog.confirm(
+        context,
+        title: tr('edit_tour.exit_confirm_title'),
+        message: tr('edit_tour.exit_confirm_msg'),
+        confirmLabel: tr('edit_tour.exit_confirm_cta'),
+        destructive: true,
+      );
+      if (!ok) return;
+    }
+    if (!mounted) return;
+    AppNav.pop(context);
+  }
+
+  /// Revert every field to the values captured in [initState].
+  ///
+  /// Confirmed first: this is a one-tap wipe of everything typed since the
+  /// screen opened, sitting immediately beside Save, with no undo behind it.
+  Future<void> _confirmCancelChanges() async {
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('edit_tour.cancel_confirm_title'),
+      message: tr('edit_tour.cancel_confirm_msg'),
+      confirmLabel: tr('edit_tour.cancel_confirm_cta'),
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    _cancelChanges();
+  }
+
   void _cancelChanges() {
     setState(() {
+      _titleError = null;
+      _fromError = null;
+      _toError = null;
+      _dateError = null;
       _titleCtrl.text = _origTitle;
       _fromCtrl.text = _origFrom;
       _toCtrl.text = _origTo;
@@ -232,12 +278,14 @@ class _EditTourScreenState extends State<EditTourScreen> {
             ? null
             : _descCtrl.text.trim(),
       );
-      AppSnackBar.success(tr('edit_tour.snack_updated'));
       if (!mounted) return;
+      AppSnackBar.success(tr('edit_tour.snack_updated'));
       AppNav.pop(context);
     } catch (_) {
       AppSnackBar.error(tr('edit_tour.snack_save_failed'));
-      setState(() => _saving = false);
+      // Guarded: the await above can outlive the screen, and an unguarded
+      // setState on a disposed State throws instead of surfacing the failure.
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -266,12 +314,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
+              // Was `body` pulled down to 13 — a size that exists nowhere on
+              // the ladder. `caption` (12) is the step below body and is what
+              // the rest of the app uses for sheet explainers.
               tr('edit_tour.price_sheet.sheet_body'),
-              style: UgamText.body.copyWith(
-                color: sc.ink2,
-                fontSize: 13,
-                height: 1.5,
-              ),
+              style: UgamText.caption.copyWith(color: sc.ink2, height: 1.5),
             ),
             const SizedBox(height: UgamSpacing.lg),
             for (final b in buses) ...[
@@ -288,10 +335,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
                         children: [
                           Text(
                             b.name,
-                            style: UgamText.bodyStrong.copyWith(
-                              color: sc.ink,
-                              fontSize: 14,
-                            ),
+                            // `bodyStrong` is already 14; the override was a
+                            // no-op reading as an intentional off-ladder size.
+                            style: UgamText.bodyStrong.copyWith(color: sc.ink),
                           ),
                           const SizedBox(height: 2),
                           Text(
@@ -301,6 +347,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                         ],
                       ),
                     ),
+                    const SizedBox(width: UgamSpacing.sm),
                     Icon(Icons.chevron_right_rounded, color: sc.ink3),
                   ],
                 ),
@@ -436,18 +483,48 @@ class _EditTourScreenState extends State<EditTourScreen> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    // One lookup for the whole build. It used to be re-run twice inline, once
+    // to gate the price-sheet card and once inside a Builder, which made the
+    // same read look like three different sources of truth.
+    final tour = Get.find<TourController>().getTour(widget.tourId);
+    if (tour == null) return _missingTour(c);
     final dirty = _isDirty;
 
+    return PopScope(
+      // Android back / iOS edge-swipe are the same intent as the chevron, and
+      // they bypassed the (previously non-existent) guard entirely.
+      canPop: !dirty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmExit();
+      },
+      child: _form(c, tour, dirty),
+    );
+  }
+
+  Widget _form(UgamColorSet c, Tour tour, bool dirty) {
     return UgamScaffold(
       body: SafeArea(
         child: Column(
           children: [
             UgamAppBar(
               title: tr('edit_tour.title'),
+              onBack: _confirmExit,
               actions: [
+                // Revert-all. Only exists while there is something to revert,
+                // and always asks first — it is a one-tap wipe of everything
+                // typed since the screen opened.
+                if (dirty)
+                  UgamAppBarAction(
+                    icon: Icons.undo_rounded,
+                    tooltip: tr('edit_tour.cancel_changes'),
+                    onTap: _saving ? () {} : _confirmCancelChanges,
+                  ),
                 UgamAppBarAction(
                   icon: Icons.delete_outline_rounded,
-                  tint: c.danger,
+                  // Inert during a save, and now LOOKS inert: it kept full
+                  // danger-red and full press feedback while wired to a no-op,
+                  // so a mid-save tap read as "delete didn't work".
+                  tint: _saving ? c.ink3 : c.danger,
                   tooltip: tr('app.action.delete'),
                   onTap: _saving ? () {} : _confirmAndDelete,
                 ),
@@ -480,30 +557,19 @@ class _EditTourScreenState extends State<EditTourScreen> {
                       errorText: _titleError,
                     ),
                     const SizedBox(height: UgamSpacing.lg),
-                    Text(
-                      tr('create_tour.label.route').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink2),
+                    // Was a hand-rolled `micro` + `.toUpperCase()`. The
+                    // uppercasing is a no-op in Gujarati and Hindi (neither
+                    // script has case), so the emphasis has to come from the
+                    // style — which is exactly what the shared eyebrow is for.
+                    UgamSectionLabel(
+                      tr('create_tour.label.route'),
+                      color: c.ink2,
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     if (MediaQuery.of(context).size.width < 400) ...[
                       UgamInput(controller: _fromCtrl, errorText: _fromError),
                       const SizedBox(height: UgamSpacing.xs),
-                      Center(
-                        child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: c.accentFill,
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Icon(
-                            Icons.arrow_downward_rounded,
-                            size: 14,
-                            color: c.accent,
-                          ),
-                        ),
-                      ),
+                      Center(child: _RouteArrow(c: c, vertical: true)),
                       const SizedBox(height: UgamSpacing.xs),
                       UgamInput(controller: _toCtrl, errorText: _toError),
                     ] else ...[
@@ -515,22 +581,11 @@ class _EditTourScreenState extends State<EditTourScreen> {
                               errorText: _fromError,
                             ),
                           ),
-                          Container(
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: UgamSpacing.sm + 2,
+                          Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: UgamSpacing.tight,
                             ),
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                              color: c.accentFill,
-                              shape: BoxShape.circle,
-                            ),
-                            alignment: Alignment.center,
-                            child: Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 14,
-                              color: c.accent,
-                            ),
+                            child: _RouteArrow(c: c, vertical: false),
                           ),
                           Expanded(
                             child: UgamInput(
@@ -542,9 +597,9 @@ class _EditTourScreenState extends State<EditTourScreen> {
                       ),
                     ],
                     const SizedBox(height: UgamSpacing.lg),
-                    Text(
-                      tr('create_tour.label.date_range').toUpperCase(),
-                      style: UgamText.micro.copyWith(color: c.ink2),
+                    UgamSectionLabel(
+                      tr('create_tour.label.date_range'),
+                      color: c.ink2,
                     ),
                     const SizedBox(height: UgamSpacing.sm),
                     // Departure date paired with its departure time.
@@ -601,8 +656,16 @@ class _EditTourScreenState extends State<EditTourScreen> {
                           flex: 2,
                           child: UgamPickerField(
                             icon: Icons.access_time_rounded,
-                            placeholder: tr('create_tour.hint.return_time'),
-                            value: _returnTime != null
+                            // Return time is DROPPED at save time unless a
+                            // return date exists (see _save), so letting the
+                            // agent pick one first was silent data loss. The
+                            // field is held shut until the date is set, and the
+                            // placeholder says which one to set.
+                            enabled: _returnDate != null,
+                            placeholder: _returnDate != null
+                                ? tr('create_tour.hint.return_time')
+                                : tr('edit_tour.return_time_locked'),
+                            value: _returnDate != null && _returnTime != null
                                 ? _returnTime!.format(context)
                                 : '',
                             onTap: () => _pickTime(true),
@@ -623,12 +686,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                       controller: _priceCtrl,
                       keyboardType: TextInputType.number,
                     ),
-                    if ((Get.find<TourController>()
-                                .getTour(widget.tourId)
-                                ?.buses
-                                .length ??
-                            0) >=
-                        2) ...[
+                    if (tour.buses.length >= 2) ...[
                       const SizedBox(height: UgamSpacing.lg),
                       _ApplyPriceSheetCard(
                         c: c,
@@ -639,55 +697,138 @@ class _EditTourScreenState extends State<EditTourScreen> {
                     UgamInput(
                       label: tr('create_tour.label.tour_description'),
                       controller: _descCtrl,
-                      maxLength: 300,
+                      maxLength: _descMaxLength,
                     ),
+                    // UgamInput blanks TextField's own counter, so the 300-char
+                    // cap was invisible: typing simply stopped, with nothing on
+                    // screen saying why. Shown from 80% so it appears before it
+                    // starts mattering, and turns danger-inked at the ceiling.
+                    if (_descCtrl.text.characters.length >=
+                        _descMaxLength * 0.8) ...[
+                      const SizedBox(height: UgamSpacing.xs),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          tr(
+                            'edit_tour.desc_counter',
+                            namedArgs: {
+                              'count': '${_descCtrl.text.characters.length}',
+                              'max': '$_descMaxLength',
+                            },
+                          ),
+                          style: UgamText.tabular(
+                            UgamText.caption.copyWith(
+                              color: _descCtrl.text.characters.length >=
+                                      _descMaxLength
+                                  ? c.danger
+                                  : c.ink3,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: UgamSpacing.lg),
                     // Booking mode + collection details live behind their own
                     // sheet: they save immediately through a narrow column
                     // update, separate from this form's save, because those
                     // columns are deliberately outside Tour.toMap.
-                    Builder(builder: (ctx) {
-                      final live =
-                          Get.find<TourController>().getTour(widget.tourId);
-                      if (live == null) return const SizedBox.shrink();
-                      return UgamPickerField(
-                        label: tr('booking_settings.title'),
-                        value: live.bookingMode.displayName,
-                        icon: Icons.event_seat_outlined,
-                        onTap: () => showBookingSettingsSheet(ctx, live),
-                      );
-                    }),
+                    UgamPickerField(
+                      label: tr('booking_settings.title'),
+                      value: tour.bookingMode.displayName,
+                      icon: Icons.event_seat_outlined,
+                      // The sheet writes straight through to the controller,
+                      // and this screen is not reactive — without the rebuild
+                      // the field kept showing the OLD booking mode until the
+                      // agent left and came back.
+                      onTap: () async {
+                        await showBookingSettingsSheet(context, tour);
+                        if (mounted) setState(() {});
+                      },
+                    ),
                   ],
                 ),
               ),
             ),
+            // Save alone gets the sticky bar.
+            //
+            // "Cancel changes" used to sit beside it as a natural-width sibling
+            // of an Expanded CTA — the exact shape that overflows here. At
+            // 375pt and the 1.3× text scale this app allows, the Gujarati
+            // "ફેરફાર રદ કરો" pill takes over half the row and squeezes the
+            // primary action down to an ellipsis. Revert is a secondary,
+            // confirmed action, so it moved to the app bar next to Delete and
+            // the CTA can no longer be truncated by it.
             UgamStickyCTA(
-              child: Row(
-                children: [
-                  if (dirty) ...[
-                    UgamButton(
-                      label: tr('edit_tour.cancel_changes'),
-                      icon: Icons.close_rounded,
-                      kind: UgamButtonKind.neutral,
-                      onPressed: _saving ? null : _cancelChanges,
-                    ),
-                    const SizedBox(width: UgamSpacing.sm),
-                  ],
-                  Expanded(
-                    child: UgamCTA(
-                      label: _saving
-                          ? tr('edit_tour.btn_saving')
-                          : tr('edit_tour.btn_save_changes'),
-                      leadingIcon: Icons.save_rounded,
-                      loading: _saving,
-                      onPressed: _save,
-                    ),
-                  ),
-                ],
+              child: UgamCTA(
+                label: _saving
+                    ? tr('edit_tour.btn_saving')
+                    : tr('edit_tour.btn_save_changes'),
+                leadingIcon: Icons.save_rounded,
+                loading: _saving,
+                onPressed: _saving ? null : _save,
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Shown instead of the form when the tour cannot be resolved — deleted from
+  /// another screen, or a list that has not finished loading. The form used to
+  /// render regardless, seeded with empty strings, so it looked like a real
+  /// (blank) tour that could be saved over.
+  Widget _missingTour(UgamColorSet c) {
+    return UgamScaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            UgamAppBar(title: tr('edit_tour.title')),
+            Expanded(
+              child: UgamEmpty(
+                icon: Icons.map_outlined,
+                title: tr('edit_tour.not_found.title'),
+                body: tr('edit_tour.not_found.body'),
+                cta: UgamButton(
+                  label: tr('app.action.retry'),
+                  icon: Icons.refresh_rounded,
+                  kind: UgamButtonKind.neutral,
+                  onPressed: () => setState(() {}),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The circle between the From and To city fields.
+///
+/// Was `accentFill` + `accent` in both orientations. A direction glyph is
+/// decoration, not a selection or an ownership state, so per the accent rule it
+/// carries no brand hue — and this screen was spending copper on it three times
+/// over (here, and on both preview pills) while the actual amber signal, the
+/// focused field ring, had to compete with all of it.
+class _RouteArrow extends StatelessWidget {
+  final UgamColorSet c;
+  final bool vertical;
+
+  const _RouteArrow({required this.c, required this.vertical});
+
+  @override
+  Widget build(BuildContext context) {
+    final d = UgamScale.px(context, 30);
+    return Container(
+      width: d,
+      height: d,
+      decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: Icon(
+        vertical ? Icons.arrow_downward_rounded : Icons.arrow_forward_rounded,
+        size: UgamScale.px(context, 14),
+        color: c.ink2,
       ),
     );
   }
@@ -711,17 +852,22 @@ class _ApplyPriceSheetCard extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 38,
-            height: 38,
+            // Decorative medallion — scales with the device, never a tap box
+            // of its own (the whole card is the target).
+            width: UgamScale.px(context, 38),
+            height: UgamScale.px(context, 38),
             decoration: BoxDecoration(
-              color: c.accentFill,
+              // Neutral, not accentFill: copying a price sheet is an action,
+              // not something the agent owns, and this screen already spends
+              // its one amber on the focused field.
+              color: c.cardElev,
               borderRadius: BorderRadius.circular(UgamRadius.stat),
             ),
             alignment: Alignment.center,
             child: Icon(
               Icons.content_copy_rounded,
-              size: 18,
-              color: enabled ? c.accent : c.ink3,
+              size: UgamScale.px(context, 18),
+              color: enabled ? c.ink2 : c.ink3,
             ),
           ),
           const SizedBox(width: UgamSpacing.md),
@@ -732,10 +878,9 @@ class _ApplyPriceSheetCard extends StatelessWidget {
               children: [
                 Text(
                   tr('edit_tour.price_sheet.card_title'),
-                  style: UgamText.bodyStrong.copyWith(
-                    color: c.ink,
-                    fontSize: 14,
-                  ),
+                  // `bodyStrong` IS 14 — the override was a no-op that made
+                  // this look like a deliberate off-ladder size.
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -745,6 +890,7 @@ class _ApplyPriceSheetCard extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(width: UgamSpacing.sm),
           Icon(Icons.chevron_right_rounded, color: c.ink3),
         ],
       ),
@@ -807,8 +953,10 @@ class _TourPreviewCard extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(UgamRadius.photo),
             child: SizedBox(
-              width: 64,
-              height: 64,
+              // Decorative thumbnail — scales down with the device so it does
+              // not eat a fixed 64pt of a 375pt-wide card.
+              width: UgamScale.px(context, 64),
+              height: UgamScale.px(context, 64),
               child: UgamBusBackdrop(
                 seed: 'preview-${fromCity}_$toCity',
                 label: _routeLabel(),
@@ -854,8 +1002,10 @@ class _TourPreviewCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: UgamSpacing.sm),
                 Wrap(
+                  // 6 is off-ladder (xs=4, sm=8) but is the pill gutter the
+                  // rest of this card already uses; see the reported gap.
                   spacing: 6,
                   runSpacing: 6,
                   children: [
@@ -882,6 +1032,13 @@ class _TourPreviewCard extends StatelessWidget {
   }
 }
 
+/// A single fact in the customer-preview card: the departure date, the fare.
+///
+/// `muted` means "not set yet". That distinction used to be carried by copper
+/// vs grey — two amber pills side by side on a screen whose amber is supposed
+/// to mean "this is yours". It is carried by INK now (set = `ink`, unset =
+/// `ink3`) on one shared neutral fill, which reads the same in both themes and
+/// leaves the accent to the focused field.
 class _PreviewPill extends StatelessWidget {
   final UgamColorSet c;
   final IconData icon;
@@ -897,27 +1054,35 @@ class _PreviewPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ink = muted ? c.ink3 : c.ink;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.sm,
+        vertical: UgamSpacing.xs,
+      ),
       decoration: BoxDecoration(
-        color: muted ? c.cardElev : c.accentFill,
+        color: c.cardElev,
         borderRadius: BorderRadius.circular(UgamRadius.chip),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: muted ? c.ink3 : c.accent),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: UgamText.tabular(
-              UgamText.caption.copyWith(
-                color: muted ? c.ink3 : c.accent,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
+          Icon(icon, size: UgamScale.px(context, 12), color: ink),
+          const SizedBox(width: UgamSpacing.xs),
+          Flexible(
+            child: Text(
+              label,
+              // Was `caption` forced down to 11 — an off-ladder size invented
+              // for this one pill. `caption` (12) with the weight bumped says
+              // the same thing on the scale the rest of the app uses.
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(
+                  color: ink,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
+              overflow: TextOverflow.ellipsis,
             ),
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),

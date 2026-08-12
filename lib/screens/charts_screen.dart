@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
@@ -134,6 +135,24 @@ class _ChartsScreenState extends State<ChartsScreen> {
     );
   }
 
+  /// The empty chart's way out. A bus with no seat layout used to be a dead
+  /// end here — a grey glyph and a sentence, with no way to fix it from the
+  /// screen that reported the problem.
+  ///
+  /// The layout is generated in exactly one place in the app: the add/edit-bus
+  /// wizard's save path (`BusLayout.generate` in `add_bus_screen.dart`), driven
+  /// by its Step 2 "capacity & layout" inputs and its edit-only "Regenerate
+  /// layout" action. So the CTA opens THIS bus in that wizard rather than
+  /// inventing a layout editor that does not exist. Same push shape as the
+  /// no-buses empty state above.
+  void _createLayout(Tour tour, Bus bus) {
+    HapticFeedback.lightImpact();
+    Get.to(
+      () => AddBusScreen(tourId: tour.id, existing: bus),
+      transition: Transition.cupertino,
+    );
+  }
+
   /// Builds the seatId → occupants map for [bus] from [tour]'s passengers. A
   /// doubleSofa cell may hold up to two passengers (a split sofa, or a disjoint
   /// GO/RETURN leg reuse); everything else has exactly one. Same shape the
@@ -237,17 +256,34 @@ class _ChartsScreenState extends State<ChartsScreen> {
           // past capacity (e.g. "40/37"). `assignments` itself is untouched —
           // it still feeds the tile grid, which needs the raw per-seat lists.
           final assignedCount = tour.occupiedBerthsFor(bus.id);
+          // ONE truth for "there is a grid on screen", so the expand button,
+          // the edit-seats pill and the legend can never disagree. Non-null
+          // exactly when a real grid renders, which also keeps type promotion
+          // at the call sites that need the layout itself.
+          final chartLayout =
+              (layout != null && layout.totalCells > 0) ? layout : null;
+          // The edit-seats pill floats ON the chart card, so the chart's scroll
+          // extent has to stop above it. Without this the rear row (DL6 / DU6
+          // on a 40-berth sleeper) came to rest UNDER the pill at maximum
+          // scroll and those two berths could not be tapped at all. Reserving
+          // the pill's own height plus its bottom offset leaves the last berth
+          // clear whether the grid scrolls or fits.
+          final fabReserve = UgamScale.tap(context, 50) + UgamSpacing.sm;
 
           return Column(
             children: [
               UgamAppBar(title: tr('charts.title'), showBack: false),
               if (eligible.length > 1) ...[
-                UgamSelectorPills(
-                  items: [
-                    for (final t in eligible) UgamSelectorItem(label: t.title),
-                  ],
-                  currentIndex: eligible.indexWhere((t) => t.id == tour.id),
-                  onChanged: (i) => _pickTour(eligible[i].id),
+                // Faded, so a tour list that runs past the edge reads as
+                // scrollable instead of looking like a title clipped mid-word.
+                _ScrollEdgeFade(
+                  child: UgamSelectorPills(
+                    items: [
+                      for (final t in eligible) UgamSelectorItem(label: t.title),
+                    ],
+                    currentIndex: eligible.indexWhere((t) => t.id == tour.id),
+                    onChanged: (i) => _pickTour(eligible[i].id),
+                  ),
                 ),
                 const SizedBox(height: UgamSpacing.md),
               ],
@@ -281,14 +317,18 @@ class _ChartsScreenState extends State<ChartsScreen> {
                         assignments: assignments,
                         sheetOccupants: sheetOccupants,
                         groupColors: groupColors,
+                        // Only a rendered grid sits under the floating pill, so
+                        // only a rendered grid reserves room for it.
+                        bottomReserve: chartLayout == null ? 0 : fabReserve,
+                        onCreateLayout: () => _createLayout(tour, bus),
                         onSeatTap: (seatId, occupants) =>
                             _showOccupantSheet(context, seatId, occupants, bus),
                       ),
-                      if (layout != null && layout.totalCells > 0)
+                      if (chartLayout != null)
                         ChartExpandButton(
                           onTap: () => FullscreenChartScreen.open(
                             context,
-                            layout: layout,
+                            layout: chartLayout,
                             occupantsBySeat: assignments,
                             groupColors: groupColors,
                             title: bus.name,
@@ -299,13 +339,14 @@ class _ChartsScreenState extends State<ChartsScreen> {
                       // Thumb-reachable "edit seats" hand-off as a small FAB
                       // overlaying the chart's bottom-right, instead of a
                       // full-width footer button that pushed the legend up and
-                      // ate vertical chart space. The legend stays below.
-                      if (layout != null && layout.totalCells > 0)
+                      // ate vertical chart space. It floats over the card's
+                      // reserved bottom band (see `fabReserve`), never over a
+                      // berth. The legend stays below.
+                      if (chartLayout != null)
                         Positioned(
                           right: UgamSpacing.sm,
                           bottom: UgamSpacing.sm,
                           child: _EditSeatsFab(
-                            c: c,
                             onTap: () => _editSeats(tour.id, bus.id),
                           ),
                         ),
@@ -313,8 +354,30 @@ class _ChartsScreenState extends State<ChartsScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: UgamSpacing.sm),
-              UgamSeatChartLegend(c: c),
+              // Ten colour codes is more than anyone holds at once, and below
+              // an EMPTY chart they explain seats that do not exist. So: shown
+              // only when a grid is on screen, and folded behind a one-line
+              // "what do the colours mean?" header that keeps all ten entries
+              // one tap away.
+              if (chartLayout != null) ...[
+                const SizedBox(height: UgamSpacing.sm),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.gutter,
+                  ),
+                  child: UgamExpander(
+                    title: tr('charts.legend_toggle'),
+                    icon: Icons.palette_outlined,
+                    // [UgamExpander]'s header is a bare Row — its tallest
+                    // child is the 22pt chevron, so its opaque tap area is
+                    // 22pt, half the 44pt floor. A zero-width spacer in the
+                    // trailing slot is the only lever this screen has to
+                    // raise it without editing the shared component.
+                    trailing: SizedBox(height: UgamScale.tap(context, 44)),
+                    child: UgamSeatChartLegend(c: c),
+                  ),
+                ),
+              ],
               SizedBox(
                 height: MediaQuery.of(context).padding.bottom + UgamSpacing.md,
               ),
@@ -345,6 +408,114 @@ class _ChartsScreenState extends State<ChartsScreen> {
       seatId: seatId,
       busName: bus.name,
       mode: OccupantSheetMode.readOnly,
+    );
+  }
+}
+
+// ─── Horizontal scroll edge fade ───────────────────────────────────────
+
+/// Wraps a horizontally scrolling strip (a [UgamSelectorPills] row here) and
+/// dissolves whichever edge still has content behind it.
+///
+/// A pill row that runs past the viewport used to be sliced dead straight
+/// mid-word on both sides, which reads as a rendering fault rather than as
+/// "there is more here" — nothing on screen said the row could be dragged. A
+/// soft edge instead of a hard cut is the standard affordance, and fading only
+/// the side that actually overflows means a row of two pills stays crisp.
+///
+/// It listens for the inner scrollable's notifications rather than owning a
+/// controller, so the shared pill component keeps building its own [ListView]
+/// untouched. [ScrollMetricsNotification] covers the first layout and any later
+/// resize (rotation, a tour added/removed); [ScrollNotification] covers drags.
+class _ScrollEdgeFade extends StatefulWidget {
+  final Widget child;
+
+  const _ScrollEdgeFade({required this.child});
+
+  @override
+  State<_ScrollEdgeFade> createState() => _ScrollEdgeFadeState();
+}
+
+class _ScrollEdgeFadeState extends State<_ScrollEdgeFade> {
+  /// Fade ramp width. Wide enough to read as a dissolve, narrow enough that it
+  /// never dims a whole pill — this is a hint, not a vignette.
+  static const double _ramp = 24;
+
+  bool _fadeLeft = false;
+  bool _fadeRight = false;
+
+  /// `extentBefore`/`extentAfter` are leading/trailing, not left/right, so they
+  /// are mapped through the scrollable's own [ScrollMetrics.axisDirection] —
+  /// which already accounts for both RTL locales and a reversed list.
+  ///
+  /// Always returns false: the notification keeps bubbling, so nothing that
+  /// already listens for this strip's scrolling stops hearing it.
+  bool _sync(ScrollMetrics m) {
+    if (m.axis != Axis.horizontal || !m.hasContentDimensions) return false;
+    final flipped = m.axisDirection == AxisDirection.left;
+    final left = (flipped ? m.extentAfter : m.extentBefore) > 1;
+    final right = (flipped ? m.extentBefore : m.extentAfter) > 1;
+    if (left == _fadeLeft && right == _fadeRight) return false;
+    // A metrics notification can be dispatched from inside layout, where
+    // setState would throw. Only THEN defer to the end of the frame — a frame
+    // is by definition already in flight there, so the callback is guaranteed
+    // to run. Deferring unconditionally would risk parking the very first
+    // update until some unrelated thing scheduled the next frame.
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _apply(left, right));
+    } else {
+      _apply(left, right);
+    }
+    return false;
+  }
+
+  void _apply(bool left, bool right) {
+    if (!mounted || (left == _fadeLeft && right == _fadeRight)) return;
+    setState(() {
+      _fadeLeft = left;
+      _fadeRight = right;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fadeLeft = _fadeLeft;
+    final fadeRight = _fadeRight;
+
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (n) => _sync(n.metrics),
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (n) => _sync(n.metrics),
+        // The mask stays mounted even when BOTH edges are opaque (where it is
+        // a visual no-op). Inserting/removing it around the strip would swap
+        // the widget type above the pill row, remounting its [ListView] and
+        // throwing the scroll offset back to zero the instant a drag turned
+        // the first fade on — the strip would jump home under the finger.
+        child: ShaderMask(
+          // The gradient is an ALPHA STENCIL, not colour: `dstIn` keeps the
+          // child wherever the mask is opaque. Black/transparent here carry no
+          // palette meaning, so they are deliberately not tokens.
+          blendMode: BlendMode.dstIn,
+          shaderCallback: (rect) {
+            final ramp = rect.width <= 0
+                ? 0.0
+                : (_ramp / rect.width).clamp(0.0, 0.35);
+            return LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                fadeLeft ? Colors.transparent : Colors.black,
+                Colors.black,
+                Colors.black,
+                fadeRight ? Colors.transparent : Colors.black,
+              ],
+              stops: [0, ramp, 1 - ramp, 1],
+            ).createShader(rect);
+          },
+          child: widget.child,
+        ),
+      ),
     );
   }
 }
@@ -382,17 +553,31 @@ class _BusBar extends StatelessWidget {
       children: [
         Expanded(
           child: multiBus
-              ? UgamSelectorPills(
-                  padding: EdgeInsets.zero,
-                  items: [
-                    for (final b in tour.buses) UgamSelectorItem(label: b.name),
-                  ],
-                  currentIndex: tour.buses.indexWhere((b) => b.id == bus.id),
-                  onChanged: (i) => onPickBus(tour.buses[i].id),
+              // Same edge fade as the tour row: this strip is even narrower
+              // (it shares the row with the fill indicator), so it clips first.
+              ? _ScrollEdgeFade(
+                  child: UgamSelectorPills(
+                    padding: EdgeInsets.zero,
+                    items: [
+                      for (final b in tour.buses)
+                        UgamSelectorItem(label: b.name),
+                    ],
+                    currentIndex: tour.buses.indexWhere((b) => b.id == bus.id),
+                    onChanged: (i) => onPickBus(tour.buses[i].id),
+                  ),
                 )
+              // Was `micro` + `.toUpperCase()`, which is the exact pair the
+              // ladder now rules out: the caps are a no-op in Gujarati and
+              // Hindi, so the PRIMARY language got a tracked 10pt eyebrow
+              // (8.5pt on a small phone) where English got a caps label, and
+              // the emphasis simply vanished. [UgamText.label] is the
+              // script-safe step — Inter 13/w700, no tracking — and weight plus
+              // full ink carry the emphasis in every script. It also lands next
+              // to the 12.5/w600 that [UgamSelectorPills] draws, which is what
+              // this stands in for on a single-bus tour.
               : Text(
-                  bus.name.toUpperCase(),
-                  style: UgamText.micro.copyWith(color: c.ink2),
+                  bus.name,
+                  style: UgamText.label.copyWith(color: c.ink),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -405,8 +590,10 @@ class _BusBar extends StatelessWidget {
 }
 
 /// The compact placed/total signal on the right of the [_BusBar]: a tabular
-/// `n/total` count and a short NEUTRAL-ink fill bar. Ink, not champagne — the
-/// accent stays rationed to the one Edit-seats CTA.
+/// `n/total` count and a short NEUTRAL-ink fill bar. Ink, not amber: a fill
+/// ratio is a measurement, not an ownership mark, and this screen now spends
+/// the accent NOWHERE — the only amber on it comes from the seat tiles, where
+/// it marks a specific rider's berth.
 class _FillIndicator extends StatelessWidget {
   final int assigned;
   final int total;
@@ -504,37 +691,34 @@ class _SeatGridSkeleton extends StatelessWidget {
 
 // ─── Edit-seats FAB ────────────────────────────────────────────────────
 
-/// The chart's one primary hand-off into the editable grid, as a small copper
-/// FAB overlaying the chart's bottom-right (thumb zone) instead of a full-width
-/// footer button. It carries the screen's single rationed solid-copper fill —
-/// THE LAW's one focal element — with the edit glyph plus a compact label, a
-/// soft copper glow, and a 48dp-min tap target with ripple + haptic.
+/// The chart's one primary hand-off into the editable grid, as a small FAB
+/// overlaying the chart's bottom-right (thumb zone) instead of a full-width
+/// footer button. Edit glyph plus a compact label, floating clear of the
+/// berths underneath it, with a 44pt-min tap target, ripple and haptic.
 class _EditSeatsFab extends StatelessWidget {
-  final UgamColorSet c;
   final VoidCallback onTap;
 
-  const _EditSeatsFab({required this.c, required this.onTap});
+  const _EditSeatsFab({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
       label: tr('charts.edit_seats'),
-      // Only the copper GLOW is bespoke — it is unique to this surface. The
-      // button itself is the shared [UgamButton], so its height, radius, icon
-      // size and press feedback match every other primary in the app (and the
-      // box now follows [UgamScale] instead of sitting at a fixed 48 while its
-      // label shrinks).
+      // Only the LIFT is bespoke — everything else is the shared [UgamButton],
+      // so height, radius, icon size and press feedback match every other
+      // primary in the app.
+      //
+      // That lift used to be an amber `glow` halo. [UgamButtonKind.primary] is
+      // `action` — deliberately no brand hue — so the halo was pure decoration
+      // in the one colour this app reserves for "this is yours", floating over
+      // a grid whose seat tiles use that same amber to mark a rider's berth.
+      // It is a genuine level-2 surface (it floats above the card, over
+      // content), so it takes the level-2 shadow and says so.
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(UgamRadius.input),
-          boxShadow: [
-            BoxShadow(
-              color: c.glow,
-              blurRadius: 18,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          boxShadow: UgamElevation.of(context).raised,
         ),
         child: UgamButton(
           label: tr('charts.edit_seats'),
@@ -575,12 +759,23 @@ class _SeatChartCard extends StatelessWidget {
   /// names, not just the first. This list is the bug-fix surface.
   final void Function(String seatId, List<Passenger> occupants) onSeatTap;
 
+  /// Dead space kept at the BOTTOM of the scroll extent so the floating
+  /// edit-seats pill has somewhere of its own to sit. Zero when no grid
+  /// renders (nothing floats over an empty card).
+  final double bottomReserve;
+
+  /// The empty state's way out — opens the bus wizard where the layout is
+  /// actually generated.
+  final VoidCallback onCreateLayout;
+
   const _SeatChartCard({
     required this.layout,
     required this.loaded,
     required this.assignments,
     required this.sheetOccupants,
     required this.groupColors,
+    required this.bottomReserve,
+    required this.onCreateLayout,
     required this.onSeatTap,
   });
 
@@ -598,6 +793,13 @@ class _SeatChartCard extends StatelessWidget {
             ? UgamEmpty(
                 icon: Icons.event_seat_outlined,
                 title: tr('charts.no_layout'),
+                body: tr('charts.no_layout_body'),
+                // Was a dead end: it stated the problem and offered nothing.
+                cta: UgamCTA(
+                  label: tr('charts.create_layout'),
+                  leadingIcon: Icons.grid_view_rounded,
+                  onPressed: onCreateLayout,
+                ),
               )
             : const _SeatGridSkeleton(),
       );
@@ -612,6 +814,11 @@ class _SeatChartCard extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(
           parent: BouncingScrollPhysics(),
         ),
+        // Padding on the SCROLL VIEW, not on the chassis: it joins the scroll
+        // extent, so the last berth clears the floating edit-seats pill both
+        // when the grid overflows (at maximum scroll) and when it does not
+        // (the grid simply ends higher up the card).
+        padding: EdgeInsets.only(bottom: bottomReserve),
         child: UgamBusChassis(
           child: CombinedSeatGrid(
             layout: l,

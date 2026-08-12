@@ -4,7 +4,7 @@ import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/utils/chart_seat_availability.dart';
-import 'package:occubusbooking/utils/chart_selection.dart';
+import 'package:occubusbooking/utils/party_fit.dart';
 import 'package:occubusbooking/utils/seat_autopick.dart';
 
 /// The chart must OPEN with seats already chosen.
@@ -59,13 +59,13 @@ void main() {
       );
 
   /// Total berths the pick covers.
-  int berthsOf(List<ChartBusSelection> picks) => picks.fold<int>(
+  int berthsOf(AutoPickResult r) => r.selections.fold<int>(
         0,
         (sum, s) => sum + s.picks.fold<int>(0, (n, p) => n + p.berths),
       );
 
-  Set<String> seatIdsOf(List<ChartBusSelection> picks) => {
-        for (final s in picks)
+  Set<String> seatIdsOf(AutoPickResult r) => {
+        for (final s in r.selections)
           for (final p in s.picks) p.seatId,
       };
 
@@ -75,12 +75,11 @@ void main() {
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 1,
+        intent: const PartyIntent(roundTrip: 1),
       );
       expect(berthsOf(picks), 1);
-      expect(picks, hasLength(1));
-      expect(picks.single.bus.id, 'a');
+      expect(picks.selections, hasLength(1));
+      expect(picks.selections.single.bus.id, 'a');
     });
 
     test('a party of four is seated on one bus', () {
@@ -93,26 +92,31 @@ void main() {
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 4,
+        intent: const PartyIntent(roundTrip: 4),
       );
       expect(berthsOf(picks), 4);
-      expect(picks, hasLength(1), reason: 'one bus was enough');
+      expect(picks.selections, hasLength(1), reason: 'one bus was enough');
     });
 
-    test('an empty result means the party cannot be seated', () {
+    test('a party that does not fit keeps what it got, and is told the gap', () {
       final b = bus(id: 'a', cells: [single('SU1', 0)]);
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 4,
+        intent: const PartyIntent(roundTrip: 4),
       );
-      expect(
-        picks,
-        isEmpty,
-        reason: 'a partial pick would silently under-book the party',
-      );
+
+      // *** THIS CONTRACT CHANGED WITH PER-SEAT LEGS ***
+      // The picker used to be all-or-nothing: a party of four facing one free
+      // berth got NOTHING, on the reasoning that silently under-booking them
+      // was worse than saying there is no room. That reasoning still holds —
+      // but the shortfall now carries it, and throwing the picks away cannot
+      // survive mixed legs: a party whose outbound leg is seated and whose
+      // return leg is not must keep the outbound seats while being told,
+      // precisely, which leg is short.
+      expect(berthsOf(picks), 1);
+      expect(picks.shortfall[TripType.roundTrip], 3);
+      expect(picks.hasShortfall, isTrue);
     });
 
     test('exactly enough room is still enough', () {
@@ -120,8 +124,7 @@ void main() {
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 2,
+        intent: const PartyIntent(roundTrip: 2),
       );
       expect(berthsOf(picks), 2);
       expect(seatIdsOf(picks), {'SU1', 'SL1'});
@@ -134,8 +137,7 @@ void main() {
         availability: availabilityByKey(const [
           SeatAvailability(busId: 'a', seatId: 'SU1', usedGo: 1, usedRet: 1),
         ]),
-        leg: TripType.roundTrip,
-        people: 1,
+        intent: const PartyIntent(roundTrip: 1),
       );
       expect(seatIdsOf(picks), {'SL1'});
     });
@@ -155,8 +157,7 @@ void main() {
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 1,
+        intent: const PartyIntent(roundTrip: 1),
       );
       expect(seatIdsOf(picks), {'SL1'});
     });
@@ -171,8 +172,7 @@ void main() {
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 1,
+        intent: const PartyIntent(roundTrip: 1),
       );
       expect(
         seatIdsOf(picks),
@@ -213,8 +213,7 @@ void main() {
       final picks = autoPick(
         buses: [cheapRear],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 2,
+        intent: const PartyIntent(roundTrip: 2),
       );
 
       expect(
@@ -225,7 +224,7 @@ void main() {
             'family booking a pilgrimage together.',
       );
       final rows = {
-        for (final s in picks)
+        for (final s in picks.selections)
           for (final p in s.picks) p.cell.row,
       };
       expect(rows, hasLength(1));
@@ -240,9 +239,7 @@ void main() {
         availability: availabilityByKey(const [
           SeatAvailability(busId: 'a', seatId: 'DU1', usedGo: 1, usedRet: 1),
         ]),
-        leg: TripType.roundTrip,
-        people: 1,
-        shareOk: true,
+        intent: const PartyIntent(roundTrip: 1, shareOk: true),
       );
       expect(seatIdsOf(picks), {'DU1'});
       expect(berthsOf(picks), 1, reason: 'half the sofa');
@@ -255,13 +252,11 @@ void main() {
         availability: availabilityByKey(const [
           SeatAvailability(busId: 'a', seatId: 'DU1', usedGo: 1, usedRet: 1),
         ]),
-        leg: TripType.roundTrip,
-        people: 1,
-        shareOk: false,
+        intent: const PartyIntent(roundTrip: 1, shareOk: false),
       );
       expect(
-        picks,
-        isEmpty,
+        picks.isEmpty,
+        isTrue,
         reason: 'the only berth left would put a stranger on their sofa, and '
             'they said no — proposing it anyway is the bug this replaces',
       );
@@ -272,9 +267,7 @@ void main() {
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 1,
-        shareOk: false,
+        intent: const PartyIntent(roundTrip: 1, shareOk: false),
       );
       expect(seatIdsOf(picks), {'DU1'});
       expect(
@@ -294,8 +287,7 @@ void main() {
       final picks = autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 2,
+        intent: const PartyIntent(roundTrip: 2),
       );
       expect(
         seatIdsOf(picks),
@@ -317,17 +309,15 @@ void main() {
         autoPick(
           buses: [b],
           availability: avail,
-          leg: TripType.outboundOnly,
-          people: 1,
-        ),
-        isEmpty,
+          intent: const PartyIntent(outboundOnly: 1),
+        ).isEmpty,
+        isTrue,
       );
       expect(
         seatIdsOf(autoPick(
           buses: [b],
           availability: avail,
-          leg: TripType.returnOnly,
-          people: 1,
+          intent: const PartyIntent(returnOnly: 1),
         )),
         {'SU1'},
         reason: 'the return leg of that berth is untouched',
@@ -346,11 +336,10 @@ void main() {
       final picks = autoPick(
         buses: [roomy, other],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 2,
+        intent: const PartyIntent(roundTrip: 2),
       );
-      expect(picks, hasLength(1), reason: 'bus a alone seats them');
-      expect(picks.single.bus.id, 'a');
+      expect(picks.selections, hasLength(1), reason: 'bus a alone seats them');
+      expect(picks.selections.single.bus.id, 'a');
     });
 
     test('the party splits only when no single bus can hold it', () {
@@ -360,29 +349,33 @@ void main() {
       final picks = autoPick(
         buses: [a, b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 4,
+        intent: const PartyIntent(roundTrip: 4),
       );
       expect(berthsOf(picks), 4);
       expect(
-        picks.map((s) => s.bus.id).toSet(),
+        picks.selections.map((s) => s.bus.id).toSet(),
         {'a', 'b'},
         reason: 'four people, two berths per bus — splitting is the only way, '
             'and the summary bar must then say which buses',
       );
     });
 
-    test('no combination of buses is enough — nothing is proposed', () {
+    test('no combination of buses is enough — every free berth is still taken',
+        () {
       final a = bus(id: 'a', cells: [single('SU1', 0)]);
       final b = bus(id: 'b', cells: [single('SU1', 0)]);
+      final picks = autoPick(
+        buses: [a, b],
+        availability: const {},
+        intent: const PartyIntent(roundTrip: 5),
+      );
+
+      expect(berthsOf(picks), 2, reason: 'both buses gave what they had');
+      expect(picks.selections.map((s) => s.bus.id).toSet(), {'a', 'b'});
       expect(
-        autoPick(
-          buses: [a, b],
-          availability: const {},
-          leg: TripType.roundTrip,
-          people: 5,
-        ),
-        isEmpty,
+        picks.shortfall[TripType.roundTrip],
+        3,
+        reason: 'the gap is reported rather than the picks being discarded',
       );
     });
   });
@@ -399,16 +392,14 @@ void main() {
       final first = seatIdsOf(autoPick(
         buses: [b],
         availability: const {},
-        leg: TripType.roundTrip,
-        people: 3,
+        intent: const PartyIntent(roundTrip: 3),
       ));
       for (var i = 0; i < 5; i++) {
         expect(
           seatIdsOf(autoPick(
             buses: [b],
             availability: const {},
-            leg: TripType.roundTrip,
-            people: 3,
+            intent: const PartyIntent(roundTrip: 3),
           )),
           first,
           reason: 'a picker that wobbles between runs makes the chart feel '

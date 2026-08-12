@@ -319,6 +319,28 @@ class TourMoneySummary {
   final double orphanCollected;
   final double orphanIncome;
 
+  /// How many of the tour's buses have NO owner rent recorded (`bus_price` is
+  /// 0). The column is `not null default 0`, so "nobody entered the rent" and
+  /// "this bus is free" are the same value — and the codebase already reads
+  /// `> 0` as "a real rent" (migration 072, `bus_money_screen.dart:249`,
+  /// `add_bus_screen.dart:168`). This follows that convention.
+  ///
+  /// It matters because rent is the single largest cost of a trip and it is
+  /// folded into [totalExpenses] straight from `Bus.busPrice`. A bus missing
+  /// its rent therefore contributes its full billed fares to
+  /// [totalNetBilled] as pure profit, so the headline reads confidently green
+  /// while a whole cost line is absent. Surfaced so the UI can say the P&L is
+  /// incomplete rather than quietly overstating it.
+  ///
+  /// 0 when the caller supplied no per-bus rents (fleet unresolvable) — the
+  /// same "unknown, never a false alarm" rule [totalDetachedCash] and the
+  /// orphan figures follow.
+  final int busesMissingRent;
+
+  /// True when at least one bus on the tour has no rent recorded, which means
+  /// [totalNetBilled] is overstated by those buses' unentered rents.
+  bool get hasUnrecordedRent => busesMissingRent > 0;
+
   /// True when any money at all sits on a bus the tour no longer lists.
   bool get hasOrphanMoney =>
       orphanExpenses.abs() > 0.005 ||
@@ -338,6 +360,7 @@ class TourMoneySummary {
     this.orphanExpenses = 0,
     this.orphanCollected = 0,
     this.orphanIncome = 0,
+    this.busesMissingRent = 0,
   });
 
   /// Net cash for the tour (collections + extra income − expenses).
@@ -379,6 +402,7 @@ class TourMoneySummary {
     double? toCollectTotal,
     double detachedCashTotal = 0,
     Set<String>? knownBusIds,
+    int busesMissingRent = 0,
   }) {
     // Null (not supplied) → no orphan detection at all. An EMPTY set is a real
     // answer ("this tour has no buses"), so it still classifies.
@@ -403,6 +427,7 @@ class TourMoneySummary {
       orphanExpenses: orphanExpenses,
       orphanCollected: orphanCollected,
       orphanIncome: orphanIncome,
+      busesMissingRent: busesMissingRent,
       // netCash, consistent with orphanCollected above and the per-bus rollup
       // at :169/:173. This was left as netCollected when amount_online was
       // introduced, so the tour total silently included UPI money the handler

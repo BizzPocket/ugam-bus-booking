@@ -37,8 +37,19 @@
 //   ]
 // }
 //
-// Response: { results: [ { to, ok, id?, error? } ], sent, failed }
+// Response: { results: [ { to, ok, id?, error?, code? } ], sent, failed }
+//
+// `code` is Meta's numeric error code (132000, 131026, …). The app maps it to
+// a cause and a remedy (lib/services/wa_error.dart); without it every failure
+// reads as the same opaque English sentence.
 // ============================================================
+
+import {
+  CONSERVATIVE_STATIC_CHARS,
+  sanitize,
+  validateRendered,
+  violationSummary,
+} from "../_shared/wa_rules.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -142,7 +153,13 @@ Deno.serve(async (req: Request) => {
   const endpoint =
     `https://graph.facebook.com/${graphVersion}/${phoneNumberId}/messages`;
 
-  type SendResult = { to: string; ok: boolean; id?: string; error?: string };
+  type SendResult = {
+    to: string;
+    ok: boolean;
+    id?: string;
+    error?: string;
+    code?: number;
+  };
 
   // Send ONE message to the Graph API and shape the per-recipient result.
   const sendOne = async (m: OutMessage): Promise<SendResult> => {
@@ -151,14 +168,41 @@ Deno.serve(async (req: Request) => {
       return { to, ok: false, error: "Missing 'to' or 'template'" };
     }
 
+    // Last line of defence before Meta. The app sanitizes too, but this
+    // function is reachable by any signed-in caller, and a parameter carrying
+    // a line break costs the WHOLE batch a per-recipient 132000 that nobody
+    // could previously explain. Repair what can be repaired; refuse only what
+    // genuinely cannot travel.
+    const safe: OutMessage = {
+      ...m,
+      headerTextParams: m.headerTextParams?.map(sanitize),
+      bodyParams: m.bodyParams?.map(sanitize),
+    };
+    const violations = validateRendered(
+      [...(safe.headerTextParams ?? []), ...(safe.bodyParams ?? [])],
+      CONSERVATIVE_STATIC_CHARS,
+    );
+    if (violations.length > 0) {
+      return {
+        to,
+        ok: false,
+        // Mirrors Meta's own wording so the app's classifier maps it to the
+        // same cause it would have reached had Meta refused it.
+        error: `(#132000) Rejected before sending: ${
+          violationSummary(violations)
+        }`,
+        code: 132000,
+      };
+    }
+
     const graphBody = {
       messaging_product: "whatsapp",
       to,
       type: "template",
       template: {
-        name: m.template,
-        language: { code: m.language ?? "en" },
-        components: buildComponents(m),
+        name: safe.template,
+        language: { code: safe.language ?? "en" },
+        components: buildComponents(safe),
       },
     };
 
@@ -173,7 +217,20 @@ Deno.serve(async (req: Request) => {
       });
       const data = await res.json();
       if (res.ok) return { to, ok: true, id: data?.messages?.[0]?.id };
-      return { to, ok: false, error: data?.error?.message ?? `HTTP ${res.status}` };
+
+      // Meta's shape: { error: { message, code, error_subcode, error_data:
+      // { details } } }. `details` is usually the SPECIFIC reason (which
+      // parameter, what about it) while `message` is the generic headline, so
+      // keep both — the app quotes the text and maps the code.
+      const err = data?.error;
+      const details = err?.error_data?.details;
+      const message = [err?.message, details].filter(Boolean).join(" — ");
+      return {
+        to,
+        ok: false,
+        error: message || `HTTP ${res.status}`,
+        code: typeof err?.code === "number" ? err.code : undefined,
+      };
     } catch (e) {
       return { to, ok: false, error: String(e) };
     }

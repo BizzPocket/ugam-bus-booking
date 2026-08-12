@@ -32,6 +32,23 @@ class _SplashScreenState extends State<SplashScreen>
   late final Animation<double> _word;
   late final Animation<double> _tag;
 
+  /// How long the session restore may take before the splash admits it is
+  /// waiting on something. Comfortably past the 950 ms minimum hold, so a
+  /// healthy cold start never flashes this — it only appears on the slow
+  /// connection it exists to explain.
+  static const Duration _slowThreshold = Duration(seconds: 3);
+
+  /// True while the restore is still outstanding past [_slowThreshold]. A
+  /// brand mark that has finished animating and then sits there is
+  /// indistinguishable from a frozen app; this is the only feedback between
+  /// the end of the entrance and the 10 s fall-through.
+  bool _slowRestore = false;
+
+  /// Held so [dispose] can cancel it too. The happy path cancels it in
+  /// `_routeWhenReady`'s `finally`, but a splash torn down early (the launch
+  /// gate covering the app, a hot restart) never reaches that.
+  Timer? _slowTimer;
+
   Animation<double> _stage(double begin, double end) => CurvedAnimation(
         parent: _animController,
         curve: Interval(begin, end, curve: UgamMotion.easeOut),
@@ -66,6 +83,11 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _routeWhenReady() async {
     final auth = Get.find<AuthController>();
     var restoreTimedOut = false;
+    // Cancelled the instant the wait resolves, so a healthy start never
+    // schedules a setState and never leaves a pending timer behind.
+    _slowTimer = Timer(_slowThreshold, () {
+      if (mounted) setState(() => _slowRestore = true);
+    });
     try {
       await Future.wait([
         // Bound the session-restore read. On a stalled network the underlying
@@ -85,6 +107,8 @@ class _SplashScreenState extends State<SplashScreen>
       ]);
     } on TimeoutException {
       restoreTimedOut = true;
+    } finally {
+      _slowTimer?.cancel();
     }
     if (!mounted) return;
     if (auth.isLoggedIn.value && auth.isAdmin) {
@@ -105,6 +129,7 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   void dispose() {
+    _slowTimer?.cancel();
     _animController.dispose();
     super.dispose();
   }
@@ -119,82 +144,111 @@ class _SplashScreenState extends State<SplashScreen>
     final haloSize = UgamScale.px(context, 300);
     return UgamScaffold(
       body: Center(
-        child: AnimatedBuilder(
-          animation: _animController,
-          builder: (context, _) {
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Logo on the rising amber halo — the design system's signature
-                // "copper glow behind a hero figure" (see login_screen), here
-                // bloomed like a sunrise. The layout box hugs the logo; the far
-                // larger glow overflows it (Clip.none) so scaling the halo only
-                // repaints and never reflows the wordmark below.
-                SizedBox(
-                  width: logoSize,
-                  height: logoSize,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    clipBehavior: Clip.none,
-                    children: [
-                      Opacity(
-                        opacity: _glow.value,
-                        child: Transform.scale(
-                          scale: 0.55 + 0.45 * _glow.value,
-                          child: Container(
-                            width: haloSize,
-                            height: haloSize,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: RadialGradient(
-                                colors: [c.glow, c.glow.withValues(alpha: 0)],
-                                stops: const [0.0, 0.7],
+        // The wordmark used to sit in an unpadded Center, one long localized
+        // brand string away from running edge to edge on a 320pt phone at the
+        // 1.3x text scale app.dart permits.
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.xxl),
+          child: AnimatedBuilder(
+            animation: _animController,
+            builder: (context, _) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Logo on the rising amber halo — the design system's signature
+                  // "copper glow behind a hero figure" (see login_screen), here
+                  // bloomed like a sunrise. The layout box hugs the logo; the far
+                  // larger glow overflows it (Clip.none) so scaling the halo only
+                  // repaints and never reflows the wordmark below.
+                  SizedBox(
+                    width: logoSize,
+                    height: logoSize,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      clipBehavior: Clip.none,
+                      children: [
+                        Opacity(
+                          opacity: _glow.value,
+                          child: Transform.scale(
+                            scale: 0.55 + 0.45 * _glow.value,
+                            child: Container(
+                              width: haloSize,
+                              height: haloSize,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: RadialGradient(
+                                  colors: [c.glow, c.glow.withValues(alpha: 0)],
+                                  stops: const [0.0, 0.7],
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      Opacity(
-                        opacity: _logo.value,
-                        child: Transform.scale(
-                          scale: 0.90 + 0.10 * _logo.value,
-                          child: UgamLogo(size: logoSize),
+                        Opacity(
+                          opacity: _logo.value,
+                          child: Transform.scale(
+                            scale: 0.90 + 0.10 * _logo.value,
+                            child: UgamLogo(size: logoSize),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: UgamSpacing.xxl),
+                  Opacity(
+                    opacity: _word.value,
+                    child: Transform.translate(
+                      offset: Offset(0, (1 - _word.value) * 12),
+                      child: Text(
+                        tr('splash.brand_name'),
+                        style: UgamText.display.copyWith(
+                          color: c.ink,
+                          letterSpacing: 1,
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: UgamSpacing.xxl),
-                Opacity(
-                  opacity: _word.value,
-                  child: Transform.translate(
-                    offset: Offset(0, (1 - _word.value) * 12),
-                    child: Text(
-                      tr('splash.brand_name'),
-                      style: UgamText.display.copyWith(
-                        color: c.ink,
-                        letterSpacing: 1,
+                  const SizedBox(height: UgamSpacing.md),
+                  Opacity(
+                    opacity: _tag.value,
+                    child: Transform.translate(
+                      offset: Offset(0, (1 - _tag.value) * 10),
+                      child: Text(
+                        tr('splash.tagline'),
+                        textAlign: TextAlign.center,
+                        style: UgamText.caption.copyWith(
+                          color: c.ink2,
+                          letterSpacing: 0.6,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: UgamSpacing.md),
-                Opacity(
-                  opacity: _tag.value,
-                  child: Transform.translate(
-                    offset: Offset(0, (1 - _tag.value) * 10),
-                    child: Text(
-                      tr('splash.tagline'),
-                      style: UgamText.caption.copyWith(
-                        color: c.ink2,
-                        letterSpacing: 0.6,
-                      ),
-                    ),
+                  // Slow-restore feedback. AnimatedSize + a static line rather
+                  // than a spinner: this is a FINITE animation, so it cannot
+                  // leave the tree pumping forever, and a brand screen that
+                  // sprouts a spinner reads as a failure where a sentence reads
+                  // as an explanation. Occupies nothing until it has something
+                  // to say, so the composition above never shifts on a healthy
+                  // start.
+                  AnimatedSize(
+                    duration: UgamMotion.sheet,
+                    curve: UgamMotion.easeOut,
+                    alignment: Alignment.topCenter,
+                    child: _slowRestore
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: UgamSpacing.huge),
+                            child: Text(
+                              tr('splash.still_connecting'),
+                              textAlign: TextAlign.center,
+                              style: UgamText.caption.copyWith(color: c.ink3),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
                   ),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

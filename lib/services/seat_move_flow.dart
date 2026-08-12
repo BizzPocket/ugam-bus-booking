@@ -208,12 +208,18 @@ class SeatMoveFlow {
     );
   }
 
-  /// Place [mover] onto a FREE seat of [destination]. A grouped mover crossing
-  /// to ANOTHER bus cascades the whole group (after a confirm) so the group is
-  /// never split; a SAME-bus move just relocates this one member (the group
-  /// stays whole — everyone is still on this bus). A whole double keeps both
-  /// berths (the cross-bus [moveSeat] replicates the count).
-  static Future<void> moveTo(
+  /// Place [mover] onto a FREE seat of [destination]. A mover who travels with
+  /// OTHERS and crosses to ANOTHER bus cascades the whole party (after a
+  /// confirm) so the group is never split; a SAME-bus move just relocates this
+  /// one member (the group stays whole — everyone is still on this bus). A
+  /// whole double keeps both berths (the cross-bus [moveSeat] replicates the
+  /// count).
+  ///
+  /// Returns what actually happened. A cascade can be refused by the
+  /// destination or backed out of at the confirm, and even a successful cascade
+  /// lands the party on ENGINE-chosen berths rather than [toSeatId] — callers
+  /// that announce "moved" or dismiss a relocate banner must branch on this.
+  static Future<SeatMoveOutcome> moveTo(
     BuildContext context, {
     required String tourId,
     required String sourceBusId,
@@ -222,11 +228,14 @@ class SeatMoveFlow {
     required Bus destination,
     required String toSeatId,
   }) async {
-    final hasGroup = mover.groupId != null && mover.groupId!.isNotEmpty;
     final crossBus = destination.id != sourceBusId;
-    if (hasGroup && crossBus) {
-      await _moveGroup(context, tourId: tourId, mover: mover, destination: destination);
-      return;
+    if (crossBus && _travelsWithOthers(tourId, mover)) {
+      return _moveGroup(
+        context,
+        tourId: tourId,
+        mover: mover,
+        destination: destination,
+      );
     }
 
     // Capacity guard (data-corruption fix): a SUBSTITUTE whole-double mover holds
@@ -243,7 +252,7 @@ class SeatMoveFlow {
         .length;
     final berthsCap = moverBerths > targetCap ? targetCap : null;
 
-    await _ctrl.moveSeat(
+    return _ctrl.moveSeat(
       tourId: tourId,
       passengerId: mover.id,
       busId: sourceBusId,
@@ -252,6 +261,21 @@ class SeatMoveFlow {
       toBusId: destination.id,
       berths: berthsCap,
     );
+  }
+
+  /// True when [mover] is part of a party of TWO OR MORE on this tour — the
+  /// only case where a cross-bus move has to cascade the whole group.
+  ///
+  /// A booking keeps its groupId after the party shrinks to one rider, and a
+  /// bare `groupId != null` check sent that solo rider through the engine
+  /// cascade — which re-seats at engine-chosen berths and therefore threw away
+  /// the seat the operator picked. Mirrors [TourController]'s own guard.
+  static bool _travelsWithOthers(String tourId, Passenger mover) {
+    final gid = mover.groupId;
+    if (gid == null || gid.isEmpty) return false;
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return false;
+    return tour.passengers.where((p) => p.groupId == gid).length > 1;
   }
 
   /// Berth capacity of [seatId] on [bus]: a Double Sofa holds 2, every other
@@ -283,10 +307,14 @@ class SeatMoveFlow {
     required Bus destination,
     required SwapCandidate candidate,
   }) async {
-    final hasGroup = mover.groupId != null && mover.groupId!.isNotEmpty;
     final crossBus = destination.id != sourceBusId;
-    if (hasGroup && crossBus) {
-      await _moveGroup(context, tourId: tourId, mover: mover, destination: destination);
+    if (crossBus && _travelsWithOthers(tourId, mover)) {
+      await _moveGroup(
+        context,
+        tourId: tourId,
+        mover: mover,
+        destination: destination,
+      );
       return;
     }
 
@@ -309,14 +337,20 @@ class SeatMoveFlow {
   /// actual re-seat to [TourController.moveGroupToBus] (which re-seats the whole
   /// group on [destination] via the engine — within-bus arrangement is free, so
   /// the anchor's chosen seat is intentionally NOT preserved for grouped movers).
-  static Future<void> _moveGroup(
+  ///
+  /// Every exit reports itself: a refused destination is
+  /// [SeatMoveOutcome.failed] with the reason on screen, a backed-out confirm is
+  /// [SeatMoveOutcome.cancelled], and a successful cascade is
+  /// [SeatMoveOutcome.groupReseated] — never a plain `moved`, because the seat
+  /// the operator picked was not the seat anyone landed on.
+  static Future<SeatMoveOutcome> _moveGroup(
     BuildContext context, {
     required String tourId,
     required Passenger mover,
     required Bus destination,
   }) async {
     final tour = _ctrl.getTour(tourId);
-    if (tour == null) return;
+    if (tour == null) return SeatMoveOutcome.failed;
     final passengers = tour.passengers;
 
     final plan = GroupCascade.planMove(
@@ -328,20 +362,21 @@ class SeatMoveFlow {
 
     if (memberCount > 1) {
       final confirmed = await _confirmGroupMove(context, count: memberCount);
-      if (confirmed != true) return;
-      if (!context.mounted) return;
+      if (confirmed != true) return SeatMoveOutcome.cancelled;
+      if (!context.mounted) return SeatMoveOutcome.cancelled;
     }
 
     if (!plan.destinationFits) {
       _showBlockedDialog(context, plan.blockedReason);
-      return;
+      return SeatMoveOutcome.failed;
     }
 
-    await _ctrl.moveGroupToBus(
+    final ok = await _ctrl.moveGroupToBus(
       tourId: tourId,
       anchorPassengerId: mover.id,
       destinationBusId: destination.id,
     );
+    return ok ? SeatMoveOutcome.groupReseated : SeatMoveOutcome.failed;
   }
 
   static Future<bool> _confirmGroupMove(

@@ -7,6 +7,14 @@ import '../design/ugam.dart';
 /// Renders a [LegalDoc] (Privacy Policy / Terms / About) natively in the
 /// Ugam dark-first style, so legal pages read as part of the app rather than
 /// as an embedded off-theme web page.
+///
+/// STATE NOTE: there is deliberately no loading, error or retry state here,
+/// because there is nothing to load. A [LegalDoc] is assembled synchronously
+/// in `lib/content/legal_content.dart` from bundled `tr()` strings — no HTTP,
+/// no WebView, no Supabase read — so this screen cannot show a spinner, cannot
+/// fail, and cannot render blank on a dead network. Should a document ever
+/// move server-side, that is the moment to add UgamSkeleton + an error state
+/// with retry; do not add them speculatively for a synchronous getter.
 class LegalDocumentScreen extends StatelessWidget {
   final LegalDoc doc;
   const LegalDocumentScreen({super.key, required this.doc});
@@ -29,12 +37,16 @@ class LegalDocumentScreen extends StatelessWidget {
             Expanded(
               child: ListView(
                 physics: const BouncingScrollPhysics(),
-                // Wider reading gutter for long-form legal text.
-                padding: const EdgeInsets.fromLTRB(
+                // Wider reading gutter for long-form legal text. The bottom
+                // inset is added on top of the trailing gap because the
+                // SafeArea above is `bottom: false` (content scrolls under the
+                // home indicator) — without it the last line of a policy stops
+                // underneath the gesture bar.
+                padding: EdgeInsets.fromLTRB(
                   UgamSpacing.xl,
                   UgamSpacing.sm,
                   UgamSpacing.xl,
-                  UgamSpacing.huge2,
+                  UgamSpacing.huge2 + MediaQuery.paddingOf(context).bottom,
                 ),
                 children: [
                   // ── Document header: logo (about), title, meta ──
@@ -124,6 +136,12 @@ class _Block extends StatelessWidget {
           ),
         );
       case LegalBlockKind.bullets:
+        // The dot has to sit on the optical centre of the FIRST line, so its
+        // offset is derived from the rendered line box rather than pinned at a
+        // literal 8. Gujarati and Hindi are taller than Latin at the same point
+        // size, and the app lets a user scale text to 1.3x — at which point a
+        // hard-coded 8 leaves every bullet floating up near the ascender.
+        final lineHeight = MediaQuery.textScalerOf(context).scale(14) * 1.55;
         return Padding(
           padding:
               const EdgeInsets.only(top: UgamSpacing.xs, bottom: UgamSpacing.sm),
@@ -137,8 +155,8 @@ class _Block extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Padding(
-                        padding: const EdgeInsets.only(
-                            top: 8, right: UgamSpacing.sm + 2),
+                        padding: EdgeInsets.only(
+                            top: (lineHeight - 5) / 2, right: UgamSpacing.tight),
                         child: Container(
                           width: 5,
                           height: 5,

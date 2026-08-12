@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
+import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/settings_scaffold.dart';
 
@@ -57,8 +58,14 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
         whatsappNumber: wa,
         waHandoffTemplate: _signature.text.trim(),
       ));
+      if (!mounted) return;
       AppSnackBar.success(tr('settings_pages.saved'));
-      Get.back();
+      // Was a bare Get.back(), which pops the ROOT navigator. This page is
+      // pushed onto the Settings tab's NESTED navigator, so saving left the
+      // screen sitting open — the exact bug the Account and Notifications
+      // pages were already fixed for. AppNav.pop pops whichever navigator the
+      // screen actually lives on.
+      AppNav.pop(context);
     } catch (_) {
       AppSnackBar.error(tr('settings_pages.save_error'));
     } finally {
@@ -108,6 +115,11 @@ class _WhatsAppSettingsScreenState extends State<WhatsAppSettingsScreen> {
 /// A single settings field on its own soft surface — the labelled input on a
 /// quiet [UgamColorSet.cardElev] card with the helper line tucked underneath,
 /// matching the grouped-card look of the other settings sub-pages.
+///
+/// The surface was a hand-rolled `Container` painting `cardElev` at
+/// [UgamRadius.card]; it is now a [UgamCard], which is the same fill and the
+/// same radius plus the app's elevation. Without that these two panels sat
+/// flush with the page while the grouped cards one screen away floated.
 class _SoftField extends StatelessWidget {
   final UgamColorSet c;
   final String note;
@@ -121,24 +133,26 @@ class _SoftField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    // SettingsScaffold lays its children out with CrossAxisAlignment.start, so
+    // the panel still has to claim the full gutter width itself.
+    return SizedBox(
       width: double.infinity,
-      padding: const EdgeInsets.all(UgamSpacing.lg),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          child,
-          const SizedBox(height: UgamSpacing.md),
-          Text(
-            note,
-            style: UgamText.caption.copyWith(color: c.ink3),
-          ),
-        ],
+      child: UgamCard.plain(
+        elev: true,
+        padding: const EdgeInsets.all(UgamSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            child,
+            const SizedBox(height: UgamSpacing.md),
+            // Free to wrap — the Hindi number hint is 94 characters.
+            Text(
+              note,
+              style: UgamText.caption.copyWith(color: c.ink3),
+            ),
+          ],
+        ),
       ),
     );
   }

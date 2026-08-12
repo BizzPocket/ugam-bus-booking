@@ -112,6 +112,10 @@ class ChartSeatTile extends StatelessWidget {
   /// move. Null hides the price (the caller has no bus context).
   final double? berthPrice;
 
+  /// True when this berth is held for BOTH legs and the party is mixed, so the
+  /// customer can see why the same seat appears on both maps.
+  final bool bothLegs;
+
   const ChartSeatTile({
     super.key,
     required this.cell,
@@ -119,6 +123,7 @@ class ChartSeatTile extends StatelessWidget {
     required this.leg,
     this.selectedBerths = 0,
     this.berthPrice,
+    this.bothLegs = false,
   });
 
   @override
@@ -142,29 +147,52 @@ class ChartSeatTile extends StatelessWidget {
         (state == ChartSeatState.partlyTaken ||
             (selectedBerths == 1 && free >= 1));
 
+    final face = splits
+        ? _SplitTile(
+            c: c,
+            seatId: cell.seatId ?? '',
+            takenIsLady: lady,
+            selectedBerths: selectedBerths,
+          )
+        : _WholeTile(
+            c: c,
+            cell: cell,
+            // A two-person sofa quotes the WHOLE sofa; the half price belongs
+            // in the share sheet, next to the words explaining what half means.
+            price: berthPrice == null
+                ? null
+                : berthPrice! * (capacity == 2 ? 2 : 1),
+            seatId: cell.seatId ?? '',
+            state: state,
+            lady: lady,
+            isDouble: capacity == 2,
+          );
+
     return SizedBox(
       width: ChartSeatMetrics.width,
       height: ChartSeatMetrics.height,
-      child: splits
-          ? _SplitTile(
-              c: c,
-              seatId: cell.seatId ?? '',
-              takenIsLady: lady,
-              selectedBerths: selectedBerths,
+      // A CORNER badge, deliberately not a fourth text line in the face's
+      // Column: a second line is what once made doubles taller than singles,
+      // and this tile's height is fixed by [ChartSeatMetrics].
+      child: bothLegs
+          ? Stack(
+              children: [
+                Positioned.fill(child: face),
+                Positioned(
+                  left: 3,
+                  top: 2,
+                  child: Text(
+                    tr('seat_pick.both_legs'),
+                    style: UgamText.micro.copyWith(
+                      color: c.accent,
+                      fontSize: 7,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             )
-          : _WholeTile(
-              c: c,
-              cell: cell,
-              // A two-person sofa quotes the WHOLE sofa; the half price belongs
-              // in the share sheet, next to the words explaining what half means.
-              price: berthPrice == null
-                  ? null
-                  : berthPrice! * (capacity == 2 ? 2 : 1),
-              seatId: cell.seatId ?? '',
-              state: state,
-              lady: lady,
-              isDouble: capacity == 2,
-            ),
+          : face,
     );
   }
 }

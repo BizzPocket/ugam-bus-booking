@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/whatsapp_cloud_config.dart';
+import 'wa_error.dart';
+import 'wa_template_params.dart';
 
 /// One recipient's outcome from a Cloud API batch send.
 class WaRecipientResult {
@@ -10,11 +12,27 @@ class WaRecipientResult {
   final String? id;
   final String? error;
 
+  /// Meta's numeric error code, when the Edge Function reported one. Kept
+  /// separate from [error] because the code is what can be MAPPED to a cause
+  /// and a remedy, while the message is only what can be quoted.
+  ///
+  /// Null for a locally generated failure (no usable number, chart render
+  /// failed) and for an Edge Function deployed before the structured `code`
+  /// field — [WaError.classify] recovers those from the text instead.
+  final int? code;
+
+  /// The passenger this result belongs to, when the caller knew it. Lets a
+  /// failure be reported by NAME ("phone Rameshbhai") rather than by a bare
+  /// number the agent then has to look up.
+  final String? passengerId;
+
   const WaRecipientResult({
     required this.to,
     required this.ok,
     this.id,
     this.error,
+    this.code,
+    this.passengerId,
   });
 
   factory WaRecipientResult.fromMap(Map<String, dynamic> m) => WaRecipientResult(
@@ -22,6 +40,29 @@ class WaRecipientResult {
         ok: m['ok'] == true,
         id: m['id']?.toString(),
         error: m['error']?.toString(),
+        code: _asInt(m['code']),
+      );
+
+  /// This failure, classified into a cause the agent can act on.
+  WaErrorInfo get info => WaError.classify(code: code, message: error);
+
+  /// Meta returns the code as a number, but a JSON round-trip through an older
+  /// function shape can deliver it as a string. Accept both rather than lose
+  /// the one field that makes a failure explainable.
+  static int? _asInt(Object? v) => switch (v) {
+        int i => i,
+        num n => n.toInt(),
+        String s => int.tryParse(s.trim()),
+        _ => null,
+      };
+
+  WaRecipientResult withPassengerId(String? id) => WaRecipientResult(
+        to: to,
+        ok: ok,
+        id: this.id,
+        error: error,
+        code: code,
+        passengerId: id ?? passengerId,
       );
 }
 
@@ -41,6 +82,25 @@ class WaSendResult {
 
   bool get allSent => failed == 0 && sent > 0;
   bool get anySent => sent > 0;
+
+  /// Just the recipients that did not receive the message.
+  List<WaRecipientResult> get failures =>
+      results.where((r) => !r.ok).toList(growable: false);
+
+  /// Failures gathered by cause, most-affected first — so a summary can say
+  /// "3 numbers are not on WhatsApp" once instead of repeating one sentence
+  /// three times.
+  List<MapEntry<WaErrorCause, List<WaRecipientResult>>> get failuresByCause =>
+      WaError.groupByCause(failures, (r) => r.info);
+
+  /// Passenger ids worth trying again — those whose failure could plausibly
+  /// succeed on a second attempt. Feeds `sendSeatAllocations(onlyPassengerIds:)`.
+  /// A non-WhatsApp number or a disabled template is excluded: it would fail
+  /// identically and waste the agent's time.
+  Set<String> get retryablePassengerIds => {
+        for (final r in failures)
+          if (r.passengerId != null && r.info.isRetryable) r.passengerId!,
+      };
 }
 
 /// Raised when a WhatsApp Edge Function refuses the whole send (a non-2xx
@@ -162,7 +222,14 @@ class WhatsAppCloudService {
   /// invoke throws (config/transport error) it rethrows so the caller's catch
   /// sees it; if a LATER chunk throws, earlier progress is kept and that
   /// chunk's recipients are recorded as failed instead.
-  Future<WaSendResult> send(List<WaMessage> messages) async {
+  /// [passengerIds], when given, is index-aligned with [messages] and travels
+  /// back on each [WaRecipientResult]. It is what lets a failure be reported by
+  /// NAME and retried for the right people, instead of leaving the agent with a
+  /// bare phone number to match against the roster by hand.
+  Future<WaSendResult> send(
+    List<WaMessage> messages, {
+    List<String>? passengerIds,
+  }) async {
     if (messages.isEmpty) return WaSendResult.empty;
 
     // A message with no recipient can never be delivered, and putting a blank
@@ -172,17 +239,24 @@ class WhatsAppCloudService {
     // half-dozen call sites: one guard, and no future caller can miss it. The
     // dropped recipients are still REPORTED, never silently discarded.
     final addressed = <WaMessage>[];
+    final addressedIds = <String?>[];
     final unaddressed = <WaRecipientResult>[];
-    for (final m in messages) {
+    for (var i = 0; i < messages.length; i++) {
+      final m = messages[i];
+      final pid = (passengerIds != null && i < passengerIds.length)
+          ? passengerIds[i]
+          : null;
       if (m.to.trim().isEmpty) {
-        unaddressed.add(const WaRecipientResult(
+        unaddressed.add(WaRecipientResult(
           to: '',
           ok: false,
+          passengerId: pid,
           error: 'No usable WhatsApp number for this passenger '
               '— contact them by phone.',
         ));
       } else {
         addressed.add(m);
+        addressedIds.add(pid);
       }
     }
     if (addressed.isEmpty) {
@@ -206,8 +280,12 @@ class WhatsAppCloudService {
 
     for (var start = 0; start < messages.length; start += _chunkSize) {
       final end = start + _chunkSize;
-      final chunk =
-          messages.sublist(start, end > messages.length ? messages.length : end);
+      final stop = end > messages.length ? messages.length : end;
+      final chunk = messages.sublist(start, stop);
+      // Both Edge Functions build their results index-aligned with the request,
+      // so the passenger for result i is the one at chunk position i.
+      final chunkIds = addressedIds.sublist(start, stop);
+      String? idAt(int i) => i < chunkIds.length ? chunkIds[i] : null;
       final body = {'messages': chunk.map((m) => m.toJson()).toList()};
       try {
         debugPrint('[WA] invoke "${WhatsAppCloudConfig.functionName}" '
@@ -228,17 +306,23 @@ class WhatsAppCloudService {
           final rawResults = (data['results'] as List?) ?? const [];
           final chunkResults = rawResults
               .whereType<Map>()
-              .map((r) => WaRecipientResult.fromMap(Map<String, dynamic>.from(r)))
+              .toList()
+              .asMap()
+              .entries
+              .map((e) => WaRecipientResult.fromMap(
+                    Map<String, dynamic>.from(e.value),
+                  ).withPassengerId(idAt(e.key)))
               .toList();
 
           if (chunkResults.isEmpty &&
               topLevelError != null &&
               topLevelError.trim().isNotEmpty) {
             failed += chunk.length;
-            results.addAll(chunk.map((m) => WaRecipientResult(
-                  to: m.to,
+            results.addAll(chunk.asMap().entries.map((e) => WaRecipientResult(
+                  to: e.value.to,
                   ok: false,
                   error: topLevelError,
+                  passengerId: idAt(e.key),
                 )));
             continue;
           }
@@ -257,20 +341,26 @@ class WhatsAppCloudService {
           // every recipient in the chunk, carrying what we did receive.
           debugPrint('[WA] unexpected reply shape: ${data.runtimeType} / $data');
           failed += chunk.length;
-          results.addAll(chunk.map((m) => WaRecipientResult(
-                to: m.to,
+          results.addAll(chunk.asMap().entries.map((e) => WaRecipientResult(
+                to: e.value.to,
                 ok: false,
                 error: 'Unexpected response from WhatsApp sender '
                     '(HTTP ${res.status})',
+                passengerId: idAt(e.key),
               )));
         }
-      } catch (e) {
-        debugPrint('[WA] invoke FAILED: $e');
+      } catch (err) {
+        debugPrint('[WA] invoke FAILED: $err');
         if (start == 0) rethrow;
         failed += chunk.length;
-        results.addAll(chunk.map(
-          (m) => WaRecipientResult(to: m.to, ok: false, error: e.toString()),
-        ));
+        results.addAll(chunk.asMap().entries.map(
+              (entry) => WaRecipientResult(
+                to: entry.value.to,
+                ok: false,
+                error: err.toString(),
+                passengerId: idAt(entry.key),
+              ),
+            ));
       }
     }
     return WaSendResult(
@@ -300,7 +390,14 @@ class WhatsAppCloudService {
     required String busId,
     required String message,
   }) async {
-    final body = {'requestId': requestId, 'busId': busId, 'message': message};
+    // The handler composer applies the same repair, but this method is the
+    // only door to `bus-message` and it used to forward whatever it was given.
+    // Meta refuses a parameter carrying a line break with 132000 for EVERY
+    // passenger on the bus, so a handler typing two paragraphs reached nobody
+    // and saw nothing explaining it. Repairing here — as the admin path
+    // already did — means neither the client nor the server can be the gap.
+    final safe = WaTemplateParams.sanitize(message);
+    final body = {'requestId': requestId, 'busId': busId, 'message': safe};
     debugPrint('[WA] invoke "bus-message" (handler) body=$body');
     final FunctionResponse res;
     try {

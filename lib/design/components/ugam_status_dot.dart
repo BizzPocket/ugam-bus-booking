@@ -46,9 +46,23 @@ class UgamStatusDot extends StatelessWidget {
             maxLines: 1,
             softWrap: false,
             overflow: TextOverflow.ellipsis,
+            // Ladder step: [UgamText.caption] (Inter 12/w500), taken up to
+            // w600 for the semibold status voice.
+            //
+            // This carried a raw `fontSize: 11` — an off-ladder size, inside
+            // the design system itself. There is no Inter step at 11: the
+            // ladder runs caption 12 → micro 10, and micro is Sora UPPERCASE
+            // with 1.4 tracking, which is a section-eyebrow voice, not a
+            // sentence-case status label. So caption (one px up, same family,
+            // same voice) is the only defensible step; 10 would have changed
+            // the typeface and the casing to save one pixel.
+            //
+            // The +1px is safe at every call site: the label is [Flexible]
+            // with `overflow: ellipsis`, so it re-fits rather than overflows.
+            // When the wanted `captionStrong` step lands in the typography
+            // pass, this becomes `UgamText.captionStrong.copyWith(color:)`.
             style: UgamText.caption.copyWith(
               color: color,
-              fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
           ),

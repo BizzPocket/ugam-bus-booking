@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:occubusbooking/models/trip_type.dart';
 import 'package:occubusbooking/utils/chart_basket.dart';
 
 /// A selection that survives switching buses.
@@ -33,8 +34,8 @@ void main() {
         ..setBerths(busId: 'a', seatId: 'DU1', berths: 2);
       basket.setBerths(busId: 'b', seatId: 'SU1', berths: 1);
 
-      expect(basket.forBus('a'), {'DU1': 2});
-      expect(basket.forBus('b'), {'SU1': 1});
+      expect(basket.forBus('a'), {'DU1': (berths: 2, leg: TripType.roundTrip)});
+      expect(basket.forBus('b'), {'SU1': (berths: 1, leg: TripType.roundTrip)});
       expect(basket.busIds, containsAll(['a', 'b']));
     });
 
@@ -128,7 +129,7 @@ void main() {
       final basket = ChartBasket()
         ..setBerths(busId: 'a', seatId: 'DU1', berths: 2);
 
-      basket.forBus('a')['DU1'] = 99;
+      basket.forBus('a')['DU1'] = (berths: 99, leg: TripType.roundTrip);
 
       expect(
         basket.berthsFor(busId: 'a', seatId: 'DU1'),

@@ -42,6 +42,11 @@ class CustomerMoreScreen extends StatelessWidget {
                   UgamSpacing.gutter,
                   UgamSpacing.lg,
                 ),
+                // The footer is NOT in this list. On a menu this short the page
+                // used to end two-thirds up the screen with the version line
+                // floating in the middle of nothing; pinning it to the bottom
+                // of the frame (below) turns that leftover space into a
+                // deliberate margin instead of an unfinished page.
                 children: [
                   // Server-driven slot. Zero-height unless content is
                   // published, so this screen is unchanged by default.
@@ -114,11 +119,17 @@ class CustomerMoreScreen extends StatelessWidget {
                       onTap: () => _openDoc(LegalContent.terms),
                     ),
                   ),
-                  const SizedBox(height: UgamSpacing.xl),
-
-                  _Footer(c: c, version: AppInfo.version),
                 ],
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                UgamSpacing.gutter,
+                UgamSpacing.md,
+                UgamSpacing.gutter,
+                UgamSpacing.md,
+              ),
+              child: _Footer(c: c, version: AppInfo.version),
             ),
           ],
         ),
@@ -172,6 +183,13 @@ class _BrandHero extends StatelessWidget {
   }
 }
 
+/// Section heading above a group of rows.
+///
+/// NOT the uppercase `UgamText.micro` eyebrow the admin surface uses.
+/// `.toUpperCase()` is a NO-OP in Gujarati and Hindi — the two scripts have no
+/// case — so on the primary language that eyebrow was just 10 px of faint ink3
+/// with 1.4 letter-spacing prised between the conjuncts. The emphasis is
+/// carried by weight and colour instead, which works in every script.
 class _SectionLabel extends StatelessWidget {
   final UgamColorSet c;
   final String label;
@@ -184,12 +202,9 @@ class _SectionLabel extends StatelessWidget {
         UgamSpacing.xs,
         0,
         UgamSpacing.xs,
-        UgamSpacing.sm + 2,
+        UgamSpacing.tight,
       ),
-      child: Text(
-        label.toUpperCase(),
-        style: UgamText.micro.copyWith(color: c.ink3),
-      ),
+      child: Text(label, style: UgamText.bodyStrong.copyWith(color: c.ink2)),
     );
   }
 }
@@ -224,7 +239,9 @@ class _MoreRow extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(UgamRadius.card),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 56),
+        // Tap floor, not a fixed height: UgamScale.tap never returns under
+        // 44 pt, so the row stays tappable on the smallest phone.
+        constraints: BoxConstraints(minHeight: UgamScale.tap(context, 56)),
         child: Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: UgamSpacing.lg,
@@ -252,10 +269,14 @@ class _MoreRow extends StatelessWidget {
                       title,
                       style: UgamText.titleS.copyWith(color: c.ink),
                     ),
-                    const SizedBox(height: 1),
+                    const SizedBox(height: 2),
+                    // ink2, not ink3. This is the row's actual description —
+                    // real content, not meta — and ink3 measures 3.5:1 on the
+                    // ground, under AA. It also wraps rather than ellipsing:
+                    // the Gujarati strings run ~30% longer than the English.
                     Text(
                       subtitle,
-                      style: UgamText.caption.copyWith(color: c.ink3),
+                      style: UgamText.caption.copyWith(color: c.ink2),
                     ),
                   ],
                 ),
@@ -280,12 +301,17 @@ class _Footer extends StatelessWidget {
       children: [
         Text(
           tr('customer_more.version', namedArgs: {'version': version}),
-          style: UgamText.caption.copyWith(color: c.ink3),
+          style: UgamText.tabular(UgamText.caption.copyWith(color: c.ink2)),
+          textAlign: TextAlign.center,
         ),
         const SizedBox(height: UgamSpacing.xs),
+        // caption, not micro: micro is the UPPERCASE eyebrow style and carries
+        // 1.4 letter-spacing, which prises apart Gujarati/Hindi conjuncts for
+        // no gain — there is no uppercase in either script to justify it.
         Text(
           tr('customer_more.footer_made_by'),
-          style: UgamText.micro.copyWith(color: c.ink3),
+          style: UgamText.caption.copyWith(color: c.ink3),
+          textAlign: TextAlign.center,
         ),
       ],
     );

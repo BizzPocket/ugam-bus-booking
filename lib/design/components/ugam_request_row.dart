@@ -45,17 +45,28 @@ class UgamReqChip extends StatelessWidget {
 
     final Widget? lead =
         leadingWidget ??
-        (leading == null ? null : Icon(leading, size: 10, color: fg));
+        // 12, not 10 — matches the larger cap height of `captionStrong` below.
+        (leading == null ? null : Icon(leading, size: 12, color: fg));
 
-    final text = Text(
-      label,
-      style: UgamText.micro.copyWith(
-        color: fg,
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.3,
-      ),
-    );
+    // `captionStrong` (Inter 12 / w600), NOT a forked `micro`.
+    //
+    // This was `UgamText.micro.copyWith(fontSize: 9.5, w700, letterSpacing: 0.3)`
+    // — three separate violations of the ladder in one call:
+    //   * 9.5 is under the Inter floor of 12. With UgamScale's 0.85 small-phone
+    //     factor that renders at ~8pt, below legibility for Gujarati conjuncts.
+    //   * `micro` is Sora, uppercase-only and Latin-only by documentation; chip
+    //     labels here are translated (`chip_due`, `chip_paid`, `upi_pending_chip`).
+    //   * letterSpacing pulls apart conjuncts that are supposed to join.
+    //
+    // `caption` (w500) was rejected over `captionStrong` (w600): the two are
+    // within ~1.5pt in width, so weight is the deciding factor, and the chip was
+    // w700 deliberately — at w500 a badge reads as body copy.
+    //
+    // COST: the chip box grows ~15pt -> ~20pt tall. That is absorbed because the
+    // strip below is a `Wrap`, which reflows rather than overflowing. If anyone
+    // reverts that Wrap to a Row, this height becomes an overflow — see the
+    // guard case in test/overflow/components_overflow_test.dart.
+    final text = Text(label, style: UgamText.captionStrong.copyWith(color: fg));
 
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -84,6 +95,10 @@ class UgamReqChip extends StatelessWidget {
 class UgamRequestRow extends StatelessWidget {
   final String initials;
   final String name;
+
+  /// Any number of chips. They lay out in a [Wrap], so a set too wide for the
+  /// row runs onto a second line instead of overflowing — see the note on the
+  /// chip strip in [build] for why wrapping and not scrolling or ellipsising.
   final List<UgamReqChip> chips;
   final String? timeAgo;
   final VoidCallback? onTap;
@@ -147,11 +162,41 @@ class UgamRequestRow extends StatelessWidget {
                   const SizedBox(height: 3),
                   Row(
                     children: [
-                      ...chips.expand(
-                        (chip) => [chip, const SizedBox(width: 5)],
+                      // A `Wrap`, not a `Row`. This was a bare Row of chips
+                      // plus a `Spacer`, which is unbounded in the main axis:
+                      // one chip fits, three real Gujarati chips overflowed
+                      // the RenderFlex by 167px at 375pt and painted the
+                      // timestamp 103pt off the right edge. `chips` is a
+                      // public `List` with no documented bound, so the only
+                      // caller passing one chip today was luck, not a
+                      // contract.
+                      //
+                      // Wrap over the two alternatives, for a row in a list:
+                      //   * horizontal scroll — a nested horizontal scrollable
+                      //     inside a tappable row inside a vertical list eats
+                      //     the row's own drag gestures (these rows sit under
+                      //     `UgamSwipeAction` elsewhere), and content parked
+                      //     off the right edge of a 20pt-tall strip is
+                      //     undiscoverable;
+                      //   * Flexible + ellipsis — a chip IS its label. "મોકલ…"
+                      //     is not a shorter status, it is no status. The name
+                      //     above may ellipsise because a partial name is
+                      //     still a name; a partial badge is noise.
+                      // Wrapping costs one line of height in the rare case and
+                      // keeps every chip readable, which is the whole job.
+                      Expanded(
+                        child: Wrap(
+                          spacing: 5,
+                          runSpacing: UgamSpacing.xs,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: chips,
+                        ),
                       ),
+                      // The row's right anchor: natural width, never flexed,
+                      // so it keeps its position no matter how the chips fall.
+                      // The `Expanded` above is what yields to it.
                       if (timeAgo != null) ...[
-                        const Spacer(),
+                        const SizedBox(width: UgamSpacing.sm),
                         Text(
                           timeAgo!,
                           style: UgamText.caption.copyWith(

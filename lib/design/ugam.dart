@@ -13,6 +13,7 @@ export 'components/ugam_bus_backdrop.dart';
 export 'components/ugam_bus_chassis.dart';
 export 'components/ugam_button.dart';
 export 'components/ugam_card.dart';
+export 'components/ugam_caveat.dart';
 export 'components/ugam_cta.dart';
 export 'components/ugam_date_pill.dart';
 export 'components/ugam_dialog.dart';

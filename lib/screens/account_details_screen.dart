@@ -25,6 +25,10 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
   late final TextEditingController _name;
   late final TextEditingController _businessName;
   late final TextEditingController _businessEmail;
+
+  /// Read-only. Exists only so the login number can be shown through the same
+  /// [UgamInput] as the editable fields instead of a hand-rolled look-alike.
+  late final TextEditingController _phone;
   bool _saving = false;
 
   @override
@@ -36,6 +40,8 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
     );
     _businessName = TextEditingController(text: admin?.businessName ?? '');
     _businessEmail = TextEditingController(text: admin?.businessEmail ?? '');
+    final phone = _authCtrl.userPhone.value;
+    _phone = TextEditingController(text: phone.isEmpty ? '—' : '+91 $phone');
   }
 
   @override
@@ -43,6 +49,7 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
     _name.dispose();
     _businessName.dispose();
     _businessEmail.dispose();
+    _phone.dispose();
     super.dispose();
   }
 
@@ -110,34 +117,22 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: UgamSpacing.lg),
-        Text(
-          tr('settings_pages.account.phone_label').toUpperCase(),
-          style: UgamText.micro.copyWith(color: c.ink2),
+        // The login number used to be a hand-rolled look-alike: its own
+        // uppercase micro label, a fixed 54px `cardElev` box at the input
+        // radius, an inline lock glyph. It reproduced UgamInput's decoration
+        // by eye, so it missed the hairline border and the height floor and
+        // would have drifted again the next time the field style moved. It is
+        // now a real disabled UgamInput — same label, same box, same metrics
+        // as the three editable fields above it, for free.
+        UgamInput(
+          label: tr('settings_pages.account.phone_label'),
+          controller: _phone,
+          enabled: false,
+          suffix: Icon(Icons.lock_outline_rounded, size: 18, color: c.ink3),
         ),
         const SizedBox(height: UgamSpacing.sm),
-        Container(
-          height: 54,
-          padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.lg),
-          decoration: BoxDecoration(
-            color: c.cardElev,
-            borderRadius: BorderRadius.circular(UgamRadius.input),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.lock_outline_rounded, size: 18, color: c.ink3),
-              const SizedBox(width: UgamSpacing.md),
-              Expanded(
-                child: Text(
-                  '+91 ${_authCtrl.userPhone.value}',
-                  style: UgamText.tabular(
-                    UgamText.body.copyWith(color: c.ink2, fontSize: 15),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: UgamSpacing.sm),
+        // Says in words what the lock says in a glyph, and wraps: the Hindi
+        // string is 78 characters.
         Text(
           tr('settings_pages.account.phone_hint'),
           style: UgamText.caption.copyWith(color: c.ink3),

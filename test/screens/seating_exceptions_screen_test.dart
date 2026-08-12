@@ -168,13 +168,16 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pump();
 
-    // Section headers (uppercased category-label keys) for the three live
-    // categories the proposal produced.
-    expect(find.text('SEATING_EXCEPTIONS.CAT_PRIORITY'), findsOneWidget);
-    expect(find.text('SEATING_EXCEPTIONS.CAT_GROUPS'), findsOneWidget);
-    expect(find.text('SEATING_EXCEPTIONS.CAT_SEAT_TYPE'), findsOneWidget);
+    // Section headers (category-label keys) for the three live categories the
+    // proposal produced. The header renders its label verbatim — the caps and
+    // tracking came off the eyebrow because `.toUpperCase()` is a no-op in
+    // Gujarati and the tracking split conjuncts — so in tests the visible
+    // string is the raw tr() key, unchanged.
+    expect(find.text('seating_exceptions.cat_priority'), findsOneWidget);
+    expect(find.text('seating_exceptions.cat_groups'), findsOneWidget);
+    expect(find.text('seating_exceptions.cat_seat_type'), findsOneWidget);
     // No overflow/waitlist exception arose → no Waitlist section.
-    expect(find.text('SEATING_EXCEPTIONS.CAT_WAITLIST'), findsNothing);
+    expect(find.text('seating_exceptions.cat_waitlist'), findsNothing);
 
     // The priority card swaps the engine message for explicit alert copy
     // (title + message keys), so we assert those keys, not the raw message.

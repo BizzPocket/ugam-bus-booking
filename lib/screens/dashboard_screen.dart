@@ -61,14 +61,20 @@ class DashboardScreen extends StatelessWidget {
             return DashboardLoadingShimmer(c: c);
           }
           if (tourCtrl.hasError.value && tourCtrl.tours.isEmpty) {
-            return UgamEmpty(
-              icon: Icons.cloud_off_rounded,
-              title: tr('dashboard.error_title'),
-              body: tourCtrl.errorMessage.value,
-              cta: UgamCTA(
-                label: tr('app.action.retry'),
-                leadingIcon: Icons.refresh_rounded,
-                onPressed: tourCtrl.refreshTours,
+            // Reserve the dock's footprint so the Retry button is optically
+            // centred in the space the agent can see, not parked underneath
+            // the floating nav.
+            return Padding(
+              padding: const EdgeInsets.only(bottom: UgamSpacing.dockClearance),
+              child: UgamEmpty(
+                icon: Icons.cloud_off_rounded,
+                title: tr('dashboard.error_title'),
+                body: tourCtrl.errorMessage.value,
+                cta: UgamCTA(
+                  label: tr('app.action.retry'),
+                  leadingIcon: Icons.refresh_rounded,
+                  onPressed: tourCtrl.refreshTours,
+                ),
               ),
             );
           }
@@ -94,111 +100,184 @@ class DashboardScreen extends StatelessWidget {
 
           return RefreshIndicator(
             onRefresh: tourCtrl.refreshTours,
-            color: c.accent,
-            child: ListView(
+            // CHROME, NOT OWNERSHIP. The accent means exactly one thing —
+            // "this is yours" (see [Brand]) — and a pull-to-refresh spinner is
+            // not a thing anyone owns. On this screen the same amber was
+            // painting the user's own rows *while* the spinner spun, so one hue
+            // was doing two jobs in one frame; that is the dilution the ration
+            // exists to prevent. ink2 is the app's neutral-chrome ink: 5.95:1
+            // on the spinner's puck in Midnight, 5.50:1 in Daylight, both well
+            // clear of the 3:1 WCAG floor for a graphical object (the amber it
+            // replaces measured 4.46:1 in Daylight).
+            //
+            // Every RefreshIndicator in lib/ carries this same line. It is a
+            // deliberately app-wide, one-pass decision: a spinner that changed
+            // hue as the user pulled on a different tab read as a bug.
+            color: c.ink2,
+            // Slivers, not a ListView, for ONE reason: the trailing
+            // SliverFillRemaining. Every live block on this screen sits in the
+            // top half, and on a quiet day (no blockers, no new requests) the
+            // bottom 300-400 pt was undesigned void. The tail now takes that
+            // space deliberately and anchors the one remaining useful door to
+            // the bottom edge, in the thumb zone. The children are byte-for-byte
+            // the same widgets in the same order.
+            child: CustomScrollView(
               physics: const AlwaysScrollableScrollPhysics(
                 parent: BouncingScrollPhysics(),
               ),
-              padding: const EdgeInsets.fromLTRB(
-                UgamSpacing.gutter,
-                UgamSpacing.lg,
-                UgamSpacing.gutter,
-                UgamSpacing.dockClearance,
-              ),
-              children: [
-                Obx(() => DashboardGreeting(
-                      name: authCtrl.userName.value,
-                      initials: authCtrl.initials,
-                      c: c,
-                    )),
-                const SizedBox(height: UgamSpacing.md),
-                DashboardTripHero(c: c),
-                const SizedBox(height: UgamSpacing.md),
-                DashboardQuickActions(c: c, shell: shell),
-                // Unread WhatsApp messages nudge — only when there's something
-                // to read; the always-present entry point is the home-header
-                // chat icon. Neutral surface (accent stays rationed to the top
-                // attention CTA); the count rides a TONAL accent pill.
-                Obx(() {
-                  final unread = Get.find<InboxController>().totalUnread.value;
-                  if (unread <= 0) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: UgamSpacing.md),
-                    child: _MessagesCard(count: unread, c: c),
-                  );
-                }),
-                const SizedBox(height: UgamSpacing.md),
-                Obx(() {
-                  final attention = _needsAttention(context, tourCtrl.tours);
-                  if (attention.isEmpty) {
-                    // P2: explicit affirmation when there are tours but
-                    // nothing needs action — never a silent SizedBox.
-                    final activeTours = tourCtrl.tours
-                        .where((t) => t.status != TourStatus.completed)
-                        .length;
-                    if (activeTours == 0) return const SizedBox.shrink();
-                    return DashboardAllCaughtUp(count: activeTours, c: c);
-                  }
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      DashboardSectionLabel(
-                        label: tr('dashboard.section_attention'),
-                        meta: '${attention.length}',
-                        c: c,
-                      ),
-                      const SizedBox(height: UgamSpacing.md),
-                      for (var i = 0; i < attention.length; i++) ...[
-                        // Accent-rationing: only the single top-priority
-                        // (first) attention row gets the accent CTA chip.
-                        DashboardAttentionRow(
-                          item: attention[i],
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    UgamSpacing.lg,
+                    UgamSpacing.gutter,
+                    0,
+                  ),
+                  sliver: SliverList.list(children: [
+                    Obx(() => DashboardGreeting(
+                          name: authCtrl.userName.value,
+                          initials: authCtrl.initials,
                           c: c,
-                          isPrimary: i == 0,
-                        ),
-                        if (i != attention.length - 1)
-                          const SizedBox(height: UgamSpacing.tight),
-                      ],
-                    ],
-                  );
-                }),
-                Obx(() {
-                  final recent = _recentRequests(tourCtrl.tours);
-                  if (recent.isEmpty) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: UgamSpacing.md),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        DashboardSectionLabel(
-                          label: tr('dashboard.section_recent'),
-                          action: tr('dashboard.see_all'),
-                          // Requests tab. Route through the same entry point
-                          // the dock uses so there is one way in. NOTE: from
-                          // the dashboard (index 0) this is behaviourally
-                          // identical to switchTab — onTabTapped only pops the
-                          // target navigator when it is ALREADY the current
-                          // tab, so a Requests sub-page the agent left open
-                          // still shows. Resetting it needs a shell-side
-                          // method; escalated rather than hand-rolled here.
-                          onAction: () => shell.onTabTapped(3),
-                          c: c,
-                        ),
-                        const SizedBox(height: UgamSpacing.md),
-                        for (var i = 0; i < recent.length; i++) ...[
-                          DashboardRecentRow(
-                            entry: recent[i],
-                            onTap: () => shell.onTabTapped(3), // Requests tab
+                        )),
+                    const SizedBox(height: UgamSpacing.md),
+                    DashboardTripHero(c: c),
+                    const SizedBox(height: UgamSpacing.md),
+                    DashboardQuickActions(c: c, shell: shell),
+                    // Unread WhatsApp messages nudge — only when there's something
+                    // to read; the always-present entry point is the home-header
+                    // chat icon. Neutral surface (accent stays rationed to the top
+                    // attention CTA); the count rides a TONAL accent pill.
+                    Obx(() {
+                      final unread = Get.find<InboxController>().totalUnread.value;
+                      if (unread <= 0) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: UgamSpacing.md),
+                        child: _MessagesCard(count: unread, c: c),
+                      );
+                    }),
+                    const SizedBox(height: UgamSpacing.md),
+                    Obx(() {
+                      final attention = _needsAttention(context, tourCtrl.tours);
+                      if (attention.isEmpty) {
+                        // P2: explicit affirmation when there are tours but
+                        // nothing needs action — never a silent SizedBox.
+                        final activeTours = tourCtrl.tours
+                            .where((t) => t.status != TourStatus.completed)
+                            .length;
+                        if (activeTours == 0) return const SizedBox.shrink();
+                        return DashboardAllCaughtUp(count: activeTours, c: c);
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          DashboardSectionLabel(
+                            label: tr('dashboard.section_attention'),
+                            meta: '${attention.length}',
+                            c: c,
                           ),
-                          if (i != recent.length - 1)
-                            const SizedBox(height: UgamSpacing.tight),
+                          const SizedBox(height: UgamSpacing.md),
+                          for (var i = 0; i < attention.length; i++) ...[
+                            // Accent-rationing: only the single top-priority
+                            // (first) attention row gets the accent CTA chip.
+                            DashboardAttentionRow(
+                              item: attention[i],
+                              c: c,
+                              isPrimary: i == 0,
+                            ),
+                            if (i != attention.length - 1)
+                              const SizedBox(height: UgamSpacing.tight),
+                          ],
                         ],
-                      ],
+                      );
+                    }),
+                    Obx(() {
+                      final recent = _recentRequests(tourCtrl.tours);
+                      // "No data yet" and "genuinely zero" are different
+                      // statements. With no active tour there is nothing that
+                      // COULD produce a request, so the section stays away.
+                      // With active tours and no requests the section renders
+                      // an explicit empty state — a silent gap where a list
+                      // should be reads as a load that failed.
+                      final hasActive = tourCtrl.tours
+                          .any((t) => t.status != TourStatus.completed);
+                      if (recent.isEmpty && !hasActive) {
+                        return const SizedBox.shrink();
+                      }
+                      final empty = recent.isEmpty;
+                      // Requests tab. Route through the same entry point the
+                      // dock uses so there is one way in. NOTE: from the
+                      // dashboard (index 0) this is behaviourally identical to
+                      // switchTab — onTabTapped only pops the target navigator
+                      // when it is ALREADY the current tab, so a Requests
+                      // sub-page the agent left open still shows. Resetting it
+                      // needs a shell-side method; escalated rather than
+                      // hand-rolled here.
+                      void openRequests() => shell.onTabTapped(3);
+                      return Padding(
+                        padding: const EdgeInsets.only(top: UgamSpacing.md),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            DashboardSectionLabel(
+                              label: tr('dashboard.section_recent'),
+                              // Nothing to "see all" of when the list is
+                              // empty — the card below is itself the door.
+                              action: empty ? null : tr('dashboard.see_all'),
+                              onAction: empty ? null : openRequests,
+                              c: c,
+                            ),
+                            const SizedBox(height: UgamSpacing.md),
+                            if (empty)
+                              _RecentEmptyCard(c: c, onTap: openRequests)
+                            else
+                              for (var i = 0; i < recent.length; i++) ...[
+                                DashboardRecentRow(
+                                  entry: recent[i],
+                                  onTap: openRequests,
+                                ),
+                                if (i != recent.length - 1)
+                                  const SizedBox(height: UgamSpacing.tight),
+                              ],
+                          ],
+                        ),
+                      );
+                    }),
+                  ]),
+                ),
+                // The composed tail. `hasScrollBody: false` hands it whatever
+                // viewport is left over after the blocks above, and the bottom
+                // Align pins its content to the floor of that space — so a
+                // quiet dashboard reads as a deliberate composition with an
+                // anchored footer, not as a page that just stops. This also
+                // carries the whole scrollable's UgamSpacing.dockClearance.
+                //
+                // The clearance MUST be padding on the CHILD, not a
+                // SliverPadding around this sliver: SliverPadding does not
+                // subtract its `after` extent from the child's
+                // remainingPaintExtent, so the fill would size itself to the
+                // full remaining viewport and then push 140 pt of padding
+                // BELOW the fold — the tail landed under the dock and a
+                // one-card dashboard became scrollable for no reason.
+                // Verified by layout probe, not by eye.
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      UgamSpacing.gutter,
+                      UgamSpacing.xl,
+                      UgamSpacing.gutter,
+                      UgamSpacing.dockClearance,
                     ),
-                  );
-                }),
+                    child: Align(
+                      alignment: Alignment.bottomCenter,
+                      child: Obx(
+                        () => _DashboardTail(tours: tourCtrl.tours, c: c),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           );
@@ -223,17 +302,34 @@ class DashboardScreen extends StatelessWidget {
       // Locked tours: only surface post-lock duties (re-notify after seat
       // edits, outstanding handler cash). Pre-lock blockers don't apply.
       if (tour.status == TourStatus.locked) {
-        final changed = tour.passengers
-            .where((p) =>
-                p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified)
-            .length;
+        // [Passenger.notifiedSeatsAreStale] — seats moved OR taken back since
+        // the send. The old predicate (`assignedSeats.isNotEmpty &&
+        // seatsChangedSinceNotified`) was redundant in its first half and
+        // silently dropped the rider whose seat was WITHDRAWN after they were
+        // told: nothing on this dashboard would ever mention them again.
+        final stale =
+            tour.passengers.where((p) => p.notifiedSeatsAreStale).toList();
+        // A withdrawal has no WhatsApp template — Notify shows the rider's
+        // phone and an "I've told them" acknowledgement — so "re-notify"
+        // wording would promise a send that surface refuses to offer. When any
+        // rider is stranded, the row leads with them and asks for a call.
+        final withdrawn =
+            stale.where((p) => p.seatsRemovedSinceNotified).length;
+        final changed = stale.length;
         if (changed > 0) {
           items.add(AttentionItem(
             tour: tour,
-            reason: tr('dashboard.attention_renotify',
-                namedArgs: {'n': '$changed'}),
-            ctaLabel: tr('dashboard.cta_renotify'),
-            ctaIcon: Icons.chat_rounded,
+            reason: withdrawn > 0
+                ? tr('dashboard.attention_seat_removed',
+                    namedArgs: {'n': '$withdrawn'})
+                : tr('dashboard.attention_renotify',
+                    namedArgs: {'n': '$changed'}),
+            ctaLabel: withdrawn > 0
+                ? tr('dashboard.cta_call')
+                : tr('dashboard.cta_renotify'),
+            ctaIcon: withdrawn > 0
+                ? Icons.phone_in_talk_rounded
+                : Icons.chat_rounded,
             tone: UgamStatusTone.warm,
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(
@@ -426,6 +522,99 @@ class DashboardScreen extends StatelessWidget {
   }
 }
 
+/// Explicit "no requests yet" state for the Recent requests section. Replaces
+/// a silent `SizedBox.shrink()`: on a live tour with no bookings, a section
+/// that simply is not there is indistinguishable from a section that failed to
+/// load. The whole card is the primary action (→ the Requests tab), so it also
+/// clears the 44 pt minimum by a wide margin.
+class _RecentEmptyCard extends StatelessWidget {
+  final UgamColorSet c;
+  final VoidCallback onTap;
+
+  const _RecentEmptyCard({required this.c, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    // Decorative medallion inside an already-tappable card -> px, never tap.
+    final tile = UgamScale.px(context, 40);
+    return UgamCard.plain(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Container(
+            width: tile,
+            height: tile,
+            decoration: BoxDecoration(
+              color: c.cardElev,
+              borderRadius: BorderRadius.circular(UgamRadius.input),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.inbox_rounded,
+              size: UgamScale.px(context, 20),
+              color: c.ink3,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  tr('dashboard.recent_empty_title'),
+                  style: UgamText.titleS.copyWith(color: c.ink),
+                ),
+                const SizedBox(height: 2),
+                // Two lines: the Gujarati copy runs past one line at 375.
+                Text(
+                  tr('dashboard.recent_empty_body'),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bottom-anchored closing block for the dashboard.
+///
+/// Everything live on this screen sits in the top half. When the agent has no
+/// active tour left — a brand-new account, or a season that has finished — the
+/// blocks above collapse and the rest of the page was blank. This takes that
+/// space on purpose and puts the one door that is still useful (the archive of
+/// finished tours) on the floor of the viewport, where the thumb already is.
+/// It renders nothing while there IS active work: a quiet dashboard should not
+/// grow footer furniture the moment it is busy.
+class _DashboardTail extends StatelessWidget {
+  final List<Tour> tours;
+  final UgamColorSet c;
+
+  const _DashboardTail({required this.tours, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasActive = tours.any((t) => t.status != TourStatus.completed);
+    final completed =
+        tours.where((t) => t.status == TourStatus.completed).length;
+    if (hasActive || completed == 0) return const SizedBox.shrink();
+
+    return UgamButton(
+      label: tr('dashboard.completed_tours', namedArgs: {'n': '$completed'}),
+      icon: Icons.history_rounded,
+      kind: UgamButtonKind.ghost,
+      expand: true,
+      onPressed: () => Get.find<ShellController>().onTabTapped(1), // Tours tab
+    );
+  }
+}
+
 /// Dashboard nudge card for unread WhatsApp customer messages. Neutral surface
 /// (accent-rationing law — the accent CTA belongs to the top attention row);
 /// the unread count rides a small TONAL accent pill — `accentFill` + `accent`
@@ -474,9 +663,14 @@ class _MessagesCard extends StatelessWidget {
                   style: UgamText.bodyStrong.copyWith(color: c.ink),
                 ),
                 const SizedBox(height: 2),
+                // `caption`, not `micro`: micro is the uppercase eyebrow step
+                // (10 pt, 1.4 tracking) and this is a subtitle sentence. In
+                // Gujarati ("3 વાંચ્યા વગર") the eyebrow tracking pulled the
+                // conjuncts apart and the line read as spaced-out fragments.
                 Text(
                   tr('inbox.card_unread', namedArgs: {'count': '$count'}),
-                  style: UgamText.micro.copyWith(color: c.ink2),
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                  maxLines: 2,
                 ),
               ],
             ),
@@ -492,12 +686,20 @@ class _MessagesCard extends StatelessWidget {
               color: c.warm,
               borderRadius: BorderRadius.circular(UgamRadius.chip),
             ),
+            // `onAction` rather than a hardcoded `Colors.white`: the warm fill
+            // is a DARK rose in Daylight (white ink, 5.4:1) but a LIGHT pink in
+            // Midnight, where white-on-pink measured ~1.4:1 — the count was
+            // effectively invisible in the app's primary theme. `onAction` is
+            // the token that already resolves to "ink that survives a
+            // maximum-contrast fill" and flips correctly in both themes.
+            // Numerals also drop to `caption`: micro's eyebrow tracking was
+            // spacing out a two-digit badge.
             child: Text(
               count > 99 ? '99+' : '$count',
               style: UgamText.tabular(
-                UgamText.micro.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+                UgamText.caption.copyWith(
+                  color: c.onAction,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),

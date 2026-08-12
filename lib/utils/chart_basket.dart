@@ -12,23 +12,37 @@
 // must be part of the key — the same reason `SeatAvailability.keyFor` composes
 // busId with seatId.
 
-/// Seats picked on one bus: `seatId -> berths taken of that cell`.
-typedef BusPicks = Map<String, int>;
+import '../models/trip_type.dart';
+
+/// One picked cell: how many berths, and which legs the person in it travels.
+///
+/// The leg lives HERE rather than on the screen because it is a property of the
+/// person, not of the booking. A basket keyed only by berth count silently
+/// forced every seat onto one trip type.
+typedef BasketEntry = ({int berths, TripType leg});
+
+/// Seats picked on one bus: `seatId -> entry`.
+typedef BusPicks = Map<String, BasketEntry>;
 
 class ChartBasket {
   final Map<String, BusPicks> _byBus = {};
 
   /// Berths of [seatId] on [busId] currently in the basket. Zero when untouched.
   int berthsFor({required String busId, required String seatId}) =>
-      _byBus[busId]?[seatId] ?? 0;
+      _byBus[busId]?[seatId]?.berths ?? 0;
 
-  /// Set how many berths of one cell are taken. Zero or less REMOVES the seat,
-  /// and emptying a bus removes the bus — an empty bus must never reach the
-  /// claim as "a bus with no seats", which the server would reject.
+  /// The whole entry, or null when this cell is not in the basket.
+  BasketEntry? entryFor({required String busId, required String seatId}) =>
+      _byBus[busId]?[seatId];
+
+  /// Set how many berths of one cell are taken, and on which legs. Zero or less
+  /// REMOVES the seat, and emptying a bus removes the bus — an empty bus must
+  /// never reach the claim as "a bus with no seats", which the server rejects.
   void setBerths({
     required String busId,
     required String seatId,
     required int berths,
+    TripType leg = TripType.roundTrip,
   }) {
     if (berths <= 0) {
       final picks = _byBus[busId];
@@ -37,13 +51,15 @@ class ChartBasket {
       if (picks.isEmpty) _byBus.remove(busId);
       return;
     }
-    (_byBus[busId] ??= <String, int>{})[seatId] = berths;
+    (_byBus[busId] ??= <String, BasketEntry>{})[seatId] =
+        (berths: berths, leg: leg);
   }
 
   /// Seats picked on [busId]. A COPY: handing out the live map would let a
   /// caller mutate the basket behind its own back, and the only thing that
   /// would catch the resulting oversell is the server.
-  BusPicks forBus(String busId) => Map<String, int>.from(_byBus[busId] ?? {});
+  BusPicks forBus(String busId) =>
+      Map<String, BasketEntry>.from(_byBus[busId] ?? {});
 
   /// Buses with at least one seat picked, in insertion order.
   List<String> get busIds => _byBus.keys.toList();
@@ -51,7 +67,14 @@ class ChartBasket {
   /// Total people in the basket, across every bus.
   int get totalBerths => _byBus.values
       .expand((picks) => picks.values)
-      .fold<int>(0, (sum, n) => sum + n);
+      .fold<int>(0, (sum, e) => sum + e.berths);
+
+  /// Berths taken for ONE leg bucket, across every bus. This is what the sofa
+  /// rule and the summary bar count against the gate's per-leg answer.
+  int berthsForLeg(TripType leg) => _byBus.values
+      .expand((picks) => picks.values)
+      .where((e) => e.leg == leg)
+      .fold<int>(0, (sum, e) => sum + e.berths);
 
   bool get isEmpty => _byBus.isEmpty;
   bool get isNotEmpty => !isEmpty;

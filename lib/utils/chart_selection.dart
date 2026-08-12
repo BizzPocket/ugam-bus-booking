@@ -30,7 +30,22 @@ class ChartPick {
   final SeatCell cell;
   final int berths;
 
-  const ChartPick({required this.cell, required this.berths});
+  /// Which legs the person in this berth is travelling.
+  ///
+  /// A chart booking used to carry ONE leg for the whole basket, which made a
+  /// party where some people stay on impossible to express. The leg belongs to
+  /// the person in the seat, not to the booking.
+  ///
+  /// Defaults to round-trip so every existing construction keeps its previous
+  /// meaning — the old single-leg basket was always "everyone, both ways"
+  /// unless the screen said otherwise.
+  final TripType leg;
+
+  const ChartPick({
+    required this.cell,
+    required this.berths,
+    this.leg = TripType.roundTrip,
+  });
 
   SeatType get seatType => cell.seatType!;
   String get seatId => cell.seatId!;
@@ -39,7 +54,8 @@ class ChartPick {
   bool get isWholeDouble =>
       seatType == SeatType.doubleSofa && berths >= 2;
 
-  Map<String, dynamic> toClaimMap() => {'seatId': seatId, 'berths': berths};
+  Map<String, dynamic> toClaimMap() =>
+      {'seatId': seatId, 'berths': berths, 'leg': leg.storageKey};
 }
 
 /// The seat TYPE a pick books as.
@@ -60,46 +76,62 @@ SeatType lineTypeFor(ChartPick pick) {
 SeatPosition? linePositionFor(ChartPick pick) =>
     pick.seatType == SeatType.seater ? null : pick.cell.position;
 
-/// Collapse picks into request lines, grouped by (seat type, position), in a
-/// stable order. Mirrors the `group by` in `chart_claim_seats`.
-List<RequestLine> requestLinesFor({
-  required List<ChartPick> picks,
-  required TripType leg,
-}) {
+/// Collapse picks into request lines, grouped by (seat type, position, LEG), in
+/// a stable order. Mirrors the `group by` in `chart_claim_seats`.
+///
+/// The leg joins the key because two people in the same kind of berth on
+/// DIFFERENT legs are two different lines — and are billed differently, since
+/// a one-way berth pays half.
+List<RequestLine> requestLinesFor({required List<ChartPick> picks}) {
   // Insertion-ordered so the output is deterministic for a given pick order.
-  final counts = <String, ({SeatType type, SeatPosition? pos, int qty})>{};
+  final counts =
+      <String, ({SeatType type, SeatPosition? pos, TripType leg, int qty})>{};
   for (final p in picks) {
     final type = lineTypeFor(p);
     final pos = linePositionFor(p);
-    final key = '${type.name}|${pos?.name ?? ''}';
+    final key = '${type.name}|${pos?.name ?? ''}|${p.leg.name}';
     final prev = counts[key];
     counts[key] = (
       type: type,
       pos: pos,
+      leg: p.leg,
       qty: (prev?.qty ?? 0) + 1,
     );
   }
   return [
     for (final v in counts.values)
-      RequestLine(seatType: v.type, position: v.pos, qty: v.qty, leg: leg),
+      RequestLine(seatType: v.type, position: v.pos, qty: v.qty, leg: v.leg),
   ];
 }
 
-/// One [SeatAssignment] PER BERTH. A whole double sofa is therefore TWO entries
-/// sharing a seatId — exactly how the app already stores a solo-held double
-/// (see `seatOccupantsForBus`), so occupancy resolution is unchanged.
+/// One [SeatAssignment] PER BERTH, each stamped with its own pick's leg. A whole
+/// double sofa is therefore TWO entries sharing a seatId — exactly how the app
+/// already stores a solo-held double (see `seatOccupantsForBus`), so occupancy
+/// resolution is unchanged.
 List<SeatAssignment> assignmentsFor({
   required List<ChartPick> picks,
   required String busId,
-  required TripType leg,
 }) {
   final out = <SeatAssignment>[];
   for (final p in picks) {
     for (var i = 0; i < p.berths; i++) {
-      out.add(SeatAssignment(busId: busId, seatId: p.seatId, leg: leg));
+      out.add(SeatAssignment(busId: busId, seatId: p.seatId, leg: p.leg));
     }
   }
   return out;
+}
+
+/// The coarse trip type a mixed basket reports as. Round-trip when any pick is
+/// round-trip or the legs are mixed, else the single shared value.
+///
+/// Deliberately the same rule as `summaryTripTypeOf` in `round_trip_combine.dart`
+/// — request mode has always derived `booking_requests.trip_type` this way, and
+/// two different derivations of one column is how they drift apart.
+TripType summaryLegOf(List<ChartPick> picks) {
+  if (picks.isEmpty) return TripType.roundTrip;
+  if (picks.any((p) => p.leg == TripType.roundTrip)) return TripType.roundTrip;
+  final legs = picks.map((p) => p.leg).toSet();
+  return legs.length == 1 ? legs.first : TripType.roundTrip;
 }
 
 /// Total physical berths in a selection — the number the customer is paying

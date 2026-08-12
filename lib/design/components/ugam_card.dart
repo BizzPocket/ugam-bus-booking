@@ -19,6 +19,11 @@ enum UgamCardTone { none, accent, good, warm, danger }
 /// Cards never nest other cards. Use the `elev: true` flag when you
 /// need a slightly raised inner surface — it swaps fill from
 /// [UgamColorSet.card] to [UgamColorSet.cardElev].
+///
+/// Every card sits at [UgamElevationSet.rest] — level 1 — regardless of theme,
+/// tone or the `elev` flag. This is the single edit that gives the whole app
+/// depth, so a screen that wants a card flush with the page should not be
+/// using a card.
 class UgamCard extends StatefulWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -106,10 +111,10 @@ class _UgamCardState extends State<UgamCard>
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final e = UgamElevation.of(context);
 
     // Semantic tone → tinted fill + hairline border. `none` falls back to the
-    // neutral card/cardElev surface and keeps the soft light-mode shadow.
+    // neutral card/cardElev surface.
     final (Color? toneFill, Color? toneBorder) = switch (widget.tone) {
       UgamCardTone.none => (null, null),
       UgamCardTone.accent => (c.accentFill, c.accent.withValues(alpha: 0.30)),
@@ -120,22 +125,19 @@ class _UgamCardState extends State<UgamCard>
         c.danger.withValues(alpha: 0.32),
       ),
     };
-    final bool tinted = widget.tone != UgamCardTone.none;
 
     Widget surface = Container(
       decoration: BoxDecoration(
         color: toneFill ?? (widget.elev ? c.cardElev : c.card),
         borderRadius: BorderRadius.circular(widget.radius),
         border: toneBorder == null ? null : Border.all(color: toneBorder),
-        boxShadow: (isDark || tinted)
-            ? null
-            : const [
-                BoxShadow(
-                  color: Color(0x14000000),
-                  offset: Offset(0, 3),
-                  blurRadius: 14,
-                ),
-              ],
+        // Level 1 for EVERY card, in both themes and both tones. This used to
+        // be a single hand-rolled shadow that only painted on light-mode
+        // untinted cards, which is why the app read as one flat plane: dark
+        // mode had no depth at all and tinted cards dropped back to the page.
+        // A card is the same object whatever colour it is wearing, so it sits
+        // at the same height. See [UgamElevation].
+        boxShadow: e.rest,
       ),
       child: Padding(padding: widget.padding, child: widget.child),
     );

@@ -158,10 +158,13 @@ void main() {
     // used the raw tr text). Premium/Held moved into the seat tap menu.
     expect(find.text('tour_seat_assignment.edit_seats'), findsNothing);
 
-    // The redesigned dock shows two clearly-separated zones. _sectionLabel
-    // uppercases the tr() key, which in tests is the raw key text.
-    expect(find.text('TOUR_SEAT_ASSIGNMENT.NOW_SEATING'), findsOneWidget);
-    expect(find.text('TOUR_SEAT_ASSIGNMENT.UP_NEXT'), findsOneWidget);
+    // The redesigned dock shows two clearly-separated zones. Both eyebrows go
+    // through [UgamSectionLabel], which renders its label VERBATIM — it used
+    // to `.toUpperCase()` onto `micro`, a no-op in Gujarati that also split
+    // conjuncts, so the caps device was dropped. In tests the rendered string
+    // is therefore the raw tr() key, unchanged.
+    expect(find.text('tour_seat_assignment.now_seating'), findsOneWidget);
+    expect(find.text('tour_seat_assignment.up_next'), findsOneWidget);
   });
 
   testWidgets(

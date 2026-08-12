@@ -28,6 +28,16 @@ enum UgamMeterDensity { tour, bus, hero }
 /// symmetric or no-return tour never shows a redundant second row. Fill is
 /// neutral [UgamColorSet.ink2] (copper stays reserved for CTAs) and turns
 /// [UgamColorSet.good] mint only when a leg is genuinely full.
+///
+/// THREE states, not two. `capacity == 0` — a bus whose seat layout has not
+/// landed (or was never drawn) — is neither full nor empty: it is "no seat plan
+/// yet". It used to fall through the `free == 0 -> full` test and announce
+/// itself SOLD OUT in the done-tone on a bus that has no seats at all, so the
+/// agent could not tell a finished tour from one that had not started. It now
+/// renders `capacity.no_layout` over an EMPTY track in [UgamColorSet.ink3] and
+/// never borrows the mint. The grid face already refuses to render at all in
+/// this case (`tour_seat_assignment_screen.dart`, the `capacity <= 0` guard) —
+/// this is the same intent, expressed as copy instead of silence.
 class UgamCapacityMeter extends StatelessWidget {
   final int capacity;
   final int goOccupied;
@@ -158,6 +168,9 @@ class UgamCapacityMeter extends StatelessWidget {
     required int cap,
     required double barH,
   }) {
+    // No seat plan -> the third state. MUST come before the `free == 0` test
+    // below, which is what used to call an empty-capacity bus "full".
+    if (cap == 0) return _noPlanRow(c, label: label, barH: barH);
     final free = (cap - placed).clamp(0, cap);
     final full = free == 0;
     final frac = cap == 0 ? 0.0 : (placed / cap).clamp(0.0, 1.0);
@@ -197,9 +210,86 @@ class UgamCapacityMeter extends StatelessWidget {
     );
   }
 
+  /// The `cap == 0` face for the stacked densities. It deliberately prints NO
+  /// fraction: "0 / 0" is the sentence that contradicted itself, because a
+  /// denominator of zero cannot express how full anything is. The leg label
+  /// survives when the caller passed one, and the status slot — where the count
+  /// and the free/full pair normally sit — carries the plain-language third
+  /// state instead, in [UgamColorSet.ink2].
+  ///
+  /// `ink2`, NOT the `ink3` the sibling "full" label wears: this string is the
+  /// ONLY thing in the row saying what is going on (it replaces both the count
+  /// and the free/full pair), and `ink3` measures 2.74:1 on `card` in Daylight
+  /// — below AA for body copy. `ink2` is 5.50:1 light / 5.95:1 dark on `card`
+  /// (4.90 / 5.18 on `cardElev`) and still reads a clear step quieter than the
+  /// `ink` count it stands in for.
+  ///
+  /// The track still renders at zero fill rather than collapsing, so the row
+  /// keeps its height and a layout arriving mid-session lands as a bar filling
+  /// in, not as a jump.
+  Widget _noPlanRow(
+    UgamColorSet c, {
+    required String? label,
+    required double barH,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            if (label != null) ...[
+              Text(
+                label,
+                style: UgamText.caption.copyWith(color: c.ink2),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(width: UgamSpacing.sm),
+            ],
+            // Expanded + end-aligned, NOT a Spacer beside a Flexible: two flex
+            // children would split the row in half and clip Gujarati at 1.3x.
+            Expanded(
+              child: Text(
+                tr('capacity.no_layout'),
+                style: UgamText.caption.copyWith(color: c.ink2),
+                textAlign: TextAlign.end,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: UgamSpacing.sm),
+        _bar(c, 0, barH, false),
+      ],
+    );
+  }
+
   // ── bus : one compact line ──────────────────────────────────────────────
 
   Widget _busLine(UgamColorSet c, int cap, int go, int ret, bool symmetric) {
+    // Same third state as [_legRow], in the compact geometry: the no-plan copy
+    // takes the slot the "0/0" fraction used to occupy (leading, where this
+    // density puts its detail), the trailing free/full slot stays empty, and
+    // the track paints at zero fill — never the done-tone.
+    if (cap == 0) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            tr('capacity.no_layout'),
+            // ink2 for the same AA reason as [_noPlanRow].
+            style: UgamText.caption.copyWith(color: c.ink2),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 6),
+          _bar(c, 0, 5, false),
+        ],
+      );
+    }
     final fuller = go > ret ? go : ret;
     final free = (cap - fuller).clamp(0, cap);
     final full = free == 0;

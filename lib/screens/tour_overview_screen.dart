@@ -160,12 +160,27 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
           child: Obx(() {
             final tour = _ctrl.getTour(widget.tourId);
             if (tour == null) {
-              // Shared empty state, matching how tour_detail_screen.dart:66-77
-              // handles the identical "tour vanished mid-session" condition —
-              // a bare centred string read as a broken screen.
+              // Three genuinely different reasons the tour isn't here, and
+              // they used to collapse into one flat "Tour not found." — which
+              // on a cold start (the roster is still in flight) is a lie that
+              // reads as a broken screen.
+              if (_ctrl.isLoading.value) return const _OverviewSkeleton();
+              if (_ctrl.hasError.value) {
+                return UgamEmpty.error(
+                  onRetry: _ctrl.refreshTours,
+                  message: _ctrl.errorMessage.value,
+                );
+              }
+              // Genuinely absent (deleted / wrong id). Still offer the one
+              // recovery path there is rather than a dead end.
               return UgamEmpty(
                 icon: Icons.search_off_rounded,
                 title: tr('tour_overview.tour_not_found'),
+                cta: UgamCTA(
+                  label: tr('app.action.refresh'),
+                  leadingIcon: Icons.refresh_rounded,
+                  onPressed: _ctrl.refreshTours,
+                ),
               );
             }
 
@@ -297,11 +312,37 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                 // dividers between), so several fit without the old
                 // card-per-bus gaps.
                 if (tour.buses.isEmpty)
+                  // An empty state that names the problem and hands over the
+                  // fix. It used to be title-only, on the one screen whose
+                  // entire job is impossible until a bus exists.
                   UgamEmpty(
                     icon: Icons.directions_bus_outlined,
                     title: tr('tour_overview.no_buses'),
+                    cta: UgamCTA(
+                      label: tr('tour_overview.add_a_bus'),
+                      leadingIcon: Icons.add_rounded,
+                      onPressed: _onAddBus,
+                    ),
                   )
-                else
+                else ...[
+                  // Names the block the card below is. Natural case (no
+                  // .toUpperCase()): the eyebrow read comes from micro's
+                  // weight + tracking, which survives Gujarati and Hindi,
+                  // where uppercasing is a no-op.
+                  Row(
+                    children: [
+                      Text(
+                        tr('tour_detail.tab_buses'),
+                        style: UgamText.micro.copyWith(color: c.ink3),
+                      ),
+                      const SizedBox(width: UgamSpacing.sm),
+                      UgamReqChip(
+                        label: '${tour.buses.length}',
+                        variant: UgamChipVariant.neutral,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: UgamSpacing.sm),
                   // Shared card chrome. `padding: zero` is load-bearing —
                   // UgamCard.plain defaults to `gutter` all round, and the rows
                   // below carry their own `md` padding + full-bleed dividers.
@@ -330,6 +371,7 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                       ],
                     ),
                   ),
+                ],
               ],
             );
           }),
@@ -346,12 +388,40 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
               ? tr('tour_overview.regenerate_plan')
               : tr('tour_overview.fill_bus');
           final onEdit = widget.onEditByHand;
-          // Thumb-zone stack: the ONE primary focal action is the
-          // full-width champagne UgamCTA "Edit seats by hand"; auto-fill /
-          // re-generate drops below it as a quiet full-width ghost
-          // UgamButton so solid gold stays rationed to a single element.
-          // Standalone (no onEditByHand) collapses to the lone auto-fill
-          // CTA as the screen's primary.
+          // Thumb-zone stack. The ONE primary focal action stays the full-width
+          // champagne UgamCTA "Edit seats by hand"; auto-fill / re-generate is
+          // the subordinate. Standalone (no onEditByHand) collapses to the lone
+          // auto-fill CTA as the screen's primary.
+          //
+          // The secondary used to be `expand: true`, and that is what made the
+          // pair unreadable: TWO full-width slabs of the same width and nearly
+          // the same height, one filled and one not. The eye compares footprint
+          // before it compares fill, so they read as peers — while the ghost's
+          // actual weight is that of a text link. Neither won.
+          //
+          // Fixed by committing to the subordination rather than faking parity:
+          // the ghost keeps its kind (its `ink2` label is already AA on the
+          // page — 6.20:1 Daylight / 6.83:1 Midnight) and drops to CONTENT
+          // width, centred, so all four cues now point the same way instead of
+          // two of them cancelling out: solid champagne vs transparent, 52 vs
+          // 48.1 pt tall, titleS vs bodyStrong, 347 vs 263.7 pt wide (measured,
+          // gu @375). No second champagne element — the accent-rationing law
+          // forbids one, and a tonal/neutral slab would have ADDED weight to
+          // the thing that needs less of it.
+          //
+          // Honest limit: at the 1.3x text scale app.dart permits, the label
+          // grows and the width cue narrows to 324.3 vs 347. The fill, height
+          // and type cues are unaffected, so the hierarchy degrades gracefully
+          // rather than reverting — but the width is not doing the work there.
+          //
+          // It is also the safer geometry. These two actions are not peers in
+          // kind: "Edit by hand" opens a workspace and is always reversible,
+          // while re-generate DISCARDS the current arrangement and re-seats
+          // everyone (hence the confirm in [_fill]). Handing a destructive
+          // mutation the full width of the thumb zone, directly under the
+          // button the agent taps most, is a mis-tap waiting to happen. At
+          // content width it is still a 48.1 pt-tall, 263.7 pt-wide target —
+          // far past the 44 pt floor — carrying 70% of the CTA's hit area.
           return UgamStickyCTA(
             child: onEdit == null
                 ? UgamCTA(
@@ -369,13 +439,34 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
                         onPressed: hasBuses ? onEdit : null,
                       ),
                       const SizedBox(height: UgamSpacing.sm),
-                      UgamButton(
-                        label: fillLabel,
-                        icon: Icons.auto_awesome_rounded,
-                        kind: UgamButtonKind.ghost,
-                        expand: true,
-                        loading: _filling,
-                        onPressed: hasBuses ? _fill : null,
+                      // IntrinsicWidth is LOAD-BEARING, not decoration.
+                      // `expand: false` alone does nothing here: UgamButton's
+                      // inner Container sets `alignment: Alignment.center`,
+                      // which wraps its child in an Align, and an Align with no
+                      // size factors takes `constraints.biggest` whenever the
+                      // incoming constraints are bounded. Dropping `expand`
+                      // measured 347 px — byte-identical to the full-width
+                      // version. IntrinsicWidth hands the button a TIGHT width
+                      // (its own max intrinsic, clamped to what the row has), so
+                      // it finally renders at content width. Verified by
+                      // measurement, not by reading the flag.
+                      //
+                      // AnimatedSize because `loading` swaps the label for a
+                      // 20 px spinner: at content width that is a real width
+                      // change, and an unanimated one would snap the button to
+                      // a stub the instant the agent taps it.
+                      AnimatedSize(
+                        duration: UgamMotion.tab,
+                        curve: UgamMotion.easeOut,
+                        child: IntrinsicWidth(
+                          child: UgamButton(
+                            label: fillLabel,
+                            icon: Icons.auto_awesome_rounded,
+                            kind: UgamButtonKind.ghost,
+                            loading: _filling,
+                            onPressed: hasBuses ? _fill : null,
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -388,6 +479,42 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
     if (widget.embedded) return content;
     return UgamScaffold(
       body: SafeArea(bottom: false, child: content),
+    );
+  }
+}
+
+// ─── First-load placeholder ──────────────────────────────────────────────
+
+/// Shaped like the cockpit it stands in for — the summary card, the buses
+/// eyebrow, then the buses card — so the load lands as a fill change rather
+/// than a spinner popping into a new layout. Gutters match the real
+/// [ListView] above it, so nothing shifts sideways when the data arrives.
+class _OverviewSkeleton extends StatelessWidget {
+  const _OverviewSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        UgamSpacing.gutter,
+        UgamSpacing.sm,
+        UgamSpacing.gutter,
+        UgamSpacing.sm,
+      ),
+      physics: const NeverScrollableScrollPhysics(),
+      children: const [
+        UgamSkeleton(height: 150, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        Row(
+          children: [
+            UgamSkeleton(height: 14, width: 64, radius: 6),
+            SizedBox(width: UgamSpacing.sm),
+            UgamSkeleton(height: 14, width: 22, radius: 6),
+          ],
+        ),
+        SizedBox(height: UgamSpacing.sm),
+        UgamSkeleton(height: 196, radius: UgamRadius.card),
+      ],
     );
   }
 }
@@ -437,93 +564,96 @@ class _SummaryCard extends StatelessWidget {
           // Seats placed — eyebrow, then the shared two-leg meter. The meter
           // owns the count ("placed / cap"), the per-leg GO/RET split, the
           // "{n} free" label and the bar — no percentage, no merged fraction,
-          // and every figure a whole seat. Falls back to a plain "0 / 0" when
-          // the tour has no buses yet (cap == null).
+          // and every figure a whole seat.
+          //
+          // ONE branch, not two. The `else` here used to hand-roll a literal
+          // "0 / $total" — and `actual` is null EXACTLY when `total == 0`, so
+          // that string was always, unavoidably, "0 / 0": a fraction with a
+          // zero denominator, printed directly under a "SEATS PLACED" eyebrow,
+          // above a "no buses yet" empty state. The meter now owns the
+          // zero-capacity case as an explicit third state ("no seat plan yet"),
+          // so routing the null snapshot through it deletes the contradiction
+          // instead of duplicating a worse version of it here.
           Text(
             tr('tour_overview.seats_placed'),
             style: UgamText.micro.copyWith(color: c.ink3),
           ),
           const SizedBox(height: UgamSpacing.sm),
-          if (actual != null)
-            UgamCapacityMeter.tourCounts(
-              capacity: actual!.capacity,
-              goOccupied: actual!.goOccupied,
-              retOccupied: actual!.retOccupied,
-            )
-          else
-            Text(
-              '0 / $total',
-              style: UgamText.tabular(
-                UgamText.bodyStrong.copyWith(color: c.ink),
-              ),
-            ),
+          UgamCapacityMeter.tourCounts(
+            capacity: actual?.capacity ?? total,
+            goOccupied: actual?.goOccupied ?? 0,
+            retOccupied: actual?.retOccupied ?? 0,
+          ),
           const SizedBox(height: UgamSpacing.md),
           Container(height: 1, color: c.border),
           // Bus requirements — eyebrow + Edit, then the chips + total.
           //
-          // The 16 px above this row and the 4 px below it used to be plain
-          // SizedBox spacers OUTSIDE the row, which left "Edit" — the only
-          // inline door from the seats cockpit to the Requests editor — a
-          // ~14 px-tall text link that users kept missing. The identical 16/4
-          // now lives as PADDING on both row children instead, so the tap box
-          // swallows the whitespace it was already sitting in and the card's
-          // overall height is unchanged to within half a pixel.
+          // "Edit" is the only inline door from the seats cockpit to the
+          // Requests editor and it was a ~34 px target: the previous pass got
+          // there by folding the surrounding whitespace into the link's own
+          // padding, then stopped short of 44 rather than resize the card
+          // without being asked. The row is now a real 44 px band — the
+          // vertical space it used to pad with is simply inside the band, so
+          // the card grows ~12 px, on a screen that had void below it anyway.
+          // The left padding on the link widens the box further into the gap
+          // beside it, at no visual cost.
           //
-          // Honest cap: this buys a ~34 px target, not 44. Reaching a true 44
-          // needs +10 px of real card height, and this card's doc comment
-          // declares it compact and on the 8 pt grid — a visible resize is the
-          // user's call, not something to smuggle in behind a tap-target fix.
-          Row(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(
-                  top: UgamSpacing.md,
-                  bottom: UgamSpacing.xs,
-                ),
-                child: Text(
+          // The label is also no longer champagne: tokens.dart reserves the
+          // accent for "this is yours" and names links explicitly as NOT that.
+          // Weight carries the affordance instead.
+          SizedBox(
+            height: 44,
+            child: Row(
+              children: [
+                Text(
                   tr('tour_overview.bus_requirements'),
                   style: UgamText.micro.copyWith(color: c.ink3),
                 ),
-              ),
-              const Spacer(),
-              GestureDetector(
-                onTap: onEditRequests,
-                behavior: HitTestBehavior.opaque,
-                child: Padding(
-                  padding: const EdgeInsets.only(
-                    top: UgamSpacing.md,
-                    bottom: UgamSpacing.xs,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        tr('app.action.edit'),
-                        style: UgamText.micro.copyWith(color: c.accent),
+                const Spacer(),
+                GestureDetector(
+                  onTap: onEditRequests,
+                  behavior: HitTestBehavior.opaque,
+                  child: SizedBox(
+                    height: 44,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: UgamSpacing.lg),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            tr('app.action.edit'),
+                            style: UgamText.caption.copyWith(
+                              color: c.ink2,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 16,
+                            color: c.ink2,
+                          ),
+                        ],
                       ),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        size: 14,
-                        color: c.accent,
-                      ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
+          // Two lines, no ellipsis: these are system labels ("સિંગલ સોફા ·
+          // ડબલ સોફા · સીટર"), which run past a single 375 pt line in
+          // Gujarati. Truncating a requirements list to "3 સિંગલ સો…" loses
+          // the very numbers the agent came here to read.
           Text(
             chips,
             style: UgamText.caption.copyWith(color: c.ink),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
           ),
           const SizedBox(height: UgamSpacing.xs),
           Text(
             tr('tour_overview.total_to_book', namedArgs: {'n': '$units'}),
             style: UgamText.micro.copyWith(color: c.ink3),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
           ),
         ],
       ),
@@ -642,13 +772,13 @@ class _CapacityBanner extends StatelessWidget {
         : tr('tour_overview.edit_requests');
     final secondaryTap = overflowed ? onReview : onEditRequests;
 
-    return Container(
+    // The shared card, tinted warm — NOT a hand-rolled Container. The tone
+    // resolves to the same warmFill + warm hairline this used to spell out by
+    // hand, and composing the component means the banner picks up the app's
+    // elevation instead of sitting flat on the page like a wireframe block.
+    return UgamCard.plain(
+      tone: UgamCardTone.warm,
       padding: const EdgeInsets.all(UgamSpacing.lg),
-      decoration: BoxDecoration(
-        color: c.warmFill,
-        borderRadius: BorderRadius.circular(UgamRadius.card),
-        border: Border.all(color: c.warm.withValues(alpha: 0.35)),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -740,15 +870,40 @@ class _BannerAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Both banner actions are now WARM TONAL — mirroring [UgamButton]'s tonal
-    // geometry (50-h, input radius, fill + hairline border) but tinted warm so
-    // the attention surface stays a single warm signal. The "primary" remedy
-    // ([filled]) reads a touch stronger via a denser warm fill; the secondary
-    // shares the same warm-tonal shape so the pair looks like one component
-    // family instead of a solid-slab + outline mix.
-    final bg = filled
-        ? c.warm.withValues(alpha: 0.20)
-        : c.warm.withValues(alpha: 0.10);
+    // ROSE ON ROSE DOES NOT WORK. These two buttons used to be warm@20% /
+    // warm@10% fills carrying a `c.warm` label, sitting on a `warmFill` card —
+    // rose ink on a rose wash on a rose ground. Measured on the current tokens
+    // (warm-tone card ground: #F8E2EC Daylight / #322126 Midnight):
+    //
+    //                            Daylight   Midnight   needs
+    //   primary label            3.50       4.56       4.5
+    //   secondary label          4.00       5.54       4.5
+    //   primary fill vs card     1.30       1.47       3.0
+    //   secondary fill vs card   1.14       1.21       3.0
+    //   hairline warm@40 vs card 1.74       2.24       3.0
+    //
+    // Only the two Midnight labels cleared anything; both buttons dissolved
+    // into the card in BOTH themes, so the remedies the banner exists to offer
+    // were invisible as controls. The fix separates the pair by WEIGHT instead
+    // of by 10 points of alpha:
+    //
+    //  * primary  — solid, full-strength `c.warm` with `c.onAction` ink.
+    //               label 5.60 / 8.38, fill vs card 4.56 / 6.71.
+    //  * secondary— keeps the tonal wash but takes a full-strength `c.ink`
+    //               label (13.39 / 11.37) and a full-strength `c.warm` border
+    //               (4.56 / 6.71 vs the card, 4.00 / 5.54 vs its own fill).
+    //               No alpha on a warm fill can clear 3:1 against warmFill —
+    //               the boundary has to come from the border. Do not retry it.
+    //
+    // Still WARM, deliberately not danger: "not enough seats" is an actionable
+    // warning, and this app rations red for things that need intervention.
+    //
+    // `c.onAction` is the ink on BOTH themes' solid fill with no brightness
+    // branch: it is white in Daylight and the #12100E ground in Midnight, which
+    // is exactly the flip `warm` needs (a mid-tone rose in light, a pale rose in
+    // dark). It beats `c.onAccent` in Midnight too (8.38 vs 8.20).
+    final Color bg = filled ? c.warm : c.warm.withValues(alpha: 0.10);
+    final Color fg = filled ? c.onAction : c.ink;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -765,12 +920,16 @@ class _BannerAction extends StatelessWidget {
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(UgamRadius.input),
-          border: Border.all(color: c.warm.withValues(alpha: 0.40)),
+          // No border on the solid one — its own fill already draws the edge at
+          // 4.56 / 6.71 against the card, and a warm hairline on a warm slab is
+          // just an invisible line. The bordered-vs-borderless difference is
+          // part of what now separates the two silhouettes.
+          border: filled ? null : Border.all(color: c.warm),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: c.warm),
+            Icon(icon, size: 16, color: fg),
             // `sm`, matching the icon->label gap UgamButton uses at
             // ugam_button.dart:132 — the component this row mirrors.
             const SizedBox(width: UgamSpacing.sm),
@@ -779,10 +938,7 @@ class _BannerAction extends StatelessWidget {
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: UgamText.caption.copyWith(
-                  color: c.warm,
-                  fontWeight: FontWeight.w700,
-                ),
+                style: UgamText.captionStrong.copyWith(color: fg),
               ),
             ),
           ],
@@ -831,10 +987,16 @@ class _BusRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = bus.totalSeats;
+    // Berths this bus can actually sell — the snapshot's figure when there is
+    // one, the bus's own count otherwise. Zero means the seat layout never
+    // landed, which is the SAME third state the meter now names: not full, not
+    // empty, no plan. Nothing below may say "full" while this holds.
+    final capBerths = busCap?.capacity ?? total;
+    final noPlan = capBerths <= 0;
     // Leg-aware fullness from the engine slice: a bus is full only when its
     // busier leg leaves no berth free. Falls back to "not full" when the slice
     // is missing so the dot reads warm rather than falsely clean.
-    final full = total > 0 && (busCap?.free ?? total) == 0;
+    final full = !noPlan && (busCap?.free ?? capBerths) == 0;
     final clean = full && !hasExceptions;
     final tone = clean ? c.good : c.warm;
 
@@ -912,8 +1074,12 @@ class _BusRow extends StatelessWidget {
               showFreeLabel: false,
             ),
             // Free seats: typed berth glyphs when any are open, else a plain
-            // "full". Only when a capacity snapshot exists (fbt != null).
-            if (fbt != null) ...[
+            // "full". Only when a capacity snapshot exists (fbt != null) AND
+            // the bus has a seat plan — the `else` below is an unconditional
+            // "full", so on a layout-less bus (no types, therefore no free
+            // types) it printed the exact claim the meter above just stopped
+            // making. The meter's own no-plan line already speaks for this row.
+            if (fbt != null && !noPlan) ...[
               const SizedBox(height: UgamSpacing.sm),
               if (hasFree)
                 UgamFreeSeats(freeByType: fbt, c: c)

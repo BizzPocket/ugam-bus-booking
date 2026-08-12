@@ -58,6 +58,42 @@ export function buildWaMessageFcm(
   };
 }
 
+export interface HandlerReportFcmInput {
+  token: string;
+  title: string;
+  body: string;
+  tourId?: string;
+  reportId?: string;
+}
+
+/// Build the FCM HTTP v1 `message` for an urgent handler problem report.
+/// `data.type` is "handler_report" so the app's tap handler can deep-link to
+/// the tour whose handler raised it. Pinned to the same high-priority
+/// "messages" channel as an inbound customer message: a breakdown on the road
+/// is at least as time-critical, and it is the only other channel the app
+/// creates on launch.
+export function buildHandlerReportFcm(
+  { token, title, body, tourId, reportId }: HandlerReportFcmInput,
+) {
+  return {
+    token,
+    notification: { title, body },
+    data: {
+      type: "handler_report",
+      ...(tourId ? { tour_id: String(tourId) } : {}),
+      ...(reportId ? { report_id: String(reportId) } : {}),
+    },
+    android: {
+      priority: "HIGH",
+      notification: { channel_id: "messages", sound: "default" },
+    },
+    apns: {
+      headers: { "apns-priority": "10" },
+      payload: { aps: { sound: "default" } },
+    },
+  };
+}
+
 export interface BookingRequestRow {
   id: string;
   customer_name: string;

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- RELEASE ONLY. An App Store or TestFlight archive talks to the
+	     PRODUCTION APNs gateway; a "development" entitlement in a release
+	     build means FCM->APNs pushes are accepted and then silently dropped,
+	     so every booking and bus-message alert dies on iOS with no error
+	     anywhere. That was release blocker REL-4.
+
+	     Debug and Profile keep Runner.entitlements ("development") so a build
+	     on a registered device still receives pushes from the sandbox gateway.
+	     The two files are wired per build configuration in project.pbxproj
+	     via CODE_SIGN_ENTITLEMENTS.
+
+	     Adding the Push Notifications capability in Xcode manages this pair
+	     automatically; this file is the equivalent done by hand, because this
+	     repo is edited from Windows where Xcode is unavailable. -->
+	<key>aps-environment</key>
+	<string>production</string>
+</dict>
+</plist>

@@ -10,7 +10,9 @@ import 'package:occubusbooking/models/collection.dart';
 import 'package:occubusbooking/models/expense.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/tour.dart';
+import 'package:occubusbooking/design/components/ugam_button.dart';
 import 'package:occubusbooking/design/components/ugam_card.dart';
+import 'package:occubusbooking/design/components/ugam_swipe_action.dart';
 import 'package:occubusbooking/screens/tour_money_board_screen.dart';
 import 'package:occubusbooking/widgets/money_loading_skeleton.dart';
 
@@ -175,11 +177,17 @@ void main() {
 
     // Both bus rows show the neutral "no activity" status label key.
     expect(find.text('tour_money_board.no_activity'), findsNWidgets(2));
-    // Totals capsule reports the tour fully settled (0 outstanding).
-    expect(find.text('tour_money_board.all_settled'), findsOneWidget);
+    // Totals capsule reports 0 outstanding — scoped to the HANDOVER, since a
+    // square handover says nothing about fares still to collect.
+    expect(find.text('tour_money_board.handover_settled'), findsOneWidget);
   });
 
-  testWidgets('to-collect bus tints danger; handover-due bus tints warm',
+  // A bus that has fares still to collect is the NORMAL state on departure
+  // morning, so it stays untinted and lets the figure carry the weight
+  // typographically. `danger` is rationed for "something needs you"; spending
+  // it on the everyday state teaches a handler to scroll past red. An
+  // outstanding HANDOVER is a real open obligation, so that one keeps `warm`.
+  testWidgets('to-collect bus stays untinted; handover-due bus tints warm',
       (tester) async {
     useTallSurface(tester);
     final tours = _FakeTourController();
@@ -190,7 +198,7 @@ void main() {
 
     money.collections.assignAll([
       // Bus 1: billed 5000 but nothing received → revenue outstanding, no
-      // handover expected yet → actionNeeded via "to collect" (danger).
+      // handover expected yet → actionNeeded via "to collect" (untinted).
       Collection(
         tourId: 't1',
         busId: 'b1',
@@ -219,7 +227,7 @@ void main() {
     final busB = tester.widget<UgamCard>(
       find.byKey(const ValueKey('bus-money-row-b2')),
     );
-    expect(busA.tone, UgamCardTone.danger);
+    expect(busA.tone, UgamCardTone.none);
     expect(busB.tone, UgamCardTone.warm);
   });
 
@@ -327,5 +335,54 @@ void main() {
 
     expect(money.refreshedCalled, isTrue);
     expect(money.refreshedTourId, 't1');
+  });
+
+  // A full-width button stacked under every row is a web card-with-CTA-footer
+  // idiom: it doubles the row's height, and puts a second tap target inside a
+  // row that is itself tappable. On a phone the action belongs ON the row.
+  group('bus row is a mobile list row, not a web card', () {
+    Finder rowFor(String busId) =>
+        find.byKey(ValueKey('bus-money-row-$busId'));
+
+    testWidgets('stacks no full-width button under the row', (tester) async {
+      useTallSurface(tester);
+      Get.put<TourController>(_FakeTourController()).tours
+          .assignAll([_fakeTour()]);
+      Get.put<MoneyController>(_FakeMoneyController());
+
+      await tester.pumpWidget(_harness());
+      await tester.pump();
+
+      expect(
+        find.descendant(of: rowFor('b1'), matching: find.byType(UgamButton)),
+        findsNothing,
+      );
+    });
+
+    testWidgets('carries the collect action on the row itself',
+        (tester) async {
+      useTallSurface(tester);
+      Get.put<TourController>(_FakeTourController()).tours
+          .assignAll([_fakeTour()]);
+      Get.put<MoneyController>(_FakeMoneyController());
+
+      await tester.pumpWidget(_harness());
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('bus-collect-b1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('bus-collect-b2')), findsOneWidget);
+    });
+
+    testWidgets('offers swipe-to-collect as an accelerator', (tester) async {
+      useTallSurface(tester);
+      Get.put<TourController>(_FakeTourController()).tours
+          .assignAll([_fakeTour()]);
+      Get.put<MoneyController>(_FakeMoneyController());
+
+      await tester.pumpWidget(_harness());
+      await tester.pump();
+
+      expect(find.byType(UgamSwipeAction), findsNWidgets(2));
+    });
   });
 }

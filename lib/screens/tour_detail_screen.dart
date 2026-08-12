@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +7,7 @@ import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
 import '../components/content_block_view.dart';
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
@@ -21,6 +24,7 @@ import '../utils/phone_dialer.dart';
 import '../utils/tour_detail_cockpit.dart';
 import '../widgets/tour_detail/tour_money_tab.dart';
 import '../widgets/tour_detail/tour_overview_cockpit.dart';
+import '../widgets/handler_alerts_strip.dart';
 import 'add_bus_screen.dart';
 import 'add_return_ticket_sheet.dart';
 import 'edit_tour_screen.dart';
@@ -175,117 +179,188 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
       ];
       return UgamScaffold(
         extendBody: true,
-        body: Stack(
-          children: [
-            RefreshIndicator(
-              color: c.accent,
-              onRefresh: tourCtrl.refreshTours,
-              child: CustomScrollView(
-                controller: _scroll,
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
+        // Builder so everything below reads the metrics of the Scaffold BODY
+        // rather than of the route above it. With `extendBody` the body's
+        // MediaQuery is where Flutter reports how much of the bottom edge is
+        // covered by this screen's own sticky CTA — which is the number the
+        // scrolling tab body has to clear.
+        body: Builder(builder: (context) {
+          // Bottom reserve for the scrolling tab body.
+          //
+          // The floating dock belongs to the SHELL (every entry point pushes
+          // this screen onto the shell's nested navigator), so it never shows
+          // up in our own metrics and [UgamSpacing.dockClearance] is what pays
+          // for it — measured, the dock is 104–132pt tall across safe-area and
+          // text-scale extremes, so 140 clears it.
+          //
+          // The tabs that DO raise a sticky CTA are the problem the max solves:
+          // that bar clears the dock through its own SafeArea and so stands
+          // ~208pt tall, while the reserve here was a flat 140 — the last
+          // roster row / bus card sat behind it with no way to scroll further.
+          final bottomReserve = math.max(
+            UgamSpacing.dockClearance,
+            MediaQuery.paddingOf(context).bottom + UgamSpacing.lg,
+          );
+          return Stack(
+            children: [
+              RefreshIndicator(
+                // Chrome, not ownership — the pull spinner is neutral ink2 in
+                // every screen, so it never changes hue between tabs.
+                color: c.ink2,
+                onRefresh: tourCtrl.refreshTours,
+                child: CustomScrollView(
+                  controller: _scroll,
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
+                  ),
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: _TourIdentityHeader(
+                        tour: tour,
+                        onBack: () => AppNav.pop(context),
+                        onEdit: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                EditTourScreen(tourId: widget.tourId),
+                          ),
+                        ),
+                        onDelete: () => _confirmDelete(context, tourCtrl, tour),
+                      ),
+                    ),
+                    // Operator-facing slot, below the identity header.
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          UgamSpacing.gutter,
+                          UgamSpacing.md,
+                          UgamSpacing.gutter,
+                          0,
+                        ),
+                        child: const ContentSlot(
+                          ContentSlots.adminTourDetailTop,
+                          role: 'admin',
+                        ),
+                      ),
+                    ),
+                    // Problems the handler raised from the bus. Renders nothing
+                    // when there is nothing open, which is the normal case — it
+                    // must not become permanent furniture on an already dense
+                    // screen. Sits directly under the identity header because a
+                    // breakdown outranks every tab below it.
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          UgamSpacing.gutter,
+                          UgamSpacing.md,
+                          UgamSpacing.gutter,
+                          0,
+                        ),
+                        child: HandlerAlertsStrip(tourId: widget.tourId),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        key: _tabStripKey,
+                        // Constant gap. It used to widen to `huge` on the one
+                        // tab that drew the photo hero, which is half of why
+                        // switching tabs shifted the whole page.
+                        padding: const EdgeInsets.fromLTRB(
+                          UgamSpacing.gutter,
+                          UgamSpacing.md,
+                          UgamSpacing.gutter,
+                          UgamSpacing.sm,
+                        ),
+                        child: _TabBar(
+                          index: _tabIndex,
+                          counts: tabCounts,
+                          onChanged: _selectTab,
+                        ),
+                      ),
+                    ),
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        UgamSpacing.gutter,
+                        0,
+                        UgamSpacing.gutter,
+                        bottomReserve,
+                      ),
+                      sliver: _buildTabBody(tour, c),
+                    ),
+                  ],
                 ),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: _TourIdentityHeader(
-                      tour: tour,
-                      onBack: () => AppNav.pop(context),
-                      onEdit: () => Navigator.of(context).push(
+              ),
+              // Status-bar / display-cutout scrim.
+              //
+              // The scroll view runs full-bleed to the top edge and the app
+              // paints a TRANSPARENT status bar app-wide (see app.dart's
+              // AnnotatedRegion), so everything that scrolls — the header's back
+              // and overflow circles, the title, the vitals, the poster — was
+              // drawn straight through the clock, signal and battery. The
+              // header pads its own chrome clear of the inset, but that only
+              // holds at rest: the moment the page moves, the chrome travels up
+              // behind the status bar. The sticky bar below covers the same
+              // strip, but only once it has faded in, which leaves every scroll
+              // position before the hand-over unprotected.
+              //
+              // `viewPaddingOf`, not `paddingOf`: this tracks the PHYSICAL
+              // inset — notch, punch-hole, Dynamic Island — which is what must
+              // never have content in it, and it stays put when a keyboard
+              // collapses `padding`. It also rebuilds on that one metric
+              // instead of on every MediaQuery change.
+              //
+              // Opaque `bg`, and deliberately hit-testable: a tap in the status
+              // row must not reach a control that is hidden underneath it.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: SizedBox(
+                  height: MediaQuery.viewPaddingOf(context).top,
+                  child: ColoredBox(color: c.bg),
+                ),
+              ),
+              // Sticky bar — on EVERY tab, for every tour. Previously it existed
+              // only on Overview and only when the tour had a broadcast photo,
+              // so scrolling a 52-rider roster left no way back and no way to
+              // change tab short of scrolling all the way up again.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: _collapsed,
+                  builder: (context, collapsed, child) => IgnorePointer(
+                    ignoring: !collapsed,
+                    child: AnimatedOpacity(
+                      duration: const Duration(milliseconds: 180),
+                      opacity: collapsed ? 1 : 0,
+                      child: child,
+                    ),
+                  ),
+                  child: _CollapsedTourChrome(
+                    key: _stickyBarKey,
+                    tour: tour,
+                    c: c,
+                    tabs: _TabBar(
+                      index: _tabIndex,
+                      counts: tabCounts,
+                      onChanged: _selectTab,
+                    ),
+                    onBack: () => AppNav.pop(context),
+                    onMore: () {
+                      Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (context) =>
                               EditTourScreen(tourId: widget.tourId),
                         ),
-                      ),
-                      onDelete: () => _confirmDelete(context, tourCtrl, tour),
-                    ),
-                  ),
-                  // Operator-facing slot, below the identity header.
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        UgamSpacing.gutter,
-                        UgamSpacing.md,
-                        UgamSpacing.gutter,
-                        0,
-                      ),
-                      child: const ContentSlot(
-                        ContentSlots.adminTourDetailTop,
-                        role: 'admin',
-                      ),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      key: _tabStripKey,
-                      // Constant gap. It used to widen to `huge` on the one
-                      // tab that drew the photo hero, which is half of why
-                      // switching tabs shifted the whole page.
-                      padding: const EdgeInsets.fromLTRB(
-                        UgamSpacing.gutter,
-                        UgamSpacing.md,
-                        UgamSpacing.gutter,
-                        UgamSpacing.sm,
-                      ),
-                      child: _TabBar(
-                        index: _tabIndex,
-                        counts: tabCounts,
-                        onChanged: _selectTab,
-                      ),
-                    ),
-                  ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      UgamSpacing.gutter,
-                      0,
-                      UgamSpacing.gutter,
-                      UgamSpacing.dockClearance,
-                    ),
-                    sliver: _buildTabBody(tour, c),
-                  ),
-                ],
-              ),
-            ),
-            // Sticky bar — on EVERY tab, for every tour. Previously it existed
-            // only on Overview and only when the tour had a broadcast photo,
-            // so scrolling a 52-rider roster left no way back and no way to
-            // change tab short of scrolling all the way up again.
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: ValueListenableBuilder<bool>(
-                valueListenable: _collapsed,
-                builder: (context, collapsed, child) => IgnorePointer(
-                  ignoring: !collapsed,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 180),
-                    opacity: collapsed ? 1 : 0,
-                    child: child,
+                      );
+                    },
                   ),
                 ),
-                child: _CollapsedTourChrome(
-                  key: _stickyBarKey,
-                  tour: tour,
-                  c: c,
-                  tabs: _TabBar(
-                    index: _tabIndex,
-                    counts: tabCounts,
-                    onChanged: _selectTab,
-                  ),
-                  onBack: () => AppNav.pop(context),
-                  onMore: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            EditTourScreen(tourId: widget.tourId),
-                      ),
-                    );
-                  },
-                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          );
+        }),
         bottomNavigationBar: _StickyAction(
           tour: tour,
           tab: _tabIndex,
@@ -364,7 +439,11 @@ class _CollapsedTourChrome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final top = MediaQuery.of(context).padding.top;
+    // `viewPaddingOf`: the physical status-bar / cutout inset, which is what
+    // chrome has to sit below. `padding` collapses to zero the moment a
+    // `viewInset` covers that edge, and it costs a rebuild on every unrelated
+    // MediaQuery change; this reads one metric and never lies about the notch.
+    final top = MediaQuery.viewPaddingOf(context).top;
     return Material(
       color: c.bg.withValues(alpha: 0.96),
       elevation: 0,
@@ -486,7 +565,11 @@ class _TourIdentityHeader extends StatelessWidget {
   /// extra chip in the chrome row.
   Widget _buildHeader(BuildContext context) {
     final c = UgamColors.of(context);
-    final topInset = MediaQuery.of(context).padding.top;
+    // Same reasoning as the sticky bar's inset — see [_CollapsedTourChrome].
+    // The scrim painted over this strip by the screen's Stack is what stops
+    // the chrome colliding with the clock ONCE THE PAGE MOVES; this keeps it
+    // clear at rest.
+    final topInset = MediaQuery.viewPaddingOf(context).top;
     final statusTone = _toneFor(tour.status);
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -611,16 +694,20 @@ class _HeroActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = danger ? c.danger : c.ink;
-    final tint = danger ? c.danger : c.accent;
-    final fill = danger
-        ? c.danger.withValues(alpha: 0.12)
-        : c.accentFill;
-    return GestureDetector(
+    // Neutral medallion, matching [_TourToolRow]'s un-highlighted rows — this
+    // sheet and that list are the same anatomy and used to disagree. A copper
+    // square behind "Edit" / "Message" / "Call" is decoration: none of those
+    // rows is a thing the user OWNS or has SELECTED, which is the accent's
+    // only job. Danger keeps its tint, because destructive IS a state.
+    final tint = danger ? c.danger : c.ink;
+    final fill = danger ? c.dangerFill : c.card;
+    return UgamTappable(
       onTap: () {
         HapticFeedback.selectionClick();
         onTap();
       },
-      behavior: HitTestBehavior.opaque,
+      semanticLabel: label,
+      haptic: false,
       child: Container(
         // One anatomy = one height: this matches _TourToolRow's fixed 56 so the
         // sheet's rows don't read airier than the Overview tool rows behind it.
@@ -745,8 +832,14 @@ class _OverviewTab extends StatelessWidget {
 
 }
 
-/// Compact tools row: Money · Broadcast · More (expander with secondary tools).
-class _OverviewToolsRow extends StatelessWidget {
+/// Compact tools row: Money · Broadcast · More (sheet with every other tool).
+///
+/// Stateful only to own the Broadcast tile's in-flight flag. That tile used to
+/// call the clipboard-only `copy` path, so a control labelled "Broadcast" put a
+/// message on the clipboard and never opened WhatsApp — indistinguishable from
+/// a dead button. It now runs the SAME [_TourBroadcast.send] as the Overview
+/// Broadcast card's primary CTA, which needs a `sending` flag to drive.
+class _OverviewToolsRow extends StatefulWidget {
   final Tour tour;
   final UgamColorSet c;
   final ValueChanged<int> onSwitchTab;
@@ -758,7 +851,22 @@ class _OverviewToolsRow extends StatelessWidget {
   });
 
   @override
+  State<_OverviewToolsRow> createState() => _OverviewToolsRowState();
+}
+
+class _OverviewToolsRowState extends State<_OverviewToolsRow> {
+  bool _sending = false;
+
+  Future<void> _broadcast() => _TourBroadcast.send(
+        widget.tour,
+        isSending: _sending,
+        setSending: (v) => setState(() => _sending = v),
+        isMounted: () => mounted,
+      );
+
+  @override
   Widget build(BuildContext context) {
+    final c = widget.c;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -772,7 +880,7 @@ class _OverviewToolsRow extends StatelessWidget {
                 c: c,
                 icon: Icons.account_balance_wallet_rounded,
                 label: tr('tour_detail.tool_money'),
-                onTap: () => onSwitchTab(3),
+                onTap: () => widget.onSwitchTab(3),
               ),
             ),
             const SizedBox(width: UgamSpacing.sm),
@@ -781,7 +889,8 @@ class _OverviewToolsRow extends StatelessWidget {
                 c: c,
                 icon: Icons.campaign_rounded,
                 label: tr('tour_detail.tool_broadcast'),
-                onTap: () => _TourBroadcast.copy(tour),
+                busy: _sending,
+                onTap: _broadcast,
               ),
             ),
             const SizedBox(width: UgamSpacing.sm),
@@ -791,11 +900,11 @@ class _OverviewToolsRow extends StatelessWidget {
                 icon: Icons.apps_rounded,
                 label: tr('tour_detail.tool_more'),
                 onTap: () {
-                  // Scroll affordance: expand more tools via existing grid sheet.
+                  // Every remaining per-tour workspace, flat — see [_ActionsGrid].
                   UgamSheet.show<void>(
                     context,
                     title: tr('tour_detail.more_tools'),
-                    builder: (_) => _ActionsGrid(tour: tour, c: c),
+                    builder: (_) => _ActionsGrid(tour: widget.tour, c: c),
                   );
                 },
               ),
@@ -813,24 +922,48 @@ class _ToolTile extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
 
+  /// Swaps the icon for a spinner and swallows taps while the tile's action is
+  /// in flight — the Broadcast tile hands off to WhatsApp, which takes a beat.
+  final bool busy;
+
   const _ToolTile({
     required this.c,
     required this.icon,
     required this.label,
     required this.onTap,
+    this.busy = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return UgamCard.plain(
-      onTap: onTap,
+      onTap: busy ? null : onTap,
       padding: const EdgeInsets.symmetric(
         vertical: UgamSpacing.md,
         horizontal: UgamSpacing.sm,
       ),
       child: Column(
         children: [
-          Icon(icon, size: 22, color: c.accent),
+          // Neutral glyph. Three of these sit side by side and ALL of them were
+          // copper, so the accent was marking "this is a tool tile" — which is
+          // no meaning at all. The label below is the identifier and keeps full
+          // ink; the glyph supports it.
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: busy
+                ? Center(
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(c.ink2),
+                      ),
+                    ),
+                  )
+                : Icon(icon, size: 22, color: c.ink2),
+          ),
           const SizedBox(height: 6),
           Text(
             label,
@@ -923,15 +1056,17 @@ class _NextActionCard extends StatelessWidget {
             // The seam shrinks because the link now carries its own 44pt box —
             // net card height is close to unchanged.
             const SizedBox(height: UgamSpacing.xs),
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
+            UgamTappable(
               onTap: () =>
                   _runKind(context, action.secondaryKind!, tour, onSwitchTab),
+              semanticLabel: action.secondaryCtaLabel,
               // Without a real 44pt target a near-miss fell through to the
               // card's own onTap and fired the PRIMARY action instead — a
               // different screen than the label the user aimed at.
               child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 44),
+                constraints: BoxConstraints(
+                  minHeight: UgamScale.tap(context, 44),
+                ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1164,8 +1299,11 @@ class _BroadcastCardState extends State<_BroadcastCard> {
           const SizedBox(height: UgamSpacing.md),
           Row(
             children: [
-              // Demoted from solid-gold UgamCTA to TONAL — the bottom sticky CTA
-              // is the one rationed champagne focal point per screen.
+              // Demoted from a full UgamCTA to TONAL — one focal control per
+              // surface, and on the Overview tab that is the Next-Action card.
+              // (`tonal` used to be amber-INKED too; that was retired in
+              // `ugam_button.dart` — the wash stays amber, the lettering is
+              // now `ink`. Nothing to do here.)
               Expanded(
                 child: UgamButton(
                   label: _sending
@@ -1362,7 +1500,9 @@ class _TravelersProgressStrip extends StatelessWidget {
               value: progress.clamp(0.0, 1.0),
               minHeight: 4,
               backgroundColor: c.cardElev,
-              color: c.accent,
+              // Ink, not amber — a fill ratio is a measurement, not something
+              // the user picked. Matches the identical bar on the Charts tab.
+              color: c.ink2,
             ),
           ),
         ),
@@ -1389,18 +1529,37 @@ class _FilterChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = count == null ? label : '$label $count';
+    // KEEP the accent: "the currently-selected value" is precisely what it is
+    // for, and this is the only such control on the screen.
+    //
+    // DEMOTED from a solid amber slab to the TONAL treatment [UgamSelectorPills]
+    // already ships (accentFill + accent ink + a hairline accent border). A
+    // solid fill is the app's single focal weight; spending it on a filter chip
+    // — and then on a second one in the Activity tab's own row — put two solid
+    // amber slabs on a screen whose primary button carries none.
     return Material(
-      color: selected ? c.accent : c.cardElev,
+      color: selected ? c.accentFill : c.cardElev,
       borderRadius: BorderRadius.circular(UgamRadius.chip),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(UgamRadius.chip),
-        child: Padding(
+        child: Container(
+          // The border lives on a Container INSIDE the InkWell, not on the
+          // Material: the ripple has to paint over it, and a selected chip must
+          // not shift its neighbours by a pixel when the border appears.
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(UgamRadius.chip),
+            border: Border.all(
+              color: selected
+                  ? c.accent.withValues(alpha: 0.32)
+                  : Colors.transparent,
+            ),
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           child: Text(
             text,
             style: UgamText.caption.copyWith(
-              color: selected ? c.onAccent : c.ink2,
+              color: selected ? c.accent : c.ink2,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
             ),
           ),
@@ -1486,8 +1645,8 @@ class _PassengersEmptyStateState extends State<_PassengersEmptyState> {
 /// on the left and a compact "+ Add" pill on the right that opens the per-tour
 /// requests manager. Replaces the old full-width _ManageRequestsButton card so
 /// the roster itself leads the tab rather than a navigation button. The pill
-/// stays NEUTRAL (not champagne) — the single rationed accent on this tab is
-/// the sticky "Assign seats" CTA.
+/// stays NEUTRAL — the sticky "Assign seats" CTA is the tab's one focal
+/// control, and it carries `action` ink, not the accent.
 class _RosterHeader extends StatelessWidget {
   final int count;
   final UgamColorSet c;
@@ -1664,8 +1823,14 @@ class _PassengerRow extends StatelessWidget {
     final needsSeat = passengerNeedsSeat(passenger);
     final seated = passenger.isFullyAssigned;
 
+    // "Still needs a seat" is a STATE — outstanding work on the agent's
+    // roster — not "this row is yours", so it takes the warm/pending tone that
+    // the re-notify highlight and [UgamButtonKind.warmTonal] already use for
+    // exactly this meaning. It pairs with the `good` tick on a seated rider
+    // below, so the roster reads green = done / rose = open, and the amber is
+    // left to the seat chart, where a berth genuinely belongs to someone.
     return Material(
-      color: needsSeat ? c.accentFill : c.card,
+      color: needsSeat ? c.warmFill : c.card,
       borderRadius: BorderRadius.circular(UgamRadius.row),
       child: InkWell(
         onTap: () => _showPassengerActions(context, passenger, tour, c),
@@ -1676,7 +1841,7 @@ class _PassengerRow extends StatelessWidget {
           decoration: needsSeat
               ? BoxDecoration(
                   borderRadius: BorderRadius.circular(UgamRadius.row),
-                  border: Border.all(color: c.accent.withValues(alpha: 0.35)),
+                  border: Border.all(color: c.warm.withValues(alpha: 0.35)),
                 )
               : null,
           child: Row(
@@ -1685,14 +1850,14 @@ class _PassengerRow extends StatelessWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: needsSeat ? c.accent.withValues(alpha: 0.18) : c.cardElev,
+                  color: needsSeat ? c.warm.withValues(alpha: 0.18) : c.cardElev,
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   _initials(passenger.name),
                   style: UgamText.micro.copyWith(
-                    color: needsSeat ? c.accent : c.ink,
+                    color: needsSeat ? c.warm : c.ink,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1734,7 +1899,7 @@ class _PassengerRow extends StatelessWidget {
                               color: seated
                                   ? c.good
                                   : needsSeat
-                                      ? c.accent
+                                      ? c.warm
                                       : c.ink3,
                               fontWeight: FontWeight.w700,
                             ),
@@ -1754,8 +1919,12 @@ class _PassengerRow extends StatelessWidget {
               ),
               if (needsSeat) ...[
                 const SizedBox(width: 6),
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
+                // A real per-row control, so it gets press feedback and a 44pt
+                // target — it was an ~18pt bare label, and a near-miss fell
+                // through to the row's own tap and opened the actions sheet
+                // instead. The Center(widthFactor: 1) keeps the PAINTED label
+                // its original size while the box grows.
+                UgamTappable(
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
@@ -1766,16 +1935,31 @@ class _PassengerRow extends StatelessWidget {
                       ),
                     );
                   },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 6,
+                  pressedScale: 0.93,
+                  semanticLabel: tr('tour_detail.assign_row'),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: UgamScale.tap(context, 44),
                     ),
-                    child: Text(
-                      tr('tour_detail.assign_row'),
-                      style: UgamText.micro.copyWith(
-                        color: c.accent,
-                        fontWeight: FontWeight.w700,
+                    child: Center(
+                      widthFactor: 1,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 6,
+                        ),
+                        child: Text(
+                          // `action` ink, not amber: this is the button on the
+                          // row, and the app's primary control deliberately
+                          // carries no brand hue. It stays legible on the warm
+                          // fill and reads as the one thing here to press.
+                          // [UgamText.label], not `micro`: this is a
+                          // TRANSLATED control label, and micro is Sora 10 with
+                          // +1.4 tracking — a no-op caps device, a broken
+                          // conjunct and an 8.5pt render in Gujarati.
+                          tr('tour_detail.assign_row'),
+                          style: UgamText.label.copyWith(color: c.action),
+                        ),
                       ),
                     ),
                   ),
@@ -2017,7 +2201,11 @@ class _BusListItem extends StatelessWidget {
                           : (filled / bus.totalSeats).clamp(0.0, 1.0),
                       minHeight: 5,
                       backgroundColor: c.cardElev,
-                      color: filled >= bus.totalSeats ? c.good : c.accent,
+                      // Ink while filling, `good` once full: "how full" is a
+                      // measurement, "full" is a state worth a colour. Amber
+                      // said neither — and one bar per bus row put four or five
+                      // copper strips down a tab whose CTA carries none.
+                      color: filled >= bus.totalSeats ? c.good : c.ink2,
                     ),
                   ),
                   if (bus.driverPhone.trim().isNotEmpty)
@@ -2046,8 +2234,8 @@ class _BusListItem extends StatelessWidget {
                             const SizedBox(width: UgamSpacing.sm),
                             // Reach the driver without leaving the tour — same
                             // symmetry as the rider row-tap actions. Neutral
-                            // icon buttons keep the gold reserved for the
-                            // sticky CTA; their own taps win over the row's.
+                            // icon buttons, repeated once per bus; their own
+                            // taps win over the row's.
                             UgamIconButton(
                               icon: Icons.chat_rounded,
                               onTap: () => _contactDriverOnWhatsApp(bus),
@@ -2075,9 +2263,11 @@ class _BusListItem extends StatelessWidget {
                         const SizedBox(width: 5),
                       ],
                       // Occupancy at a glance — "12/40 filled" — tinted by how
-                      // full the bus is (green when full, accent when partly,
-                      // neutral when empty). Carries the total seat count too,
-                      // so it replaces the old plain "{n} SEATS" chip.
+                      // full the bus is: green when full, WARM while there are
+                      // berths still to sell (seats left is the open work on
+                      // this tab), neutral when the bus is untouched. It was
+                      // amber for the partly-filled case, which made the
+                      // commonest state on the screen the loudest one.
                       UgamReqChip(
                         label: tr('tour_detail.bus_occupancy', namedArgs: {
                           'filled': '$filled',
@@ -2086,7 +2276,7 @@ class _BusListItem extends StatelessWidget {
                         variant: bus.totalSeats > 0 && filled >= bus.totalSeats
                             ? UgamChipVariant.good
                             : (filled > 0
-                                ? UgamChipVariant.accent
+                                ? UgamChipVariant.warm
                                 : UgamChipVariant.neutral),
                       ),
                     ],
@@ -2095,9 +2285,9 @@ class _BusListItem extends StatelessWidget {
               ),
             ),
             const SizedBox(width: UgamSpacing.sm),
-            // Accent-rationing: the same "open this" affordance is a plain grey
-            // chevron on the Passengers tab, and every bus row repeating a
-            // copper circle stacked a third copper under the sticky CTA.
+            // The same "open this" affordance is a plain grey chevron on the
+            // Passengers tab; repeating a copper circle once per bus row would
+            // have spent the accent on "this row is tappable".
             Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
           ],
         ),
@@ -2178,6 +2368,12 @@ class _ActivityTabState extends State<_ActivityTab> {
   }
 }
 
+/// TONE POLICY for the timeline: a log entry is NEUTRAL. Colour is spent only
+/// on the two milestones that mean the tour moved forward — all seats assigned
+/// and the tour locked — which are `good`. Four of these entries used to be
+/// `accent`, so most of the timeline glowed copper and the two entries that
+/// actually mattered had nothing left to stand out against. (Amber's job is
+/// "this is yours"; a history of things that already happened is nobody's.)
 List<_TimelineEvent> _buildTourTimelineEvents(Tour t) {
     final events = <_TimelineEvent>[];
 
@@ -2202,7 +2398,7 @@ List<_TimelineEvent> _buildTourTimelineEvents(Tour t) {
         title: tr('tour_detail.event_first_request',
             namedArgs: {'name': first.name}),
         time: earliest,
-        tone: UgamStatusTone.accent,
+        tone: UgamStatusTone.neutral,
       category: ActivityEventCategory.requests,
     ));
 
@@ -2216,7 +2412,7 @@ List<_TimelineEvent> _buildTourTimelineEvents(Tour t) {
             title: tr('tour_detail.event_requests_total',
                 namedArgs: {'n': '${t.passengers.length}'}),
             time: latestReq,
-            tone: UgamStatusTone.accent,
+            tone: UgamStatusTone.neutral,
       category: ActivityEventCategory.requests,
     ));
         }
@@ -2234,7 +2430,7 @@ List<_TimelineEvent> _buildTourTimelineEvents(Tour t) {
             : tr('tour_detail.event_buses_added',
                 namedArgs: {'n': '${t.buses.length}'}),
         time: earliestBus,
-        tone: UgamStatusTone.accent,
+        tone: UgamStatusTone.neutral,
       category: ActivityEventCategory.buses,
     ));
     }
@@ -2247,7 +2443,7 @@ List<_TimelineEvent> _buildTourTimelineEvents(Tour t) {
             : tr('tour_detail.event_seats_assigned_other',
                 namedArgs: {'n': '${t.totalSeatsAssigned}'}),
         time: t.updatedAt,
-        tone: UgamStatusTone.accent,
+        tone: UgamStatusTone.neutral,
       category: ActivityEventCategory.seats,
     ));
     }
@@ -2663,16 +2859,23 @@ class _HeroVitals extends StatelessWidget {
   }
 }
 
-/// Full tour-actions grid — every per-tour workspace in one clean, labeled
+/// Full tour-actions list — every per-tour workspace in one clean, labeled
 /// surface. Restored after the BUG-001 slim removed Seats/Buses/Requests; the
-/// agent wanted all shortcuts back, so the fix is presentation (a tidy 3×2
-/// grid) rather than removal. Order follows the tour lifecycle: Requests →
-/// Buses → Seats → Money → Groups → Lock/Send. Each tile lands straight on its
-/// real workspace screen (no forwarding hop), and these are the SAME
-/// destinations the tabs / Next-Action card use. The Lock/Send tile highlights
-/// (and flips Lock→Send) once the tour is ready to lock (all seats assigned +
-/// handler set) or is locked, so the next milestone still stands out within the
-/// otherwise-neutral grid.
+/// agent wanted all shortcuts back, so the fix is presentation (tidy labeled
+/// groups) rather than removal. Each row lands straight on its real workspace
+/// screen (no forwarding hop), and these are the SAME destinations the tabs /
+/// Next-Action card use. The Lock/Send row highlights (and flips Lock→Send)
+/// once the tour is ready to lock (all seats assigned + handler set) or is
+/// locked, so the next milestone still stands out among neutral rows.
+///
+/// FLAT BY DESIGN. This used to show three rows plus a "More tools" expander
+/// hiding Buses / Groups / Lock — an affordance from when the list rendered
+/// INLINE on the Overview tab. Its only caller is now the sheet the Overview's
+/// More tile opens, which is itself titled "More tools": the screen read
+/// "More tools ▸ More tools" and buried half the tools behind a second tap
+/// inside the surface opened to reveal them. Six rows fit; nothing is hidden.
+/// Two eyebrows carry the grouping the expander used to imply — ACTIONS is the
+/// tour lifecycle (requests → seats → money → lock/send), MANAGE is setup.
 class _ActionsGrid extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
@@ -2682,9 +2885,21 @@ class _ActionsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final locked = tour.status == TourStatus.locked;
-    final needsRenotify = locked &&
-        tour.passengers.any((p) =>
-            p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified);
+    final completed = tour.status == TourStatus.completed;
+    // Riders whose last message no longer matches reality — seats MOVED, or
+    // taken back entirely. The predicate here used to be `assignedSeats
+    // .isNotEmpty && seatsChangedSinceNotified`: the first half is redundant
+    // (the getter already requires seats) and its real effect was to hide the
+    // rider whose seat was WITHDRAWN after they were told — the one person who
+    // turns up on the day expecting a berth. [Passenger.notifiedSeatsAreStale]
+    // is the single "does this rider still need telling?" question.
+    final stale =
+        tour.passengers.where((p) => locked && p.notifiedSeatsAreStale).toList();
+    final needsRenotify = stale.isNotEmpty;
+    // A withdrawal cannot be WhatsApp'd (no approved template), so Notify shows
+    // the phone number and an "I've told them" acknowledgement instead. The row
+    // must not promise a re-send it will not offer.
+    final anyWithdrawn = stale.any((p) => p.seatsRemovedSinceNotified);
     final readyToLock = !locked &&
         tour.passengers.isNotEmpty &&
         tour.allSeatsAssigned &&
@@ -2694,10 +2909,8 @@ class _ActionsGrid extends StatelessWidget {
           MaterialPageRoute(builder: (_) => screen),
         );
 
-    // Mobile-native: the icon-grid launcher is now a vertical list of
-    // full-width tool rows (icon left + label + chevron, 56dp). The three
-    // primary destinations (Requests / Seats / Money) show by default; the
-    // rest live behind a "More tools" expander so the Overview stays calm.
+    // Mobile-native: the icon-grid launcher is a vertical list of full-width
+    // tool rows (icon left + label + chevron, 56dp), all of them visible.
     final requests = _TourToolRow(
       icon: Icons.how_to_reg_rounded,
       label: tr('tour_detail.tool_requests'),
@@ -2737,12 +2950,14 @@ class _ActionsGrid extends StatelessWidget {
     );
     final lockSend = _TourToolRow(
       icon: needsRenotify
-          ? Icons.chat_rounded
+          ? (anyWithdrawn ? Icons.phone_in_talk_rounded : Icons.chat_rounded)
           : locked
               ? Icons.send_rounded
               : Icons.lock_rounded,
       label: needsRenotify
-          ? tr('tour_detail.action_renotify_cta')
+          ? (anyWithdrawn
+              ? tr('tour_detail.action_seat_removed_cta')
+              : tr('tour_detail.action_renotify_cta'))
           : locked
               ? tr('notify.title')
               : tr('tour_detail.tool_lock'),
@@ -2754,37 +2969,45 @@ class _ActionsGrid extends StatelessWidget {
 
     const gap = UgamSpacing.tight;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionEyebrow(label: tr('tour_detail.actions_section'), c: c),
-        const SizedBox(height: UgamSpacing.md),
-        requests,
-        const SizedBox(height: gap),
-        seats,
-        const SizedBox(height: gap),
-        money,
-        const SizedBox(height: gap),
-        // Secondary tools hidden behind a tap. Lock/Send stays here too but, if
-        // it's the next milestone (ready-to-lock / locked), the expander opens
-        // by default so it isn't buried.
-        UgamExpander(
-          title: tr('tour_detail.more_tools'),
-          icon: Icons.apps_rounded,
-          initiallyExpanded: readyToLock || needsRenotify || locked,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              buses,
-              const SizedBox(height: gap),
-              groups,
-              const SizedBox(height: gap),
-              lockSend,
-            ],
-          ),
-        ),
-      ],
+    // Six rows always drawn is taller than the sheet's 92%-of-screen cap on a
+    // short phone (or at a large text scale), and the shell's Flexible would
+    // clip rather than scroll. Scrolling here keeps every row reachable, so
+    // dropping the expander doesn't trade a hidden section for a hidden edge.
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionEyebrow(label: tr('tour_detail.actions_section'), c: c),
+          const SizedBox(height: UgamSpacing.md),
+          requests,
+          const SizedBox(height: gap),
+          seats,
+          const SizedBox(height: gap),
+          money,
+          // The milestone closes the lifecycle group, where it reads as the
+          // next step rather than as one more shortcut — and a COMPLETED tour
+          // has already passed it. NotifyScreen refuses a finished tour
+          // outright ("Tour is completed"), so the row could only dead-end;
+          // worse, `locked` is false for a completed tour, so it rendered as a
+          // HIGHLIGHTED "Lock" — the next step on a trip that is already over.
+          // Hidden, not disabled or relabelled: the other surfaces offering
+          // this action already omit it for a completed tour
+          // (tours_screen._actionFor returns null, dashboard._needsAttention
+          // filters completed out), and Notify has no read-only "who was
+          // notified" view a relabel could honestly point at.
+          if (!completed) ...[
+            const SizedBox(height: gap),
+            lockSend,
+          ],
+          const SizedBox(height: UgamSpacing.lg),
+          _SectionEyebrow(label: tr('tour_detail.manage'), c: c),
+          const SizedBox(height: UgamSpacing.md),
+          buses,
+          const SizedBox(height: gap),
+          groups,
+        ],
+      ),
     );
   }
 }
@@ -2815,11 +3038,11 @@ class _TourToolRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Accent-rationing: ordinary tool rows are NEUTRAL (graphite chip + muted
-    // ink) so the only champagne signal on the Overview is the single next
-    // action card / sticky CTA. The "good" highlight (ready-to-lock / locked)
-    // is a distinct semantic green, not the rationed gold, so it stays.
-    // Warm is for post-lock re-notify urgency.
+    // Ordinary tool rows are NEUTRAL (graphite chip + ink glyph): a shortcut
+    // list is navigation, and colouring all six would rank none of them. Only
+    // the lifecycle milestone is tinted — `good` once the tour is ready to lock
+    // or locked, `warm` for post-lock re-notify urgency. Both are semantic
+    // states, so neither is the accent; nothing in this list is ever amber.
     final iconColor = !highlight
         ? c.ink
         : warmHighlight
@@ -2936,6 +3159,35 @@ _NextAction _nextActionFor(Tour tour) {
       tone: UgamStatusTone.warm,
     );
   }
+  // A rider whose seat was taken back AFTER they were told holds a WhatsApp
+  // message naming a berth that no longer exists.
+  //
+  // *** WHY THIS SITS ABOVE "N seats to place" ***
+  // Removing the seat also makes that rider's berths unassigned again, so
+  // `pendingSeatsToAssign` goes up and the branch below would answer with
+  // "1 seat to place" — silently re-seating them is NOT enough, because the
+  // number in their hand is wrong either way and only a phone call fixes it.
+  // Ranking it here is what makes the stale-notification check further down
+  // reachable at all for a withdrawal. Plain seat MOVES keep their old rank:
+  // they leave nothing unassigned, so nothing competes with them.
+  if (tour.status == TourStatus.locked) {
+    final stranded =
+        tour.passengers.where((p) => p.seatsRemovedSinceNotified).length;
+    if (stranded > 0) {
+      return _NextAction(
+        kind: _NextActionKind.renotify,
+        title: tr('tour_detail.action_seat_removed_title',
+            namedArgs: {'n': '$stranded'}),
+        subtitle: tr('tour_detail.action_seat_removed_subtitle'),
+        // Deliberately NOT "Re-notify": there is no approved WhatsApp template
+        // for a withdrawal, so Notify offers their phone number and an "I've
+        // told them" acknowledgement rather than a send.
+        ctaLabel: tr('tour_detail.action_seat_removed_cta'),
+        icon: Icons.phone_in_talk_rounded,
+        tone: UgamStatusTone.warm,
+      );
+    }
+  }
   if (tour.buses.isNotEmpty && tour.pendingSeatsToAssign > 0) {
     final remaining = tour.pendingSeatsToAssign;
     // Active-only totals so a finished GO-leg rider neither inflates the
@@ -2956,7 +3208,11 @@ _NextAction _nextActionFor(Tour tour) {
       }),
       ctaLabel: tr('seats.title'),
       icon: Icons.event_seat_rounded,
-      tone: UgamStatusTone.accent,
+      // Warm, like every other "there is work outstanding" next action on this
+      // screen (add a bus, re-notify). It was the one accent-toned action,
+      // which tinted the card, its medallion, its NEXT ACTION eyebrow, its
+      // arrow and its secondary link copper — five accent marks for a state.
+      tone: UgamStatusTone.warm,
     );
   }
   if (tour.allSeatsAssigned && tour.handlerId == null) {
@@ -2984,11 +3240,14 @@ _NextAction _nextActionFor(Tour tour) {
   }
   // Post-lock seat edits that haven't been WhatsApp'd yet outrank leg
   // completion — passengers are sitting on wrong-confirmed seats until then.
+  // Asks [Passenger.notifiedSeatsAreStale], the canonical question, rather than
+  // the old `assignedSeats.isNotEmpty && seatsChangedSinceNotified` (redundant
+  // first half, and it dropped withdrawals). Withdrawals are already answered
+  // by the higher-ranked block above, so `changed` here is seat MOVES only and
+  // the "moved since the last send" copy stays true.
   if (tour.status == TourStatus.locked) {
-    final changed = tour.passengers
-        .where((p) =>
-            p.assignedSeats.isNotEmpty && p.seatsChangedSinceNotified)
-        .length;
+    final changed =
+        tour.passengers.where((p) => p.notifiedSeatsAreStale).length;
     if (changed > 0) {
       return _NextAction(
         kind: _NextActionKind.renotify,
@@ -3053,15 +3312,33 @@ _NextAction _nextActionFor(Tour tour) {
   );
 }
 
+/// Lifecycle → tone. THREE bands, and the status LABEL (not the colour) is what
+/// names the exact stage:
+///
+///   * `warm`    — pre-lock. The tour still needs the agent: riders to collect,
+///                 a bus to book, seats to place.
+///   * `good`    — locked. Set up, confirmed, running.
+///   * `neutral` — completed. Archived; nothing to do.
+///
+/// Planning / bus-booked / assigning were `accent`, which made the amber a
+/// STATUS colour — the one role the token's own doc rules out — and meant most
+/// tours in the app wore the "this is yours" hue for no reason. They are all
+/// the same thing operationally ("not ready yet"), so they share one tone and
+/// the label carries the detail.
 UgamStatusTone _toneFor(TourStatus s) => switch (s) {
-      TourStatus.planning => UgamStatusTone.accent,
+      TourStatus.planning => UgamStatusTone.warm,
       TourStatus.collecting => UgamStatusTone.warm,
-      TourStatus.busBooked => UgamStatusTone.accent,
-      TourStatus.assigning => UgamStatusTone.accent,
+      TourStatus.busBooked => UgamStatusTone.warm,
+      TourStatus.assigning => UgamStatusTone.warm,
       TourStatus.locked => UgamStatusTone.good,
       TourStatus.completed => UgamStatusTone.neutral,
     };
 
+// The `accent` arms below are now unreachable from this screen — nothing here
+// produces [UgamStatusTone.accent] any more. They stay because the switches are
+// exhaustive over a shared design-system enum, and because the mapping itself
+// is correct: if a genuinely OWNED thing ever lands on this screen, it maps
+// here. Do not re-point an ordinary status at it to "use up" the branch.
 Color _toneColor(UgamStatusTone t, UgamColorSet c) => switch (t) {
       UgamStatusTone.accent => c.accent,
       UgamStatusTone.good => c.good,

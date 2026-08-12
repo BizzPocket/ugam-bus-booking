@@ -71,6 +71,7 @@ class _PhaseNode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final e = UgamElevation.of(context);
     final Color circleColor;
     final Color iconColor;
     final Color textColor;
@@ -99,15 +100,19 @@ class _PhaseNode extends StatelessWidget {
           decoration: BoxDecoration(
             color: circleColor,
             shape: BoxShape.circle,
-            boxShadow: isActive
-                ? [
-                    BoxShadow(
-                      color: c.accent.withValues(alpha: 0.24),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3),
-                    ),
-                  ]
-                : [],
+            // The step you are ON is the one node in this strip that sits on
+            // the page rather than being part of it, so it takes level 1 and
+            // every other node is explicitly level 0 — `flat`, not a bare `[]`
+            // that reads as an oversight.
+            //
+            // Was a hand-rolled amber halo (`accent` @ 24%, blur 8) that
+            // predated the scale. Two problems: it made this the only surface
+            // in the app whose depth was a COLOUR rather than a level, and in
+            // Daylight the deep amber smeared visibly onto the white page
+            // around the dot. The active node already outranks its neighbours
+            // by size (34 vs 28), by a solid accent fill against a border-grey
+            // one, and by a bolder label — it does not need a glow to be found.
+            boxShadow: isActive ? e.rest : e.flat,
           ),
           child: Icon(
             isDone ? Icons.check_rounded : icon,
