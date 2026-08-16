@@ -104,6 +104,14 @@ class CustomerRequestEntry {
   final String? collectVpa;
   final String? collectPayeeName;
 
+  /// Paise the customer has ALREADY told us they paid against this request.
+  ///
+  /// An assertion, never proof — the same caveat as `payment_claims` itself.
+  /// Its job is narrow and important: without it, "Pay now" keeps offering
+  /// itself to someone who has already paid, and they pay twice. That is the
+  /// exact failure this whole feature exists to avoid on the other side.
+  final int claimedPaise;
+
   CustomerRequestEntry({
     required this.id,
     required this.tourId,
@@ -135,6 +143,7 @@ class CustomerRequestEntry {
     this.advancePaise = 0,
     this.collectVpa,
     this.collectPayeeName,
+    this.claimedPaise = 0,
   });
 
   bool get hasSeatsAssigned => assignedSeats.isNotEmpty;
@@ -166,6 +175,26 @@ class CustomerRequestEntry {
       isHeld &&
       (holdId?.isNotEmpty ?? false) &&
       advancePaise > 0 &&
+      (collectVpa?.isNotEmpty ?? false);
+
+  /// Paise still owed on a banded request.
+  int get outstandingPaise =>
+      (advancePaise - claimedPaise).clamp(0, advancePaise);
+
+  /// The customer has told us they paid the whole charge. Unverified until the
+  /// organiser confirms it against their bank statement.
+  bool get paymentRecorded => advancePaise > 0 && claimedPaise >= advancePaise;
+
+  /// Whether to offer "Pay now" for a REQUEST-mode charge.
+  ///
+  /// Deliberately excludes anything on a seat hold: chart-mode holds already
+  /// carry their own countdown and retry ([canPayAdvance]), and offering both
+  /// would put two Pay buttons on one card.
+  bool get canPayCharge =>
+      !isHeld &&
+      (holdId?.isEmpty ?? true) &&
+      !isCancelled &&
+      outstandingPaise > 0 &&
       (collectVpa?.isNotEmpty ?? false);
 
   /// A request is cancellable by the customer ONLY while purely pending — not
@@ -230,6 +259,7 @@ class CustomerRequestEntry {
     int? advancePaise,
     String? collectVpa,
     String? collectPayeeName,
+    int? claimedPaise,
     /// Wins over [holdExpiresAt] so a finalized/dead hold can be nulled out —
     /// plain copyWith cannot set null through the `??` fallback.
     bool clearHold = false,
@@ -266,6 +296,7 @@ class CustomerRequestEntry {
       advancePaise: advancePaise ?? this.advancePaise,
       collectVpa: collectVpa ?? this.collectVpa,
       collectPayeeName: collectPayeeName ?? this.collectPayeeName,
+      claimedPaise: claimedPaise ?? this.claimedPaise,
     );
   }
 
@@ -315,6 +346,7 @@ class CustomerRequestEntry {
       'hold_expires_at': holdExpiresAt!.toIso8601String(),
     if (holdId != null) 'hold_id': holdId,
     if (advancePaise > 0) 'advance_paise': advancePaise,
+    if (claimedPaise > 0) 'claimed_paise': claimedPaise,
     if (collectVpa != null) 'collect_vpa': collectVpa,
     if (collectPayeeName != null) 'collect_payee_name': collectPayeeName,
   };
@@ -354,6 +386,7 @@ class CustomerRequestEntry {
           : null,
       holdId: m['hold_id'] as String?,
       advancePaise: (m['advance_paise'] as num?)?.toInt() ?? 0,
+      claimedPaise: (m['claimed_paise'] as num?)?.toInt() ?? 0,
       collectVpa: m['collect_vpa'] as String?,
       collectPayeeName: m['collect_payee_name'] as String?,
       cancelRequestedAt: m['cancel_requested_at'] != null

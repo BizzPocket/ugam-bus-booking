@@ -17,9 +17,77 @@ import '../widgets/hold_countdown_strip.dart';
 import '../services/sync_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/formatters.dart';
 import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
 import 'handler/handler_shell.dart';
+
+/// Outstanding-balance strip for a banded request-mode booking.
+///
+/// The hold path has [HoldCountdownStrip], which is built around a deadline. A
+/// request has no hold and no clock, so this states the plainer fact: what is
+/// still owed, or that a payment has been recorded and is awaiting the
+/// organiser's confirmation. Once paid it stops offering to take money again —
+/// which is the whole point of tracking `claimedPaise`.
+class _ChargeStrip extends StatelessWidget {
+  final CustomerRequestEntry entry;
+  final VoidCallback onPay;
+  final UgamColorSet c;
+
+  const _ChargeStrip({
+    required this.entry,
+    required this.onPay,
+    required this.c,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final paid = entry.paymentRecorded;
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: paid ? c.cardElev : c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.input),
+        border: Border.all(color: paid ? c.border : c.accent),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            paid ? Icons.hourglass_bottom_rounded : Icons.payments_outlined,
+            size: 16,
+            color: paid ? c.ink3 : c.accent,
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Expanded(
+            child: Text(
+              paid
+                  ? tr('customer_my_requests.payment_recorded')
+                  : tr('customer_my_requests.payment_due', namedArgs: {
+                      'amount': Formatters.formatMoneyInr(
+                        entry.outstandingPaise / 100,
+                      ),
+                    }),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: UgamText.caption.copyWith(color: paid ? c.ink2 : c.ink),
+            ),
+          ),
+          if (!paid) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            UgamButton(
+              label: tr('customer_my_requests.payment_pay_now'),
+              kind: UgamButtonKind.primary,
+              onPressed: onPay,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 /// Customer-facing list of every booking request submitted from this
 /// device — image-5 fidelity.
@@ -145,6 +213,33 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
     await ChartAdvancePayment.retry(context: context, entry: entry);
     // Refresh either way: a recorded claim moves the booking forward, and a
     // dismissal may still have burned enough of the clock to matter.
+    await _refresh();
+  }
+
+  /// Finish paying a REQUEST-mode charge that was left unpaid at submit.
+  ///
+  /// The banded request has no seat hold and no deadline, so there is no
+  /// countdown here — but the dead end is the same one the hold path already
+  /// fixed: without a way back, a customer who dismissed the UPI sheet has a
+  /// request the organiser will never treat as paid and no way to correct it.
+  Future<void> _payCharge(CustomerRequestEntry entry) async {
+    if (!entry.canPayCharge) return;
+    final owed = entry.outstandingPaise;
+    final recorded = await ChartAdvancePayment.collect(
+      context: context,
+      requestId: entry.id,
+      payeeVpa: entry.collectVpa!,
+      payeeName: (entry.collectPayeeName?.trim().isNotEmpty ?? false)
+          ? entry.collectPayeeName!
+          : entry.tourTitle,
+      amountPaise: owed,
+      note: '${entry.tourFromCity}-${entry.tourToCity} · ${entry.customerName}',
+    );
+    if (recorded) {
+      await CustomerRequestsStore().upsert(
+        entry.copyWith(claimedPaise: entry.claimedPaise + owed),
+      );
+    }
     await _refresh();
   }
 
@@ -434,6 +529,7 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
                             onViewChart: () => _openFullChart(_visible[i]),
                             onRebook: () => _openAddAnother(_visible[i]),
                             onPayAdvance: _payAdvance,
+                            onPayCharge: _payCharge,
                             onCancel: () => _cancel(_visible[i]),
                             onRequestCancel: () => _requestCancel(_visible[i]),
                             onContact: () => _contactOrganiser(_visible[i]),
@@ -653,6 +749,9 @@ class _RequestRow extends StatelessWidget {
   /// Re-opens the advance UPI sheet for a booking sitting on a live hold.
   final Future<void> Function(CustomerRequestEntry entry) onPayAdvance;
 
+  /// Finish paying a banded request-mode charge left unpaid at submit.
+  final Future<void> Function(CustomerRequestEntry entry) onPayCharge;
+
   const _RequestRow({
     required this.entry,
     required this.isHandler,
@@ -664,6 +763,7 @@ class _RequestRow extends StatelessWidget {
     required this.onRequestCancel,
     required this.onContact,
     required this.onPayAdvance,
+    required this.onPayCharge,
   });
 
   @override
@@ -783,6 +883,18 @@ class _RequestRow extends StatelessWidget {
                 entry: entry,
                 onPay: () => onPayAdvance(entry),
                 onRebook: onRebook,
+              ),
+            ]
+            // Banded request-mode charge. No hold and no clock, so this is a
+            // plain outstanding-balance strip rather than a countdown — but it
+            // is the same recovery: a request left unpaid must offer a way to
+            // finish, and a paid one must stop asking.
+            else if (entry.canPayCharge || entry.paymentRecorded) ...[
+              const SizedBox(height: UgamSpacing.tight),
+              _ChargeStrip(
+                entry: entry,
+                onPay: () => onPayCharge(entry),
+                c: c,
               ),
             ],
             // Chip strip is informational only (departure countdown / edited /

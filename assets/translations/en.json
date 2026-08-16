@@ -695,7 +695,10 @@
     "next_steps_title": "What happens next",
     "next_steps_1": "Your request reaches the organiser.",
     "next_steps_2": "They confirm it and pick your seat.",
-    "next_steps_3": "Your seat number shows here once the trip is locked."
+    "next_steps_3": "Your seat number shows here once the trip is locked.",
+    "payment_due": "{amount} due to confirm your seats",
+    "payment_recorded": "Payment recorded — waiting for the organiser to confirm it",
+    "payment_pay_now": "Pay now"
   },
   "add_bus": {
     "title": "Add Bus",
@@ -1069,7 +1072,10 @@
     "next_s2_body": "They check what is free and confirm your seats on WhatsApp.",
     "next_s3_title": "Your berth is assigned",
     "next_s3_body": "Check the status any time under My Requests.",
-    "pay_now_label": "Total to pay"
+    "pay_now_label": "Total to pay",
+    "button_pay_submit": "Pay & send request",
+    "saved_unpaid_title": "Request saved — not paid yet",
+    "saved_unpaid_body": "Your seats are not confirmed until payment is received. Open My Requests to pay."
   },
   "booking_form": {
     "label_name": "Your name",

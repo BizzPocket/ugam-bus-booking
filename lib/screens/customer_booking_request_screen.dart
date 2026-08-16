@@ -10,12 +10,14 @@ import '../controllers/user_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../routes/app_routes.dart';
+import '../services/chart_advance_payment.dart';
 import '../services/customer_requests_store.dart';
 import '../services/seat_chart_booking_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
+import '../utils/request_payment_gate.dart';
 import '../utils/round_trip_combine.dart';
 import '../utils/time_format.dart';
 import '../utils/tour_public_summary.dart';
@@ -78,6 +80,11 @@ class _CustomerBookingRequestScreenState
   /// 057). Until it answers the form simply shows no bands, which degrades to
   /// exactly today's free request rather than to a wrong price.
   TourPublicSummary _summary = TourPublicSummary.pending;
+
+  /// Whether the customer asserted a payment during THIS submit. Drives only
+  /// the closing message — the durable record is the claim on the server and
+  /// `claimedPaise` on the local ticket.
+  bool _paymentRecorded = false;
 
   @override
   void initState() {
@@ -369,29 +376,62 @@ class _CustomerBookingRequestScreenState
       },
     );
 
-    await CustomerRequestsStore().upsert(
-      CustomerRequestEntry(
-        id: requestId,
-        tourId: widget.tour.id,
-        tourTitle: widget.tour.title,
-        tourFromCity: widget.tour.fromCity,
-        tourToCity: widget.tour.toCity,
-        tourDepartureDate: widget.tour.departureDate,
-        tourPricePerSeat: widget.tour.pricePerSeat,
-        customerName: name,
-        customerPhone: normalisedPhone,
-        partySize: data.totalSeats,
-        doubleSofa: data.doubleSofa,
-        singleSofa: data.singleSofa,
-        note: note.isEmpty ? null : note,
-        pickupLocationId: data.pickupLocationId,
-        pickupLocationName: data.pickupLocationName,
-        tripType: data.tripType,
-        status: 'pending',
-        organiserPhone: widget.tour.createdBy,
-        createdAt: DateTime.now(),
-      ),
+    // What this request costs, decided from the bands the customer actually
+    // chose. `cannotCollect` (the organiser set no VPA) deliberately behaves
+    // like a free request rather than blocking the booking.
+    final plan = planRequestPayment(tour: widget.tour, lines: requestLines);
+
+    final entry = CustomerRequestEntry(
+      id: requestId,
+      tourId: widget.tour.id,
+      tourTitle: widget.tour.title,
+      tourFromCity: widget.tour.fromCity,
+      tourToCity: widget.tour.toCity,
+      tourDepartureDate: widget.tour.departureDate,
+      tourPricePerSeat: widget.tour.pricePerSeat,
+      customerName: name,
+      customerPhone: normalisedPhone,
+      partySize: data.totalSeats,
+      doubleSofa: data.doubleSofa,
+      singleSofa: data.singleSofa,
+      note: note.isEmpty ? null : note,
+      pickupLocationId: data.pickupLocationId,
+      pickupLocationName: data.pickupLocationName,
+      tripType: data.tripType,
+      status: 'pending',
+      organiserPhone: widget.tour.createdBy,
+      createdAt: DateTime.now(),
+      // Everything "Pay now" needs later, captured NOW so the retry works
+      // offline and cannot be re-quoted if the agent re-prices the bus.
+      advancePaise: plan.amountPaise,
+      collectVpa: widget.tour.collectVpa,
+      collectPayeeName: widget.tour.collectPayeeName,
     );
+    // Written BEFORE the payment sheet opens. If the customer fumbles their UPI
+    // app, closes it, or the phone dies, the request still exists and My
+    // Requests carries a Pay button — the alternative is a booking that is
+    // unrecoverable from the customer's side, which is the exact dead end
+    // ChartAdvancePayment was extracted to fix.
+    await CustomerRequestsStore().upsert(entry);
+
+    if (plan.needsPayment && mounted) {
+      final recorded = await ChartAdvancePayment.collect(
+        context: context,
+        requestId: requestId,
+        payeeVpa: widget.tour.collectVpa!,
+        payeeName:
+            (widget.tour.collectPayeeName?.trim().isNotEmpty ?? false)
+                ? widget.tour.collectPayeeName!
+                : widget.tour.title,
+        amountPaise: plan.amountPaise,
+        note: '${widget.tour.fromCity}-${widget.tour.toCity} · $name',
+      );
+      if (recorded) {
+        await CustomerRequestsStore()
+            .upsert(entry.copyWith(claimedPaise: plan.amountPaise));
+      }
+      _paymentRecorded = recorded;
+    }
 
     if (hasOrganiser && Get.isRegistered<UserController>()) {
       // ignore: unawaited_futures
@@ -428,6 +468,16 @@ class _CustomerBookingRequestScreenState
     // form, so back from My Requests returns to the tour list/detail.
     Get.offNamed(AppRoutes.customerMyRequests);
     final String message;
+    // A request that owed money and did NOT get paid must say so plainly, and
+    // name where to finish it. Reporting the cheerful "sent" line would leave
+    // the customer believing they were done.
+    if (plan.needsPayment && !_paymentRecorded) {
+      AppSnackBar.warning(
+        tr('customer_booking.saved_unpaid_body'),
+        title: tr('customer_booking.saved_unpaid_title'),
+      );
+      return;
+    }
     if (!hasOrganiser) {
       message = tr('customer_booking.success_sent_no_wa');
     } else if (whatsAppOpened) {
@@ -532,7 +582,10 @@ class _CustomerBookingRequestScreenState
     // entirely of one-leg seats, or a tour whose buses carry no bands — in
     // which case the older leg-weighted estimate is still the honest preview.
     final chargePaise = form?.chargePaise ?? 0;
-    final payNow = chargePaise > 0;
+    // Only promise a payment step when there is somewhere for the money to go.
+    // On a tour whose organiser set no VPA the charge is real but uncollectable
+    // online, so the button must not say "Pay".
+    final payNow = chargePaise > 0 && widget.tour.canCollectOnline;
     // Leg-weighted estimate: a one-way (Go-only / Return-only) berth is charged
     // at 0.5 of a round-trip berth, so the preview must apply the same factor —
     // otherwise a Go-only booking reads at the full round-trip price. Rounded to
@@ -644,17 +697,15 @@ class _CustomerBookingRequestScreenState
               ),
             ],
             UgamCTA(
-              // Deliberately still "send request": the payment step is not
-              // wired yet, and a button that says Pay had better take money.
-              // It becomes the pay gate once capacity holds exist — charging
-              // before capacity is gated is how you sell 38 seats on a 37-seat
-              // bus and owe refunds you promised never to make.
               label: _saving
                   ? tr('customer_booking.button_saving')
                   : (widget.isEditing
                         ? tr('customer_booking.button_update')
-                        : tr('customer_booking.button_submit')),
-              leadingIcon: Icons.send_rounded,
+                        : payNow
+                            ? tr('customer_booking.button_pay_submit')
+                            : tr('customer_booking.button_submit')),
+              leadingIcon:
+                  payNow ? Icons.account_balance_wallet_outlined : Icons.send_rounded,
               loading: _saving,
               // Live "N seats" tabular value on the right — reads off the
               // shared form's totalSeats getter, refreshed via onChanged.

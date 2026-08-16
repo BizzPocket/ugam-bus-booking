@@ -67,6 +67,16 @@ class Tour {
       collectVpa != null &&
       collectVpa!.trim().isNotEmpty;
 
+  /// Whether money can be taken online for this tour AT ALL — i.e. whether
+  /// there is somewhere for it to land.
+  ///
+  /// Deliberately weaker than [collectsAdvance], which also demands an
+  /// `advance_per_berth_paise` policy because the CHART flow quotes a fixed
+  /// advance. A banded REQUEST quotes the sum of the bands the customer chose,
+  /// so that policy has nothing to say about it — all this rail needs is a VPA.
+  bool get canCollectOnline =>
+      collectVpa != null && collectVpa!.trim().isNotEmpty;
+
   /// What ONE berth is asked to pay up front, in paise. Zero when the tour
   /// takes no advance. A policy of 0 means "the whole amount due", which the
   /// caller resolves against the real price — this only covers the fixed case.
