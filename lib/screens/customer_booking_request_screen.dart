@@ -631,6 +631,7 @@ class _CustomerBookingRequestScreenState
                     // RPC answers, and empty forever on an unpriced tour —
                     // both of which keep today's free-request behaviour.
                     buses: _summary.buses,
+                    availability: _summary.availability,
                     enableContacts: false,
                     // Pickup is mandatory here as on every capture surface —
                     // it's the form's default now, no per-surface opt-in.

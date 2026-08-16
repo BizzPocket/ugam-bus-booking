@@ -104,10 +104,14 @@ class _BandPickerBodyState extends State<_BandPickerBody> {
             key: Key('band-${widget.options[i].key}'),
             option: widget.options[i],
             selected: widget.options[i] == _selected,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              setState(() => _selected = widget.options[i]);
-            },
+            // A band with nothing left must not select. Letting it through is
+            // how money gets taken for a seat that does not exist.
+            onTap: widget.options[i].soldOut
+                ? null
+                : () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _selected = widget.options[i]);
+                  },
           ),
         ],
         // Quantity appears only once a band is chosen: a number tapped before
@@ -120,7 +124,14 @@ class _BandPickerBodyState extends State<_BandPickerBody> {
           ),
           const SizedBox(height: UgamSpacing.sm),
           _QtyRow(
-            max: widget.maxQty,
+            // Two independent ceilings, and the lower wins: what the CALLER
+            // still allows on this seat type, and what the BAND actually has
+            // left. Offering more than the band holds sells a seat that does
+            // not exist; offering more than the caller allows breaks the
+            // per-type cap.
+            max: _selected!.freeUnits < widget.maxQty
+                ? _selected!.freeUnits
+                : widget.maxQty,
             onPick: (qty) {
               HapticFeedback.lightImpact();
               Navigator.of(context).pop(
@@ -138,7 +149,11 @@ class _BandPickerBodyState extends State<_BandPickerBody> {
 class _BandRow extends StatelessWidget {
   final BandOption option;
   final bool selected;
-  final VoidCallback onTap;
+
+  /// Null when the band is sold out — the row renders, greyed, and does nothing.
+  /// Hiding it entirely would be worse: a customer who can see the ₹1,200 band
+  /// on the tour page needs to be told it is gone, not left wondering.
+  final VoidCallback? onTap;
 
   const _BandRow({
     super.key,
@@ -169,10 +184,12 @@ class _BandRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final chip = _labelChip;
+    final gone = option.soldOut;
+    final ink = gone ? c.ink3 : (selected ? c.accent : c.ink);
 
     return UgamTappable(
       onTap: onTap,
-      pressedScale: 0.98,
+      pressedScale: gone ? 1.0 : 0.98,
       child: AnimatedContainer(
         duration: UgamMotion.tab,
         curve: UgamMotion.easeOut,
@@ -192,11 +209,13 @@ class _BandRow extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_off_rounded,
+              gone
+                  ? Icons.block_rounded
+                  : (selected
+                      ? Icons.radio_button_checked_rounded
+                      : Icons.radio_button_off_rounded),
               size: 18,
-              color: selected ? c.accent : c.ink3,
+              color: gone ? c.ink3 : (selected ? c.accent : c.ink3),
             ),
             const SizedBox(width: UgamSpacing.sm),
             Expanded(
@@ -208,7 +227,8 @@ class _BandRow extends StatelessWidget {
                     Formatters.formatMoneyInr(option.unitPricePaise / 100),
                     style: UgamText.tabular(
                       UgamText.titleS.copyWith(
-                        color: selected ? c.accent : c.ink,
+                        color: ink,
+                        decoration: gone ? TextDecoration.lineThrough : null,
                       ),
                     ),
                   ),
@@ -220,6 +240,22 @@ class _BandRow extends StatelessWidget {
                     style: UgamText.caption.copyWith(color: c.ink2),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(width: UgamSpacing.sm),
+            // How many are left. This is the number that stops a customer
+            // committing to a band that is visibly nearly gone — and it is
+            // ADVISORY: it comes from a snapshot fetched seconds ago.
+            Text(
+              gone
+                  ? tr('band_picker.sold_out')
+                  : tr('band_picker.left', namedArgs: {
+                      'n': '${option.freeUnits}',
+                    }),
+              style: UgamText.tabular(
+                UgamText.caption.copyWith(
+                  color: gone ? c.danger : c.ink3,
+                ),
               ),
             ),
           ],

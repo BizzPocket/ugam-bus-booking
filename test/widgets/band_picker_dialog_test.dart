@@ -14,16 +14,19 @@ List<BandOption> liveOptions() => const [
         band:
             RequestBand(label: 'બેન્ડ', fromRow: 0, toRow: 3, pricePaise: 160000),
         unitPricePaise: 160000,
+        freeUnits: 4,
       ),
       BandOption(
         band:
             RequestBand(label: 'બેન્ડ', fromRow: 4, toRow: 4, pricePaise: 150000),
         unitPricePaise: 150000,
+        freeUnits: 1,
       ),
       BandOption(
         band:
             RequestBand(label: 'બેન્ડ', fromRow: 5, toRow: 5, pricePaise: 120000),
         unitPricePaise: 120000,
+        freeUnits: 0,
       ),
     ];
 
@@ -105,8 +108,9 @@ void main() {
     await tester.tap(find.byKey(const Key('open')));
     await tester.pumpAndSettle();
 
-    final middle = liveOptions()[1]; // row 4, Rs 1,500
-    await tester.tap(find.byKey(Key('band-${middle.key}')));
+    // Front band — 4 free, so a quantity of 2 is genuinely available.
+    final front = liveOptions().first;
+    await tester.tap(find.byKey(Key('band-${front.key}')));
     await tester.pumpAndSettle();
 
     // Tapping the quantity is the commit — the dialog closes on it.
@@ -114,7 +118,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(picked, isNotNull);
-    expect(picked!.option, middle);
+    expect(picked!.option, front);
     expect(picked!.qty, 2);
   });
 
@@ -133,6 +137,44 @@ void main() {
 
     // Nothing tapped inside — the sheet is still open and has produced nothing.
     expect(result, isNull);
+  });
+
+  testWidgets('a sold-out band cannot be chosen', (tester) async {
+    // Taking money for a band with nothing left is the failure this whole
+    // feature exists to prevent, so the row must not select.
+    await openPicker(tester);
+
+    final gone = liveOptions().last; // freeUnits 0
+    await tester.tap(find.byKey(Key('band-${gone.key}')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('bandqty-1')), findsNothing,
+        reason: 'no quantity step for a band with no seats');
+  });
+
+  testWidgets('quantity is capped by what the band has left', (tester) async {
+    // The middle band has ONE seat left; offering "2" would sell a seat that
+    // does not exist.
+    await openPicker(tester);
+
+    await tester.tap(find.byKey(Key('band-${liveOptions()[1].key}')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('bandqty-1')), findsOneWidget);
+    expect(find.byKey(const Key('bandqty-2')), findsNothing);
+  });
+
+  testWidgets('the caller cap still applies when the band has more', (
+    tester,
+  ) async {
+    // Front band has 4 free but the caller allows only 2 more.
+    await openPicker(tester, maxQty: 2);
+
+    await tester.tap(find.byKey(Key('band-${liveOptions().first.key}')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('bandqty-2')), findsOneWidget);
+    expect(find.byKey(const Key('bandqty-3')), findsNothing);
   });
 
   testWidgets('a sold-out type shows the waiting-list notice, no bands',

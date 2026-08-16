@@ -17,6 +17,7 @@ import '../models/seat_type.dart';
 import '../models/trip_type.dart';
 import '../services/contact_sync_service.dart';
 import '../utils/band_options.dart';
+import '../utils/chart_seat_availability.dart';
 import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
 import '../utils/request_pricing.dart';
@@ -277,6 +278,15 @@ class BookingCaptureForm extends StatefulWidget {
   /// joins the waiting list.
   final List<Bus> buses;
 
+  /// Live per-seat occupancy keyed `busId|seatId`, arriving with [buses] from
+  /// the same RPC round-trip. Drives the "N left" figure and the sold-out state
+  /// in the band picker.
+  ///
+  /// ADVISORY. It is a snapshot the device fetched seconds ago, so it stops a
+  /// customer committing to a band that is visibly gone — it does NOT guarantee
+  /// the seat. Only a server-side hold can do that.
+  final Map<String, SeatAvailability> availability;
+
   const BookingCaptureForm({
     super.key,
     required this.fromCity,
@@ -290,6 +300,7 @@ class BookingCaptureForm extends StatefulWidget {
     this.forcedLeg,
     this.requirePickup = true,
     this.buses = const [],
+    this.availability = const {},
   });
 
   @override
@@ -526,8 +537,13 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   @override
   void didUpdateWidget(covariant BookingCaptureForm old) {
     super.didUpdateWidget(old);
-    if (!identical(old.buses, widget.buses) &&
-        !listEquals(old.buses, widget.buses)) {
+    final busesChanged = !identical(old.buses, widget.buses) &&
+        !listEquals(old.buses, widget.buses);
+    // Occupancy moves on its own as other customers book, and a stale "4 left"
+    // is exactly the number that talks someone into paying for a gone seat.
+    final occupancyChanged =
+        !availabilityEquals(old.availability, widget.availability);
+    if (busesChanged || occupancyChanged) {
       setState(_recomputeBandOptions);
     }
   }
@@ -544,7 +560,11 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   void _recomputeBandOptions() {
     _bandOptions = {
       for (final t in _selectableTypes)
-        t: bandOptionsFor(buses: widget.buses, type: t),
+        t: bandOptionsFor(
+          buses: widget.buses,
+          type: t,
+          availability: widget.availability,
+        ),
     };
 
     for (final type in _selectableTypes) {

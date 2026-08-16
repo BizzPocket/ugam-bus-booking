@@ -3425,6 +3425,8 @@
     "row_one": "Row {row}",
     "standard": "Standard",
     "unavailable_title": "No seats left at a set price",
-    "unavailable_body": "You can still send your request — it joins the waiting list, free, and we will contact you if a seat opens up."
+    "unavailable_body": "You can still send your request — it joins the waiting list, free, and we will contact you if a seat opens up.",
+    "left": "{n} left",
+    "sold_out": "Sold out"
   }
 }

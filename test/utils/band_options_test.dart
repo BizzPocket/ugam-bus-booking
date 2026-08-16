@@ -3,6 +3,7 @@ import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/utils/band_options.dart';
+import 'package:occubusbooking/utils/chart_seat_availability.dart';
 
 void main() {
   /// A cell of [type] at [row].
@@ -139,6 +140,82 @@ void main() {
       final bus = Bus(id: 'b', name: 'b', pricePerSeat: 800);
 
       expect(bandOptionsFor(buses: [bus], type: SeatType.singleSofa), isEmpty);
+    });
+
+    test('with no occupancy every unit reads free', () {
+      // The server only emits OCCUPIED seats, so an empty feed on a loaded
+      // summary genuinely means nothing is booked.
+      final options =
+          bandOptionsFor(buses: [liveBus()], type: SeatType.singleSofa);
+
+      // Rows 0-3 carry one single sofa each.
+      expect(options.first.freeUnits, 4);
+      expect(options.first.soldOut, isFalse);
+    });
+
+    test('a booked seat is removed from its band', () {
+      final options = bandOptionsFor(
+        buses: [liveBus()],
+        type: SeatType.singleSofa,
+        availability: availabilityByKey([
+          SeatAvailability(busId: 'bus1', seatId: 'SL0', usedGo: 1, usedRet: 1),
+        ]),
+      );
+
+      expect(options.first.freeUnits, 3);
+    });
+
+    test('a one-leg booking still blocks a full-trip unit', () {
+      // A round-trip rider needs the berth on BOTH legs. Someone holding only
+      // the outbound leg is enough to make it unsellable as a full trip.
+      final options = bandOptionsFor(
+        buses: [liveBus()],
+        type: SeatType.singleSofa,
+        availability: availabilityByKey([
+          SeatAvailability(busId: 'bus1', seatId: 'SL0', usedGo: 1),
+        ]),
+      );
+
+      expect(options.first.freeUnits, 3);
+    });
+
+    test('a HALF-taken double sofa is not a free double', () {
+      // A whole unit must fit — a fresh pair cannot sit on a half-sold sofa.
+      final options = bandOptionsFor(
+        buses: [liveBus()],
+        type: SeatType.doubleSofa,
+        availability: availabilityByKey([
+          SeatAvailability(busId: 'bus1', seatId: 'DL0', usedGo: 1, usedRet: 1),
+        ]),
+      );
+
+      expect(options.first.freeUnits, 3);
+    });
+
+    test('a band with every seat gone is sold out', () {
+      final options = bandOptionsFor(
+        buses: [liveBus()],
+        type: SeatType.singleSofa,
+        availability: availabilityByKey([
+          SeatAvailability(busId: 'bus1', seatId: 'SL5', usedGo: 1, usedRet: 1),
+        ]),
+      );
+
+      // Row 5 is the Rs 1,200 band and holds exactly one single sofa.
+      final cheapest = options.last;
+      expect(cheapest.band.pricePaise, 120000);
+      expect(cheapest.freeUnits, 0);
+      expect(cheapest.soldOut, isTrue);
+    });
+
+    test('free units SUM across two buses sharing a band', () {
+      final options = bandOptionsFor(
+        buses: [liveBus(id: 'bus1'), liveBus(id: 'bus2')],
+        type: SeatType.singleSofa,
+      );
+
+      expect(options.length, 3, reason: 'still one choice per band');
+      expect(options.first.freeUnits, 8, reason: '4 rows on each of two buses');
     });
 
     test('a zero-priced bus offers nothing', () {

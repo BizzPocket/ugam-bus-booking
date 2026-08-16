@@ -42,12 +42,20 @@ class TourPublicSummary {
   /// sold-out state during the first frame.
   final bool loaded;
 
+  /// Per-seat occupancy keyed `busId|seatId`, exactly as fetched. Carried on
+  /// the summary because it arrives in the SAME round-trip as [buses] and the
+  /// two are only meaningful together — a band's remaining seats cannot be
+  /// counted from the layout alone. The server emits only OCCUPIED seats, so an
+  /// empty map on a [loaded] summary means nothing is booked.
+  final Map<String, SeatAvailability> availability;
+
   const TourPublicSummary({
     this.buses = const [],
     this.fromPrice,
     this.berthsTotal = 0,
     this.berthsFree = 0,
     this.loaded = false,
+    this.availability = const {},
   });
 
   /// Pre-answer state.
@@ -110,5 +118,6 @@ TourPublicSummary summariseTourForPublic({
     berthsTotal: total,
     berthsFree: free,
     loaded: true,
+    availability: availability,
   );
 }

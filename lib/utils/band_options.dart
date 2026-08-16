@@ -2,6 +2,8 @@ import '../models/bus_details.dart';
 import '../models/request_band.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
+import '../models/trip_type.dart';
+import 'chart_seat_availability.dart';
 
 /// One choice in the band picker: a band the customer may buy into for a given
 /// seat type, and what ONE unit of that type costs inside it.
@@ -18,11 +20,36 @@ class BandOption {
   /// "Standard" rather than showing an authored band label it does not have.
   final bool isStandard;
 
+  /// WHOLE units of this seat type still sellable as a FULL TRIP inside this
+  /// band, across every bus that carries it.
+  ///
+  /// Whole units, not berths: a fresh pair cannot sit on a half-sold double
+  /// sofa, so a half-taken double counts for nothing. Full trip, so a rider
+  /// holding only the outbound leg still blocks it — a round-trip seat needs
+  /// both legs, which is the whole 37-berths-or-74-one-leg arithmetic.
+  ///
+  /// ADVISORY ONLY. It is computed from a snapshot the customer's device
+  /// fetched some seconds ago, so it can be stale by the time they tap Pay.
+  /// It exists to stop someone paying for a seat that is visibly gone, NOT to
+  /// guarantee the seat — that needs a server-side hold.
+  final int freeUnits;
+
   const BandOption({
     required this.band,
     required this.unitPricePaise,
     this.isStandard = false,
+    this.freeUnits = 0,
   });
+
+  /// Nothing of this type left in this band for a full-trip rider.
+  bool get soldOut => freeUnits <= 0;
+
+  BandOption copyWith({int? freeUnits}) => BandOption(
+        band: band,
+        unitPricePaise: unitPricePaise,
+        isStandard: isStandard,
+        freeUnits: freeUnits ?? this.freeUnits,
+      );
 
   /// Stable identity for de-duplication across buses and for widget keys.
   /// Deliberately excludes the label: the live tour carries three
@@ -71,31 +98,58 @@ class BandOption {
 List<BandOption> bandOptionsFor({
   required List<Bus> buses,
   required SeatType type,
+  Map<String, SeatAvailability> availability = const {},
 }) {
   final byKey = <String, BandOption>{};
-  final ordered = <BandOption>[];
+  final ordered = <String>[];
 
   void add(BandOption option) {
     if (option.unitPricePaise <= 0) return;
-    if (byKey.containsKey(option.key)) return;
-    byKey[option.key] = option;
-    ordered.add(option);
+    final existing = byKey[option.key];
+    if (existing == null) {
+      byKey[option.key] = option;
+      ordered.add(option.key);
+      return;
+    }
+    // The same band on a second bus is ONE choice with MORE seats behind it.
+    byKey[option.key] =
+        existing.copyWith(freeUnits: existing.freeUnits + option.freeUnits);
   }
 
   for (final bus in buses) {
     final layout = bus.layout;
     if (layout == null) continue;
 
-    // Rows that actually hold a sellable seat of this type. Reserved cells are
-    // held by the agent and never sold, so they cannot justify a band.
+    // Rows that actually hold a sellable seat of this type, and how many WHOLE
+    // units of it are still free for a full-trip rider in each row. Reserved
+    // cells are held by the agent and never sold, so they cannot justify a
+    // band — `freeBerths` already returns 0 for them.
     final rowsWithType = <int>{};
+    final freeByRow = <int, int>{};
     for (final SeatCell cell in layout.grid) {
       if (cell.seatId == null || cell.seatType != type || cell.reserved) {
         continue;
       }
       rowsWithType.add(cell.row);
+      final free = freeBerths(
+        cell: cell,
+        occupancy: availability[SeatAvailability.keyFor(bus.id, cell.seatId!)],
+        leg: TripType.roundTrip,
+      );
+      // A WHOLE unit must fit: a half-sold double sofa seats no fresh pair.
+      if (free >= type.berthsPerUnit) {
+        freeByRow[cell.row] = (freeByRow[cell.row] ?? 0) + 1;
+      }
     }
     if (rowsWithType.isEmpty) continue;
+
+    int freeIn(bool Function(int row) covers) {
+      var n = 0;
+      freeByRow.forEach((row, units) {
+        if (covers(row)) n += units;
+      });
+      return n;
+    }
 
     final bands = bus.effectiveBands;
 
@@ -105,6 +159,7 @@ List<BandOption> bandOptionsFor({
       add(BandOption(
         band: snapshot,
         unitPricePaise: snapshot.pricePaise * type.berthsPerUnit,
+        freeUnits: freeIn(snapshot.covers),
       ));
     }
 
@@ -128,9 +183,11 @@ List<BandOption> bandOptionsFor({
       ),
       unitPricePaise: berthPaise * type.berthsPerUnit,
       isStandard: true,
+      freeUnits: freeIn(uncovered.contains),
     ));
   }
 
-  ordered.sort((a, b) => a.band.fromRow.compareTo(b.band.fromRow));
-  return ordered;
+  final out = [for (final k in ordered) byKey[k]!]
+    ..sort((a, b) => a.band.fromRow.compareTo(b.band.fromRow));
+  return out;
 }
