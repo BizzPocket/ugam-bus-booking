@@ -108,13 +108,18 @@ Bus _bus({BusLayout? layout, String? handlerId}) => Bus(
       layout: layout,
     );
 
-Tour _tour({BusLayout? layout, String? handlerId}) => Tour(
+Tour _tour({
+  BusLayout? layout,
+  String? handlerId,
+  TourStatus status = TourStatus.busBooked,
+}) =>
+    Tour(
       id: 't1',
       title: 'Shravan Sud Bij',
       fromCity: 'Ahmedabad',
       toCity: 'Ambaji',
       departureDate: DateTime(2026, 8, 14),
-      status: TourStatus.busBooked,
+      status: status,
       pricePerSeat: 1500,
       buses: [_bus(layout: layout, handlerId: handlerId)],
       passengers: [
@@ -128,6 +133,12 @@ Tour _tour({BusLayout? layout, String? handlerId}) => Tour(
     );
 
 void main() {
+  // The refusal paths below reach `AppSnackBar`, which reads
+  // `Get.overlayContext` — and that touches `WidgetsBinding.instance`. The
+  // snackbar itself no-ops without an overlay (app_snackbar.dart:46), so this
+  // buys the binding, not a rendered toast.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late _RecordingSync sync;
   late TourController ctrl;
 
@@ -222,6 +233,60 @@ void main() {
 
       final patch = sync.patches.firstWhere((p) => p.table == 'buses').fields;
       expect(patch['layout'], isNotNull);
+    });
+  });
+
+  group('updateBus — the lock freezes the CHART, not the bus record', () {
+    // Reported from the field as "the bus details are not editing". The gate
+    // fired on `!status.allowsLayoutEdit` alone, so a locked tour refused the
+    // WHOLE update — driver, phone, boarding point, departure time, pricing —
+    // under a toast that said "layout locked" and explained none of it. Those
+    // are the fields that change on departure day, which is precisely when a
+    // tour is locked.
+    for (final status in [TourStatus.locked, TourStatus.completed]) {
+      test('a detail edit lands on a ${status.name} tour', () async {
+        ctrl.tours.assignAll([_tour(status: status)]);
+
+        await ctrl.updateBus(
+          't1',
+          _bus().copyWith(driverName: 'Rakesh', driverPhone: '+919000000001'),
+          layoutChanged: false,
+        );
+
+        final patch = sync.patches.firstWhere((p) => p.table == 'buses').fields;
+        expect(patch['driver_name'], 'Rakesh');
+        expect(patch['driver_phone'], '+919000000001');
+        expect(patch.containsKey('layout'), isFalse,
+            reason: 'a detail edit still must not carry the grid');
+      });
+
+      test('a re-layout is still refused on a ${status.name} tour', () async {
+        ctrl.tours.assignAll([_tour(layout: _layout(), status: status)]);
+
+        await ctrl.updateBus(
+          't1',
+          _bus(layout: _layout()),
+          layoutChanged: true,
+        );
+
+        expect(sync.busWrites, isEmpty,
+            reason: 'the notified chart must not silently change shape');
+      });
+    }
+
+    test('the local cache is not patched by a refused re-layout', () async {
+      ctrl.tours.assignAll([_tour(status: TourStatus.locked)]);
+
+      await ctrl.updateBus(
+        't1',
+        _bus(layout: _layout()).copyWith(driverName: 'Should not stick'),
+        layoutChanged: true,
+      );
+
+      // The optimistic local write sits INSIDE `_write`, so a gate that returns
+      // before it must leave the in-memory bus alone too — otherwise the UI
+      // shows an edit the server never took.
+      expect(ctrl.getTour('t1')!.buses.first.driverName, isNot('Should not stick'));
     });
   });
 

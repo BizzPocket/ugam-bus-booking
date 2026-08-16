@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../config/whatsapp_cloud_config.dart';
+import '../models/bus_details.dart';
 import '../models/chart_footer.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
@@ -212,11 +213,7 @@ class WhatsAppOutbound {
     final busId = p.assignedSeats.first.busId;
     final busMatch = tour.buses.where((b) => b.id == busId).toList();
     final bus = busMatch.isEmpty ? null : busMatch.first;
-    // The customer's bus line ({{3}}) is the bus NAME only (e.g. "Raj") via the
-    // shared [Bus.customerLabel] — no registration number, no internal "Bus N"
-    // slot. The plate is an agent-only detail (it stays on the admin screens'
-    // [Bus.displayLabel]); the customer just needs the name.
-    final busLabel = _param(bus == null ? '' : bus.customerLabel);
+    final busLabel = _param(allocationBusLabel(bus));
     // Template variable order (must match the approved `seat_allotment` body):
     //   {{1}} passenger name  {{2}} tour (in the greeting "{name}, {tour} માટે
     //   …")  {{3}} bus  {{4}} boarding place  {{5}} departure date
@@ -325,6 +322,22 @@ class WhatsAppOutbound {
       error: null,
     );
   }
+
+  /// The bus line ({{3}}) of the allotment message: [Bus.displayLabel]
+  /// (`Raj · GJ05HU7162`) — name AND registration plate.
+  ///
+  /// This is the SAME label the chart image stapled to this very message carries
+  /// in its header, and the same one on the agent's downloaded A4. It used to be
+  /// [Bus.customerLabel] (name only), on the reasoning that a sentence reads
+  /// better without a plate wedged into it. That reasoning loses to a plainer
+  /// one: a message and the chart attached to it must not name the bus two
+  /// different ways, and the rider who reads "બસ: Raj" then walks into a car
+  /// park beside two coaches both called Raj has nothing to match against.
+  ///
+  /// Pure + static so the rule is unit-testable — it has flipped once already.
+  /// A missing bus yields `''`, which [_param] turns into the dash Meta needs
+  /// (an empty parameter is rejected with 132000).
+  static String allocationBusLabel(Bus? bus) => bus?.displayLabel ?? '';
 
   /// The last guard before ANY value goes on the wire: repair it into
   /// something Meta will accept, and coerce a blank to a dash.

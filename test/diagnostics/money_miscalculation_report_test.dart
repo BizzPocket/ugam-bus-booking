@@ -438,13 +438,19 @@ void main() {
   });
 
   // ── 6 · F1 · a rider's whole AR lands on their first bus ───────────────────
-  test('6 · FIXED F1 — cross-bus rider owes each bus its own share', () async {
-    section('6 · FIXED F1 — cross-bus rider: AR split by what each bus billed');
+  test('6 · FIXED F1 — cross-bus rider owes each bus its own fare', () async {
+    section('6 · FIXED F1 — cross-bus rider: each bus prices its own seats');
     addTearDown(Get.reset);
 
     // Goes out on bus A (SL1 · row 0 · ₹1,600 band, one leg → ₹800) and returns
-    // on a second, cheaper bus (₹400 one leg). Owes ₹2,000 in total, so the
-    // honest split is 800:400 → ₹1,333 / ₹667.
+    // on a second, cheaper bus (₹400 one leg). Each bus is owed exactly what it
+    // billed this rider — ₹800 and ₹400 — and has collected nothing yet.
+    //
+    // The ledger's `owes_minor` below deliberately says ₹2,000, which is what
+    // that rider's `ar.rider` lines were posted at before their buses were
+    // re-priced. Nothing re-posts a fare when a bus's price changes (the hole
+    // migration 092 closes), so that figure is stale by ₹800. It is no longer an
+    // input: per-bus AR is priced from the seats the rider actually holds.
     final busTwo = Bus(
       id: 'bus-2',
       name: 'Bus 2',
@@ -481,25 +487,28 @@ void main() {
     final billedB = busTwo.amountDueFor(rider);
     final a = money.summaryForBus(busAId);
     final b = money.summaryForBus('bus-2');
-    final expectA = 2000 * billedA / (billedA + billedB);
-    final expectB = 2000 * billedB / (billedA + billedB);
 
-    line('  one rider owes ${inr(2000)}, seated on BOTH buses');
-    line('  billed on Test Bus A1 ${inr(billedA)} · on Bus 2 ${inr(billedB)}\n');
+    line('  one rider seated on BOTH buses, nothing collected yet');
+    line('  billed on Test Bus A1 ${inr(billedA)} · on Bus 2 ${inr(billedB)}');
+    line('  the ledger still carries a pre-reprice ${inr(2000)} for them\n');
     line('  ${pad("bus", 16)}${pad("was", 12)}${pad("now", 12)}correct');
     line('  ${pad("Test Bus A1", 16)}${pad(inr(2000), 12)}'
-        '${pad(inr(a.toCollectTotal), 12)}${inr(expectA)}');
+        '${pad(inr(a.toCollectTotal), 12)}${inr(billedA)}');
     line('  ${pad("Bus 2", 16)}${pad(inr(0), 12)}'
-        '${pad(inr(b.toCollectTotal), 12)}${inr(expectB)}');
+        '${pad(inr(b.toCollectTotal), 12)}${inr(billedB)}');
     line('  ${pad("trip total", 16)}${pad(inr(2000), 12)}'
-        '${pad(inr(money.tourSummary().totalToCollect), 12)}${inr(2000)}');
-    line('\n  FIXED: _arShareByBus apportions a rider\'s balance across the buses');
-    line('  that billed them, so Bus 2\'s handler now sees the rider they carry.');
-    line('  The shares sum to 1, so the trip total is unchanged.');
+        '${pad(inr(money.tourSummary().totalToCollect), 12)}'
+        '${inr(billedA + billedB)}');
+    line('\n  FIXED: each bus prices the seats it is actually carrying, so Bus 2\'s');
+    line('  handler sees the rider they carry — and the trip total is what the');
+    line('  buses between them billed, not what a stale ledger line remembers.');
 
-    expect(a.toCollectTotal, closeTo(expectA, 0.01));
-    expect(b.toCollectTotal, closeTo(expectB, 0.01));
-    expect(money.tourSummary().totalToCollect, closeTo(2000, 0.01));
+    expect(a.toCollectTotal, closeTo(billedA, 0.01));
+    expect(b.toCollectTotal, closeTo(billedB, 0.01));
+    expect(
+      money.tourSummary().totalToCollect,
+      closeTo(billedA + billedB, 0.01),
+    );
   });
 
   // ── 7 · B1 · four different bottom lines on the same data ──────────────────

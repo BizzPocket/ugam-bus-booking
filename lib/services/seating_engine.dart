@@ -257,13 +257,25 @@ class SeatingEngine {
     // must never seat them and never raise an exception for them (no phantom
     // overflowWaitlist for someone the agent already chose to defer). They
     // re-enter placement only once the agent takes them off the waitlist.
-    // journeyDone riders have FINISHED their travelled leg — completeOutboundLeg
-    // freed their seats and flagged them. They are off the bus, so the engine
-    // must never re-seat them or raise an exception for them; otherwise a
+    // journeyDone riders have FINISHED travelling. They are off the bus, so the
+    // engine must never re-seat them or raise an exception for them; otherwise a
     // completed GO leg resurfaces them as pending demand and a "needs decision".
+    //
+    // Excluded from DEMAND is not the same as "their berths are free" — see the
+    // retained-berth seed below. `completeOutboundLeg` frees a retired rider's
+    // seats, but a per-seat leg cancellation deliberately does NOT: a round-trip
+    // rider whose return is struck keeps the GO berth they actually rode.
     final sorted = [
       for (final p in passengers)
         if (!p.isWaitlisted && !p.journeyDone) p,
+    ]..sort((a, b) => a.id.compareTo(b.id));
+
+    // Riders excluded above who STILL HOLD berths. Their seats are history, not
+    // vacancy: the berth is spoken for on the leg they rode it, and only the
+    // OTHER leg is resellable.
+    final retainedHolders = [
+      for (final p in passengers)
+        if (p.journeyDone && p.assignedSeats.isNotEmpty) p,
     ]..sort((a, b) => a.id.compareTo(b.id));
 
     // ── 0. Seed reserved + locked ─────────────────────────────────────────
@@ -292,6 +304,29 @@ class SeatingEngine {
           passengerId: p.id,
           reason: 'locked',
         ));
+      }
+    }
+
+    // Seed the berths retired riders still hold, so nothing is placed on top of
+    // them. Seeded like a locked berth (same primitive) but WITHOUT recording a
+    // PlacementReason: the engine did not place these and must not claim them.
+    //
+    // The seed is leg-scoped, which is the whole point. A rider who rode GO and
+    // had their return struck holds a berth stamped `outboundOnly`, so only the
+    // GO half of that tile is consumed and the RETURN half stays sellable —
+    // exactly the "cancel the return, resell the seat home" flow. Without this
+    // the berth read as wholly free and the engine would re-let it on BOTH legs,
+    // seating a stranger on top of someone the chart still shows.
+    for (final p in retainedHolders) {
+      final legBuckets = _LockedLegResolver(p);
+      for (final a in p.assignedSeats) {
+        final cell = state.cellFor(a.busId, a.seatId);
+        // Prefer the berth's OWN stamped leg; fall back to the request-line
+        // queue only for legacy berths that never recorded one.
+        final legs = a.leg != null
+            ? TripLeg.forTrip(a.leg!)
+            : legBuckets.legsFor(cell?.seatType);
+        state.seedLocked(p.id, a, legs, groupId: p.groupId);
       }
     }
 

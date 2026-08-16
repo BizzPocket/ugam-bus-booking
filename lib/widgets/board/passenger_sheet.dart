@@ -48,11 +48,13 @@ import '../../models/board_lens.dart';
 import '../../models/bus_details.dart';
 import '../../models/passenger.dart';
 import '../../models/seat_assignment.dart';
+import '../../models/tour_status.dart';
 import '../../models/trip_type.dart';
 import '../../services/seat_move_flow.dart';
 import '../../utils/app_snackbar.dart';
 import '../../utils/formatters.dart';
 import '../../utils/passenger_display.dart';
+import '../../utils/seat_leg_cancel.dart';
 import '../../utils/phone_dialer.dart';
 import '../edit_request_sheet.dart';
 
@@ -270,9 +272,10 @@ class PassengerSheet extends StatefulWidget {
   )?
   onRelocateToBus;
 
-  /// Return phase only: cancel this occupant's return seat. The caller owns the
-  /// confirm + cancel + guided-rebook flow, exactly as the occupant sheet does.
-  final void Function(Passenger occupant)? onCancelReturn;
+  /// Strike ONE leg from THIS berth for this occupant. The caller owns the
+  /// confirm + cancel + guided-rebook flow, exactly as the occupant sheet does,
+  /// and [cancellableSeatLegs] decides which legs are offerable on both.
+  final void Function(Passenger occupant, TripType strike)? onCancelSeatLeg;
 
   /// Opens the Hold / Premium flag sheet for THIS berth (not the occupant).
   final VoidCallback? onSeatFlags;
@@ -290,7 +293,7 @@ class PassengerSheet extends StatefulWidget {
     this.onCheckIn,
     this.onFree,
     this.onRelocateToBus,
-    this.onCancelReturn,
+    this.onCancelSeatLeg,
     this.onSeatFlags,
   });
 
@@ -315,7 +318,7 @@ class PassengerSheet extends StatefulWidget {
       String fromSeatId,
     )?
     onRelocateToBus,
-    void Function(Passenger occupant)? onCancelReturn,
+    void Function(Passenger occupant, TripType strike)? onCancelSeatLeg,
     VoidCallback? onSeatFlags,
   }) {
     if (occupants.isEmpty) return Future.value(null);
@@ -334,7 +337,7 @@ class PassengerSheet extends StatefulWidget {
         onCheckIn: onCheckIn,
         onFree: onFree,
         onRelocateToBus: onRelocateToBus,
-        onCancelReturn: onCancelReturn,
+        onCancelSeatLeg: onCancelSeatLeg,
         onSeatFlags: onSeatFlags,
       ),
     );
@@ -360,6 +363,23 @@ class _PassengerSheetState extends State<PassengerSheet> {
   /// app). Every row that needs it is dropped rather than throwing.
   TourController? get _ctrl =>
       Get.isRegistered<TourController>() ? Get.find<TourController>() : null;
+
+  /// Which legs of THIS berth can be struck for [occ] — the same shared gate
+  /// the seat chart's occupant sheet uses, so the two surfaces never disagree.
+  ({bool go, bool ret}) _strikeable(Passenger occ) {
+    final tour = _ctrl?.getTour(widget.tourId);
+    // Locked only: before the tour locks, a rider who isn't travelling is an
+    // ordinary request edit, not a leg strike.
+    if (tour == null || tour.status != TourStatus.locked) {
+      return (go: false, ret: false);
+    }
+    return cancellableSeatLegs(
+      occ,
+      busId: widget.busId,
+      seatId: widget.seatId,
+      goLegCompleted: tour.goLegCompleted,
+    );
+  }
 
   /// Re-read from the controller so an in-context priority / handler toggle
   /// shows immediately without closing the sheet.
@@ -889,21 +909,35 @@ class _PassengerSheetState extends State<PassengerSheet> {
               onTap: _busy ? null : () => unawaited(_free()),
             ),
 
-          if (widget.onCancelReturn != null &&
-              p != null &&
-              p.retBerths > 0 &&
-              (_ctrl?.getTour(widget.tourId)?.isReturnPhase ?? false))
-            _ActionRow(
-              icon: Icons.event_busy_rounded,
-              label: tr('tour_detail.cancel_return_seat'),
-              danger: true,
-              onTap: _busy
-                  ? null
-                  : () {
-                      Navigator.of(context).maybePop();
-                      widget.onCancelReturn!(p);
-                    },
-            ),
+          // Strike ONE leg from THIS berth. Seat-scoped so a party keeps the
+          // seats it is still travelling on; the gate is shared with the seat
+          // chart's occupant sheet so both offer the same thing here.
+          if (widget.onCancelSeatLeg != null && p != null) ...[
+            if (_strikeable(p).ret)
+              _ActionRow(
+                icon: Icons.event_busy_rounded,
+                label: tr('tour_detail.cancel_return_seat'),
+                danger: true,
+                onTap: _busy
+                    ? null
+                    : () {
+                        Navigator.of(context).maybePop();
+                        widget.onCancelSeatLeg!(p, TripType.returnOnly);
+                      },
+              ),
+            if (_strikeable(p).go)
+              _ActionRow(
+                icon: Icons.logout_rounded,
+                label: tr('tour_detail.cancel_go_seat'),
+                danger: true,
+                onTap: _busy
+                    ? null
+                    : () {
+                        Navigator.of(context).maybePop();
+                        widget.onCancelSeatLeg!(p, TripType.outboundOnly);
+                      },
+              ),
+          ],
         ],
       ),
     );

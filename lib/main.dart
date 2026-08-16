@@ -1,4 +1,3 @@
-
 // Prefixed because easy_localization re-exports intl's TextDirection (LTR/RTL),
 // which shadows dart:ui's TextDirection (ltr/rtl) used by Directionality below.
 import 'dart:ui' as ui;
@@ -204,7 +203,7 @@ class _BootstrapSplash extends StatelessWidget {
         backgroundColor: c.bg,
         body: const Center(child: UgamLogo(size: 140)),
       ),
-    );
+    ); 
   }
 }
 

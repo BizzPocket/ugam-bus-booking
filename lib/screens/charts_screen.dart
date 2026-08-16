@@ -14,6 +14,7 @@ import '../models/passenger.dart';
 import '../models/seat_layout.dart';
 import '../models/tour.dart';
 import '../routes/app_routes.dart';
+import '../utils/app_snackbar.dart';
 import '../utils/seat_occupants.dart';
 import '../utils/tour_capacity.dart';
 import '../utils/tour_group_colors.dart';
@@ -151,6 +152,38 @@ class _ChartsScreenState extends State<ChartsScreen> {
       () => AddBusScreen(tourId: tour.id, existing: bus),
       transition: Transition.cupertino,
     );
+  }
+
+  /// Rebuild a LOST grid rather than generating a new one.
+  ///
+  /// `TourController.recoverBusLayoutFor` re-derives the layout from the bus's
+  /// seat count, its type, and the seat ids the riders are still holding, then
+  /// writes ONLY the layout column. Every candidate it considers hosts every
+  /// surviving id identically, so nobody moves — which is the whole difference
+  /// between this and [_createLayout], where a regenerate renumbers the seats
+  /// and unassigns the people sitting in them.
+  ///
+  /// It can legitimately fail to find exactly one answer (a bus whose surviving
+  /// ids fit several layouts, or none). It says which in `reason`, and that is
+  /// surfaced verbatim instead of a generic error — the reason names the actual
+  /// obstacle and is the only lead the agent has.
+  Future<void> _recoverLayout(Tour tour, Bus bus) async {
+    HapticFeedback.lightImpact();
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('charts.recover_confirm_title'),
+      message: tr('charts.recover_confirm_body'),
+      confirmLabel: tr('charts.recover_layout'),
+    );
+    if (!confirmed || !mounted) return;
+
+    final result = await tourCtrl.recoverBusLayoutFor(tour.id, bus.id);
+    if (!mounted) return;
+    if (result.recovered) {
+      AppSnackBar.success(tr('charts.recover_done'));
+    } else {
+      AppSnackBar.error(result.reason);
+    }
   }
 
   /// Builds the seatId → occupants map for [bus] from [tour]'s passengers. A
@@ -321,6 +354,8 @@ class _ChartsScreenState extends State<ChartsScreen> {
                         // only a rendered grid reserves room for it.
                         bottomReserve: chartLayout == null ? 0 : fabReserve,
                         onCreateLayout: () => _createLayout(tour, bus),
+                        seatedRiders: assignedCount,
+                        onRecoverLayout: () => _recoverLayout(tour, bus),
                         onSeatTap: (seatId, occupants) =>
                             _showOccupantSheet(context, seatId, occupants, bus),
                       ),
@@ -548,7 +583,15 @@ class _BusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final multiBus = tour.buses.length > 1;
-    return Row(
+    final plate = bus.busNumber.trim();
+    // The registration goes on its OWN line under the bus row, not into the
+    // label above it. On a multi-bus tour that label is a scrolling pill strip
+    // sharing its row with the fill indicator — the narrowest thing on the
+    // screen, already the first to clip — so `name · GJ05HU7162` would push the
+    // plate straight off the edge on the tour where it matters most. Down here
+    // it always fits, it names the SELECTED bus, and one placement serves both
+    // the pills and the single-bus label.
+    final row = Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
@@ -584,6 +627,25 @@ class _BusBar extends StatelessWidget {
         ),
         const SizedBox(width: UgamSpacing.md),
         _FillIndicator(assigned: assigned, total: total, c: c),
+      ],
+    );
+
+    if (plate.isEmpty) return row;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        row,
+        const SizedBox(height: 2),
+        Text(
+          plate,
+          // Meta, so ink2 and never the accent — a plate identifies, it does
+          // not mark ownership. Tabular so the digits sit in even columns the
+          // way a registration is read off a windscreen.
+          style: UgamText.tabular(UgamText.caption).copyWith(color: c.ink2),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }
@@ -768,6 +830,16 @@ class _SeatChartCard extends StatelessWidget {
   /// actually generated.
   final VoidCallback onCreateLayout;
 
+  /// Riders still holding a seat on THIS bus. Non-zero next to a missing grid
+  /// is the signature of a lost layout rather than an unconfigured bus, and it
+  /// is what decides which of the two empty states below is honest.
+  final int seatedRiders;
+
+  /// Rebuild the lost grid from the surviving seat ids, re-attaching everyone.
+  /// Offered only when [seatedRiders] is non-zero — with nobody seated there is
+  /// no evidence to rebuild from and [onCreateLayout] is the right answer.
+  final VoidCallback onRecoverLayout;
+
   const _SeatChartCard({
     required this.layout,
     required this.loaded,
@@ -776,6 +848,8 @@ class _SeatChartCard extends StatelessWidget {
     required this.groupColors,
     required this.bottomReserve,
     required this.onCreateLayout,
+    required this.seatedRiders,
+    required this.onRecoverLayout,
     required this.onSeatTap,
   });
 
@@ -788,20 +862,45 @@ class _SeatChartCard extends StatelessWidget {
       // "this bus genuinely has no seat map". Rendering the second answer while
       // the first is true showed an empty-chart dead end on a bus that had 36
       // riders seated on it. [loaded] resolves the ambiguity.
+      // A bus with riders on it did NOT arrive here unconfigured — it LOST its
+      // grid (the full-row write that erased two live seat charts; see
+      // `Bus.toPatch`). `total_seats` and every rider's `assigned_seats` survive
+      // that, which is why the meter above still reads "37/37" over this card.
+      //
+      // Offering "create seat plan" here was actively harmful: it opens the bus
+      // wizard, and generating a layout renumbers every seat id — unassigning
+      // all 37 of the people the bar just counted. So when there is evidence to
+      // rebuild FROM, lead with the repair, which re-derives the same grid from
+      // the surviving ids and puts everyone back where they were.
+      final lost = loaded && seatedRiders > 0;
       return UgamCard.plain(
-        child: loaded
-            ? UgamEmpty(
-                icon: Icons.event_seat_outlined,
-                title: tr('charts.no_layout'),
-                body: tr('charts.no_layout_body'),
-                // Was a dead end: it stated the problem and offered nothing.
-                cta: UgamCTA(
-                  label: tr('charts.create_layout'),
-                  leadingIcon: Icons.grid_view_rounded,
-                  onPressed: onCreateLayout,
-                ),
-              )
-            : const _SeatGridSkeleton(),
+        child: !loaded
+            ? const _SeatGridSkeleton()
+            : lost
+                ? UgamEmpty(
+                    icon: Icons.restore_page_outlined,
+                    title: tr('charts.layout_lost'),
+                    body: tr(
+                      'charts.layout_lost_body',
+                      namedArgs: {'count': '$seatedRiders'},
+                    ),
+                    cta: UgamCTA(
+                      label: tr('charts.recover_layout'),
+                      leadingIcon: Icons.auto_fix_high_rounded,
+                      onPressed: onRecoverLayout,
+                    ),
+                  )
+                : UgamEmpty(
+                    icon: Icons.event_seat_outlined,
+                    title: tr('charts.no_layout'),
+                    body: tr('charts.no_layout_body'),
+                    // Was a dead end: it stated the problem and offered nothing.
+                    cta: UgamCTA(
+                      label: tr('charts.create_layout'),
+                      leadingIcon: Icons.grid_view_rounded,
+                      onPressed: onCreateLayout,
+                    ),
+                  ),
       );
     }
 

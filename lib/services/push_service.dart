@@ -185,6 +185,47 @@ class PushService {
     if (kDebugMode) debugPrint('[push] registered token ($platform)');
   }
 
+  /// Stable id for the tray slot a message occupies.
+  ///
+  /// This used to be `notification.hashCode`, which looked like a content hash
+  /// and is not: [RemoteNotification] overrides neither `==` nor `hashCode`
+  /// (checked in firebase_messaging_platform_interface), so it inherits
+  /// identity — a FRESH value for every delivery, because every delivery is
+  /// decoded into a new object. The tray therefore stacked one more copy of the
+  /// same alert each time instead of replacing the one already there, which is
+  /// what "the same notification again and again" actually was.
+  ///
+  /// Redelivery of one event is normal and not worth chasing on the server: a
+  /// device that has rotated its FCM token keeps both the old and the new row
+  /// in `device_tokens` until FCM reports the old one dead and `send-push`
+  /// prunes it, so one booking legitimately fans out to the same handset more
+  /// than once in that window. Keying the slot on the event makes those extra
+  /// deliveries land on top of each other, as they should.
+  ///
+  /// Preference order: Meta/FCM's own `messageId`, else the semantic identity
+  /// in `data` (type + the row the push is about), else the notification TEXT.
+  /// Every fallback is content-derived, so two deliveries of one event always
+  /// agree and two genuinely different events never collide.
+  int _traySlotFor(RemoteMessage message, RemoteNotification n) {
+    final data = message.data;
+    final key = message.messageId ??
+        [
+          data['type'],
+          data['request_id'] ?? data['conversation_id'] ?? data['id'],
+          data['event'],
+        ].where((v) => v != null).join('|');
+    final seed = key.isEmpty ? '${n.title}|${n.body}' : key;
+    // Local-notification ids must fit a 32-bit int on Android; String.hashCode
+    // already does, but mask anyway so the sign can never surprise the plugin.
+    return seed.hashCode & 0x7fffffff;
+  }
+
+  /// Message ids already drawn this session, newest last. Bounded — this only
+  /// has to outlive the burst of duplicate deliveries for ONE event, not the
+  /// session's whole history.
+  final List<String> _shownMessageIds = <String>[];
+  static const int _shownMessageIdCap = 64;
+
   /// Foreground delivery. Android does NOT auto-display a notification-payload
   /// message in the foreground, so draw one via local notifications. iOS is
   /// handled by setForegroundNotificationPresentationOptions, so skip there to
@@ -193,13 +234,30 @@ class PushService {
     if (!Platform.isAndroid) return;
     final n = message.notification;
     if (n == null) return;
+
+    // Drop an exact redelivery outright rather than redrawing the same tray
+    // slot. Same-slot redraws are silent on Android but still re-alert on some
+    // OEM skins, and the heads-up banner is the part that reads as spam.
+    // Only `messageId` is trustworthy enough to suppress on: it is FCM's own
+    // per-message identity, so two deliveries of one message share it while two
+    // real events never do. Without one, fall through and let the slot id
+    // collapse the duplicate visually.
+    final id = message.messageId;
+    if (id != null && id.isNotEmpty) {
+      if (_shownMessageIds.contains(id)) return;
+      _shownMessageIds.add(id);
+      if (_shownMessageIds.length > _shownMessageIdCap) {
+        _shownMessageIds.removeAt(0);
+      }
+    }
+
     // Route the local heads-up onto the channel that matches the push type so
     // it inherits the right name/importance (and the user can mute each kind
     // independently).
     final ch =
         message.data['type'] == 'wa_message' ? _messagesChannel : _channel;
     await _local.show(
-      id: n.hashCode,
+      id: _traySlotFor(message, n),
       title: n.title,
       body: n.body,
       notificationDetails: NotificationDetails(

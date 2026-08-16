@@ -345,8 +345,22 @@ class Passenger {
   /// WhatsApp template for "your seat was withdrawn" and the seat-allotment
   /// template cannot be built without a seat to highlight, so this state is a
   /// call-them-by-phone task, never an automatic send.
+  ///
+  /// *** WHY [journeyDone] DISQUALIFIES A RIDER HERE ***
+  /// `TourController.completeOutboundLeg` releases a one-way rider's berth ON
+  /// PURPOSE once they have travelled, and it leaves [seatsNotifiedSig] holding
+  /// the GO-leg value — so a retired rider is data-identical to one whose seat
+  /// was taken away from them. Without this guard every Notify surface lit up
+  /// the moment the GO leg completed (six of them read this getter, none
+  /// filtered the flag): the tour's next action became "N riders' seats were
+  /// taken back — call them", which OUTRANKS the return-phase action, so the
+  /// agent could not reach "Add return ticket" until they had hand-dismissed a
+  /// "I've told them" dialog for every rider who had simply finished their trip.
+  /// Their seat was not withdrawn; their journey ended. Nobody needs telling.
   bool get seatsRemovedSinceNotified =>
-      assignedSeats.isEmpty && (seatsNotifiedSig ?? '').isNotEmpty;
+      !journeyDone &&
+      assignedSeats.isEmpty &&
+      (seatsNotifiedSig ?? '').isNotEmpty;
 
   /// True when what this rider was last told no longer matches reality — their
   /// seats moved ([seatsChangedSinceNotified]) or were withdrawn entirely

@@ -373,6 +373,23 @@ class _AddBusScreenState extends State<AddBusScreen> {
         .length;
   }
 
+  /// True when this bus's seat plan may no longer be rebuilt — an EDIT of a bus
+  /// on a locked or completed tour.
+  ///
+  /// The bus record itself stays editable there (that is the whole point of
+  /// reaching this screen on departure day: a driver changes, a number is
+  /// wrong, a pickup moves), and `TourController.updateBus` gates on
+  /// `layoutChanged` rather than on status so those edits land. But it still
+  /// refuses a re-layout, and an agent who changed a capacity field on the way
+  /// past would have had the ENTIRE save refused for it. So Step 2 freezes
+  /// instead: the refusal becomes something the screen states up front rather
+  /// than something the agent discovers by losing their other edits.
+  ///
+  /// Add mode is never frozen — [addBus] has its own status gate, and a bus
+  /// that cannot be added never reaches this wizard.
+  bool get _layoutFrozen =>
+      widget.isEditing && !(_tour?.status.allowsLayoutEdit ?? true);
+
   /// True when the admin has changed any capacity value from what the edited bus
   /// started with — so the layout (and seat IDs) will be regenerated on save.
   bool get _capacityChanged =>
@@ -961,8 +978,14 @@ class _AddBusScreenState extends State<AddBusScreen> {
             _dirty = true;
           }),
           // Edit mode only: re-apply the current seat engine to a bus whose
-          // layout was saved under the old engine. Null in add mode (hides it).
-          onRegenerate: widget.isEditing ? _regenerateLayout : null,
+          // layout was saved under the old engine. Null in add mode (hides it),
+          // and null once the chart is locked — the write would be refused.
+          onRegenerate:
+              (widget.isEditing && !_layoutFrozen) ? _regenerateLayout : null,
+          // Locked/completed tour: the seat plan is frozen, the rest of the bus
+          // is not. Stated here so the agent does not change a capacity field
+          // and lose their driver/pricing edits to the refusal it would trigger.
+          frozenNotice: _layoutFrozen ? tr('add_bus.layout_frozen') : null,
           // Edit mode only: warn that resizing will unassign the people already
           // seated on this bus (their seat IDs change when the layout rebuilds).
           seatedWarning: (widget.isEditing && _seatedOnThisBus > 0)
@@ -1482,6 +1505,14 @@ class _Step2Capacity extends StatelessWidget {
   /// (re-applies the current seat engine to a bus saved under the old one).
   /// Null in add mode, which hides the "Regenerate layout" button.
   final VoidCallback? onRegenerate;
+
+  /// Non-null when this bus's seat plan can no longer be rebuilt (a locked or
+  /// completed tour). The controls below are shown but made inert rather than
+  /// hidden: the agent still needs to READ the capacity they are working with,
+  /// and a step that vanished would read as a bug. The rest of the wizard —
+  /// driver, boarding, departure, pricing — stays fully editable.
+  final String? frozenNotice;
+
   final ValueChanged<int> onTotalSeats;
   final ValueChanged<int> onSingleSofa;
 
@@ -1496,6 +1527,7 @@ class _Step2Capacity extends StatelessWidget {
     this.singleSofaError,
     this.seatedWarning,
     this.onRegenerate,
+    this.frozenNotice,
     required this.onTotalSeats,
     required this.onSingleSofa,
   });
@@ -1516,71 +1548,119 @@ class _Step2Capacity extends StatelessWidget {
           title: tr('add_bus.step2.title'),
           body: tr('add_bus.step2.body'),
         ),
-        if (seatedWarning != null) ...[
+        // The frozen notice replaces the resize warning rather than stacking
+        // with it: "resizing will unassign N people" is advice about a change
+        // that can no longer be made, so showing both would contradict.
+        if (frozenNotice != null) ...[
+          const SizedBox(height: UgamSpacing.lg),
+          _ResizeWarning(c: c, text: frozenNotice!),
+        ] else if (seatedWarning != null) ...[
           const SizedBox(height: UgamSpacing.lg),
           _ResizeWarning(c: c, text: seatedWarning!),
         ],
         const SizedBox(height: UgamSpacing.xl),
-        // Every bus in this app is a sleeper coach, so there's no bus-type
-        // picker — the layout is always sleeper berths (single + double sofa).
-        _Label(c: c, text: tr('add_bus.label.total_seats')),
-        const SizedBox(height: UgamSpacing.sm),
-        _StepperRow(
-          c: c,
-          value: totalSeats,
-          min: 1,
-          max: 100,
-          onChanged: onTotalSeats,
+        // Frozen: the whole capacity cluster goes inert in ONE place rather
+        // than each control growing its own disabled flag. AbsorbPointer stops
+        // the taps and the dimming is what tells the agent why nothing moves —
+        // a stepper that silently ignored a press would read as a broken app.
+        // The values stay legible, which is the point of showing the step at
+        // all on a locked tour.
+        _MaybeInert(
+          inert: frozenNotice != null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Every bus in this app is a sleeper coach, so there's no bus-type
+              // picker — the layout is always sleeper berths (single + double).
+              _Label(c: c, text: tr('add_bus.label.total_seats')),
+              const SizedBox(height: UgamSpacing.sm),
+              _StepperRow(
+                c: c,
+                value: totalSeats,
+                min: 1,
+                max: 100,
+                onChanged: onTotalSeats,
+              ),
+              if (sleeperSeats > 0) ...[
+                const SizedBox(height: UgamSpacing.xl),
+                _Label(c: c, text: tr('add_bus.label.single_sofa_count')),
+                const SizedBox(height: UgamSpacing.sm),
+                _StepperRow(
+                  c: c,
+                  value: singleSofaCount,
+                  min: 0,
+                  max: sleeperSeats,
+                  onChanged: onSingleSofa,
+                ),
+                const SizedBox(height: UgamSpacing.sm),
+                Text(
+                  singleSofaSummary,
+                  style: UgamText.caption.copyWith(color: c.ink2),
+                ),
+                if (singleSofaError != null) ...[
+                  const SizedBox(height: UgamSpacing.xs),
+                  _InlineError(c: c, text: singleSofaError!),
+                ],
+                const SizedBox(height: UgamSpacing.sm),
+                _ToggleRow(
+                  c: c,
+                  icon: Icons.weekend_rounded,
+                  label: tr('add_bus.back_row_toggle.label'),
+                  subtitle: allDoubleBackRow
+                      ? tr('add_bus.back_row_toggle.on')
+                      : tr('add_bus.back_row_toggle.off'),
+                  value: allDoubleBackRow,
+                  onChanged: onAllDoubleBackRow,
+                ),
+                if (onRegenerate != null) ...[
+                  const SizedBox(height: UgamSpacing.lg),
+                  // This is a button, not a settings row — it was the third
+                  // copy of the icon+title+subtitle+chevron row, and the
+                  // chevron read as "opens something" when it actually rebuilds
+                  // and saves. The subtitle's explanation now lives in the
+                  // destructive confirm, which is where it is actually read
+                  // before anything happens.
+                  UgamButton(
+                    label: tr('add_bus.regenerate_label'),
+                    kind: UgamButtonKind.neutral,
+                    icon: Icons.refresh_rounded,
+                    expand: true,
+                    onPressed: onRegenerate,
+                  ),
+                ],
+              ],
+            ],
+          ),
         ),
-        if (sleeperSeats > 0) ...[
-          const SizedBox(height: UgamSpacing.xl),
-          _Label(c: c, text: tr('add_bus.label.single_sofa_count')),
-          const SizedBox(height: UgamSpacing.sm),
-          _StepperRow(
-            c: c,
-            value: singleSofaCount,
-            min: 0,
-            max: sleeperSeats,
-            onChanged: onSingleSofa,
-          ),
-          const SizedBox(height: UgamSpacing.sm),
-          Text(
-            singleSofaSummary,
-            style: UgamText.caption.copyWith(color: c.ink2),
-          ),
-          if (singleSofaError != null) ...[
-            const SizedBox(height: UgamSpacing.xs),
-            _InlineError(c: c, text: singleSofaError!),
-          ],
-          const SizedBox(height: UgamSpacing.sm),
-          _ToggleRow(
-            c: c,
-            icon: Icons.weekend_rounded,
-            label: tr('add_bus.back_row_toggle.label'),
-            subtitle: allDoubleBackRow
-                ? tr('add_bus.back_row_toggle.on')
-                : tr('add_bus.back_row_toggle.off'),
-            value: allDoubleBackRow,
-            onChanged: onAllDoubleBackRow,
-          ),
-          if (onRegenerate != null) ...[
-            const SizedBox(height: UgamSpacing.lg),
-            // This is a button, not a settings row — it was the third copy of
-            // the icon+title+subtitle+chevron row, and the chevron read as
-            // "opens something" when it actually rebuilds and saves. The
-            // subtitle's explanation now lives in the destructive confirm,
-            // which is where it is actually read before anything happens.
-            UgamButton(
-              label: tr('add_bus.regenerate_label'),
-              kind: UgamButtonKind.neutral,
-              icon: Icons.refresh_rounded,
-              expand: true,
-              onPressed: onRegenerate,
-            ),
-          ],
-        ],
         const SizedBox(height: UgamSpacing.xl),
       ],
+    );
+  }
+}
+
+/// Wraps [child] so it can be read but not touched.
+///
+/// Used for Step 2's capacity cluster once the seat plan is frozen. Kept as a
+/// named widget rather than an inline ternary so the "shown, dimmed, inert"
+/// treatment is one decision in one place — and so `inert: false` costs nothing
+/// but a passthrough on the far more common unlocked path.
+class _MaybeInert extends StatelessWidget {
+  final bool inert;
+  final Widget child;
+
+  const _MaybeInert({required this.inert, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!inert) return child;
+    return Opacity(
+      opacity: 0.45,
+      // Excluded from semantics traversal as well: a screen reader offering
+      // "increment total seats" on a control that refuses would be worse than
+      // the visual dimming it cannot see.
+      child: ExcludeSemantics(
+        child: AbsorbPointer(child: child),
+      ),
     );
   }
 }

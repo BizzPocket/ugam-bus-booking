@@ -11,13 +11,16 @@ import '../../controllers/handler_controller.dart';
 import '../../design/price_band_color.dart';
 import '../../design/ugam.dart';
 import '../../models/bus_details.dart';
+import '../../models/handler_manifest.dart';
 import '../../models/handler_phase.dart';
+import '../../services/error_reporter.dart';
 import '../../services/location_tracker_service.dart';
 import '../../utils/app_snackbar.dart';
 import '../../utils/formatters.dart';
 import '../../utils/seat_occupants.dart';
 import '../../widgets/handler/handler_phase_banner.dart';
 import '../../widgets/handler/handler_skeleton.dart';
+import '../../widgets/handler/handler_tracking_strip.dart';
 import '../../widgets/location_rationale_sheet.dart';
 import '../fullscreen_chart_screen.dart';
 import 'handler_board_tab.dart';
@@ -46,10 +49,45 @@ class HandlerShell extends StatefulWidget {
   @visibleForTesting
   final HandlerManifestReader? manifestReader;
 
-  const HandlerShell({super.key, required this.requestId, this.manifestReader});
+  /// TEST SEAM — see [TrackingProbes].
+  @visibleForTesting
+  final TrackingProbes? trackingProbes;
+
+  const HandlerShell({
+    super.key,
+    required this.requestId,
+    this.manifestReader,
+    this.trackingProbes,
+  });
 
   @override
   State<HandlerShell> createState() => _HandlerShellState();
+}
+
+/// TEST SEAM for the platform half of the tracking bootstrap.
+///
+/// Geolocator answers over a plugin channel that does not exist under
+/// `flutter test`, and the rationale sheet needs a live navigator — so the
+/// bootstrap's WIRING (which trigger runs it, and when it may be latched off
+/// for good) had no coverage at all, which is exactly where it regressed. With
+/// the four platform calls behind this, the wiring is testable without a device
+/// and without ever opening a GPS stream. Production leaves it null and the
+/// shell talks to [Geolocator] and [showLocationRationale] directly.
+@visibleForTesting
+class TrackingProbes {
+  final Future<bool> Function() serviceEnabled;
+  final Future<LocationPermission> Function() checkPermission;
+  final Future<LocationPermission> Function() requestPermission;
+
+  /// True when the handler chose to continue on to the OS prompt.
+  final Future<bool> Function() rationale;
+
+  const TrackingProbes({
+    required this.serviceEnabled,
+    required this.checkPermission,
+    required this.requestPermission,
+    required this.rationale,
+  });
 }
 
 /// The four things a handler does. Order is the order of the trip.
@@ -72,12 +110,25 @@ class _HandlerShellState extends State<HandlerShell>
   /// True while a milestone stamp is in the air — disables the CTA.
   bool _stamping = false;
 
+  /// The TERMINAL latch: set only once tracking is genuinely running, or the
+  /// handler has genuinely said no. It used to be set on the first line of
+  /// [_bootstrapTracking], where it doubled as the reentrancy guard — which
+  /// meant a handler who dismissed the rationale sheet once, or whose first
+  /// attempt bailed for any transient reason at all, got no automatic retry for
+  /// the entire life of the screen and their bus silently never reported.
   bool _trackingBootstrapped = false;
+
+  /// The reentrancy guard the latch used to double as. Two workers fire within
+  /// one manifest load, so without this the second would stack a second
+  /// rationale sheet (and a second OS prompt) on top of the first.
+  bool _trackingInFlight = false;
+
   static const String _rationaleSeenKey = 'tracking.rationale_seen';
 
-  /// The bus-selection listener, kept so dispose can tear it down — an
-  /// undisposed GetX worker outlives the widget and fires against a dead state.
+  /// The bootstrap triggers, kept so dispose can tear them down — an undisposed
+  /// GetX worker outlives the widget and fires against a dead state.
   Worker? _busWorker;
+  Worker? _manifestWorker;
 
   @override
   void initState() {
@@ -97,9 +148,28 @@ class _HandlerShellState extends State<HandlerShell>
     c.onRefreshFailed = () {
       if (mounted) AppSnackBar.error(tr('handler_chart.error_refresh'));
     };
-    // Start tracking once the manifest lands and a bus is known.
+    // Retry the tracking bootstrap after EVERY successful manifest load, which
+    // is what the screen this replaced did (`unawaited(_bootstrapTracking())`
+    // at the tail of its own load). It takes two triggers, because neither is
+    // sufficient alone:
+    //
+    //   * `manifest` is assigned BEFORE `selectedBusId` on every load
+    //     (handler_controller.dart:389 vs :408), so on a cold start it fires
+    //     while the bus is still null and the attempt legitimately bails;
+    //   * `selectedBusId` therefore catches that cold start — but GetX's Rx
+    //     setter swallows a write that does not change the value, so on every
+    //     later load of the SAME bus it never emits at all. Wiring the bootstrap
+    //     to it alone is what reduced "after every load" to "at most once per
+    //     screen-open, and only if the bus changed".
+    //
+    // Both are cheap no-ops once tracking is genuinely up: the bootstrap
+    // latches itself the moment its outcome is terminal.
     _busWorker = ever<String?>(
       c.selectedBusId,
+      (_) => unawaited(_bootstrapTracking()),
+    );
+    _manifestWorker = ever<HandlerManifest?>(
+      c.manifest,
       (_) => unawaited(_bootstrapTracking()),
     );
   }
@@ -108,6 +178,7 @@ class _HandlerShellState extends State<HandlerShell>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _busWorker?.dispose();
+    _manifestWorker?.dispose();
     // Deliberately does NOT stop tracking: sharing is scoped to the TRIP, not
     // to this screen. A handler who backs out to check something, or pockets
     // the phone, must keep reporting.
@@ -127,69 +198,129 @@ class _HandlerShellState extends State<HandlerShell>
 
   // ── Live location ─────────────────────────────────────────
 
+  // The four platform calls, behind [TrackingProbes] so the wiring above them
+  // is testable. Production passes no probes and these tear off the Geolocator
+  // statics directly.
+  Future<bool> _serviceEnabled() =>
+      (widget.trackingProbes?.serviceEnabled ??
+          Geolocator.isLocationServiceEnabled)();
+
+  Future<LocationPermission> _checkPermission() =>
+      (widget.trackingProbes?.checkPermission ?? Geolocator.checkPermission)();
+
+  Future<LocationPermission> _requestPermission() =>
+      (widget.trackingProbes?.requestPermission ??
+          Geolocator.requestPermission)();
+
+  Future<bool> _rationale() {
+    final probes = widget.trackingProbes;
+    if (probes != null) return probes.rationale();
+    return showLocationRationale(context);
+  }
+
   /// Auto-start, per the tracking design: the handler never taps a Start
   /// button, because consent lives at the permission step. The gate is simply
   /// "manifest loaded and a bus selected" — `handler_tour_manifest` is itself
   /// lock-gated, so a handler on a pre-lock tour never reaches here.
+  ///
+  /// Runs after every successful manifest load and does its own bookkeeping,
+  /// because the two questions are genuinely different: "is one already in
+  /// flight?" ([_trackingInFlight]) versus "is there any point ever asking
+  /// again?" ([_trackingBootstrapped]). Only three outcomes answer the second
+  /// one — tracking started, the rationale was declined, or the OS prompt was
+  /// answered no. Everything else is transient and must leave the door open.
   Future<void> _bootstrapTracking() async {
-    if (_trackingBootstrapped) return;
+    if (_trackingBootstrapped || _trackingInFlight) return;
     if (!Get.isRegistered<LocationTrackerService>()) return;
     final busId = c.selectedBusId.value;
+    // Transient, NOT terminal: the manifest worker fires before `selectedBusId`
+    // is assigned, so the very first trigger of every cold start lands here.
     if (busId == null || c.manifest.value == null) return;
-    _trackingBootstrapped = true;
 
+    _trackingInFlight = true;
     final tracker = Get.find<LocationTrackerService>();
-    tracker.status.value = TrackingStatus.awaitingPermission;
+    try {
+      tracker.status.value = TrackingStatus.awaitingPermission;
 
-    var serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    var permission = await Geolocator.checkPermission();
-    var state = resolveTrackingStatus(
-      serviceEnabled: serviceEnabled,
-      permission: permission,
-    );
-
-    // First ask ever: disclose BEFORE the OS prompt (Play policy), once only.
-    if (state == TrackingStatus.denied) {
-      final prefs = await SharedPreferences.getInstance();
-      final seen = prefs.getBool(_rationaleSeenKey) ?? false;
-      if (!seen) {
-        if (!mounted) return;
-        final go = await showLocationRationale(context);
-        await prefs.setBool(_rationaleSeenKey, true);
-        if (!go) {
-          tracker.status.value = TrackingStatus.denied;
-          return;
-        }
-      }
-      permission = await Geolocator.requestPermission();
-      // Android needs a SECOND ask to move whileInUse -> always. Declining
-      // leaves foreground-only tracking, which the card states plainly.
-      if (permission == LocationPermission.whileInUse && Platform.isAndroid) {
-        permission = await Geolocator.requestPermission();
-      }
-      serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      state = resolveTrackingStatus(
+      var serviceEnabled = await _serviceEnabled();
+      var permission = await _checkPermission();
+      var state = resolveTrackingStatus(
         serviceEnabled: serviceEnabled,
         permission: permission,
       );
-    }
 
-    if (state == TrackingStatus.live ||
-        state == TrackingStatus.foregroundOnly) {
-      await tracker.start(
-        requestId: widget.requestId,
-        busId: busId,
-        leg: c.legForBoarding.storageKey,
-      );
-      // start() optimistically sets `live`; correct it when the handler only
-      // granted while-in-use.
-      tracker.status.value = state;
-      tracker.startStream();
-    } else {
-      tracker.status.value = state;
+      // First ask ever: disclose BEFORE the OS prompt (Play policy), once only.
+      if (state == TrackingStatus.denied) {
+        final prefs = await SharedPreferences.getInstance();
+        final seen = prefs.getBool(_rationaleSeenKey) ?? false;
+        if (!seen) {
+          if (!mounted) return;
+          final go = await _rationale();
+          await prefs.setBool(_rationaleSeenKey, true);
+          if (!go) {
+            // TERMINAL — an explicit "not now". Retrying this on the next
+            // manifest load would re-open the sheet after every write and every
+            // app resume: a loop the handler cannot get out of. Coming back in
+            // stays a deliberate tap, on the strip or the Trip tab's card.
+            _trackingBootstrapped = true;
+            tracker.status.value = TrackingStatus.denied;
+            return;
+          }
+        }
+        permission = await _requestPermission();
+        // Android needs a SECOND ask to move whileInUse -> always. Declining
+        // leaves foreground-only tracking, which the card states plainly.
+        if (permission == LocationPermission.whileInUse && Platform.isAndroid) {
+          permission = await _requestPermission();
+        }
+        serviceEnabled = await _serviceEnabled();
+        state = resolveTrackingStatus(
+          serviceEnabled: serviceEnabled,
+          permission: permission,
+        );
+      }
+
+      switch (state) {
+        case TrackingStatus.live || TrackingStatus.foregroundOnly:
+          await tracker.start(
+            requestId: widget.requestId,
+            busId: busId,
+            leg: c.legForBoarding.storageKey,
+          );
+          // start() optimistically sets `live`; correct it when the handler
+          // only granted while-in-use.
+          tracker.status.value = state;
+          tracker.startStream();
+          // TERMINAL — it is actually running. This is the one latch that was
+          // ever meant to happen automatically.
+          _trackingBootstrapped = true;
+        case TrackingStatus.denied || TrackingStatus.deniedForever:
+          // TERMINAL — the OS prompt was answered no. Same reasoning as the
+          // declined rationale: never re-prompt on a reconcile.
+          tracker.status.value = state;
+          _trackingBootstrapped = true;
+        default:
+          // serviceDisabled, or anything we did not prompt for. Nobody was
+          // asked anything, so retrying on the next manifest load costs the
+          // handler nothing — and picks sharing up by itself the moment they
+          // flip the system location switch back on.
+          tracker.status.value = state;
+      }
+    } catch (e, st) {
+      // A throw out of a platform probe is precisely the transient bail the old
+      // code latched on. Leave the flag clear so the next load retries, and
+      // clear the status so the card is not stranded on a spinner that will
+      // never resolve.
+      tracker.status.value = TrackingStatus.idle;
+      ErrorReporter.report(kind: 'tracking_bootstrap', error: e, stack: st);
+    } finally {
+      _trackingInFlight = false;
     }
   }
 
+  /// The single recovery action behind both the Trip tab's card and the shell
+  /// strip. This is the ONLY path that re-arms a terminal latch, which is what
+  /// keeps an explicit decline from turning into a permission-prompt loop.
   Future<void> _onTrackingFix() async {
     if (!Get.isRegistered<LocationTrackerService>()) return;
     switch (Get.find<LocationTrackerService>().status.value) {
@@ -427,6 +558,7 @@ class _HandlerShellState extends State<HandlerShell>
                 : null,
           ),
         ),
+        _trackingStrip(),
         Expanded(
           // Pull-to-refresh over whichever tab is showing, with
           // AlwaysScrollableScrollPhysics on each so the gesture still works on
@@ -443,6 +575,29 @@ class _HandlerShellState extends State<HandlerShell>
           ),
         ),
       ],
+    );
+  }
+
+  /// The tracking signal that follows the handler across all four tabs — see
+  /// [HandlerTrackingStrip] for why the Trip tab's card was not enough.
+  ///
+  /// Rendered nowhere at all under `flutter test` unless the service has been
+  /// registered, and nowhere on the Trip tab either: the full card is already
+  /// standing there, and two warnings about one thing in one viewport is the
+  /// duplication this shell exists to remove.
+  Widget _trackingStrip() {
+    if (_tab == _Tab.trip) return const SizedBox.shrink();
+    if (!Get.isRegistered<LocationTrackerService>()) {
+      return const SizedBox.shrink();
+    }
+    // Its own Obx: the status changes on the tracker's schedule (a refused push
+    // lands minutes into a trip), not on the shell's, and this keeps that
+    // repaint off the seat chart.
+    return Obx(
+      () => HandlerTrackingStrip(
+        status: Get.find<LocationTrackerService>().status.value,
+        onFix: () => unawaited(_onTrackingFix()),
+      ),
     );
   }
 

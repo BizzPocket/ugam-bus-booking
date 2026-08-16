@@ -43,13 +43,13 @@ class WhatsAppCloudConfig {
   /// in WhatsAppOutbound._buildAllocationMessage.
   /// Body variables, IN ORDER (must match the approved `seat_allotment` body):
   ///   {{1}} passenger name  {{2}} tour title (in the greeting line)  {{3}} bus
-  ///   NAME only  {{4}} boarding place  {{5}} departure date  {{6}} departure
-  ///   time  {{7}} handler contact
+  ///   name + registration plate  {{4}} boarding place  {{5}} departure date
+  ///   {{6}} departure time  {{7}} handler contact
   /// The tour title lives in the line-2 greeting ("{name}, {tour} માટે …") —
-  /// there is no separate "પ્રવાસ:" line. Bus is the customer label
-  /// ([Bus.customerLabel] = name only, no registration plate) — the same label
-  /// used on the chart-image footer and every customer screen, so the convention
-  /// can't drift; the plate stays on the admin screens' [Bus.displayLabel]. The
+  /// there is no separate "પ્રવાસ:" line. Bus is [Bus.displayLabel]
+  /// (`name · GJ05HU7162`) — the SAME label the attached chart image and the
+  /// downloaded A4 print carry, so the message and its own chart can't name the
+  /// bus two different ways. The
   /// seat numbers are NOT in the body — they're highlighted on the image. The
   /// approved Meta template MUST be re-created with an Image header and these
   /// seven body vars in this exact order, or every send fails at Meta.

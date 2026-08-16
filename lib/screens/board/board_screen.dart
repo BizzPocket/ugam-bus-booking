@@ -62,14 +62,19 @@ import '../../models/collection.dart';
 import '../../models/handler_phase.dart';
 import '../../models/passenger.dart';
 import '../../models/seat_layout.dart';
+import '../../models/seat_type.dart';
 import '../../models/tour.dart';
 import '../../models/tour_status.dart';
+import '../../models/trip_type.dart';
 import '../../routes/app_routes.dart';
+import '../../services/seat_move_flow.dart';
+import '../../services/seat_swap_guard.dart';
 import '../../utils/aisle_order.dart';
 import '../../utils/app_snackbar.dart';
 import '../../utils/collection_write.dart';
 import '../../utils/formatters.dart';
 import '../../utils/passenger_display.dart';
+import '../../utils/seat_drop_engine.dart';
 import '../../utils/seat_money_state.dart';
 import '../../utils/seat_occupants.dart';
 import '../../widgets/board/berth_tile.dart';
@@ -256,6 +261,25 @@ class _BoardScreenState extends State<BoardScreen> {
   /// actually loaded: on a cold deep link the roster arrives after this screen.
   bool _busApplied = false;
 
+  /// The first hydrate is still in flight — see [_empty] for what depends on it.
+  ///
+  /// Starts TRUE, because the first build runs BEFORE `initState`'s post-frame
+  /// callback does: on a cold open (or a deep link) `_tour` is null while
+  /// `TourController` is still fetching, and the Board used to answer that with
+  /// its "no such tour" empty state. An empty state is a VERDICT, and a verdict
+  /// delivered 300ms early reads to the agent as "the chart failed to load" —
+  /// on the one screen they open when a bus is about to leave. Cleared in the
+  /// hydrate's `whenComplete`, so noTour / noBus are only ever painted once the
+  /// answer is genuinely "there is nothing here".
+  bool _hydrating = true;
+
+  /// Tap-to-place relocate (spec §7, and the seat grid's own `_relocate`): who
+  /// is held "in hand" and the berth they were lifted from, so the next berth
+  /// tap MOVES them onto a free berth or SWAPS them with its occupant. Set by
+  /// [_beginRelocate] when the move flow's destination picker hands control
+  /// back here; null when no relocate is in progress.
+  ({Passenger mover, String fromBusId, String fromSeatId})? _relocate;
+
   TourController? get _tours =>
       Get.isRegistered<TourController>() ? Get.find<TourController>() : null;
 
@@ -288,8 +312,24 @@ class _BoardScreenState extends State<BoardScreen> {
       // Layouts are lazily fetched (a whole-row write once nulled them), so the
       // Board asks for them explicitly rather than assuming the tour it was
       // handed is chart-ready.
-      unawaited(_tours?.ensureTourReadyForSeating(widget.tourId));
-      unawaited(_money?.loadForTour(widget.tourId));
+      final tourCtrl = _tours;
+      final moneyCtrl = _money;
+      final hydrate = <Future<void>>[
+        if (tourCtrl != null) tourCtrl.ensureTourReadyForSeating(widget.tourId),
+        if (moneyCtrl != null) moneyCtrl.loadForTour(widget.tourId),
+      ];
+      unawaited(
+        Future.wait(hydrate)
+            // A FAILED load still ends the wait. The controllers surface their
+            // own error; all this flag decides is whether the Board is still
+            // expecting an answer, and a dropped connection that pinned it on
+            // the skeleton forever would be a worse lie than the empty state.
+            .catchError((Object _) => <void>[])
+            .whenComplete(() {
+              if (!mounted) return;
+              setState(() => _hydrating = false);
+            }),
+      );
     });
   }
 
@@ -448,6 +488,31 @@ class _BoardScreenState extends State<BoardScreen> {
 
   // ── The sheet ───────────────────────────────────────────────
 
+  /// One berth, one tap, two meanings.
+  ///
+  /// Normally the tap opens the sheet. While a relocate is in flight the whole
+  /// chart is a target picker instead — the tap PLACES the person in hand, and
+  /// opening a sheet about whoever is already there would be the app changing
+  /// the subject mid-gesture.
+  Future<void> _onBerthTap(
+    Tour tour,
+    Bus bus,
+    BoardBusPage page,
+    BoardBerthSlot slot,
+  ) async {
+    if (_relocate != null) {
+      await _relocateOnto(tour, bus, slot);
+      return;
+    }
+    await _openSheet(
+      cell: slot.cell,
+      tour: tour,
+      bus: bus,
+      page: page,
+      lens: slot.lens,
+    );
+  }
+
   /// Opens the one passenger sheet for [cell]. Null when the berth holds
   /// nobody — a vacant berth has no passenger to show, and the assign picker of
   /// spec §7 is not in this wave (see the library doc).
@@ -500,6 +565,63 @@ class _BoardScreenState extends State<BoardScreen> {
               riders: riders,
               amount: amount,
             ),
+      // Without this the sheet's "move or swap" falls back to the LEGACY auto
+      // swap-assistant — a flat list of free-seat codes as chips, on a screen
+      // whose whole point is that the agent reads the bus and not a list. With
+      // it, picking the destination bus swings the Board to that bus and hands
+      // the choice back to the thumb (see [_beginRelocate]).
+      onRelocateToBus: _beginRelocate,
+      // Strike one leg off THIS berth. The Board reads the same shared gate and
+      // calls the same controller method as the seat chart, so a leg cancelled
+      // from either surface lands identically.
+      onCancelSeatLeg: (occ, strike) => unawaited(
+        _cancelSeatLeg(tour: tour, bus: bus, seatId: seatId, occ: occ,
+            strike: strike),
+      ),
+    );
+  }
+
+  /// Cancel one leg of one berth from the Board, with a confirm first. The
+  /// berth the rider actually travelled survives — see [cancelSeatLegTransform].
+  Future<void> _cancelSeatLeg({
+    required Tour tour,
+    required Bus bus,
+    required String seatId,
+    required Passenger occ,
+    required TripType strike,
+  }) async {
+    final cancellingReturn = strike == TripType.returnOnly;
+    final ok = await UgamDialog.confirm(
+      context,
+      title: cancellingReturn
+          ? tr('tour_detail.cancel_return_confirm_title')
+          : tr('tour_detail.cancel_go_confirm_title'),
+      message: cancellingReturn
+          ? tr('tour_detail.cancel_return_confirm_body',
+              namedArgs: {'name': occ.displayName, 'seat': seatId})
+          : tr('tour_detail.cancel_go_confirm_body',
+              namedArgs: {'name': occ.displayName, 'seat': seatId}),
+      confirmLabel: cancellingReturn
+          ? tr('tour_detail.cancel_return_cta')
+          : tr('tour_detail.cancel_go_cta'),
+      destructive: true,
+    );
+    final ctrl = _tours;
+    if (!ok || ctrl == null || !mounted) return;
+    await ctrl.cancelSeatLeg(
+      tour.id,
+      occ.id,
+      busId: bus.id,
+      seatId: seatId,
+      strike: strike,
+    );
+    if (!mounted) return;
+    AppSnackBar.success(
+      cancellingReturn
+          ? tr('tour_detail.cancel_return_done',
+              namedArgs: {'name': occ.displayName})
+          : tr('tour_detail.cancel_go_done',
+              namedArgs: {'name': occ.displayName}),
     );
   }
 
@@ -597,6 +719,666 @@ class _BoardScreenState extends State<BoardScreen> {
     );
   }
 
+  // ── Moving a rider (spec §7) ────────────────────────────────
+  //
+  // Two gestures land here — a berth DRAGGED onto another berth, and a berth
+  // TAPPED while somebody is held in hand by the relocate flow — and both are
+  // resolved by the same two pieces the seat grid uses:
+  //
+  //  * [decideSeatDrop] says what a drop MEANS (move / peel a berth / share a
+  //    sofa / swap / refuse, and why). It is pure, so the Board and the grid
+  //    cannot drift into two different answers for one drop — which would show
+  //    a green ring here on a drop the grid would refuse.
+  //  * [SeatMoveFlow.moveTo] and [SeatSwapGuard.run] do the WRITE. Nothing on
+  //    this screen touches `assignedSeats`: the flow owns the whole-double peel,
+  //    the cross-bus group cascade confirm and the blocked-destination dialog,
+  //    and the guard owns the "this over-books a leg — bump the one-leg
+  //    occupant?" prompt. Every seat write in the app goes through one of them.
+  //
+  // Not gated on the tour lock: the lock is a CUSTOMER gate, and the agent
+  // re-seating a locked tour on departure morning is the whole reason the Board
+  // exists. That is exactly what the seat grid does (`enableDrag: true`).
+
+  /// The layout cell for [seatId] on [bus]. Null when the bus has no plan, or
+  /// when the seat is not on THIS bus — which is also the guard that keeps a
+  /// callback captured for the page on screen from acting on another bus.
+  SeatCell? _cellOf(Bus bus, String? seatId) {
+    if (seatId == null || seatId.isEmpty) return null;
+    for (final cell in bus.layout?.grid ?? const <SeatCell>[]) {
+      if (cell.seatId == seatId) return cell;
+    }
+    return null;
+  }
+
+  /// The drop engine's view of whoever holds [seatId] on [bus].
+  ///
+  /// A port of the seat grid's `_occupantsOn` / `_occupantFor`, deliberately
+  /// fact-for-fact: the engine tells a SUBSTITUTE whole-double (two singles
+  /// parked on one sofa, splittable) from a genuine one by comparing the doubles
+  /// held against the doubles requested, so dropping either of those two facts
+  /// would quietly change what a drop does.
+  List<SeatOccupant> _engineOccupants(Tour tour, Bus bus, String seatId) {
+    final riders = occupantListForBus(tour.passengers, bus.id)[seatId];
+    if (riders == null || riders.isEmpty) return const <SeatOccupant>[];
+    return [for (final p in riders) _engineOccupant(bus, p, seatId)];
+  }
+
+  SeatOccupant _engineOccupant(Bus bus, Passenger p, String seatId) {
+    final perCell = <String, int>{};
+    for (final a in p.assignedSeats) {
+      if (a.busId != bus.id) continue;
+      perCell[a.seatId] = (perCell[a.seatId] ?? 0) + 1;
+    }
+    var wholeDoubles = 0;
+    perCell.forEach((sid, n) {
+      if (n < 2) return;
+      if (_cellOf(bus, sid)?.seatType == SeatType.doubleSofa) wholeDoubles++;
+    });
+    final requestedDoubles = p.requestLines
+        .where((l) => l.seatType == SeatType.doubleSofa)
+        .fold<int>(0, (sum, l) => sum + l.qty);
+    return (
+      passengerId: p.id,
+      // The PER-SEAT leg, never the rider's coarse `tripType`: the leg stamped
+      // on the berth is canonical, and it is what decides whether a GO-only
+      // rider may reuse a berth a RET-only rider already holds.
+      trip: p.legForSeat(seatId, busId: bus.id),
+      berthsHere: perCell[seatId] ?? 0,
+      wholeDoublesHeld: wholeDoubles,
+      requestedDoubleQty: requestedDoubles,
+    );
+  }
+
+  /// What dropping [payload] on [target] would do. Null when either end cannot
+  /// be resolved on this bus.
+  SeatDropDecision? _decideDrop(
+    Tour tour,
+    Bus bus,
+    BoardDragPayload payload,
+    BoardBerthSlot target,
+  ) {
+    final fromSeatId = payload.fromSeatId;
+    final fromCell = _cellOf(bus, fromSeatId);
+    final targetCell = _cellOf(bus, target.seatId);
+    if (fromSeatId == null || fromCell == null || targetCell == null) {
+      return null;
+    }
+    final toSeatId = targetCell.seatId;
+    if (toSeatId == null || toSeatId.isEmpty) return null;
+    return decideSeatDrop(
+      fromCell: (
+        seatId: fromCell.seatId,
+        seatType: fromCell.seatType,
+        reserved: fromCell.reserved,
+      ),
+      targetCell: (
+        seatId: toSeatId,
+        seatType: targetCell.seatType,
+        reserved: targetCell.reserved,
+      ),
+      fromOccupants: _engineOccupants(tour, bus, fromSeatId),
+      targetOccupants: _engineOccupants(tour, bus, toSeatId),
+    );
+  }
+
+  /// How many riders hold [seatId] on [bus] RIGHT NOW. The live roster, not the
+  /// slot the tile was built from — see [_dropIsSupported] for why the
+  /// difference matters at drop time.
+  int _ridersOn(Tour tour, Bus bus, String? seatId) {
+    if (seatId == null || seatId.isEmpty) return 0;
+    return occupantListForBus(tour.passengers, bus.id)[seatId]?.length ?? 0;
+  }
+
+  /// Whether this verdict is one the Board can actually carry out, given that
+  /// [sourceRiders] people hold the berth being dragged.
+  ///
+  /// Two doors, and the source count is the lock on both:
+  ///
+  ///  * The engine also answers for a SHARED source — move both sharers, swap
+  ///    two sofas' full contents, ask which sharer peels off — and those need
+  ///    writes ([TourController.moveSharedPair], [swapSeatContents]) that are
+  ///    NOT behind the move flow or the swap guard.
+  ///  * [SeatDropAction.fillPairInto] is the one verdict the engine returns for
+  ///    a single-rider source AND for a two-rider one (seat_drop_engine.dart
+  ///    :282 and :304 reach it from the shared-source branch). The Board's write
+  ///    moves ONE rider, so on a shared source it would merge the first sharer
+  ///    onto the target, leave the second behind, and announce the whole thing
+  ///    as done. Refusing on the count rather than on the action is what makes
+  ///    the guarantee hold for every verdict at once.
+  ///
+  /// [_canDragBerth] refuses to LIFT a shared berth, but it is read when the
+  /// tile builds, whereas this is read at hover and at drop against a roster
+  /// that realtime sync may have changed under the finger. That gap is exactly
+  /// what this is here to cover.
+  bool _dropIsSupported(SeatDropDecision decision, int sourceRiders) {
+    if (sourceRiders != 1) return false;
+    return switch (decision.action) {
+      SeatDropAction.move ||
+      SeatDropAction.splitToSingle ||
+      SeatDropAction.fill ||
+      SeatDropAction.swap ||
+      SeatDropAction.fillPairInto => true,
+      _ => false,
+    };
+  }
+
+  /// Whether this berth can be picked up at all.
+  bool _canDragBerth(Tour tour, Bus bus, BoardBerthSlot slot) {
+    final seatId = slot.seatId;
+    if (seatId == null || seatId.isEmpty) return false;
+    // A held berth guards its occupant at the ORIGIN too — the grid refuses to
+    // lift one (`_canDragSeat`) and so does this.
+    if (slot.cell.reserved) return false;
+    // EXACTLY one rider. [BoardDragPayload] carries a SEAT, not a person, so a
+    // berth two people share — a split sofa, or a GO rider and a RET rider
+    // reusing one berth — cannot say which of them the thumb picked up. The
+    // grid resolves that with a "which sharer moves?" picker; the Board sends
+    // them to the sheet instead of guessing.
+    return _ridersOn(tour, bus, seatId) == 1;
+  }
+
+  bool _canDropOnBerth(
+    Tour tour,
+    Bus bus,
+    BoardDragPayload payload,
+    BoardBerthSlot target,
+  ) {
+    // Berth→berth only. The Board has no rail to drag an unseated rider from
+    // (that is the seat grid's dock), so a rail payload has no meaning here.
+    if (!payload.isBerthMove) return false;
+    final decision = _decideDrop(tour, bus, payload, target);
+    if (decision == null || !decision.isValid) return false;
+    return _dropIsSupported(
+      decision,
+      _ridersOn(tour, bus, payload.fromSeatId),
+    );
+  }
+
+  /// A released drop. Dispatches the engine's verdict through the guarded write
+  /// paths and reports what actually happened — never "moved" on a move that was
+  /// refused, which on a locked tour is how a family ends up at the wrong bus.
+  Future<void> _handleDrop(
+    Tour tour,
+    Bus bus,
+    BoardDragPayload payload,
+    BoardBerthSlot target,
+  ) async {
+    final decision = _decideDrop(tour, bus, payload, target);
+    final fromSeatId = payload.fromSeatId;
+    final toSeatId = target.seatId;
+    if (decision == null || fromSeatId == null || toSeatId == null) return;
+
+    // The roster as it stands at the RELEASE, which is the only reading the
+    // write is entitled to act on. `canDrop` painted the ring from the roster a
+    // moment earlier; this is the same question asked again at the last instant,
+    // so a sync that landed mid-drag can still veto the write.
+    final occupants = occupantListForBus(tour.passengers, bus.id);
+    final riders = occupants[fromSeatId] ?? const <Passenger>[];
+    if (!decision.isValid || !_dropIsSupported(decision, riders.length)) return;
+
+    final mover = riders.firstOrNull;
+    if (mover == null) return;
+    final sitting = (occupants[toSeatId] ?? const <Passenger>[]).firstOrNull;
+
+    switch (decision.action) {
+      case SeatDropAction.swap:
+        if (sitting == null) return;
+        await SeatSwapGuard.run(
+          context,
+          tourId: tour.id,
+          busAId: bus.id,
+          passengerAId: mover.id,
+          seatAId: fromSeatId,
+          passengerBId: sitting.id,
+          seatBId: toSeatId,
+          busBId: bus.id,
+        );
+        if (!mounted || !_holdsBerth(mover.id, bus.id, toSeatId)) return;
+        AppSnackBar.success(
+          tr(
+            'tour_seat_assignment.drop.swapped_body',
+            namedArgs: {'a': mover.displayName, 'b': sitting.displayName},
+          ),
+          title: tr('tour_seat_assignment.drop.swapped_title'),
+        );
+
+      case SeatDropAction.fill:
+        // Sharing a sofa with a stranger is asked for, never assumed — the same
+        // confirm the grid puts in front of the identical drop.
+        if (sitting == null) return;
+        final shared = await UgamDialog.confirm(
+          context,
+          title: tr('tour_seat_assignment.share_confirm_title'),
+          message: tr(
+            'tour_seat_assignment.share_confirm_body',
+            namedArgs: {
+              'seat': toSeatId,
+              'otherName': sitting.displayName,
+              'currentName': mover.displayName,
+            },
+          ),
+          confirmLabel: tr('tour_seat_assignment.share_confirm_yes'),
+        );
+        if (!shared || !mounted) return;
+        await _writeMove(
+          tour: tour,
+          bus: bus,
+          mover: mover,
+          fromSeatId: fromSeatId,
+          toSeatId: toSeatId,
+          success: tr(
+            'tour_seat_assignment.drop.filled_body',
+            namedArgs: {
+              'a': mover.displayName,
+              'b': sitting.displayName,
+              'seat': toSeatId,
+            },
+          ),
+          successTitle: tr('tour_seat_assignment.drop.filled_title'),
+        );
+
+      // move / splitToSingle / fillPairInto are one write with three readings:
+      // the flow moves every berth the mover holds on the source cell, capping
+      // at what the target can take — which IS the peel a `splitToSingle` means.
+      case SeatDropAction.splitToSingle:
+        await _writeMove(
+          tour: tour,
+          bus: bus,
+          mover: mover,
+          fromSeatId: fromSeatId,
+          toSeatId: toSeatId,
+          success: tr(
+            'tour_seat_assignment.drop.split_body',
+            namedArgs: {'name': mover.displayName, 'seat': toSeatId},
+          ),
+          successTitle: tr('tour_seat_assignment.drop.split_title'),
+        );
+
+      case SeatDropAction.move:
+      case SeatDropAction.fillPairInto:
+        await _writeMove(
+          tour: tour,
+          bus: bus,
+          mover: mover,
+          fromSeatId: fromSeatId,
+          toSeatId: toSeatId,
+          success: tr(
+            'tour_seat_assignment.drop.moved_body',
+            namedArgs: {'name': mover.displayName, 'seat': toSeatId},
+          ),
+          successTitle: tr('tour_seat_assignment.drop.moved_title'),
+        );
+
+      // Unreachable: _dropIsSupported refused these before the write.
+      case SeatDropAction.moveBoth:
+      case SeatDropAction.swapPair:
+      case SeatDropAction.splitPairChoice:
+      case SeatDropAction.blocked:
+        return;
+    }
+  }
+
+  /// The ONE seat-move write on this screen. Reports the outcome honestly: a
+  /// group the destination could not fit, or a confirm the agent backed out of,
+  /// says nothing rather than claiming a move that never happened.
+  Future<SeatMoveOutcome> _writeMove({
+    required Tour tour,
+    required Bus bus,
+    required Passenger mover,
+    required String fromSeatId,
+    required String toSeatId,
+    required String success,
+    String? successTitle,
+  }) async {
+    final outcome = await SeatMoveFlow.moveTo(
+      context,
+      tourId: tour.id,
+      sourceBusId: bus.id,
+      mover: mover,
+      fromSeatId: fromSeatId,
+      destination: bus,
+      toSeatId: toSeatId,
+    );
+    if (!mounted) return outcome;
+    switch (outcome) {
+      // The reason is already on screen (the flow's blocked dialog), or the
+      // agent cancelled — either way, nothing to announce.
+      case SeatMoveOutcome.failed:
+      case SeatMoveOutcome.cancelled:
+        break;
+      case SeatMoveOutcome.groupReseated:
+        AppSnackBar.info(
+          tr(
+            'tour_seat_assignment.relocate.group_moved',
+            namedArgs: {
+              'name': mover.displayName,
+              'bus': bus.customerLabel,
+              'seat': toSeatId,
+            },
+          ),
+        );
+      case SeatMoveOutcome.moved:
+        AppSnackBar.success(success, title: successTitle);
+    }
+    return outcome;
+  }
+
+  /// Does [passengerId] hold [seatId] on [busId] RIGHT NOW?
+  ///
+  /// This is how a swap is confirmed to have happened. [SeatSwapGuard.run]
+  /// returns nothing, and it can end in a confirm the agent backs out of (the
+  /// "this over-books a leg — bump the occupant?" prompt), so announcing a swap
+  /// on the strength of the call having returned is how the grid comes to report
+  /// an exchange that never took place. The roster is the only witness.
+  bool _holdsBerth(String passengerId, String busId, String seatId) {
+    final rider = _tour?.passengers.firstWhereOrNull((p) => p.id == passengerId);
+    return rider?.assignedSeats.any(
+          (a) => a.busId == busId && a.seatId == seatId,
+        ) ??
+        false;
+  }
+
+  /// A refused drop. Spec §7: never a silent failure — the canvas has already
+  /// flashed the berth and buzzed the "no", and this names the reason.
+  void _explainRefusedDrop(
+    Tour tour,
+    Bus bus,
+    BoardDragPayload payload,
+    BoardBerthSlot target,
+  ) {
+    final decision = _decideDrop(tour, bus, payload, target);
+    final seat = target.seatId ?? target.berth.code;
+    final fromSeatId = payload.fromSeatId;
+    _toastRefused(
+      decision?.block,
+      name: payload.label,
+      seat: seat,
+      sourceIsSeater: _cellOf(bus, fromSeatId)?.seatType == SeatType.seater,
+      moverTrip: fromSeatId == null
+          ? null
+          : _engineOccupants(tour, bus, fromSeatId).firstOrNull?.trip,
+    );
+  }
+
+  /// The refusal, in words. Same reasons and same strings as the grid's
+  /// `_toastBlocked`, so one drop never gets two different explanations
+  /// depending on which surface the agent happened to be on.
+  void _toastRefused(
+    SeatDropBlock? block, {
+    required String name,
+    required String seat,
+    required bool sourceIsSeater,
+    TripType? moverTrip,
+  }) {
+    switch (block) {
+      case SeatDropBlock.self:
+        return;
+      case SeatDropBlock.classMismatch:
+        AppSnackBar.warning(
+          tr(
+            sourceIsSeater
+                ? 'tour_seat_assignment.drop.class_mismatch_seater'
+                : 'tour_seat_assignment.drop.class_mismatch_sleeper',
+          ),
+          title: tr('tour_seat_assignment.drop.class_mismatch_title'),
+        );
+      case SeatDropBlock.tooSmall:
+        AppSnackBar.warning(
+          tr(
+            'tour_seat_assignment.drop.too_small_body',
+            namedArgs: {'name': name},
+          ),
+          title: tr('tour_seat_assignment.drop.too_small_title'),
+        );
+      case SeatDropBlock.held:
+        AppSnackBar.warning(
+          tr('tour_seat_assignment.drop.held_body', namedArgs: {'seat': seat}),
+          title: tr('tour_seat_assignment.drop.held_title'),
+        );
+      case SeatDropBlock.sharedTargetAmbiguous:
+        AppSnackBar.info(
+          tr('tour_seat_assignment.drop.shared_body'),
+          title: tr('tour_seat_assignment.drop.shared_title'),
+        );
+      case SeatDropBlock.sharedNeedsFreeDouble:
+        AppSnackBar.info(
+          tr('tour_seat_assignment.drop.shared_need_free_double'),
+          title: tr('tour_seat_assignment.drop.shared_title'),
+        );
+      case SeatDropBlock.noLegRoom:
+        // Name the SPECIFIC leg for a one-way rider: "already full" is only
+        // useful if the agent knows which half of the trip clashed.
+        final leg = moverTrip == null
+            ? 'tour_seat_assignment.drop.leg_both'
+            : (moverTrip.usesOutbound && !moverTrip.usesReturn)
+            ? 'tour_seat_assignment.drop.leg_go'
+            : (moverTrip.usesReturn && !moverTrip.usesOutbound)
+            ? 'tour_seat_assignment.drop.leg_ret'
+            : 'tour_seat_assignment.drop.leg_both';
+        AppSnackBar.warning(
+          tr(
+            'tour_seat_assignment.drop.no_leg_room_body',
+            namedArgs: {'seat': seat, 'leg': tr(leg)},
+          ),
+          title: tr('tour_seat_assignment.drop.no_leg_room_title'),
+        );
+      // `neutral` (not a real seat) and a verdict the Board cannot carry out
+      // both land here. Still a sentence, still names the way out — a shrug is
+      // the one answer spec §7 forbids.
+      case SeatDropBlock.neutral:
+      case null:
+        AppSnackBar.info(
+          tr(
+            'board_screen.drop_unsupported',
+            namedArgs: {'name': name, 'seat': seat},
+          ),
+          title: tr('tour_seat_assignment.drop.blocked_title'),
+        );
+    }
+  }
+
+  // ── Tap-to-place relocate (spec §7) ─────────────────────────
+
+  /// Swing the Board to [destination] and hold [mover] in hand.
+  ///
+  /// Called by [SeatMoveFlow.start] INSTEAD of its auto swap-assistant, which is
+  /// a flat list of free-seat codes: on a screen built so the agent can read the
+  /// bus, picking a berth off a list is the one interaction that throws the bus
+  /// away. Mirrors the seat grid's `_beginRelocate`.
+  void _beginRelocate(
+    Bus destination,
+    Passenger mover,
+    String sourceBusId,
+    String fromSeatId,
+  ) {
+    final index =
+        _tour?.buses.indexWhere((b) => b.id == destination.id) ?? -1;
+    // Written OUTSIDE build (a callback), so the enclosing Obx is free to be
+    // marked dirty by it — see the note at the top of build().
+    if (index >= 0) _board.setBusIndex(index);
+    setState(() {
+      _relocate = (
+        mover: mover,
+        fromBusId: sourceBusId,
+        fromSeatId: fromSeatId,
+      );
+    });
+    AppSnackBar.info(
+      tr(
+        'tour_seat_assignment.relocate.started',
+        namedArgs: {
+          'name': mover.displayName,
+          'bus': destination.customerLabel,
+        },
+      ),
+    );
+  }
+
+  void _cancelRelocate() {
+    if (_relocate == null) return;
+    setState(() => _relocate = null);
+  }
+
+  /// A berth was tapped while somebody is in hand: a free berth MOVES them, an
+  /// occupied one SWAPS them with its occupant.
+  Future<void> _relocateOnto(Tour tour, Bus bus, BoardBerthSlot slot) async {
+    final reloc = _relocate;
+    final seatId = slot.seatId;
+    if (reloc == null || seatId == null || seatId.isEmpty) return;
+    // Re-read the mover from the live roster: the sheet handed them over some
+    // taps ago and their seats may have moved since.
+    final mover =
+        tour.passengers.firstWhereOrNull((p) => p.id == reloc.mover.id) ??
+        reloc.mover;
+
+    final riders =
+        occupantListForBus(tour.passengers, bus.id)[seatId] ??
+        const <Passenger>[];
+    final others = riders.where((p) => p.id != mover.id).toList();
+    // Their own berth. Nothing to do, and nothing wrong — a tap that lands home
+    // is how an agent checks they picked up the right person.
+    if (others.isEmpty && riders.isNotEmpty) return;
+
+    if (others.isEmpty) {
+      await _relocateOntoFree(tour, bus, mover, reloc, seatId);
+      return;
+    }
+    if (others.length > 1) {
+      // Which of the two would the mover be swapping with? The grid asks; the
+      // Board sends them somewhere that can.
+      AppSnackBar.info(
+        tr(
+          'board_screen.drop_unsupported',
+          namedArgs: {'name': mover.displayName, 'seat': seatId},
+        ),
+        title: tr('tour_seat_assignment.drop.blocked_title'),
+      );
+      return;
+    }
+    await _relocateSwap(tour, bus, mover, reloc, others.first, seatId);
+  }
+
+  Future<void> _relocateOntoFree(
+    Tour tour,
+    Bus bus,
+    Passenger mover,
+    ({Passenger mover, String fromBusId, String fromSeatId}) reloc,
+    String seatId,
+  ) async {
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('tour_seat_assignment.relocate.move_confirm_title'),
+      message: tr(
+        'tour_seat_assignment.relocate.move_confirm_body',
+        namedArgs: {
+          'name': mover.displayName,
+          'seat': seatId,
+          'bus': bus.customerLabel,
+        },
+      ),
+      confirmLabel: tr('tour_seat_assignment.relocate.move_confirm_yes'),
+    );
+    if (!confirmed || !mounted) return;
+
+    final outcome = await SeatMoveFlow.moveTo(
+      context,
+      tourId: tour.id,
+      // The SOURCE bus, which on a cross-bus relocate is not the bus on screen.
+      sourceBusId: reloc.fromBusId,
+      mover: mover,
+      fromSeatId: reloc.fromSeatId,
+      destination: bus,
+      toSeatId: seatId,
+    );
+    if (!mounted) return;
+    _finishRelocate(outcome, mover: mover, bus: bus, seatId: seatId);
+  }
+
+  Future<void> _relocateSwap(
+    Tour tour,
+    Bus bus,
+    Passenger mover,
+    ({Passenger mover, String fromBusId, String fromSeatId}) reloc,
+    Passenger other,
+    String seatId,
+  ) async {
+    final confirmed = await UgamDialog.confirm(
+      context,
+      title: tr('tour_seat_assignment.relocate.swap_confirm_title'),
+      message: tr(
+        'tour_seat_assignment.relocate.swap_confirm_body',
+        namedArgs: {
+          'mover': mover.displayName,
+          'other': other.displayName,
+          'seat': seatId,
+        },
+      ),
+      confirmLabel: tr('tour_seat_assignment.relocate.swap_confirm_yes'),
+    );
+    if (!confirmed || !mounted) return;
+
+    await SeatSwapGuard.run(
+      context,
+      tourId: tour.id,
+      busAId: reloc.fromBusId,
+      passengerAId: mover.id,
+      seatAId: reloc.fromSeatId,
+      passengerBId: other.id,
+      seatBId: seatId,
+      busBId: bus.id,
+    );
+    // Same witness as the drag path: a guard the agent backed out of leaves the
+    // mover exactly where they were, and the banner must stay up so the next tap
+    // can try somewhere else.
+    if (!mounted || !_holdsBerth(mover.id, bus.id, seatId)) return;
+    setState(() => _relocate = null);
+    AppSnackBar.success(
+      tr(
+        'tour_seat_assignment.relocate.swapped',
+        namedArgs: {'mover': mover.displayName, 'other': other.displayName},
+      ),
+    );
+  }
+
+  /// Close out a relocate by what the move ACTUALLY did.
+  ///
+  /// The banner is the agent's "you are still holding someone" indicator, so it
+  /// comes down only when somebody really moved: a refusal leaves it up (the
+  /// reason is already on screen) so the next tap can try another berth, and a
+  /// group cascade says plainly that the berth they tapped was not the one used.
+  void _finishRelocate(
+    SeatMoveOutcome outcome, {
+    required Passenger mover,
+    required Bus bus,
+    required String seatId,
+  }) {
+    switch (outcome) {
+      case SeatMoveOutcome.failed:
+      case SeatMoveOutcome.cancelled:
+        return;
+      case SeatMoveOutcome.groupReseated:
+        setState(() => _relocate = null);
+        AppSnackBar.info(
+          tr(
+            'tour_seat_assignment.relocate.group_moved',
+            namedArgs: {
+              'name': mover.displayName,
+              'bus': bus.customerLabel,
+              'seat': seatId,
+            },
+          ),
+        );
+      case SeatMoveOutcome.moved:
+        setState(() => _relocate = null);
+        AppSnackBar.success(
+          tr(
+            'tour_seat_assignment.relocate.moved',
+            namedArgs: {'name': mover.displayName, 'seat': seatId},
+          ),
+        );
+    }
+  }
+
   // ── Chrome ──────────────────────────────────────────────────
 
   void _toggleSearch() {
@@ -651,9 +1433,14 @@ class _BoardScreenState extends State<BoardScreen> {
       case BoardEmptyAction.createSeatPlan:
       case BoardEmptyAction.setFares:
         _createLayout(tour, bus);
+      // [AppRoutes.seatGrid], never [AppRoutes.seatAssignment]: that one is the
+      // "open this bus's chart" alias and it resolves back to THIS screen while
+      // `boardReplacesChart` is on, so "place riders" pushed a second Board on
+      // top of the one the agent was already looking at. The seat grid is the
+      // only surface with an assign path, and it takes the same arguments.
       case BoardEmptyAction.placeRiders:
         Get.toNamed(
-          AppRoutes.seatAssignment,
+          AppRoutes.seatGrid,
           arguments: {'tourId': tour.id, 'busId': bus.id},
         );
       case BoardEmptyAction.addPickupPoints:
@@ -689,8 +1476,18 @@ class _BoardScreenState extends State<BoardScreen> {
           _money?.collections.length;
 
           final tour = _tour;
-          if (tour == null) return _empty(_EmptyKind.noTour, null);
-          if (tour.buses.isEmpty) return _empty(_EmptyKind.noBus, tour);
+          // "Not yet" and "not there" are different answers, and only the
+          // hydrate can tell them apart — see [_hydrating]. Until it settles,
+          // an unresolved tour (or a tour whose buses have not arrived) is a
+          // skeleton, never the error-shaped empty state.
+          if (tour == null) {
+            return _hydrating ? _loading(null) : _empty(_EmptyKind.noTour, null);
+          }
+          if (tour.buses.isEmpty) {
+            return _hydrating
+                ? _loading(tour)
+                : _empty(_EmptyKind.noBus, tour);
+          }
 
           final pages = _pagesFor(tour);
           final index = busIndex.clamp(0, pages.length - 1);
@@ -790,6 +1587,24 @@ class _BoardScreenState extends State<BoardScreen> {
               _LensBar(board: _board),
               const SizedBox(height: UgamSpacing.sm),
 
+              // Somebody is in hand: say who, on which bus, and offer the ONE
+              // way out. Directly above the chart, because the next tap it is
+              // explaining goes into the chart.
+              if (_relocate != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    UgamSpacing.gutter,
+                    0,
+                    UgamSpacing.gutter,
+                    UgamSpacing.sm,
+                  ),
+                  child: _RelocateBanner(
+                    moverName: _relocate!.mover.displayName,
+                    busName: bus.customerLabel,
+                    onCancel: _cancelRelocate,
+                  ),
+                ),
+
               // Two agents built an answer for "there is nothing to draw", and
               // the split between them is deliberate rather than accidental:
               //
@@ -812,15 +1627,21 @@ class _BoardScreenState extends State<BoardScreen> {
                     tints: _tintsFor(page),
                     slotSizeOf: BerthTileMetrics.slotSize,
                     berthTileBuilder: _berthTile,
-                    onBerthTap: (slot) => unawaited(
-                      _openSheet(
-                        cell: slot.cell,
-                        tour: tour,
-                        bus: bus,
-                        page: page,
-                        lens: slot.lens,
-                      ),
-                    ),
+                    onBerthTap: (slot) =>
+                        unawaited(_onBerthTap(tour, bus, page, slot)),
+                    // Spec §7's drag, finally connected. The canvas has always
+                    // known how to arm a berth drag and paint a live drop
+                    // target; it refuses to unless BOTH of these are supplied
+                    // (`_BerthHost._canDrag`), and the Board supplied neither —
+                    // so every one of those gestures was dead code on a screen
+                    // whose main job is moving people around a bus.
+                    canDragBerth: (slot) => _canDragBerth(tour, bus, slot),
+                    canDrop: (payload, target) =>
+                        _canDropOnBerth(tour, bus, payload, target),
+                    onDrop: (payload, target) =>
+                        unawaited(_handleDrop(tour, bus, payload, target)),
+                    onInvalidDrop: (payload, target) =>
+                        _explainRefusedDrop(tour, bus, payload, target),
                     stripTrailing: _NextOutstanding(
                       board: _board,
                       pages: pages,
@@ -877,6 +1698,54 @@ class _BoardScreenState extends State<BoardScreen> {
     isDropRejected: slot.dropState == BoardDropState.invalid,
   );
 
+  /// The chart, still on its way.
+  ///
+  /// Shaped like the Board rather than like a spinner — the strip's band, then
+  /// rows of berths in the two-lanes-aisle-two-lanes silhouette of a coach — so
+  /// the wait reads as "this is loading" and nothing jumps when the real bus
+  /// lands in the same places. [UgamSkeleton] is the app's loading primitive
+  /// (its own doc: spinners are for pull-to-refresh and submit buttons).
+  Widget _loading(Tour? tour) => Column(
+    children: [
+      UgamAppBar(
+        title: tour?.title ?? tr('board_screen.title'),
+        eyebrow: tour == null ? null : tr('board_screen.title'),
+      ),
+      Expanded(
+        child: Semantics(
+          label: tr('board_screen.loading'),
+          liveRegion: true,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: UgamSpacing.gutter,
+            ),
+            // Clipped, not scrolled: six rows fill any phone, and a placeholder
+            // is never something the agent needs to reach the bottom of. The
+            // OverflowBox is what keeps a large text scale from turning that
+            // into an overflow stripe.
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.topCenter,
+                maxHeight: double.infinity,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const UgamSkeleton(height: 40, radius: UgamRadius.row),
+                    const SizedBox(height: UgamSpacing.md),
+                    for (var row = 0; row < 6; row++) ...[
+                      const _LoadingBerthRow(),
+                      const SizedBox(height: UgamSpacing.sm),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
+
   Widget _empty(_EmptyKind kind, Tour? tour) => Column(
     children: [
       UgamAppBar(
@@ -915,6 +1784,125 @@ class _BoardScreenState extends State<BoardScreen> {
 }
 
 enum _EmptyKind { noTour, noBus }
+
+/// One row of the loading chart: two berths, the walkway, two berths — the
+/// silhouette of a sleeper coach, so the skeleton is recognisably THIS screen
+/// arriving rather than a generic list of grey bars.
+class _LoadingBerthRow extends StatelessWidget {
+  const _LoadingBerthRow();
+
+  @override
+  Widget build(BuildContext context) {
+    const berth = Expanded(
+      child: UgamSkeleton(
+        height: BerthTileMetrics.comfortableHeight,
+        radius: UgamRadius.seat,
+      ),
+    );
+    return const Row(
+      children: [
+        berth,
+        SizedBox(width: UgamSpacing.xs),
+        berth,
+        // The aisle. Empty, because that is what makes the shape read as a bus.
+        SizedBox(width: UgamSpacing.lg),
+        berth,
+        SizedBox(width: UgamSpacing.xs),
+        berth,
+      ],
+    );
+  }
+}
+
+/// Shown while somebody is held in hand for tap-to-place: who is moving, onto
+/// which bus, and the ONE way out of the mode.
+///
+/// A deliberate twin of the seat grid's own `_RelocateBanner` — same words (the
+/// same `tour_seat_assignment.relocate.banner` string), same accent-fill
+/// treatment, same 44pt Cancel — because an agent who learns the mode on one
+/// chart must recognise it instantly on the other. Both are private to their
+/// screens; when a third surface needs it, THAT is the moment it earns a home
+/// in `widgets/`.
+class _RelocateBanner extends StatelessWidget {
+  final String moverName;
+  final String busName;
+  final VoidCallback onCancel;
+
+  const _RelocateBanner({
+    required this.moverName,
+    required this.busName,
+    required this.onCancel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: c.accentFill,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+        border: Border.all(color: c.accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.touch_app_rounded,
+            size: UgamScale.px(context, 18),
+            color: c.accent,
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Expanded(
+            child: Text(
+              tr(
+                'tour_seat_assignment.relocate.banner',
+                namedArgs: {'name': moverName, 'bus': busName},
+              ),
+              style: UgamText.caption.copyWith(
+                color: c.accent,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          // The only exit from relocate mode, so it gets a real 44pt box; the
+          // width factor keeps that box shrink-wrapped to the label so the
+          // banner does not reflow.
+          UgamTappable(
+            onTap: onCancel,
+            semanticLabel: tr('app.action.cancel'),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minWidth: UgamScale.tap(context, 44),
+                minHeight: UgamScale.tap(context, 44),
+              ),
+              child: Center(
+                widthFactor: 1,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: UgamSpacing.sm,
+                  ),
+                  child: Text(
+                    tr('app.action.cancel'),
+                    style: UgamText.caption.copyWith(
+                      color: c.ink2,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chrome pieces — each with its own Obx, so a lens tap does not rebuild the bus

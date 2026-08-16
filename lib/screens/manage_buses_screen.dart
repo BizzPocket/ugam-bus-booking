@@ -47,21 +47,31 @@ class ManageBusesScreen extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (canEditLayout)
-              _BusMenuTile(
-                c: c,
-                icon: Icons.edit_rounded,
-                label: tr('manage_buses.menu_edit'),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          AddBusScreen(tourId: tourId, existing: bus),
-                    ),
-                  );
-                },
-              ),
+            // Edit is NOT gated on the layout lock. The lock freezes the seat
+            // chart, and this entry is the only route to the driver name and
+            // phone, the boarding point, the departure time and the pricing —
+            // the fields most likely to change on departure day, which is
+            // exactly when the tour is locked. `TourController.updateBus` now
+            // gates on `layoutChanged` rather than on status, so a detail edit
+            // lands and a re-layout after lock still refuses; and the wizard
+            // freezes its own capacity step (see `AddBusScreen`) so the refusal
+            // is never something the agent can walk into. Duplicate and delete
+            // below stay gated: both change how many buses the notified chart
+            // has, which is what the lock exists to hold still.
+            _BusMenuTile(
+              c: c,
+              icon: Icons.edit_rounded,
+              label: tr('manage_buses.menu_edit'),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        AddBusScreen(tourId: tourId, existing: bus),
+                  ),
+                );
+              },
+            ),
             // Duplicate: open the add wizard seeded from this bus as a template
             // (capacity, layout, pricing, boarding, departure, AC all carry
             // over) but STAY in add mode, so save creates a new bus in the next

@@ -88,11 +88,18 @@ void main() {
         collections: collections,
         expenses: const [],
         incomes: const [],
-        dueForSeat: dueForSeat,
+        // Each rider's seat costs what they actually paid, so this fixture
+        // describes ten SETTLED riders who merely moved seats — which is the
+        // invariant under test. The flat ₹2000 `dueForSeat` used elsewhere would
+        // contradict the rows (c7 paid ₹1000), and to-collect is now priced from
+        // the LIVE fare, so it would correctly report that rider ₹1000 short and
+        // bury the seat-move question under a pricing one.
+        dueForSeat: (p, seatId) => amounts[p.id]!.toDouble(),
       );
 
       expect(m.collected, 30000);
       expect(m.toCollect, 0);
+      expect(m.toReturn, 0);
     });
 
     test('a collection on a different bus never leaks in', () {
@@ -174,14 +181,76 @@ void main() {
     test('partial payment leaves the shortfall to collect', () {
       final m = HandlerBusMoney.compute(
         busId: 'bus1',
+        passengers: [pax('p1', ['SU1'])],
+        collections: [
+          Collection(
+            tourId: 't1',
+            busId: 'bus1',
+            passengerId: 'p1',
+            seatId: 'SU1',
+            amountDue: 2000,
+            amountReceived: 1500, // ₹500 short
+          ),
+        ],
+        expenses: const [],
+        incomes: const [],
+        dueForSeat: dueForSeat, // ₹2000
+      );
+      expect(m.collected, 1500);
+      expect(m.toCollect, 500);
+    });
+
+    test('the shortfall follows the LIVE fare, not the stored amount_due', () {
+      // The row was written when this seat cost ₹1500 and the rider paid it in
+      // full, so `Collection.balance` reads settled forever. The bus has since
+      // been re-priced to ₹2000 — `dueForSeat` is the live fare — and the rider
+      // genuinely owes the ₹500 difference.
+      //
+      // This is the admin-side half of the bug behind the ₹449 phantom refund:
+      // to-collect used to be summed from the stored `amount_due` SNAPSHOT, so a
+      // re-priced bus went on reporting the old expectation while the collection
+      // roster (which always priced live) showed the truth.
+      final m = HandlerBusMoney.compute(
+        busId: 'bus1',
+        passengers: [pax('p1', ['SU1'])],
+        collections: [
+          Collection(
+            tourId: 't1',
+            busId: 'bus1',
+            passengerId: 'p1',
+            seatId: 'SU1',
+            amountDue: 1500, // stale snapshot: settled against the OLD fare
+            amountReceived: 1500,
+          ),
+        ],
+        expenses: const [],
+        incomes: const [],
+        dueForSeat: dueForSeat, // live fare is now ₹2000
+      );
+      expect(m.collected, 1500);
+      expect(m.toCollect, 500);
+      expect(m.toReturn, 0);
+    });
+
+    test('cash from a rider who holds no seat here is not a refund due', () {
+      // They paid ₹1500 on this bus and have since left it entirely (unseated,
+      // or moved to another bus that re-prices them). This bus bills them
+      // nothing, so it is owed nothing and owes nothing back: the cash is
+      // BusMoneySummary.detachedCash, surfaced on its own and display-only.
+      //
+      // Reading it as money to hand back is exactly the phantom "refund ₹X" with
+      // nobody behind it that the To-return filter could never match.
+      final m = HandlerBusMoney.compute(
+        busId: 'bus1',
         passengers: const [],
         collections: [
           Collection(
             tourId: 't1',
             busId: 'bus1',
             passengerId: 'p1',
+            seatId: 'SU1',
             amountDue: 2000,
-            amountReceived: 1500, // ₹500 short
+            amountReceived: 1500,
           ),
         ],
         expenses: const [],
@@ -189,7 +258,8 @@ void main() {
         dueForSeat: dueForSeat,
       );
       expect(m.collected, 1500);
-      expect(m.toCollect, 500);
+      expect(m.toCollect, 0);
+      expect(m.toReturn, 0);
     });
   });
 }

@@ -1,6 +1,7 @@
 import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/passenger.dart';
+import 'collection_seat_resolver.dart';
 
 /// The at-a-glance collection state for one rider or a whole seat, mirroring
 /// collection_screen's chip logic: return-due (warm) wins, then a shortfall is
@@ -70,6 +71,73 @@ double netCollectedOf(Collection? collection) =>
 /// Refunds count, so a partly-refunded row can never read as fully paid.
 double liveBalanceOf(double due, Collection? collection) =>
     netCollectedOf(collection) - due;
+
+/// What a bus is still owed, and what it still has to hand back, measured SEAT
+/// BY SEAT against the LIVE fare.
+///
+/// THE BUG THIS KILLS. Three surfaces each answered "how much is still to
+/// collect on this bus?" with their own arithmetic:
+///
+///   * the collection roster — live fare vs the resolved row ([liveBalanceOf]);
+///   * [BusMoneySummary.compute] — `Collection.balance`, i.e. the `amount_due`
+///     SNAPSHOT taken when the money was recorded;
+///   * `MoneyController.summaryForBus` on the ledger path — each rider's
+///     TOUR-WIDE `finance_rider_balance`, apportioned across their buses by
+///     billed share.
+///
+/// So the collect screen's header and the roster printed underneath it were
+/// computed two different ways, and disagreed the moment a fare changed after
+/// money was taken: a header reading "₹449 to return" over a To-return filter
+/// that matched nobody. The apportioning made it worse — splitting one rider's
+/// net balance across the buses they sit on lands a FRACTION of it on a bus
+/// whose own seat is square, so a figure appeared on a bus with no rider behind
+/// it at all.
+///
+/// This is now the one answer. It walks the same seats the roster renders, in
+/// the same order, using the same [liveBalanceOf] — so a header total is always
+/// the sum of the lines below it, and "to collect ₹X" always has rows you can
+/// point at.
+///
+/// Seats are deduplicated by BASE id ([baseSeatId]): both berths of a whole
+/// double sofa are ONE priced record ([Bus.amountDueForSeat] charges the full
+/// sofa once), so counting the raw ids would bill it twice.
+///
+/// Rows whose payer no longer holds a seat here are deliberately NOT counted as
+/// money to hand back. That cash is [BusMoneySummary.detachedCash] — surfaced on
+/// its own, display-only — and reading it as a refund due is precisely the
+/// phantom this function exists to stop.
+({double toCollect, double toReturn}) busSeatAr({
+  required String busId,
+  required Iterable<Passenger> passengers,
+  required Iterable<Collection> collections,
+  required double Function(Passenger passenger, String seatId) dueForSeat,
+}) {
+  var toCollect = 0.0;
+  var toReturn = 0.0;
+  for (final p in passengers) {
+    final seatIds = <String>{
+      for (final a in p.assignedSeats)
+        if (a.busId == busId) baseSeatId(a.seatId),
+    };
+    for (final seatId in seatIds) {
+      final balance = liveBalanceOf(
+        dueForSeat(p, seatId),
+        collectionRowForSeat(
+          passenger: p,
+          busId: busId,
+          seatId: seatId,
+          collections: collections,
+        ),
+      );
+      if (balance > Collection.kMoneyEpsilon) {
+        toReturn += balance;
+      } else if (balance < -Collection.kMoneyEpsilon) {
+        toCollect += -balance;
+      }
+    }
+  }
+  return (toCollect: toCollect, toReturn: toReturn);
+}
 
 /// Per-RIDER money state from their resolved [due] and [collection].
 ///

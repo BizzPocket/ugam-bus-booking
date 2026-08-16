@@ -19,6 +19,8 @@ void main() {
   Passenger rider({
     List<SeatAssignment> seats = const [],
     String? notifiedSig,
+    TripType trip = TripType.roundTrip,
+    bool journeyDone = false,
   }) =>
       Passenger(
         tourId: 't1',
@@ -26,7 +28,8 @@ void main() {
         phone: '9900000000',
         assignedSeats: seats,
         seatsNotifiedSig: notifiedSig,
-        tripType: TripType.roundTrip,
+        tripType: trip,
+        journeyDone: journeyDone,
       );
 
   /// *** WHY THE "SEAT REMOVED" CASES EXIST ***
@@ -144,6 +147,46 @@ void main() {
         isTrue,
         reason: 'a chart can still be drawn, so it is an ordinary re-notify',
       );
+    });
+
+    /// *** WHY A FINISHED RIDER IS EXCLUDED ***
+    /// `completeOutboundLeg` releases a one-way rider's berth on purpose once
+    /// they have travelled, and it does not touch [seatsNotifiedSig] — so the
+    /// retired rider is byte-for-byte identical to a rider whose seat was taken
+    /// away from them. Every Notify surface then lit up the moment the GO leg
+    /// completed: the tour's next action became "N riders' seats were taken back
+    /// — call them", ranked ABOVE the return-phase action, and the only way off
+    /// that list was a per-rider "I've told them" dialog. Nobody needs telling.
+    /// Their seat was not withdrawn; their journey ended.
+    test('does not fire for a rider whose leg is finished', () {
+      final travelled = rider(seats: [seat('DL3')], trip: TripType.outboundOnly);
+      // Exactly what completeOutboundLeg leaves behind: seats gone,
+      // journeyDone set, the GO-leg notification signature untouched.
+      final retired = rider(
+        seats: const [],
+        notifiedSig: travelled.seatSignature,
+        trip: TripType.outboundOnly,
+        journeyDone: true,
+      );
+
+      expect(retired.seatsRemovedSinceNotified, isFalse);
+      expect(
+        retired.notifiedSeatsAreStale,
+        isFalse,
+        reason: 'the GO leg is over — nothing is owed to this rider',
+      );
+    });
+
+    test('still fires for an un-finished rider on the same tour', () {
+      // The guard must be about the FINISHED flag alone: a one-way rider who
+      // has not travelled yet and loses their seat is still stranded.
+      final before = rider(seats: [seat('DL3')], trip: TripType.outboundOnly);
+      final stranded = rider(
+        seats: const [],
+        notifiedSig: before.seatSignature,
+        trip: TripType.outboundOnly,
+      );
+      expect(stranded.seatsRemovedSinceNotified, isTrue);
     });
   });
 }

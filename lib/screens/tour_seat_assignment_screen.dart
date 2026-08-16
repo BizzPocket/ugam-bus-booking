@@ -27,6 +27,7 @@ import '../utils/seat_drop_engine.dart';
 import '../utils/seat_fit.dart';
 import '../utils/seat_leg_capacity.dart';
 import '../utils/tour_group_colors.dart';
+import '../widgets/cached_data_banner.dart';
 import '../widgets/chart_expand_button.dart';
 import '../widgets/occupant_action_sheet.dart';
 import '../widgets/chart_footer_sheet.dart';
@@ -712,33 +713,68 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       // "Move or swap" → pick a destination bus → hand back here so the agent
       // lands on that bus's chart and taps the exact target seat by hand.
       onRelocateToBus: _beginRelocate,
-      // Return phase: cancel a return seat, then offer to rebook it in place.
-      onCancelReturn: _cancelReturnSeatFlow,
+      // Strike one leg off THIS seat, then offer to rebook the freed half.
+      onCancelSeatLeg: (occ, strike) =>
+          _cancelSeatLegFlow(occ, strike, bus, cell.seatId!),
       // Seat Hold/Premium flags for this seat — the tap-menu home for the old
       // edit-seats mode (empty seats reach the same sheet via long-press).
       onSeatFlags: () => _showSeatFlagsSheet(cell, bus),
     );
   }
 
-  /// Cancel an occupant's return seat (freeing it), then offer to book a
-  /// replacement return ticket straight into the just-freed seat. Only reachable
-  /// once the tour is in its return phase (the sheet gates the entry point).
-  Future<void> _cancelReturnSeatFlow(Passenger occ) async {
+  /// Strike ONE leg off ONE seat for an occupant, then offer to resell the half
+  /// that just came free. Seat-scoped, so a party holding a double plus a single
+  /// loses only the berth the agent tapped — the rest of the party keeps both
+  /// legs. The sheet gates which legs are offerable ([cancellableSeatLegs]).
+  ///
+  /// The berth the rider DID travel survives the strike: cancelling a return
+  /// leaves their GO berth on the chart, re-stamped outbound-only, so the tile
+  /// still shows who rode out while its return half becomes sellable.
+  Future<void> _cancelSeatLegFlow(
+    Passenger occ,
+    TripType strike,
+    Bus bus,
+    String seatId,
+  ) async {
+    final cancellingReturn = strike == TripType.returnOnly;
     final ok = await _confirmSheet(
       context,
-      title: tr('tour_detail.cancel_return_confirm_title'),
-      message: tr('tour_detail.cancel_return_confirm_body',
-          namedArgs: {'name': occ.displayName}),
-      confirmLabel: tr('tour_detail.cancel_return_cta'),
+      title: cancellingReturn
+          ? tr('tour_detail.cancel_return_confirm_title')
+          : tr('tour_detail.cancel_go_confirm_title'),
+      message: cancellingReturn
+          ? tr('tour_detail.cancel_return_confirm_body',
+              namedArgs: {'name': occ.displayName, 'seat': seatId})
+          : tr('tour_detail.cancel_go_confirm_body',
+              namedArgs: {'name': occ.displayName, 'seat': seatId}),
+      confirmLabel: cancellingReturn
+          ? tr('tour_detail.cancel_return_cta')
+          : tr('tour_detail.cancel_go_cta'),
       destructive: true,
-      confirmIcon: Icons.event_busy_rounded,
+      confirmIcon:
+          cancellingReturn ? Icons.event_busy_rounded : Icons.logout_rounded,
     );
     if (!ok) return;
-    await _ctrl.cancelReturnSeat(widget.tourId, occ.id);
+    await _ctrl.cancelSeatLeg(
+      widget.tourId,
+      occ.id,
+      busId: bus.id,
+      seatId: seatId,
+      strike: strike,
+    );
     if (!mounted) return;
-    AppSnackBar.success(tr('tour_detail.cancel_return_done',
-        namedArgs: {'name': occ.displayName}));
+    AppSnackBar.success(
+      cancellingReturn
+          ? tr('tour_detail.cancel_return_done',
+              namedArgs: {'name': occ.displayName})
+          : tr('tour_detail.cancel_go_done',
+              namedArgs: {'name': occ.displayName}),
+    );
 
+    // Reselling is a RETURN-leg move: the freed half is a seat home. A struck
+    // outbound berth frees a seat on a bus that has not left, which is ordinary
+    // assignment work, so no rebook prompt there.
+    if (!cancellingReturn) return;
     final rebook = await _confirmSheet(
       context,
       title: tr('tour_detail.cancel_return_rebook_title'),
@@ -2180,6 +2216,14 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
               ),
             ],
           ),
+        // The chart is the surface where believing stale data actually costs
+        // something — two devices seating riders into the same berth. Sits
+        // above the bus pills so it is read before any seat is tapped; renders
+        // nothing when the graph is live.
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+          child: CachedDataBanner(),
+        ),
         Expanded(
           child: Obx(() {
             final tour = _tour;
@@ -2274,6 +2318,30 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                       },
                       c: c,
                     ),
+                    // The selected bus's registration, under the strip rather
+                    // than inside a pill: the pills live in a fixed 44pt tap
+                    // strip that already clipped a capacity badge once, so a
+                    // plate wedged in there would be the next thing to go. This
+                    // is the seating surface — the agent placing riders needs
+                    // to know WHICH physical coach they are filling, and until
+                    // now nothing on this screen said.
+                    if (bus.busNumber.trim().isNotEmpty) ...[
+                      const SizedBox(height: UgamSpacing.xs),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: UgamSpacing.gutter,
+                        ),
+                        child: Text(
+                          bus.busNumber.trim(),
+                          // Meta ink, never the accent: a plate identifies the
+                          // vehicle, it does not mark anything as yours.
+                          style: UgamText.tabular(UgamText.caption)
+                              .copyWith(color: c.ink2),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: UgamSpacing.md),
                     // Per-leg (GO / RETURN) occupancy meter for the SELECTED bus
                     // — a fill bar per leg so the agent reads how full each leg

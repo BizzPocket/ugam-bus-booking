@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/services/wa_template_params.dart';
 import 'package:occubusbooking/services/whatsapp_outbound.dart';
 
@@ -16,6 +17,64 @@ import 'package:occubusbooking/services/whatsapp_outbound.dart';
 /// standing "some passengers don't get the msg" report, and it is what these
 /// tests exist to stop coming back.
 void main() {
+  group('the allotment message names the bus the way its chart does', () {
+    // The rider gets a photo of the seat chart with "Raj · GJ05HU7162" printed
+    // on it, and a line of text above it. If that line says only "Raj" they are
+    // reading two different names for one vehicle, and in a car park with two
+    // coaches called Raj the plate is the only thing that resolves it. This
+    // flipped once (plate-on-charts-only); these tests are what stops it
+    // flipping back by accident.
+    test('the plate rides along with the name', () {
+      expect(
+        WhatsAppOutbound.allocationBusLabel(
+          Bus(id: 'b1', name: 'Raj', busNumber: 'GJ05HU7162'),
+        ),
+        'Raj · GJ05HU7162',
+      );
+    });
+
+    test('it is the SAME string the chart image and the A4 print carry', () {
+      final bus = Bus(id: 'b1', name: 'જય વાલમ', busNumber: 'GJ 05 HU 7162');
+      expect(WhatsAppOutbound.allocationBusLabel(bus), bus.displayLabel);
+    });
+
+    test('a bus with no plate entered yet degrades to the bare name', () {
+      expect(
+        WhatsAppOutbound.allocationBusLabel(Bus(id: 'b1', name: 'Raj')),
+        'Raj',
+      );
+    });
+
+    test('the separator survives sanitizing — Meta gets the whole label', () {
+      final sent = WhatsAppOutbound.paramValue(
+        WhatsAppOutbound.allocationBusLabel(
+          Bus(id: 'b1', name: 'Raj', busNumber: 'GJ05HU7162'),
+        ),
+      );
+      expect(sent, 'Raj · GJ05HU7162');
+      expect(WaTemplateParams.validateOne(sent), isEmpty);
+    });
+
+    test('a plate typed across two lines is repaired, not refused', () {
+      final sent = WhatsAppOutbound.paramValue(
+        WhatsAppOutbound.allocationBusLabel(
+          Bus(id: 'b1', name: 'Raj', busNumber: 'GJ05\nHU7162'),
+        ),
+      );
+      expect(WaTemplateParams.validateOne(sent), isEmpty);
+      expect(sent, 'Raj · GJ05 HU7162');
+    });
+
+    test('an unseated passenger still sends — a blank bus becomes a dash', () {
+      expect(WhatsAppOutbound.allocationBusLabel(null), '');
+      expect(
+        WhatsAppOutbound.paramValue(WhatsAppOutbound.allocationBusLabel(null)),
+        '—',
+        reason: 'Meta rejects an empty parameter with 132000',
+      );
+    });
+  });
+
   group('every parameter is repaired before it is sent', () {
     test('a boarding point typed across two lines is joined, not refused', () {
       const typed = 'ગામ ના પાદર\nબસ સ્ટેન્ડ પાસે';

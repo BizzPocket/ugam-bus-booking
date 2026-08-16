@@ -9,6 +9,7 @@ import '../../design/group_color.dart';
 import '../../design/ugam.dart';
 import '../../models/collection.dart';
 import '../../models/passenger.dart';
+import '../../services/sync_service.dart';
 import '../../utils/app_snackbar.dart';
 import '../../utils/formatters.dart';
 import '../../utils/phone_dialer.dart';
@@ -101,9 +102,19 @@ class _HandlerCollectSheetState extends State<HandlerCollectSheet> {
       // `true` tells the shared-seat chooser the collection landed, so it can
       // close behind us. Backing out pops with null and leaves it open.
       if (mounted) Navigator.of(context).pop(true);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _saving = false);
-      AppSnackBar.error(tr('handler_chart.error_save_collection'));
+      // NAME the fault. This used to be `catch (_)` behind a generic "please
+      // try again", which is how a hard server error (42P10 — the ON CONFLICT
+      // arbiter stopped matching once 054 made the index partial, fixed in 091)
+      // read to the handler as nothing more than a spinner that went nowhere.
+      // The reason the server gives is the one thing worth showing here.
+      AppSnackBar.error(
+        tr(
+          'handler_chart.error_save_collection_reason',
+          namedArgs: {'reason': SyncService.describeReadError(e)},
+        ),
+      );
     }
   }
 

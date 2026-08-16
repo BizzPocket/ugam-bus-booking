@@ -572,7 +572,6 @@
     "selected_count": "{n} selected",
     "search_hint": "Search name or phone…",
     "cta_add_bus": "Add a bus to start assigning",
-    "cta_remaining": "{n} left",
     "group": {
       "no_bus": "Add a bus to size groups"
     },
@@ -788,6 +787,7 @@
     "slot_auto": "auto",
     "title_edit": "Edit Bus",
     "resize_warning": "{count} passenger(s) are seated on this bus. Changing the seat count rebuilds the layout and will unassign them — they go back to the unassigned list (their booking stays).",
+    "layout_frozen": "This tour is locked, so the seat plan can no longer be rebuilt. Everything else — driver, boarding point, departure time and pricing — can still be edited and saved.",
     "resize_confirm_title": "Change seats?",
     "resize_confirm_msg": "This unassigns the {count} passenger(s) seated on this bus. They return to the unassigned list and can be re-seated. Continue?",
     "resize_confirm_cta": "Change seats",
@@ -1278,6 +1278,12 @@
     "no_layout": "No seat layout yet for this bus.",
     "no_layout_body": "Set the bus capacity and its seat map is built for you.",
     "create_layout": "Build seat map",
+    "layout_lost": "This bus's seat map is missing",
+    "layout_lost_body": "{count} passenger(s) are still seated on this bus, so it had a seat map — it was lost, not never made. It can be rebuilt from where everyone is sitting.",
+    "recover_layout": "Restore seat map",
+    "recover_confirm_title": "Restore this seat map?",
+    "recover_confirm_body": "The seat map is rebuilt from the seats passengers are already holding, so nobody moves and no one is unassigned. Nothing else about the bus changes.",
+    "recover_done": "Seat map restored. Everyone is back on their own seat.",
     "legend_toggle": "What do the colours mean?",
     "layout_loading": "Loading seat map…",
     "sheet_bus": "Bus",
@@ -1436,7 +1442,9 @@
     "group_move_no_fit_on": "{bus} cannot fit all {count} in this group — nobody was moved.",
     "group_move_save": "Move whole group",
     "auto_confirm_sent_one": "Confirmed & sent WhatsApp to {name}",
-    "auto_confirm_sent_many": "Confirmed & notified {count} passengers on WhatsApp"
+    "auto_confirm_sent_many": "Confirmed & notified {count} passengers on WhatsApp",
+    "auto_allotment_sent_one": "Confirmed & sent {name} their seat chart on WhatsApp",
+    "auto_allotment_sent_many": "Confirmed & sent {count} passengers their seat chart on WhatsApp"
   },
   "manage_buses": {
     "title": "Manage Buses",
@@ -1873,9 +1881,14 @@
     "return_ticket_added": "Return ticket added for {name}.",
     "cancel_return_seat": "Cancel return seat",
     "cancel_return_confirm_title": "Cancel this return seat?",
-    "cancel_return_confirm_body": "{name}'s return seat will be freed so you can rebook it. A round-trip rider keeps their completed GO trip.",
+    "cancel_return_confirm_body": "{name} keeps seat {seat} for the GO trip they already made — only the return half is freed, ready to rebook. Their other seats are untouched.",
     "cancel_return_cta": "Cancel return",
     "cancel_return_done": "{name}'s return seat is free.",
+    "cancel_go_seat": "Cancel GO seat",
+    "cancel_go_confirm_title": "Cancel this GO seat?",
+    "cancel_go_confirm_body": "{name} will not ride out on seat {seat}, so its GO half is freed for someone else. They keep the seat for the ride home, and their other seats are untouched.",
+    "cancel_go_cta": "Cancel GO",
+    "cancel_go_done": "{name}'s GO seat is free. They still ride home.",
     "cancel_return_rebook_title": "Book a replacement?",
     "cancel_return_rebook_body": "The seat is free. Add a return ticket now?",
     "action_done_title_completed": "Trip completed",
@@ -2254,6 +2267,7 @@
     "att_mark_present": "Mark present",
     "error_save_attendance": "Couldn't save attendance. Please try again.",
     "error_save_collection": "Couldn't save the collection. Please try again.",
+    "error_save_collection_reason": "Couldn't save the collection: {reason}",
     "stat_collected": "Collected",
     "stat_to_return": "To return",
     "stat_to_collect": "To collect",
@@ -3081,6 +3095,7 @@
     "card_window_closed": "Trip finished — sharing stopped",
     "card_unavailable": "Sharing unavailable",
     "card_stop": "Stop sharing",
+    "strip_retry": "Check again",
     "rationale_title": "Share this bus's location",
     "rationale_body": "While the trip is running, this app sends the bus's position to your tour operator so they can answer passengers asking where the bus is.\n\nIt collects only the bus position — never your calls, messages or contacts. It starts when the trip is locked and stops on its own when the trip is marked complete. You can stop it any time from the notification or this screen.",
     "rationale_continue": "Continue",
@@ -3378,6 +3393,17 @@
     "next_outstanding_a11y": "Next outstanding, {count} left",
     "round_done": "Nothing left on this bus",
     "round_done_a11y": "Round complete",
-    "undo_collect_semantic": "Undo collecting {amount} from {name}"
+    "undo_collect_semantic": "Undo collecting {amount} from {name}",
+    "loading": "Loading this bus's chart",
+    "drop_unsupported": "{name} can't be placed on {seat} from here — open the seat chart to manage this berth."
+  },
+  "offline": {
+    "showing_saved": "Showing saved data — not live.",
+    "showing_saved_at": "Showing saved data from {when} — not live.",
+    "retry": "Retry",
+    "age_just_now": "just now",
+    "age_minutes": "{n}m ago",
+    "age_hours": "{n}h ago",
+    "age_days": "{n}d ago"
   }
 }

@@ -83,11 +83,16 @@ class HandlerBusMoney {
     List<BusHandover> handovers = const [],
     required double Function(Passenger passenger, String seatId) dueForSeat,
   }) {
-    // collected / toReturn / to-collect-shortfalls / income all come from the
-    // shared, seat-agnostic BusMoneySummary. Rent is kept OUT of this base
-    // (`busRent: 0`) so `expensesTotal` stays the handler's ground expenses
-    // only — the owner's rent is the admin's cost and is deliberately invisible
-    // on every handler figure.
+    // EVERY figure comes from the shared BusMoneySummary — including to-collect
+    // and to-return, which used to be finished off by a bespoke second pass
+    // right here. Handing the roster and the fare resolver straight down means
+    // both sides walk the same seats through the same `busSeatAr`, so the
+    // handler's "still to collect" is the admin's by construction rather than by
+    // two implementations agreeing to stay in step.
+    //
+    // Rent is kept OUT of this base (`busRent: 0`) so `expensesTotal` stays the
+    // handler's ground expenses only — the owner's rent is the admin's cost and
+    // is deliberately invisible on every handler figure.
     final base = BusMoneySummary.compute(
       busId: busId,
       collections: collections,
@@ -95,32 +100,14 @@ class HandlerBusMoney {
       handovers: handovers,
       incomes: incomes,
       busRent: 0,
+      passengers: passengers,
+      dueForSeat: dueForSeat,
     );
-
-    // Seated riders nobody has opened a collection for yet still owe their full
-    // fare. Keyed by passenger id (seat-AGNOSTIC): a rider with ANY collection
-    // row on this bus is already accounted for by [base.toCollectTotal], so
-    // they are skipped here regardless of which seat that row names.
-    final collectedPassengerIds = collections
-        .where((c) => c.busId == busId)
-        .map((c) => c.passengerId)
-        .toSet();
-    var toCollect = base.toCollectTotal;
-    for (final p in passengers) {
-      if (collectedPassengerIds.contains(p.id)) continue;
-      final seatIds = p.assignedSeats
-          .where((a) => a.busId == busId)
-          .map((a) => a.seatId)
-          .toSet();
-      for (final seatId in seatIds) {
-        toCollect += dueForSeat(p, seatId);
-      }
-    }
 
     return HandlerBusMoney(
       collected: base.collected,
       toReturn: base.toReturnTotal,
-      toCollect: toCollect,
+      toCollect: base.toCollectTotal,
       spent: base.expensesTotal, // busRent: 0 → logged ground expenses only
       income: base.income,
       handedOver: base.handedOver,

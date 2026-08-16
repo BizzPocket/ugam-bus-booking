@@ -435,6 +435,116 @@ void main() {
     expect(sent, isEmpty);
   });
 
+  // ── Which message the auto-notify sends ────────────────────────────────────
+  // The greeting names no seat, no bus and no boarding point — it is the
+  // PRE-LOCK message. Once a tour is locked the seat numbers are final and the
+  // rider needs the full `seat_allotment` (their highlighted chart + travel
+  // details) instead, exactly as the Requests screen's re-notify already
+  // decides via [WhatsAppOutbound.shouldSendFullAllotment].
+  //
+  // This is not a corner case: a tour in its RETURN phase is locked BY
+  // DEFINITION (`Tour.isReturnPhase` requires it), so every return ticket
+  // seated from the chart went out as a bare "booking confirmed" with no seat
+  // on it — the chart was rendered and never sent.
+
+  test('a seat placed on a LOCKED tour sends the full allotment, not the greeting',
+      () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith(
+        [_requesting('p1')],
+        buses: [_bus('b1')],
+        status: TourStatus.locked,
+      ),
+    ]);
+    final greeted = <String>[];
+    final allotted = <String>[];
+    ctrl.confirmedSender = (tour, p) async {
+      greeted.add(p.id);
+      return true;
+    };
+    ctrl.allotmentSender = (tour, p) async {
+      allotted.add(p.id);
+      return true;
+    };
+
+    await ctrl.assignSeats(
+      't1',
+      'p1',
+      [SeatAssignment(busId: 'b1', seatId: 'L1')],
+    );
+    await pumpEventQueue();
+
+    expect(allotted, ['p1'], reason: 'locked + seated → the chart message');
+    expect(greeted, isEmpty, reason: 'the pre-lock greeting must not be used');
+    // A message naming these seats has now gone out, so the rider must not
+    // immediately reappear in the Notify screen's "needs re-notify" pile.
+    final p = ctrl.getTour('t1')!.passengers.first;
+    expect(p.seatsNotifiedSig, p.seatSignature);
+    expect(p.notifiedSeatsAreStale, isFalse);
+  });
+
+  test('a seat placed BEFORE lock still sends the lighter greeting', () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith([_requesting('p1')], buses: [_bus('b1')]),
+    ]);
+    final greeted = <String>[];
+    final allotted = <String>[];
+    ctrl.confirmedSender = (tour, p) async {
+      greeted.add(p.id);
+      return true;
+    };
+    ctrl.allotmentSender = (tour, p) async {
+      allotted.add(p.id);
+      return true;
+    };
+
+    await ctrl.assignSeats(
+      't1',
+      'p1',
+      [SeatAssignment(busId: 'b1', seatId: 'L1')],
+    );
+    await pumpEventQueue();
+
+    expect(greeted, ['p1'], reason: 'seats are provisional until lock');
+    expect(allotted, isEmpty);
+    // The greeting names no seat, so it must NOT claim the seats were notified.
+    expect(ctrl.getTour('t1')!.passengers.first.seatsNotifiedSig, isNull);
+  });
+
+  test('a refused allotment send does not stamp the notified signature',
+      () async {
+    final sync = _RecordingSync();
+    Get.put<SyncService>(sync);
+    final ctrl = TourController();
+    ctrl.tours.assignAll([
+      _tourWith(
+        [_requesting('p1')],
+        buses: [_bus('b1')],
+        status: TourStatus.locked,
+      ),
+    ]);
+    // Meta refused it (or the chart could not be rendered) — the rider has
+    // nothing in hand, so they must stay on the re-notify list.
+    ctrl.allotmentSender = (tour, p) async => false;
+
+    await ctrl.assignSeats(
+      't1',
+      'p1',
+      [SeatAssignment(busId: 'b1', seatId: 'L1')],
+    );
+    await pumpEventQueue();
+
+    final p = ctrl.getTour('t1')!.passengers.first;
+    expect(p.seatsNotifiedSig, isNull);
+    expect(p.seatsChangedSinceNotified, isTrue);
+  });
+
   test('fillTour auto-confirms + notifies every newly-seated unconfirmed rider',
       () async {
     final sync = _RecordingSync();

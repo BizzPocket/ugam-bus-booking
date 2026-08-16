@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31) backup/transfer rules.
+
+  WHY THIS FILE EXISTS: `android:allowBackup="false"` in the manifest turns off
+  CLOUD backup, but it does NOT turn off DEVICE-TO-DEVICE transfer on Android
+  12+. That leaves one live channel by which an app's data can reappear on a
+  "fresh" install — which is exactly how the deleted SQLite offline cache used
+  to resurrect a logged-out admin's tours after a reinstall. Both channels are
+  now closed explicitly.
+
+  The offline tour-graph cache (TourCacheStore) additionally lives in
+  Context.getCacheDir(), which neither channel has ever included. This file is
+  the belt to that directory's braces, and it covers everything else too:
+  nothing in this app is worth restoring onto another device, because every
+  byte of it is re-derivable from Supabase after a sign-in.
+
+  `path="."` means "the whole domain" — the form used in Android's own docs.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

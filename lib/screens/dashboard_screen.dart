@@ -19,6 +19,7 @@ import '../widgets/dashboard/loading_shimmer.dart';
 import '../widgets/dashboard/quick_actions.dart';
 import '../widgets/dashboard/recent_request_row.dart';
 import '../widgets/dashboard/trip_hero.dart';
+import '../widgets/cached_data_banner.dart';
 import 'main_shell.dart';
 import 'notify_screen.dart';
 import 'seating_exceptions_screen.dart';
@@ -140,6 +141,11 @@ class DashboardScreen extends StatelessWidget {
                           c: c,
                         )),
                     const SizedBox(height: UgamSpacing.md),
+                    // Directly under the greeting, above the hero: the very
+                    // first thing read on this screen is a money figure, and a
+                    // money figure computed from a day-old roster is worse than
+                    // no figure. Renders nothing when the data is live.
+                    const CachedDataBanner(),
                     DashboardTripHero(c: c),
                     const SizedBox(height: UgamSpacing.md),
                     DashboardQuickActions(c: c, shell: shell),

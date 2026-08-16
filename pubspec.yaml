@@ -73,6 +73,13 @@ dependencies:
   # Preferences (used for theme)
   shared_preferences: ^2.5.3
 
+  # Platform cache directory for the offline tour-graph cache
+  # (TourCacheStore). Was already present transitively; declared explicitly
+  # because we now import it directly, and because the NO-BACKUP guarantee this
+  # cache depends on comes from getApplicationCacheDirectory() specifically —
+  # that must not silently disappear with a transitive dependency.
+  path_provider: ^2.1.6
+
   # SHA-256 + random salt for admin password hashing (Phase 3 auth)
   crypto: ^3.0.6
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -118,6 +119,16 @@ class _RequestsScreenState extends State<RequestsScreen> {
     if (!withBar) return UgamSpacing.dockClearance;
     return _kBarLift + _kBarHeight + MediaQuery.paddingOf(context).bottom;
   }
+
+  /// Whether a bottom bar will ACTUALLY paint over the content.
+  ///
+  /// Used to be assumed true, because the Seats CTA was always there. It is
+  /// gone (see [_AssignmentCTA]), so the two remaining cases are the bulk bar
+  /// while multi-selecting and the add-bus CTA on a tour with no bus. Anything
+  /// that reserves bottom space has to ask this rather than assume — reserving
+  /// for an absent bar leaves 144pt of dead space under the last row, and NOT
+  /// reserving for a present one traps that row behind it.
+  bool _hasBottomBar(Tour tour) => _selectionMode || tour.buses.isEmpty;
 
   // Whether the floating action bar is currently extended. Scrolling DOWN the
   // list retracts it behind the dock; scrolling back up — or any state change
@@ -747,13 +758,31 @@ class _RequestsScreenState extends State<RequestsScreen> {
               color: c.ink2,
               onRefresh: tourCtrl.refreshTours,
               child: passengers.isEmpty
-                ? ListView(
+                ? LayoutBuilder(
+                  builder: (context, constraints) {
+                  // The empty branch reserved NOTHING at the bottom while the
+                  // populated one reserved the full bar inset, so the empty
+                  // state's body text was laid out underneath the floating CTA
+                  // and clipped by it. Same inset as the list, same predicate.
+                  final inset = _listBottomInset(
+                    context,
+                    withBar: _hasBottomBar(selectedTour),
+                  );
+                  // Was a flat 45% of SCREEN height — a magic fraction blind to
+                  // the tour/filter chrome above, the bar below and the text
+                  // scale, which is how the body line ended up under the
+                  // button. Measure the box this list actually has, minus what
+                  // the chrome claims. Floored so a very small viewport at a
+                  // large text scale can never ask for a negative height.
+                  final free = math.max(0.0, constraints.maxHeight - inset);
+                  return ListView(
                     physics: const AlwaysScrollableScrollPhysics(
                       parent: BouncingScrollPhysics(),
                     ),
+                    padding: EdgeInsets.only(bottom: inset),
                     children: [
                       SizedBox(
-                        height: MediaQuery.of(context).size.height * 0.45,
+                        height: free,
                         child: UgamEmpty(
                           icon: _query.isNotEmpty
                               ? Icons.search_off_rounded
@@ -805,7 +834,8 @@ class _RequestsScreenState extends State<RequestsScreen> {
                         ),
                       ),
                     ],
-                  )
+                  );
+                })
                 : ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(
                       parent: BouncingScrollPhysics(),
@@ -814,10 +844,15 @@ class _RequestsScreenState extends State<RequestsScreen> {
                       UgamSpacing.gutter,
                       0,
                       UgamSpacing.gutter,
-                      // A populated list always carries a bottom bar (the
-                      // Seats CTA, or the bulk bar while selecting), so it
-                      // reserves the bar AND the dock beneath it.
-                      _listBottomInset(context, withBar: true),
+                      // Reserve for the bar only when one is really there —
+                      // the bulk bar while selecting, or the add-bus CTA on a
+                      // busless tour. With the Seats CTA gone that is now the
+                      // minority case, and assuming it left a dead 144pt gap
+                      // below the last request.
+                      _listBottomInset(
+                        context,
+                        withBar: _hasBottomBar(selectedTour),
+                      ),
                     ),
                     itemCount: passengers.length,
                     separatorBuilder: (_, _) =>
@@ -1218,6 +1253,20 @@ class _CapacityBannerState extends State<_CapacityBanner> {
 
 // ─── Assignment CTA ───────────────────────────────────────────────────
 
+/// The "add a bus" way out, and ONLY that.
+///
+/// This used to also be a full-width "Seats" shortcut into the seating
+/// workspace whenever the tour had a bus — i.e. essentially always. Removed:
+/// the dock's own CHARTS tab already reaches seating, so the slab was a second
+/// route to a place that was never more than one tap away, and it paid for that
+/// redundancy with the loudest control on the screen — permanently parked over
+/// the request list, and over the empty state's body text.
+///
+/// A tour with NO bus is different: nothing on this screen can be acted on
+/// until one exists, so that case keeps its CTA rather than leaving the agent
+/// on a dead end. Which also means the bottom bar is now the exception on this
+/// screen, not the rule — see `_hasBottomBar`, which the list padding reads so
+/// it stops reserving 144pt for a bar that is not there.
 class _AssignmentCTA extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
@@ -1225,31 +1274,14 @@ class _AssignmentCTA extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final remaining = tour.pendingSeatsToAssign;
-    final hasBus = tour.buses.isNotEmpty;
+    if (tour.buses.isNotEmpty) return const SizedBox.shrink();
     return UgamStickyCTA(
       child: UgamCTA(
-        // ONE seating entry, ONE label: "Seats". It opens the Seats workspace
-        // on the auto-fill SUMMARY (SeatsMode.summary). Auto-fill / re-generate
-        // are actions INSIDE that screen, never the navigation entry label.
-        label: hasBus ? tr('seats.title') : tr('requests.cta_add_bus'),
-        leadingIcon: hasBus ? Icons.event_seat_rounded : Icons.add_rounded,
-        trailingValue: hasBus && remaining > 0
-            ? tr('requests.cta_remaining', namedArgs: {'n': '$remaining'})
-            : null,
-        // With a bus → open the Seats workspace (auto-fill SUMMARY). Without a
-        // bus → the label says "Add bus" and it must DO that, not sit disabled:
-        // route into the add-bus flow so the CTA is never a dead end.
+        label: tr('requests.cta_add_bus'),
+        leadingIcon: Icons.add_rounded,
         onPressed: () {
           HapticFeedback.lightImpact();
-          if (hasBus) {
-            Get.toNamed(
-              AppRoutes.tourOverview,
-              arguments: {'tourId': tour.id},
-            );
-          } else {
-            Get.to(() => AddBusScreen(tourId: tour.id));
-          }
+          Get.to(() => AddBusScreen(tourId: tour.id));
         },
       ),
     );

@@ -40,7 +40,20 @@ class AppRoutes {
   /// `false`. No screen is deleted, no call site changes, and the two screens
   /// the Board is trialling against keep routes of their own for a side-by-side
   /// comparison during the review itself.
-  static const bool boardReplacesChart = true;
+  /// **Off.** The live-tour review went badly, exactly as the paragraph above
+  /// anticipated, so this is the documented fallback being taken.
+  ///
+  /// While it was `true` the Board WAS "open this bus's chart" for the charts
+  /// tab and the tour overview — and the Board cannot yet do the work those
+  /// two entry points exist for. It has no assign picker (see the comment on
+  /// [seatAssignment] below), no pending pool to re-seat from, and its canvas
+  /// is built without `canDragBerth`/`onDrop`, so berth→berth dragging is off
+  /// at the widget level however the chart is reached. An agent who opened a
+  /// bus got a read-only surface where the seat grid used to be.
+  ///
+  /// Flip back to `true` only once the Board grows an assign path. The drag,
+  /// relocate and loading gaps are fixed; the missing pending pool is not.
+  static const bool boardReplacesChart = false;
 
   static const String splash = '/splash';
   static const String login = '/login';

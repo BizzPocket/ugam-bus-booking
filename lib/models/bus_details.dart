@@ -198,12 +198,15 @@ class Bus {
     return reg.isEmpty ? name : '$name · $reg';
   }
 
-  /// Customer-facing bus label — the NAME only, never the registration number.
-  /// The plate is an operational detail the agent needs to identify the physical
-  /// vehicle ([displayLabel]); customers just need the name (e.g. "Raj"). This is
-  /// the single source for every customer surface (WhatsApp confirmation, their
-  /// seat-chart image, Find-my-seat, customer tour detail), so the convention
+  /// Conversational bus label — the NAME only, never the registration number
+  /// (e.g. "Raj"). For copy that TALKS about a bus mid-sentence: in-app customer
+  /// screens (Find-my-seat, customer tour detail, the seat sheet) and the Board's
+  /// move/confirm prompts. This is the single source for those, so the convention
   /// can't drift per screen the way a hand-rolled "name only" would.
+  ///
+  /// It is NOT for anything that IDENTIFIES a vehicle the rider has to find —
+  /// the seat chart, the printed A4 and the WhatsApp allotment message all use
+  /// [displayLabel] so they name the same bus the same way.
   String get customerLabel => name.trim().isEmpty ? displayLabel : name.trim();
 
   /// Parsed bus type enum. The underlying `busType` string is kept on the

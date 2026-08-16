@@ -8,6 +8,7 @@ import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../utils/formatters.dart';
+import '../widgets/cached_data_banner.dart';
 import 'create_tour_screen.dart';
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
@@ -129,6 +130,13 @@ class _ToursScreenState extends State<ToursScreen> {
                       ),
                     )
                   : const SizedBox.shrink(),
+            ),
+            // The tour list is the entry point to every other surface, so it is
+            // where the agent should first learn the app is running on saved
+            // data. Renders nothing when the graph is live.
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+              child: CachedDataBanner(),
             ),
             Expanded(
               child: Obx(() {

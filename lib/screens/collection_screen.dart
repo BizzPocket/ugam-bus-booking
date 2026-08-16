@@ -12,6 +12,7 @@ import '../models/passenger.dart';
 import '../models/payment_claim.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
+import '../utils/collection_seat_resolver.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_money_state.dart';
@@ -86,14 +87,21 @@ class _CollectionScreenState extends State<CollectionScreen> {
   List<_SeatCollectionLine> get _seatLines {
     final lines = <_SeatCollectionLine>[];
     for (final p in widget.tour.passengers) {
-      // Distinct seats only: a whole double-sofa is stored as TWO assignment
-      // entries on the same seatId; amountDueForSeat already charges the full
-      // sofa for that case, so iterate per distinct seatId (not per entry) to
-      // avoid duplicate lines / double counting.
-      final seatIds = p.assignedSeats
-          .where((a) => a.busId == widget.bus.id)
-          .map((a) => a.seatId)
-          .toSet();
+      // Distinct PHYSICAL seats only: a whole double-sofa is two assignment
+      // entries on one seat, and amountDueForSeat already charges the full sofa
+      // once — so a line per entry would bill it twice.
+      //
+      // Deduplicated on the BASE id. The app writes both berths under the
+      // identical seatId, but the older `#n` berth-suffix form still exists in
+      // the data (diagnostics CHECK 10), and on the raw string those read as two
+      // seats — two rows for one rider, each at the full sofa price, doubling
+      // this bus's shortfall the moment they are part-paid. Every other reader
+      // already normalises: `Bus.amountDueFor`, `collectionRowForSeat`, and
+      // 062's SQL all strip the suffix first.
+      final seatIds = <String>{
+        for (final a in p.assignedSeats)
+          if (a.busId == widget.bus.id) baseSeatId(a.seatId),
+      };
       for (final seatId in seatIds) {
         final due = widget.bus.amountDueForSeat(p, seatId);
         lines.add(

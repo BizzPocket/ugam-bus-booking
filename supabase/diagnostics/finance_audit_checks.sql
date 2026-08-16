@@ -247,3 +247,63 @@ select p.id, p.name, s->>'seatId' as suffixed_seat_id
   cross join lateral jsonb_array_elements(coalesce(p.assigned_seats, '[]'::jsonb)) s
  where s->>'seatId' like '%#%'
  limit 50;
+
+
+-- ── CHECK 11 · Reconcile ONE bus against the physical cash ───
+-- Not a bug hunt — the tool for "the app says ₹55,800 but I counted ₹54,600".
+-- Every check above proves the books agree with THEMSELVES; only this one lets
+-- you put them next to the money in your hand and find the row that differs.
+--
+-- Replace the bus name, then read down the `cash` column. `cash` is what the
+-- handler is holding for that row (received − online − refunded) and is exactly
+-- what the ledger's `collected_minor` counts, so the total at the bottom is the
+-- figure the app prints on the bus money screen.
+--
+-- WHAT TO LOOK FOR
+--   * two rows for the same rider on the same physical seat (`seat` equal once
+--     the '#n' berth suffix is stripped) — one payment recorded twice. This is
+--     the "defect #2" signature that public.finance_integrity_alerts watches.
+--   * a row whose `seated_here` is false — cash from somebody who no longer
+--     holds a seat on this bus. It is real money and it stays in the total; the
+--     app names it separately as "detached cash".
+--   * `online` > 0 — a UPI advance. It reached the organiser's bank, never the
+--     handler's pocket, which is why it is excluded from `cash`.
+with target as (
+  select b.id, b.name, b.tour_id
+    from public.buses b
+   where b.name = 'Momai Krupa 2'          -- ← the bus you are counting
+     and b.deleted_at is null
+)
+select p.name                                        as rider,
+       split_part(c.seat_id, '#', 1)                 as seat,
+       c.amount_due                                  as due,
+       c.amount_received                             as received,
+       c.amount_online                               as online,
+       c.amount_refunded                             as refunded,
+       c.amount_received - c.amount_online - c.amount_refunded as cash,
+       exists (
+         select 1
+           from jsonb_array_elements(
+                  coalesce(p.assigned_seats, '[]'::jsonb)) s
+          where (nullif(s->>'busId',''))::uuid = c.bus_id
+       )                                             as seated_here,
+       c.collected_by, c.note, c.created_at
+  from public.collections c
+  join target t          on t.id = c.bus_id
+  left join public.passengers p on p.id = c.passenger_id
+ where c.deleted_at is null
+ order by 1, 2;
+
+-- …and the one number to compare against your cash box:
+with target as (
+  select b.id from public.buses b
+   where b.name = 'Momai Krupa 2' and b.deleted_at is null
+)
+select count(*)                                                    as rows,
+       sum(c.amount_received)                                      as received,
+       sum(c.amount_online)                                        as online_not_in_hand,
+       sum(c.amount_refunded)                                      as refunded,
+       sum(c.amount_received - c.amount_online - c.amount_refunded) as cash_app_shows
+  from public.collections c
+  join target t on t.id = c.bus_id
+ where c.deleted_at is null;

@@ -135,6 +135,23 @@ class SeatChartPdf {
   ///  - [fitOnePage] true (the per-passenger WhatsApp image) — one page, with
   ///    the table scaled down to fit so the recipient still gets ONE image.
   ///    A table that already fits is untouched (scaleDown ⇒ factor 1).
+  ///
+  /// **The chart names its bus by plate, for BOTH audiences.**
+  ///
+  /// This one builder serves the agent's downloaded/printed sheet
+  /// ([shareTourChartA4]) and the image attached to each passenger's WhatsApp
+  /// confirmation ([buildPassengerChartImages]). It used to print `bus.name`
+  /// raw in the title and [Bus.customerLabel] on a line literally headed
+  /// "ગાડી નંબર" — so neither sheet carried a vehicle number at all, and a
+  /// rider standing in a car park beside two identically-named coaches had
+  /// nothing to match against.
+  ///
+  /// Both now use [Bus.displayLabel] (`name · plate`), by explicit product
+  /// decision: the passenger needs to find the physical bus as much as the
+  /// agent does. The WhatsApp message BODY that carries this image says the
+  /// same thing — its bus line is [Bus.displayLabel] too
+  /// (`whatsapp_outbound.dart`), so the text and the chart attached to it can't
+  /// name the bus two different ways.
   static Future<Uint8List> buildTourChartPdf({
     required Tour tour,
     required ChartFooter footer,
@@ -224,7 +241,12 @@ class SeatChartPdf {
     required ChartFooter footer,
     CollectLeg? leg,
   }) async {
-    final bytes = await buildTourChartPdf(tour: tour, footer: footer, leg: leg);
+    // The agent's own copy: names the vehicle by plate as well as by label.
+    final bytes = await buildTourChartPdf(
+      tour: tour,
+      footer: footer,
+      leg: leg,
+    );
     final legSuffix = leg == null
         ? ''
         : leg == CollectLeg.go
@@ -333,7 +355,10 @@ class SeatChartPdf {
         ),
         pw.SizedBox(height: 2),
         pw.Text(
-          '${bus.name} · $route',
+          // Was raw `bus.name`, which meant the plate appeared on NEITHER
+          // audience's sheet — the agent printing a chart to hand a driver had
+          // no way to tell two identically-named buses apart.
+          '${bus.displayLabel} · $route',
           style: pw.TextStyle(fontSize: 13, color: _inkMuted),
         ),
         // Leg banner — only on a one-way recipient's leg-scoped chart. Makes the
@@ -381,12 +406,20 @@ class SeatChartPdf {
           ),
         );
 
-    // ગાડી નંબર – <bus name>. This chart is recipient-facing (it's the image
-    // attached to each passenger's WhatsApp confirmation), so it uses the
-    // customer label — the NAME only, matching the "બસ: {name}" message body.
-    // The registration plate is an agent-only detail; it stays on the admin
-    // screens' [Bus.displayLabel].
-    lines.add(line('${tr('chart.gaadi_number')} – ${bus.customerLabel}', bold: true));
+    // ગાડી નંબર – <bus>. The line is LABELLED "vehicle number", so on the
+    // agent's own sheet it had better carry one: it printed [customerLabel] for
+    // both audiences, i.e. the bus NAME under a heading that says number, which
+    // is why a downloaded chart could not identify the vehicle at all.
+    //
+    // The recipient's copy keeps the name only — it matches the "બસ: {name}"
+    // message body it is attached to, and the plate is an operational detail
+    // they have no use for.
+    lines.add(
+      line(
+        '${tr('chart.gaadi_number')} – ${bus.displayLabel}',
+        bold: true,
+      ),
+    );
 
     // સ્થળ.. <boarding place> — per-bus boarding point overrides the tour footer.
     final place =

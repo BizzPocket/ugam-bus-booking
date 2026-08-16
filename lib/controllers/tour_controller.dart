@@ -3,6 +3,7 @@ import 'dart:developer' as dev;
 import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show PostgresChangeEvent;
@@ -26,10 +27,12 @@ import '../services/seating_engine.dart';
 import '../services/seating_plan_applier.dart';
 import '../services/sync_retry_policy.dart' as retry;
 import '../services/sync_service.dart';
+import '../services/tour_cache_store.dart';
 import '../services/whatsapp_outbound.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_normalize.dart';
+import '../utils/seat_leg_cancel.dart';
 import '../utils/seat_leg_resolver.dart';
 import '../utils/seat_occupants.dart';
 import '../models/bus_type.dart';
@@ -231,6 +234,23 @@ class TourController extends GetxController {
     return res.anySent;
   }
 
+  /// AFTER-LOCK counterpart of [confirmedSender]: the full `seat_allotment` —
+  /// the rider's own highlighted seat chart as the image header, plus bus,
+  /// boarding place, departure date/time and handler contact. Same stub seam so
+  /// tests can assert WHICH message a seat placement produced without a network.
+  ///
+  /// Chosen by [_broadcastConfirmed] via
+  /// [WhatsAppOutbound.shouldSendFullAllotment], which is the same decision the
+  /// Requests screen's re-notify already makes.
+  Future<bool> Function(Tour tour, Passenger passenger) allotmentSender =
+      _sendSeatAllotment;
+
+  static Future<bool> _sendSeatAllotment(Tour tour, Passenger p) async {
+    final res = await WhatsAppOutbound()
+        .sendSeatAllocations(tour: tour, onlyPassengerIds: {p.id});
+    return res.anySent;
+  }
+
   StreamSubscription<DataChangedEvent>? _realtimeSub;
 
   /// Tours whose passengers/buses/groups are actually loaded.
@@ -244,6 +264,51 @@ class TourController extends GetxController {
   /// Bus ids for which we have already attempted a layout fetch (including
   /// buses whose layout is legitimately null). Prevents refetch loops on 2G.
   final _layoutFetchedBusIds = <String>{};
+
+  /// Bus ids the SERVER has positively answered `layout: null` for.
+  ///
+  /// The distinction that keeps [layoutsLoadedFor] honest. A null layout in
+  /// memory means one of two very different things, and only this set tells
+  /// them apart:
+  ///
+  ///  * **in here** — the grid is genuinely absent server-side (the wipe
+  ///    `recoverBusLayoutFor` repairs). "No seat plan" is the true answer and
+  ///    re-fetching would burn a request on every refresh forever.
+  ///  * **not in here** — we simply do not hold it: never fetched, or dropped
+  ///    by a merge. The honest answer is "loading", and it must be re-fetched.
+  ///
+  /// Cleared the moment a grid arrives for that bus, so a recovered or
+  /// re-generated bus stops being treated as known-empty.
+  final _layoutKnownNullBusIds = <String>{};
+
+  /// Disk cache of the last graph that was confirmed against the server.
+  /// Injectable so tests can point it at a temp directory.
+  TourCacheStore diskCache = TourCacheStore.instance;
+
+  /// **The data on screen did not come from a successful fetch.**
+  ///
+  /// The single honest signal behind the "showing saved data" indicator. A
+  /// cache that can be mistaken for live data is the exact defect that got the
+  /// last offline layer deleted ("masked real fetch failures as empty
+  /// results"), so this is set by BOTH paths that can produce a stale render —
+  /// a cold start hydrated from disk, and a fetch that failed while content was
+  /// already on screen — and cleared by exactly one thing: a load that actually
+  /// reached the server.
+  final isShowingCachedData = false.obs;
+
+  /// When the graph on screen was last confirmed against the server. Drives the
+  /// `from <relative time>` half of the indicator; null when the content came
+  /// from somewhere with no such timestamp (a test seed, an optimistic write),
+  /// in which case the indicator says "saved data" with no age rather than
+  /// inventing one.
+  final Rxn<DateTime> dataAsOf = Rxn<DateTime>();
+
+  /// Coalesces cache writes. A single load fires phase-2 and then N layout
+  /// merges; without this each one would re-encode and re-write the WHOLE
+  /// graph. Deliberately main-isolate: encoding ~100 kB of JSON costs a few ms,
+  /// where spawning an isolate to do it costs tens of ms on the low-end devices
+  /// this is meant to help.
+  Timer? _cacheSaveDebounce;
 
   /// In-flight hydrations, so two widgets opening the same tour at once
   /// share one request instead of racing two down a 2G link.
@@ -285,6 +350,11 @@ class TourController extends GetxController {
   /// with an empty list, automatically retry once — the same action the user
   /// was forced to take on every launch when connectivity/auth raced.
   Future<void> _bootstrapLoad() async {
+    // Disk BEFORE network. The cached graph paints in the time one file read
+    // takes, so Home and every seat chart are readable while the fetch is still
+    // opening its socket — and stay readable if it never lands. Nothing here
+    // suppresses the fetch that follows.
+    await hydrateFromDiskCache();
     await _awaitAuthRestored();
     await _loadTours();
     if (hasError.value && tours.isEmpty) {
@@ -306,10 +376,134 @@ class TourController extends GetxController {
     }
   }
 
+  /// Scope key for the on-disk graph: the ADMIN's id, or null when there is no
+  /// admin session.
+  ///
+  /// Null is a hard "do not cache". An anonymous / customer viewer is never
+  /// persisted at all, which is half of why a cached tour cannot survive a
+  /// logout: the moment the session goes, so does the only key that can address
+  /// the file — and [AuthController] deletes the file itself as well.
+  ///
+  /// Waits only on the PREFS half of session restore, so an offline start finds
+  /// its scope in milliseconds instead of after the admin lookup's timeout.
+  ///
+  /// [forWrite] tightens which admin id may name the file, and the two answers
+  /// deliberately differ. A READ accepts the id persisted in prefs, because an
+  /// offline cold start has no live `currentAdmin` (that comes from a network
+  /// lookup) and painting the saved graph is the whole point. A WRITE demands
+  /// the LIVE id — the same value [_tourFilters] filtered the query by — so a
+  /// load that ran unfiltered because the admin lookup timed out cannot save
+  /// the resulting list of public tours over this admin's roster.
+  Future<String?> _diskCacheScope({bool forWrite = false}) async {
+    if (!Get.isRegistered<AuthController>()) return null;
+    final auth = Get.find<AuthController>();
+    try {
+      await auth.whenPrefsRestored.timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      // Fall through: `cacheScopeAdminId` returns null unless prefs actually
+      // restored an admin, so the worst case is no cache, never a wrong one.
+    }
+    final adminId =
+        forWrite ? auth.writeCacheScopeAdminId : auth.cacheScopeAdminId;
+    return adminId == null ? null : 'tours_admin_$adminId';
+  }
+
+  /// Paint the last known-good graph off disk.
+  ///
+  /// Only ever ADDITIVE to an empty list: if anything is already in `tours`,
+  /// or a load started while the file was being read, the cache is dropped on
+  /// the floor. Fresher data must never be painted over by older data, and the
+  /// generation token is the same one [_loadTours] uses.
+  @visibleForTesting
+  Future<void> hydrateFromDiskCache() async {
+    final gen = _loadGeneration;
+    final scope = await _diskCacheScope();
+    if (scope == null) return;
+    final snap = await diskCache.read(scope);
+    if (snap == null || snap.tours.isEmpty) return;
+    if (isClosed || gen != _loadGeneration || tours.isNotEmpty) return;
+
+    // Rebuild the layout bookkeeping the SAME WAY the network path maintains
+    // it, because `layoutsLoadedFor` decides "skeleton" vs "no seat plan" on
+    // every chart surface and a wrong answer here is a chart that never
+    // resolves:
+    //
+    //  * a bus whose grid came back with the cache IS fetched — that is the
+    //    whole point of caching the jsonb;
+    //  * a bus the SERVER said `layout: null` for is fetched AND known-null, so
+    //    the chart says "no seat plan" (the true answer) instead of spinning;
+    //  * anything else is left unmarked, so the background prefetch re-asks.
+    //
+    // Derived rather than persisted on purpose: `_layoutFetchedBusIds` is only
+    // honest when it agrees with the data beside it, and a persisted set can
+    // drift out of agreement with a persisted grid. This cannot.
+    _layoutKnownNullBusIds
+      ..clear()
+      ..addAll(snap.layoutKnownNullBusIds);
+    _layoutFetchedBusIds.clear();
+    for (final t in snap.tours) {
+      for (final b in t.buses) {
+        if (b.layout != null || _layoutKnownNullBusIds.contains(b.id)) {
+          _layoutFetchedBusIds.add(b.id);
+        }
+      }
+      // Mirror `ensureTourHydrated`'s own short-circuit: a tour that carries a
+      // roster is hydrated, an empty one still pays its fetch when opened. Not
+      // persisted separately, for the same "flag must agree with data" reason.
+      if (t.passengers.isNotEmpty || t.buses.isNotEmpty) {
+        _hydratedTourIds.add(t.id);
+      }
+    }
+
+    tours.assignAll(snap.tours);
+    dataAsOf.value = snap.savedAt;
+    isShowingCachedData.value = true;
+  }
+
+  /// Persist the current graph as the new last-known-good, debounced.
+  void _scheduleDiskCacheSave() {
+    _cacheSaveDebounce?.cancel();
+    _cacheSaveDebounce = Timer(const Duration(milliseconds: 1200), () {
+      // ignore: unawaited_futures
+      saveToDiskCache();
+    });
+  }
+
+  @visibleForTesting
+  Future<void> saveToDiskCache() async {
+    if (isClosed) return;
+    final scope = await _diskCacheScope(forWrite: true);
+    if (scope == null) return;
+    if (isClosed) return;
+    // ignore: invalid_use_of_protected_member
+    final graph = List<Tour>.from(tours.value);
+    if (graph.isEmpty) return;
+    await diskCache.write(
+      TourGraphSnapshot(
+        scopeKey: scope,
+        // The age the indicator shows must be the age of the DATA, not of the
+        // file, so this is when the graph was last confirmed against the
+        // server — set by [_markFresh] — and only falls back to now when
+        // nothing set it.
+        savedAt: dataAsOf.value ?? DateTime.now(),
+        tours: graph,
+        layoutKnownNullBusIds: Set<String>.from(_layoutKnownNullBusIds),
+      ),
+    );
+  }
+
+  /// The graph on screen just came from the server. The ONLY place the cached
+  /// label is taken down.
+  void _markFresh() {
+    dataAsOf.value = DateTime.now();
+    isShowingCachedData.value = false;
+  }
+
   @override
   void onClose() {
     _realtimeSub?.cancel();
     _refreshDebounce?.cancel();
+    _cacheSaveDebounce?.cancel();
     super.onClose();
   }
 
@@ -512,6 +706,10 @@ class TourController extends GetxController {
     final gen = ++_loadGeneration;
     isLoading.value = true;
     hasError.value = false;
+    // Flipped the instant the roster merge lands. Read by every failure path
+    // below to answer one question honestly: is what the agent is looking at
+    // right now from the server, or off the disk?
+    var reachedServer = false;
     try {
       // ── Phase 1: tour headers only ─────────────────────────────────
       // On 2G the roster+layout payload dwarfs the tour list. Paint titles
@@ -531,6 +729,10 @@ class TourController extends GetxController {
           hasError.value = true;
           errorMessage.value = SyncService.describeReadError(e);
         } else {
+          // Content on screen + a fetch that did not land = the agent is
+          // reading saved data. Say so persistently, not just in a toast that
+          // is gone in three seconds.
+          isShowingCachedData.value = true;
           AppSnackBar.warning(tr('errors.refresh_showing_cached'));
         }
         isLoading.value = false;
@@ -593,20 +795,47 @@ class TourController extends GetxController {
         for (final b in raw[idx].buses) {
           if (!buses.any((n) => n.id == b.id)) {
             _layoutFetchedBusIds.remove(b.id);
+            _layoutKnownNullBusIds.remove(b.id);
           }
         }
-        // Preserve layouts we already paid for on a prior prefetch.
+        // Preserve layouts we already paid for — read from the LIVE list, not
+        // from `priorById`.
+        //
+        // `priorById` is snapshotted before this method's `await` on
+        // `fetchRelationsForTours`, and `_prefetchLayoutsForHydratedTours` is
+        // writing grids into `tours` the whole time that request is in flight.
+        // Re-attaching from the snapshot therefore threw away any layout that
+        // landed during the window and put back the null the snapshot held —
+        // while `_layoutFetchedBusIds` kept the id, so `need` stayed empty and
+        // it was never re-fetched. That is the intermittent "no seat plan" on a
+        // bus that had rendered a moment earlier: not a fetch failure, a race
+        // between a background prefetch and a foreground refresh.
+        final liveById = {for (final b in raw[idx].buses) b.id: b};
         final withLayouts = [
           for (final b in buses)
-            if (priorById[tourId]
-                    ?.buses
-                    .where((x) => x.id == b.id && x.layout != null)
-                    .firstOrNull
-                case final priorBus?)
-              b.copyWith(layout: priorBus.layout)
+            if (liveById[b.id]?.layout case final live?)
+              b.copyWith(layout: live)
             else
               b,
         ];
+        // The flag and the data must agree, always.
+        //
+        // `layoutsLoadedFor` — which decides "skeleton" vs "no seat plan" on
+        // every chart surface — answers from `_layoutFetchedBusIds` alone, so a
+        // latched id next to a null layout renders the hard, wrong conclusion
+        // and never recovers. Any bus that comes out of this merge WITHOUT a
+        // grid gets its mark dropped, so the worst case is one more cheap
+        // id+jsonb request rather than a chart that is stuck until app restart.
+        //
+        // Except when the SERVER is the one that said null: that bus has no
+        // grid to fetch (it was wiped — `recoverBusLayoutFor` repairs it), and
+        // dropping its mark would send the chart back to a skeleton that can
+        // never resolve, and re-ask on every single refresh forever.
+        for (final b in withLayouts) {
+          if (b.layout == null && !_layoutKnownNullBusIds.contains(b.id)) {
+            _layoutFetchedBusIds.remove(b.id);
+          }
+        }
         raw[idx] = raw[idx].copyWith(
           passengers: passengers,
           buses: withLayouts,
@@ -618,6 +847,14 @@ class TourController extends GetxController {
       _hydratedTourIds
         ..clear()
         ..addAll(scope);
+
+      // The roster IS the server's answer now. Everything after this point
+      // (archive sweep, remembered priority, layout prefetch) is follow-up
+      // work — if one of those throws, the graph on screen is still live and
+      // must not be re-labelled as saved data.
+      reachedServer = true;
+      _markFresh();
+      _scheduleDiskCacheSave();
 
       await _archiveExpiredTours();
       await _applyRememberedPriority();
@@ -633,6 +870,7 @@ class TourController extends GetxController {
         hasError.value = true;
         errorMessage.value = SyncService.describeReadError(e);
       } else {
+        if (!reachedServer) isShowingCachedData.value = true;
         AppSnackBar.warning(tr('errors.refresh_showing_cached'));
       }
     }
@@ -1082,27 +1320,46 @@ class TourController extends GetxController {
         .length;
   }
 
-  /// Cancel the RETURN leg for the rider currently holding a return seat, so
-  /// the agent can rebook it. A return-only rider never rode, so they are
-  /// removed outright. A round-trip rider already rode the GO leg, so we keep
-  /// their record but drop the return: convert every round-trip request line
-  /// to outbound-only, clear their seats (freeing the berth), and flag
-  /// journeyDone — exactly like completeOutboundLeg does for one-way riders.
-  Future<void> cancelReturnSeat(String tourId, String passengerId) async {
+  /// Strike ONE leg from ONE seat a rider holds, so the freed half can be
+  /// resold. [strike] is [TripType.returnOnly] to cancel the ride home or
+  /// [TripType.outboundOnly] to cancel the ride out.
+  ///
+  /// The berth SURVIVES whenever the rider still travels the other leg on it —
+  /// a round-trip berth is re-stamped one-way rather than deleted, so the seat
+  /// keeps showing who is on it and only the struck leg's half of the tile
+  /// becomes sellable. See [cancelSeatLegTransform] for the full rule.
+  ///
+  /// Scoped to one seat on purpose: a party holding a Double Sofa plus a Single
+  /// can now cancel the return on just one of them. Cancelling for the whole
+  /// party is [cancelReturnSeat], which walks each of their seats in turn.
+  Future<void> cancelSeatLeg(
+    String tourId,
+    String passengerId, {
+    required String busId,
+    required String seatId,
+    required TripType strike,
+  }) async {
     final tour = getTour(tourId);
     if (tour == null) return;
     final p = tour.passengers.firstWhereOrNull((x) => x.id == passengerId);
     if (p == null) return;
 
-    final updated = cancelReturnSeatTransform(p);
+    final updated = cancelSeatLegTransform(
+      p,
+      busId: busId,
+      seatId: seatId,
+      strike: strike,
+      cellTypeAt: _cellTypeLookup(tour),
+    );
     if (updated == null) {
-      // Return-only rider never rode the GO leg → remove outright.
+      // Nothing of this rider survives (a return-only rider whose return is
+      // struck never rode any leg) → remove them outright.
       await removePassenger(tourId, passengerId);
       return;
     }
+    // The tapped seat carried no travel on the struck leg — nothing to write.
+    if (identical(updated, p)) return;
 
-    // Round-trip / mixed rider: keep the record, demote to outbound-only. Same
-    // optimistic-local + persist pattern as completeOutboundLeg.
     await _write(
       optimistic: () =>
           _updatePassengerLocal(tourId, passengerId, (_) => updated),
@@ -1113,6 +1370,65 @@ class TourController extends GetxController {
       ),
       failure: tr('errors.save_passenger'),
     );
+  }
+
+  /// Cancel the RETURN leg across EVERY seat a rider holds — the whole-party
+  /// version of [cancelSeatLeg], kept for callers that act on a person rather
+  /// than a seat.
+  ///
+  /// A return-only rider never rode, so they are removed outright. Everyone else
+  /// keeps the berths they actually travelled on, re-stamped outbound-only.
+  Future<void> cancelReturnSeat(String tourId, String passengerId) async {
+    final tour = getTour(tourId);
+    if (tour == null) return;
+    final p = tour.passengers.firstWhereOrNull((x) => x.id == passengerId);
+    if (p == null) return;
+
+    // Distinct seats, in held order. Snapshotted before the loop because each
+    // pass rewrites the rider's assignments.
+    final seen = <String>{};
+    final targets = <({String busId, String seatId})>[
+      for (final a in p.assignedSeats)
+        if (seen.add('${a.busId}:${a.seatId}'))
+          (busId: a.busId, seatId: a.seatId),
+    ];
+
+    for (final t in targets) {
+      await cancelSeatLeg(
+        tourId,
+        passengerId,
+        busId: t.busId,
+        seatId: t.seatId,
+        strike: TripType.returnOnly,
+      );
+      // The rider may have been removed outright by the pass above.
+      if (getTour(tourId)?.passengers.firstWhereOrNull(
+                (x) => x.id == passengerId,
+              ) ==
+          null) {
+        return;
+      }
+    }
+
+    // A rider holding NO seat still has a return booking to cancel — strike it
+    // straight off the request lines so the demand goes away with the berth.
+    if (targets.isEmpty) {
+      final updated = cancelReturnSeatTransform(p);
+      if (updated == null) {
+        await removePassenger(tourId, passengerId);
+        return;
+      }
+      await _write(
+        optimistic: () =>
+            _updatePassengerLocal(tourId, passengerId, (_) => updated),
+        persist: () => _sync.smartUpdate(
+          table: 'passengers',
+          entityId: passengerId,
+          data: updated.toMap(),
+        ),
+        failure: tr('errors.save_passenger'),
+      );
+    }
   }
 
   // Passenger Management
@@ -2512,30 +2828,78 @@ class TourController extends GetxController {
     for (final p in newly) {
       await setConfirmed(tourId, p.id, true);
     }
-    unawaited(_broadcastConfirmed(tour, newly));
+    // Re-read AFTER the confirms land: [_broadcastConfirmed] may render each
+    // rider's seat chart off this tour, so it must see the roster as it now
+    // stands, not the snapshot taken before the loop above.
+    unawaited(_broadcastConfirmed(getTour(tourId) ?? tour, newly));
   }
 
   /// Fires the WhatsApp confirmation to each freshly-confirmed rider (bounded to
   /// what [_confirmAndNotifyOnSeat] just flipped) and surfaces a SINGLE summary
   /// toast — never one-per-rider, so a bulk auto-fill doesn't spam. A
   /// per-recipient failure is logged and skipped, never thrown.
+  ///
+  /// *** WHICH MESSAGE EACH RIDER GETS ***
+  /// Per rider, via [WhatsAppOutbound.shouldSendFullAllotment] — the same
+  /// decision the Requests screen's re-notify makes, so a seat placed from the
+  /// CHART no longer says something different from the identical placement made
+  /// from Requests:
+  ///   * tour locked/completed + rider holds seats → the full `seat_allotment`
+  ///     (their highlighted chart image + bus + boarding place + departure +
+  ///     handler contact). Seat numbers are final, so this is what they need.
+  ///   * anything earlier → the lighter greeting. Pre-lock seats are
+  ///     provisional and the app deliberately does not publish them yet.
+  ///
+  /// This is the RETURN phase's whole story: `Tour.isReturnPhase` requires the
+  /// tour to be locked, so every return ticket seated from the chart took the
+  /// first branch's condition and yet was sent the greeting — a bare "booking
+  /// confirmed" with no seat, no bus and no boarding point, while the chart it
+  /// should have carried was rendered and dropped.
   Future<void> _broadcastConfirmed(Tour tour, List<Passenger> passengers) async {
     var sent = 0;
+    // Riders whose message actually NAMED their seats. Only these may have
+    // their notified-signature stamped below.
+    final allotted = <String>[];
     for (final p in passengers) {
       try {
-        if (await confirmedSender(tour, p)) sent++;
+        final full = WhatsAppOutbound.shouldSendFullAllotment(tour, p);
+        final ok = await (full ? allotmentSender : confirmedSender)(tour, p);
+        if (!ok) continue;
+        sent++;
+        if (full) allotted.add(p.id);
       } catch (e) {
         dev.log('auto-confirm WhatsApp failed for ${p.id}: $e',
             name: 'TourController');
       }
     }
+    // Record that these riders have been told about the seats they hold RIGHT
+    // NOW, so the Notify screen's tracker and the tour's "re-notify" next
+    // action don't immediately demand a second send of the message that just
+    // went out. Deliberately skipped for the greeting (it names no seat) and
+    // for a refused send (the rider has nothing in hand, so they stay pending).
+    if (allotted.isNotEmpty) {
+      try {
+        await markSeatsNotified(tour.id, allotted);
+      } catch (e) {
+        dev.log('markSeatsNotified after auto-allotment failed: $e',
+            name: 'TourController');
+      }
+    }
     if (sent <= 0) return;
     try {
+      final chart = allotted.length == sent;
       AppSnackBar.success(
         passengers.length == 1
-            ? tr('seat.auto_confirm_sent_one',
+            ? tr(
+                chart
+                    ? 'seat.auto_allotment_sent_one'
+                    : 'seat.auto_confirm_sent_one',
                 namedArgs: {'name': passengers.first.name})
-            : tr('seat.auto_confirm_sent_many', namedArgs: {'count': '$sent'}),
+            : tr(
+                chart
+                    ? 'seat.auto_allotment_sent_many'
+                    : 'seat.auto_confirm_sent_many',
+                namedArgs: {'count': '$sent'}),
       );
     } catch (_) {
       // The toast is best-effort feedback — never let a missing localization or
@@ -2858,11 +3222,28 @@ class TourController extends GetxController {
     Bus bus, {
     required bool layoutChanged,
   }) async {
-    final tourGate = getTour(tourId);
-    if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
-      AppSnackBar.info(tr('manage_buses.layout_locked_body'),
-          title: tr('manage_buses.layout_locked_title'));
-      return;
+    // The lock freezes the CHART, not the bus record.
+    //
+    // This gate used to fire on `!allowsLayoutEdit` alone, which meant a locked
+    // tour refused the whole update — driver name, driver phone, boarding point,
+    // departure time, prices and owner details included — under a toast that
+    // said "layout locked" and therefore explained nothing. Those are exactly
+    // the fields that change on departure day: the owner sends a different
+    // driver, a number is wrong, a pickup moves. Refusing them is also at odds
+    // with the rule the rest of the app follows, that the lock is the CUSTOMER
+    // gate and the agent keeps managing a locked tour.
+    //
+    // [layoutChanged] is already the caller's declaration that it built a fresh
+    // grid this save, so gate on that instead: a re-layout after lock still
+    // stops (the notified chart must not silently change shape), and a plain
+    // detail edit goes through.
+    if (layoutChanged) {
+      final tourGate = getTour(tourId);
+      if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
+        AppSnackBar.info(tr('manage_buses.layout_locked_body'),
+            title: tr('manage_buses.layout_locked_title'));
+        return;
+      }
     }
     await _write(
       optimistic: () => _updateTourLocal(
@@ -3037,7 +3418,6 @@ class TourController extends GetxController {
     final idx = raw.indexWhere((t) => t.id == tourId);
     if (idx < 0) return;
 
-    final priorBuses = raw[idx].buses;
     final rel = await _sync.fetchRelationsForTours([tourId]);
 
     // Mirror the cold-start read: a customer-cancelled passenger stays in the
@@ -3052,16 +3432,33 @@ class TourController extends GetxController {
     // Preserve layouts already paid for — hydrate must never throw away a
     // chart the agent is looking at just because the roster refresh omitted
     // the jsonb column.
+    //
+    // Read from the LIVE buses, not from `priorBuses`. That snapshot is taken
+    // before the `await` above, and a realtime full row or a concurrent layout
+    // merge writes grids into `tours` the whole time the relations request is in
+    // flight. Re-attaching from the snapshot put the pre-fetch null back while
+    // the layout-fetched mark survived, so `need` stayed empty, the grid was
+    // never re-requested, and the chart declared "no seat plan" on a bus that
+    // has one. Same race, same fix, as the cold-start merge in [_loadTours].
+    final liveById = {for (final b in raw[idx].buses) b.id: b};
     final withLayouts = [
       for (final b in buses)
-        if (priorBuses
-            .where((x) => x.id == b.id && x.layout != null)
-            .firstOrNull
-            case final prior?)
-          b.copyWith(layout: prior.layout)
+        if (liveById[b.id]?.layout case final live?)
+          b.copyWith(layout: live)
         else
           b,
     ];
+    // The flag and the data must agree here too. A bus that leaves this merge
+    // WITHOUT a grid, and which the server never answered `layout: null` for, is
+    // not resolved — and a latched mark next to a null grid is now worse than a
+    // wrong label: `charts_screen` offers "Restore seat map" on it, which
+    // rebuilds a grid from the surviving seat ids and writes it over the live
+    // one. Dropping the mark costs one cheap id+jsonb request instead.
+    for (final b in withLayouts) {
+      if (b.layout == null && !_layoutKnownNullBusIds.contains(b.id)) {
+        _layoutFetchedBusIds.remove(b.id);
+      }
+    }
 
     raw[idx] = raw[idx].copyWith(
       passengers: passengers,
@@ -3070,6 +3467,10 @@ class TourController extends GetxController {
     );
     _hydratedTourIds.add(tourId);
     _scheduleNotify();
+    // An archived tour's roster is fetched exactly once, when it is first
+    // opened. Persist it so opening it again — on a bus, with no signal — does
+    // not have to.
+    _scheduleDiskCacheSave();
 
     // Chart / capacity screens usually open next — pull layouts immediately
     // for this one tour rather than waiting on the background prefetch queue.
@@ -3099,7 +3500,13 @@ class TourController extends GetxController {
     // Layouts already in memory (seed / prior prefetch / realtime full row)
     // count as fetched — never re-pay the 2G cost for jsonb we hold.
     for (final b in tour.buses) {
-      if (b.layout != null) _layoutFetchedBusIds.add(b.id);
+      if (b.layout != null) {
+        _layoutFetchedBusIds.add(b.id);
+        // Holding a grid outranks any earlier "server said null": this is how a
+        // bus repaired by `recoverBusLayoutFor` (or re-generated by the wizard)
+        // stops being treated as known-empty.
+        _layoutKnownNullBusIds.remove(b.id);
+      }
     }
 
     final need = tour.buses
@@ -3119,10 +3526,30 @@ class TourController extends GetxController {
     if (idx < 0) return;
 
     final updatedBuses = raw[idx].buses.map((b) {
-      _layoutFetchedBusIds.add(b.id);
+      // Mark fetched only for a bus the server actually ANSWERED for.
+      //
+      // This used to be unconditional and ran before the two checks below, so a
+      // bus the response simply did not carry — a partial page, a row filtered
+      // by RLS, an id that raced a concurrent insert — was latched as "already
+      // fetched" anyway. `need` then came back empty on every later call and the
+      // grid was never re-requested for the life of the controller: one thin
+      // response and the chart said "no seat layout" until the app restarted.
+      //
+      // A row that comes back with a NULL layout still counts as answered. That
+      // is the server stating the grid is genuinely gone (the wipe this file's
+      // `recoverBusLayoutFor` repairs), not a fetch that failed, and re-asking
+      // would just burn the request on every rebuild.
       if (!byId.containsKey(b.id)) return b;
+      _layoutFetchedBusIds.add(b.id);
       final layoutVal = byId[b.id];
-      if (layoutVal == null) return b;
+      if (layoutVal == null) {
+        // The server answered, and the answer is "there is no grid". Record it
+        // so a later merge does not mistake this for a layout we merely failed
+        // to hold and re-ask on every refresh.
+        _layoutKnownNullBusIds.add(b.id);
+        return b;
+      }
+      _layoutKnownNullBusIds.remove(b.id);
       return Bus.fromMap({
         ...b.toMap(),
         'layout': layoutVal,
@@ -3133,6 +3560,11 @@ class TourController extends GetxController {
     _capacityCache.remove(tourId);
     _actualCapacityCache.remove(tourId);
     _scheduleNotify();
+    // The grids are the expensive half of the payload and the half a seat chart
+    // cannot be drawn without — this is the save that makes the chart readable
+    // offline at all. `_layoutKnownNullBusIds` is written above and rides along
+    // in the same snapshot, so the "server said null" answer survives too.
+    _scheduleDiskCacheSave();
   }
 
   /// Roster + layouts — what chart / fill / manage-buses need before work.

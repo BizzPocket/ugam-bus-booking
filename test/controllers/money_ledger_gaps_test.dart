@@ -63,6 +63,7 @@ Future<MoneyController> _controller({
   Map<String, List<Map<String, dynamic>>> legacy = const {},
   List<Map<String, dynamic>> rollups = const [],
   List<Map<String, dynamic>> riderRows = const [],
+  bool ledgerFails = false,
 }) async {
   Get.put<SyncService>(_StubSync(legacy));
   final tours = _InertTours();
@@ -81,7 +82,13 @@ Future<MoneyController> _controller({
     ),
   ]);
   final ledger = LedgerMoneySource()
-    ..debugFetchBusRows = ((_) async => rollups)
+    ..debugFetchBusRows = ((_) async {
+      // A THROW is "the ledger is unreachable" (which drops the controller onto
+      // its legacy recompute); an empty list is "the ledger answered, and it has
+      // nothing" — a different path entirely. See _loadLedgerForTour.
+      if (ledgerFails) throw StateError('ledger unreachable');
+      return rollups;
+    })
     ..debugFetchRiderRows = ((_) async => riderRows);
   final money = MoneyController(ledgerSource: ledger);
   await money.loadForTour(_tourId);
@@ -176,77 +183,81 @@ void main() {
     });
   });
 
-  group('F1 · a cross-bus rider owes each bus its own share', () {
-    test('AR splits in proportion to what each bus billed them', () async {
+  // F1's original fix apportioned each rider's TOUR-WIDE `finance_rider_balance`
+  // across their buses by billed share, because `ar.rider` lines carry no
+  // bus_id. That answered the right question with the wrong instrument: a
+  // fraction of one rider's net balance landed on a bus whose own seat was
+  // square, so the collect screen's header could show money to hand back with
+  // nobody in the To-return filter to hand it to. Per-bus AR is now priced from
+  // the seats a rider actually holds there, against the row resolved for that
+  // seat — the same walk the roster renders.
+  group('F1 · a cross-bus rider owes each bus what THAT bus billed them', () {
+    Passenger crossBusRider() => Passenger(
+          id: 'p1', tourId: _tourId, name: 'Cross', phone: '9',
+          assignedSeats: const [
+            SeatAssignment(busId: 'b1', seatId: 'ST1'),
+            SeatAssignment(busId: 'b2', seatId: 'ST1'),
+          ],
+        );
+
+    test('each bus asks for its own fare, not a share of one balance', () async {
       addTearDown(Get.reset);
-      // Billed 1000 on b1 and 3000 on b2 → a 2000 balance splits 500 / 1500.
-      final rider = Passenger(
-        id: 'p1', tourId: _tourId, name: 'Cross', phone: '9',
-        assignedSeats: const [
-          SeatAssignment(busId: 'b1', seatId: 'ST1'),
-          SeatAssignment(busId: 'b2', seatId: 'ST1'),
-        ],
-      );
+      // Nothing collected anywhere: b1 is owed its ₹1000, b2 its ₹3000. The old
+      // apportioning turned the same rider into 500 / 1500 — two figures that
+      // matched neither bus's actual price.
       final money = await _controller(
         buses: [_bus('b1', price: 1000), _bus('b2', price: 3000)],
-        passengers: [rider],
+        passengers: [crossBusRider()],
         rollups: [_rollup('b1'), _rollup('b2')],
-        riderRows: [
-          {'tour_id': _tourId, 'passenger_id': 'p1', 'owes_minor': 200000},
-        ],
       );
 
-      expect(money.summaryForBus('b1').toCollectTotal, closeTo(500, 0.01));
-      expect(money.summaryForBus('b2').toCollectTotal, closeTo(1500, 0.01));
-      expect(money.tourSummary().totalToCollect, closeTo(2000, 0.01));
+      expect(money.summaryForBus('b1').toCollectTotal, closeTo(1000, 0.01));
+      expect(money.summaryForBus('b2').toCollectTotal, closeTo(3000, 0.01));
+      expect(money.tourSummary().totalToCollect, closeTo(4000, 0.01));
     });
 
-    test('change due to a cross-bus rider splits the same way', () async {
+    test('paying one bus in full clears that bus and only that bus', () async {
       addTearDown(Get.reset);
-      final rider = Passenger(
-        id: 'p1', tourId: _tourId, name: 'Cross', phone: '9',
-        assignedSeats: const [
-          SeatAssignment(busId: 'b1', seatId: 'ST1'),
-          SeatAssignment(busId: 'b2', seatId: 'ST1'),
-        ],
-      );
       final money = await _controller(
-        buses: [_bus('b1', price: 1000), _bus('b2', price: 1000)],
-        passengers: [rider],
+        buses: [_bus('b1', price: 1000), _bus('b2', price: 3000)],
+        passengers: [crossBusRider()],
+        legacy: {
+          'collections': [
+            Collection(
+              id: 'c1', tourId: _tourId, busId: 'b1', passengerId: 'p1',
+              seatId: 'ST1', amountDue: 1000, amountReceived: 1000,
+            ).toMap(),
+          ],
+        },
         rollups: [_rollup('b1'), _rollup('b2')],
-        riderRows: [
-          {'tour_id': _tourId, 'passenger_id': 'p1', 'owes_minor': -100000},
-        ],
+      );
+
+      expect(money.summaryForBus('b1').toCollectTotal, 0);
+      expect(money.summaryForBus('b2').toCollectTotal, closeTo(3000, 0.01));
+    });
+
+    test('change stays on the bus that was overpaid', () async {
+      addTearDown(Get.reset);
+      // ₹1500 handed over for a ₹1000 seat on b1. That ₹500 is b1's to give
+      // back — it must not be smeared across b2, which was paid nothing.
+      final money = await _controller(
+        buses: [_bus('b1', price: 1000), _bus('b2', price: 3000)],
+        passengers: [crossBusRider()],
+        legacy: {
+          'collections': [
+            Collection(
+              id: 'c1', tourId: _tourId, busId: 'b1', passengerId: 'p1',
+              seatId: 'ST1', amountDue: 1000, amountReceived: 1500,
+            ).toMap(),
+          ],
+        },
+        rollups: [_rollup('b1'), _rollup('b2')],
       );
 
       expect(money.summaryForBus('b1').toReturnTotal, closeTo(500, 0.01));
-      expect(money.summaryForBus('b2').toReturnTotal, closeTo(500, 0.01));
-    });
-
-    test('an unpriced rider falls back to an even split across their buses',
-        () async {
-      addTearDown(Get.reset);
-      // Nothing billed anywhere (prices not entered yet) — apportioning by fare
-      // is impossible, so the balance is shared evenly rather than dumped on
-      // whichever seat happens to sort first.
-      final rider = Passenger(
-        id: 'p1', tourId: _tourId, name: 'Cross', phone: '9',
-        assignedSeats: const [
-          SeatAssignment(busId: 'b1', seatId: 'ST1'),
-          SeatAssignment(busId: 'b2', seatId: 'ST1'),
-        ],
-      );
-      final money = await _controller(
-        buses: [_bus('b1'), _bus('b2')],
-        passengers: [rider],
-        rollups: [_rollup('b1'), _rollup('b2')],
-        riderRows: [
-          {'tour_id': _tourId, 'passenger_id': 'p1', 'owes_minor': 100000},
-        ],
-      );
-
-      expect(money.summaryForBus('b1').toCollectTotal, closeTo(500, 0.01));
-      expect(money.summaryForBus('b2').toCollectTotal, closeTo(500, 0.01));
+      expect(money.summaryForBus('b1').toCollectTotal, 0);
+      expect(money.summaryForBus('b2').toReturnTotal, 0);
+      expect(money.summaryForBus('b2').toCollectTotal, closeTo(3000, 0.01));
     });
 
     test('a single-bus rider is unaffected', () async {
@@ -259,13 +270,80 @@ void main() {
         buses: [_bus('b1', price: 1000), _bus('b2', price: 1000)],
         passengers: [rider],
         rollups: [_rollup('b1'), _rollup('b2')],
-        riderRows: [
-          {'tour_id': _tourId, 'passenger_id': 'p1', 'owes_minor': 100000},
-        ],
       );
 
       expect(money.summaryForBus('b1').toCollectTotal, closeTo(1000, 0.01));
       expect(money.summaryForBus('b2').toCollectTotal, 0);
+    });
+
+    test('the trip total matches the bus rows on the legacy path too', () async {
+      addTearDown(Get.reset);
+      // Ledger unreachable → every figure is recomputed from the legacy tables.
+      // This rider overpaid: the seat now costs ₹1000 (the bus was re-priced
+      // after they paid, so the row's own amount_due still says ₹1500) and they
+      // handed over ₹1500, so ₹500 goes back.
+      //
+      // The bus row priced that live already; the TRIP total summed the rows'
+      // stored amount_due for to-return and so read ₹0 — a total that
+      // contradicted the single line printed underneath it.
+      final rider = Passenger(
+        id: 'p1', tourId: _tourId, name: 'Overpaid', phone: '9',
+        assignedSeats: const [SeatAssignment(busId: 'b1', seatId: 'ST1')],
+      );
+      final money = await _controller(
+        buses: [_bus('b1', price: 1000)],
+        passengers: [rider],
+        legacy: {
+          'collections': [
+            Collection(
+              id: 'c1', tourId: _tourId, busId: 'b1', passengerId: 'p1',
+              seatId: 'ST1', amountDue: 1500, amountReceived: 1500,
+            ).toMap(),
+          ],
+        },
+        ledgerFails: true,
+      );
+
+      final bus = money.summaryForBus('b1');
+      final tour = money.tourSummary();
+      expect(bus.toReturnTotal, closeTo(500, 0.01));
+      expect(tour.totalToReturn, closeTo(bus.toReturnTotal, 0.01));
+      expect(tour.totalToCollect, closeTo(bus.toCollectTotal, 0.01));
+    });
+
+    test('a stale ledger rider balance can no longer invent a figure', () async {
+      addTearDown(Get.reset);
+      // THE ₹449 REGRESSION. The rider is square: one ₹1000 seat on b1, paid in
+      // full. `finance_rider_balance` disagrees — it still carries the fare from
+      // before this bus was re-priced, which nothing re-posted (migration 092).
+      //
+      // That view is no longer an input to per-bus AR, so the disagreement
+      // cannot surface as a phantom "to return" the roster has no row for.
+      final rider = Passenger(
+        id: 'p1', tourId: _tourId, name: 'Square', phone: '9',
+        assignedSeats: const [SeatAssignment(busId: 'b1', seatId: 'ST1')],
+      );
+      final money = await _controller(
+        buses: [_bus('b1', price: 1000)],
+        passengers: [rider],
+        legacy: {
+          'collections': [
+            Collection(
+              id: 'c1', tourId: _tourId, busId: 'b1', passengerId: 'p1',
+              seatId: 'ST1', amountDue: 1000, amountReceived: 1000,
+            ).toMap(),
+          ],
+        },
+        rollups: [_rollup('b1', collected: 100000)],
+        riderRows: [
+          {'tour_id': _tourId, 'passenger_id': 'p1', 'owes_minor': -44900},
+        ],
+      );
+
+      expect(money.summaryForBus('b1').toReturnTotal, 0);
+      expect(money.summaryForBus('b1').toCollectTotal, 0);
+      expect(money.tourSummary().totalToReturn, 0);
+      expect(money.tourSummary().totalToCollect, 0);
     });
   });
 }

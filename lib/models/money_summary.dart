@@ -1,3 +1,4 @@
+import '../utils/seat_money_state.dart';
 import 'collection.dart';
 import 'expense.dart';
 import 'income_entry.dart';
@@ -88,26 +89,30 @@ class BusMoneySummary {
   /// handler's handover — [expectedHandover] minus [busRent].
   double get netCollected => collected + income - expensesTotal;
 
-  /// [passengers] + [dueForSeat] make to-collect the TRUE money still owed, not
-  /// just the recorded shortfalls: a seated rider with NO collection row on this
-  /// bus still owes their full seat fare, so admin no longer reads "to collect 0"
-  /// while the handler shows the full billed revenue. Mirrors
-  /// [HandlerBusMoney.compute] exactly (seat-AGNOSTIC: a rider with ANY row on
-  /// this bus is already covered by the recorded shortfall, so they are skipped
-  /// regardless of which seat that row names). When [dueForSeat] is null (e.g.
-  /// the handler's own call, which does its own seated-uncollected pass)
-  /// to-collect stays the recorded shortfalls alone — no double-count.
+  /// [passengers] + [dueForSeat] make to-collect / to-return the TRUE money
+  /// still owed and still owed BACK: every seated rider is priced at their LIVE
+  /// seat fare and measured against the row actually resolved for that seat, via
+  /// the shared [busSeatAr]. So a rider with no collection row yet owes their
+  /// full fare (admin no longer reads "to collect 0" while the handler shows the
+  /// full billed revenue), and a rider whose bus was re-priced after they paid
+  /// shows the real difference rather than a snapshot of the old fare.
   ///
-  /// SCOPE OF THAT AGREEMENT (audit finding F2). "Admin and handler can never
-  /// disagree" holds for THIS path — both sides computing from the same rows
-  /// with the same [dueForSeat]. It does NOT hold once the admin reads the
-  /// LEDGER: `MoneyController.summaryForBus` then takes to-collect from
-  /// `finance_rider_balance` (via `_arShareByBus`), which is the ledger's own
-  /// arithmetic over posted `ar.rider` lines, while the handler still prices
-  /// seated riders here from the live Dart fare. The two agree only while the
-  /// ledger's fare formula and `Bus.amountDueForSeat` agree — which is what
-  /// migration 070 exists to guarantee, and what check 7 in
-  /// supabase/diagnostics/finance_audit_checks.sql verifies on live data.
+  /// EVERY surface now shares that one walk — this factory, the collection
+  /// roster, [HandlerBusMoney.compute] (which routes straight through here), and
+  /// `MoneyController.summaryForBus` on BOTH its ledger and legacy paths. Admin,
+  /// handler and the tour totals therefore cannot disagree, and a header figure
+  /// is always the sum of the rows printed beneath it.
+  ///
+  /// This deliberately does NOT read `finance_rider_balance`. That view is
+  /// passenger-scoped over posted `ar.rider` lines, so a per-bus figure had to be
+  /// reconstructed by apportioning each rider's tour-wide balance across their
+  /// buses — which lands a fraction of one rider's balance on a bus whose own
+  /// seat is square, and inherits any drift between the ledger's posted fare and
+  /// the current one. Check 7 in supabase/diagnostics/finance_audit_checks.sql
+  /// measures that drift; migration 092 stops it accumulating.
+  ///
+  /// When [dueForSeat] is null no seat can be priced, so both figures fall back
+  /// to the rows' own recorded shortfalls — see the note at the call site.
   factory BusMoneySummary.compute({
     required String busId,
     required List<Collection> collections,
@@ -124,28 +129,30 @@ class BusMoneySummary {
     final busHandovers = handovers.where((h) => h.busId == busId);
     final busIncomes = incomes.where((i) => i.busId == busId);
 
-    // Recorded shortfalls on existing collection rows …
-    var toCollect = busCollections.fold(
-      0.0,
-      (sum, c) => sum + c.stillToCollect,
-    );
-    // … plus seated riders nobody has opened a collection for yet, at their full
-    // seat fare. Keyed by passenger id (seat-agnostic): a rider with ANY row on
-    // this bus is already in the shortfall sum above, so skip them here.
+    // What every seated rider still owes / is still owed, priced seat by seat
+    // against the LIVE fare — the same walk the collection roster renders, so a
+    // header total is always the sum of the lines below it. See [busSeatAr].
+    //
+    // Without a fare resolver we cannot price a seat at all, so the figures fall
+    // back to the recorded shortfalls on the rows themselves. That reads
+    // `amount_due` — a SNAPSHOT of the fare at the moment the cash was taken —
+    // so it goes stale the instant a bus is re-priced. It is the weaker answer
+    // and is used only when the caller genuinely has no bus to price against
+    // (an orphaned bus the tour no longer lists).
+    final double toCollect;
+    final double toReturn;
     if (dueForSeat != null) {
-      final collectedPassengerIds = busCollections
-          .map((c) => c.passengerId)
-          .toSet();
-      for (final p in passengers) {
-        if (collectedPassengerIds.contains(p.id)) continue;
-        final seatIds = p.assignedSeats
-            .where((a) => a.busId == busId)
-            .map((a) => a.seatId)
-            .toSet();
-        for (final seatId in seatIds) {
-          toCollect += dueForSeat(p, seatId);
-        }
-      }
+      final ar = busSeatAr(
+        busId: busId,
+        passengers: passengers,
+        collections: collections,
+        dueForSeat: dueForSeat,
+      );
+      toCollect = ar.toCollect;
+      toReturn = ar.toReturn;
+    } else {
+      toCollect = busCollections.fold(0.0, (sum, c) => sum + c.stillToCollect);
+      toReturn = busCollections.fold(0.0, (sum, c) => sum + c.changeToReturn);
     }
 
     // Cash on this bus whose payer holds no seat here any more (see
@@ -180,10 +187,7 @@ class BusMoneySummary {
       expensesTotal:
           busExpenses.fold(0.0, (sum, e) => sum + e.amount) + busRent,
       handedOver: busHandovers.fold(0.0, (sum, h) => sum + h.handedOverAmount),
-      toReturnTotal: busCollections.fold(
-        0.0,
-        (sum, c) => sum + c.changeToReturn,
-      ),
+      toReturnTotal: toReturn,
       toCollectTotal: toCollect,
     );
   }
@@ -384,10 +388,18 @@ class TourMoneySummary {
   double get totalOutstandingHandover =>
       totalExpectedHandover - totalHandedOver;
 
-  /// [toCollectTotal] overrides the recorded-shortfall sum with the caller's
-  /// per-bus roll-up (which also counts seated-but-uncollected riders), so the
-  /// tour total and the per-bus [BusMoneySummary.toCollectTotal] figures always
-  /// agree. When null, to-collect falls back to the recorded shortfalls alone.
+  /// [toCollectTotal] / [toReturnTotal] override the recorded-shortfall sums
+  /// with the caller's per-bus roll-up, so the trip total and the per-bus
+  /// [BusMoneySummary] figures printed under it always agree.
+  ///
+  /// BOTH must be overridable. Only to-collect was, so the per-bus rows priced
+  /// every seat live while the total above them still summed `Collection.balance`
+  /// — the `amount_due` SNAPSHOT — for to-return. The rows and their own total
+  /// disagreed the moment a bus was re-priced after money was taken, which is
+  /// the same drift, one level up, as the one the per-bus figures had.
+  ///
+  /// When null they fall back to the recorded shortfalls alone.
+  ///
   /// [knownBusIds] are the buses the tour currently lists. Supply them to have
   /// money on any OTHER bus broken out as [orphanExpenses] / [orphanCollected] /
   /// [orphanIncome] (still counted in the totals — see those fields). Omit them
@@ -400,6 +412,7 @@ class TourMoneySummary {
     double busRentsTotal = 0,
     double totalRevenueBilled = 0,
     double? toCollectTotal,
+    double? toReturnTotal,
     double detachedCashTotal = 0,
     Set<String>? knownBusIds,
     int busesMissingRent = 0,
@@ -446,7 +459,9 @@ class TourMoneySummary {
         0.0,
         (sum, h) => sum + h.handedOverAmount,
       ),
-      totalToReturn: collections.fold(0.0, (sum, c) => sum + c.changeToReturn),
+      totalToReturn:
+          toReturnTotal ??
+          collections.fold(0.0, (sum, c) => sum + c.changeToReturn),
       totalToCollect:
           toCollectTotal ??
           collections.fold(0.0, (sum, c) => sum + c.stillToCollect),
