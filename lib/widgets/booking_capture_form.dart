@@ -1,4 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
@@ -435,13 +436,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       // Fire-and-forget: an Obx in build reveals the selector once it lands.
       _pickup!.ensureLoaded();
     }
-    // Bands are derived ONCE: they come from the tour's buses, which do not
-    // change while the form is open, and re-deriving them per build would run
-    // the whole grid scan on every keystroke.
-    _bandOptions = {
-      for (final t in _selectableTypes)
-        t: bandOptionsFor(buses: widget.buses, type: t),
-    };
+    _recomputeBandOptions();
     // Start with an empty grid so every (leg, type) counter exists at 0.
     for (final leg in _legs) {
       _cells[leg] = {for (final t in _selectableTypes) t: _Cell()};
@@ -517,6 +512,61 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       add(e.tripType, SeatType.doubleSofa, e.doubleSofa, null);
       add(e.tripType, SeatType.singleSofa, e.singleSofa, null);
       if (widget.showSeater) add(e.tripType, SeatType.seater, e.seater, null);
+    }
+  }
+
+  /// The customer screen CANNOT read `Tour.buses` — `buses` has no anon SELECT
+  /// policy — so it fetches them over `public_tour_buses` and hands them down
+  /// on a LATER frame. Deriving the bands only in [initState] therefore derived
+  /// them from an empty list and never again: on a real device the picker never
+  /// appeared at all, while tests that passed buses up front all passed.
+  ///
+  /// Recomputed only when the bus list actually changes, not per build — the
+  /// derivation scans every seat cell of every bus.
+  @override
+  void didUpdateWidget(covariant BookingCaptureForm old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.buses, widget.buses) &&
+        !listEquals(old.buses, widget.buses)) {
+      setState(_recomputeBandOptions);
+    }
+  }
+
+  /// Derive the sellable bands per seat type, then move any quantity that has
+  /// landed on the wrong side of the banded/unbanded split.
+  ///
+  /// Both directions matter, and both strand seats if skipped: a berth typed
+  /// into the plain stepper BEFORE the buses arrived would sit behind a control
+  /// that is no longer rendered, and a banded line on a tour that lost its
+  /// pricing would do the same in reverse. Migrated quantity keeps its berths
+  /// and simply carries no band, so it counts toward the request but not toward
+  /// the price until the customer picks one.
+  void _recomputeBandOptions() {
+    _bandOptions = {
+      for (final t in _selectableTypes)
+        t: bandOptionsFor(buses: widget.buses, type: t),
+    };
+
+    for (final type in _selectableTypes) {
+      final roundTrip = _cells[TripType.roundTrip]?[type];
+      final entries = _banded[type];
+      if (entries == null) continue;
+
+      if (_isBanded(type)) {
+        // Newly banded: fold any plain full-trip quantity into a bandless line.
+        if (roundTrip != null && roundTrip.qty > 0) {
+          entries.add(_BandEntry(qty: roundTrip.qty, position: roundTrip.position));
+          roundTrip.qty = 0;
+        }
+      } else if (entries.isNotEmpty) {
+        // No longer banded: hand the berths back to the plain counter.
+        if (roundTrip != null) {
+          final total = entries.fold<int>(0, (s, e) => s + e.qty);
+          roundTrip.qty = (roundTrip.qty + total).clamp(0, widget.maxPerType);
+          roundTrip.position ??= entries.first.position;
+        }
+        entries.clear();
+      }
     }
   }
 

@@ -233,6 +233,66 @@ void main() {
     expect(data.lines.single.leg, TripType.roundTrip);
   });
 
+  testWidgets('bands appear when the buses arrive after the first frame',
+      (tester) async {
+    // THE BUG THIS PINS: the customer screen cannot read `Tour.buses` (no anon
+    // SELECT policy), so it fetches them over an RPC and passes them down on a
+    // LATER frame. Deriving the bands once in initState meant they were derived
+    // from an empty list and never again — the picker never appeared on a real
+    // device, only in tests that passed buses up front.
+    _useTallSurface(tester);
+    final key = GlobalKey<BookingCaptureFormState>();
+
+    await tester.pumpWidget(_host(
+      BookingCaptureForm(key: key, fromCity: 'A', toCity: 'B'),
+    ));
+    expect(find.byKey(const Key('seat-band-add-singleSofa')), findsNothing);
+
+    // The RPC answers.
+    await tester.pumpWidget(_host(BookingCaptureForm(
+      key: key,
+      fromCity: 'A',
+      toCity: 'B',
+      buses: [_liveBus()],
+    )));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('seat-band-add-singleSofa')), findsOneWidget);
+    expect(find.byKey(const Key('seat-add-singleSofa')), findsNothing);
+  });
+
+  testWidgets('a quantity typed before the buses arrive is not lost',
+      (tester) async {
+    // A fast customer can tap the stepper in the window before the RPC answers.
+    // Those berths must survive the swap to the banded tile rather than being
+    // stranded behind a control that is no longer rendered.
+    _useTallSurface(tester);
+    final key = GlobalKey<BookingCaptureFormState>();
+
+    await tester.pumpWidget(_host(
+      BookingCaptureForm(key: key, fromCity: 'A', toCity: 'B'),
+    ));
+    await _fillIdentity(tester);
+    await tester.tap(find.byKey(const Key('seat-add-singleSofa')));
+    await tester.pump();
+    expect(key.currentState!.totalSeats, 1);
+
+    await tester.pumpWidget(_host(BookingCaptureForm(
+      key: key,
+      fromCity: 'A',
+      toCity: 'B',
+      buses: [_liveBus()],
+    )));
+    await tester.pumpAndSettle();
+
+    expect(key.currentState!.totalSeats, 1, reason: 'the berth survives');
+    // It carries no band, so it is not chargeable — the customer must still
+    // choose one, but nothing they did was thrown away.
+    expect(key.currentState!.chargePaise, 0);
+    expect(find.byKey(const Key('seat-band-remove-singleSofa-0')),
+        findsOneWidget);
+  });
+
   testWidgets('an unpriced bus falls back to the plain stepper', (tester) async {
     // price_per_seat 0 is the normal state of a request-mode tour until the
     // agent prices it. Nothing can be quoted, so nothing may be charged — the
