@@ -5,14 +5,21 @@ import 'package:get/get.dart';
 
 import '../controllers/pickup_controller.dart';
 import '../controllers/user_controller.dart';
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/app_user.dart';
+import '../models/bus_details.dart';
 import '../models/pickup_location.dart';
+import '../models/request_band.dart';
 import '../models/request_line.dart';
 import '../models/seat_type.dart';
 import '../models/trip_type.dart';
 import '../services/contact_sync_service.dart';
+import '../utils/band_options.dart';
+import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
+import '../utils/request_pricing.dart';
+import 'band_picker_dialog.dart';
 
 /// Result of a successful [BookingCaptureForm] collection.
 ///
@@ -177,6 +184,19 @@ class _Cell {
   SeatPosition? position;
 }
 
+/// One banded line inside a FULL-TRIP seat type: the band the customer chose
+/// and how many units of that type they took in it.
+///
+/// [band] is nullable only to carry a LEGACY full-trip line — a request saved
+/// before bands existed, reopened for editing on a tour that now has them. Such
+/// a line keeps its quantity and stays removable; it simply has no price.
+class _BandEntry {
+  RequestBand? band;
+  int qty;
+  SeatPosition? position;
+  _BandEntry({this.band, required this.qty, this.position});
+}
+
 /// ONE shared booking-capture form, used by all three surfaces:
 /// customer request (create + edit), admin add request, admin edit request.
 ///
@@ -243,6 +263,19 @@ class BookingCaptureForm extends StatefulWidget {
   /// no configured pickups never blocks booking (the field is hidden too).
   final bool requirePickup;
 
+  /// The tour's buses, used ONLY to price the FULL-TRIP tab by price band.
+  ///
+  /// Empty (the default) keeps this form exactly as it has always behaved:
+  /// plain quantity steppers on every tab and unpriced request lines. That is
+  /// what the admin add/edit surfaces pass, and what a customer sees on a tour
+  /// whose buses are not priced yet — a band cannot be quoted from nothing, and
+  /// quoting Rs 0 would let a rider be treated as paid without paying.
+  ///
+  /// When bands ARE available, the full-trip tab asks which band each seat is
+  /// for. The one-leg tabs never do: a Go-only or Return-only seat is free and
+  /// joins the waiting list.
+  final List<Bus> buses;
+
   const BookingCaptureForm({
     super.key,
     required this.fromCity,
@@ -255,6 +288,7 @@ class BookingCaptureForm extends StatefulWidget {
     this.onChanged,
     this.forcedLeg,
     this.requirePickup = true,
+    this.buses = const [],
   });
 
   @override
@@ -275,6 +309,21 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   /// PRIMARY axis (a tab); seat type is a counter within the active leg. This is
   /// the entire seat-section state — there are no per-row drafts to add/remove.
   final Map<TripType, Map<SeatType, _Cell>> _cells = {};
+
+  /// FULL-TRIP seats that carry a price band, keyed by seat type. A type
+  /// appears here INSTEAD of its [_cells] round-trip counter whenever
+  /// [_bandOptions] can offer it a band — the two never both hold quantity for
+  /// the same (round-trip, type) pair, which is what keeps [_totalSeats] from
+  /// double-counting.
+  final Map<SeatType, List<_BandEntry>> _banded = {};
+
+  /// Bands sellable per seat type, derived once from [BookingCaptureForm.buses].
+  /// An empty list means this type cannot be banded, and it keeps the plain
+  /// stepper on every tab.
+  Map<SeatType, List<BandOption>> _bandOptions = const {};
+
+  /// Whether [type] is sold by band on the full-trip tab.
+  bool _isBanded(SeatType type) => (_bandOptions[type] ?? const []).isNotEmpty;
 
   /// The leg whose counters are currently shown (the active tab). Pinned to
   /// [BookingCaptureForm.forcedLeg] on a forced surface.
@@ -306,6 +355,18 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
         n += entry.value.qty * entry.key.berthsPerUnit;
       }
     }
+    n += _bandedBerths;
+    return n;
+  }
+
+  /// Berths held by banded full-trip lines (a Double Sofa is two).
+  int get _bandedBerths {
+    var n = 0;
+    for (final e in _banded.entries) {
+      for (final entry in e.value) {
+        n += entry.qty * e.key.berthsPerUnit;
+      }
+    }
     return n;
   }
 
@@ -331,7 +392,8 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
         n += entry.value.qty * entry.key.berthsPerUnit * factor;
       }
     }
-    return n;
+    // Banded lines are round-trip by construction, so they weigh 1.0.
+    return n + _bandedBerths;
   }
 
   /// Legs offered as tabs. A forced-leg surface collapses to just that one leg
@@ -342,12 +404,15 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
 
   /// Seat *berths* booked on [leg] across all types (Double Sofa = 2) — drives
   /// the per-tab badge, kept in the same berth unit as the "Total seats" line.
-  int _legSeatCount(TripType leg) =>
-      _cells[leg]?.entries.fold<int>(
-        0,
-        (s, e) => s + e.value.qty * e.key.berthsPerUnit,
-      ) ??
-      0;
+  int _legSeatCount(TripType leg) {
+    final plain = _cells[leg]?.entries.fold<int>(
+          0,
+          (s, e) => s + e.value.qty * e.key.berthsPerUnit,
+        ) ??
+        0;
+    // Banded lines live only on the full-trip tab, so only its badge gains them.
+    return leg == TripType.roundTrip ? plain + _bandedBerths : plain;
+  }
 
   /// Seat types selectable in this surface — Seater only when [showSeater].
   List<SeatType> get _selectableTypes => [
@@ -370,9 +435,19 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
       // Fire-and-forget: an Obx in build reveals the selector once it lands.
       _pickup!.ensureLoaded();
     }
+    // Bands are derived ONCE: they come from the tour's buses, which do not
+    // change while the form is open, and re-deriving them per build would run
+    // the whole grid scan on every keystroke.
+    _bandOptions = {
+      for (final t in _selectableTypes)
+        t: bandOptionsFor(buses: widget.buses, type: t),
+    };
     // Start with an empty grid so every (leg, type) counter exists at 0.
     for (final leg in _legs) {
       _cells[leg] = {for (final t in _selectableTypes) t: _Cell()};
+    }
+    for (final t in _selectableTypes) {
+      _banded[t] = <_BandEntry>[];
     }
     final e = widget.initial;
     if (e != null) {
@@ -400,12 +475,32 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   void _hydrateCells(BookingCaptureInitial e) {
     final selectable = _selectableTypes.toSet();
 
-    void add(TripType leg, SeatType type, int qty, SeatPosition? pos) {
+    void add(
+      TripType leg,
+      SeatType type,
+      int qty,
+      SeatPosition? pos, {
+      RequestBand? band,
+    }) {
       if (qty <= 0 || !selectable.contains(type)) return;
       // A forced-leg surface has a single tab — funnel everything into it. An
       // unknown leg (shouldn't happen) also falls back to the first tab.
       final l =
           widget.forcedLeg ?? (_cells.containsKey(leg) ? leg : _legs.first);
+      // A banded seat type keeps ALL its full-trip quantity in [_banded] — a
+      // legacy line with no band included, so re-opening an old request on a
+      // now-banded tour still shows (and can remove) what was requested,
+      // instead of stranding the quantity behind a stepper that isn't rendered.
+      if (l == TripType.roundTrip && _isBanded(type)) {
+        _banded[type]!.add(
+          _BandEntry(
+            band: band,
+            qty: qty.clamp(0, widget.maxPerType),
+            position: pos,
+          ),
+        );
+        return;
+      }
       final cell = _cells[l]?[type];
       if (cell == null) return;
       cell.qty = (cell.qty + qty).clamp(0, widget.maxPerType);
@@ -416,7 +511,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
 
     if (e.lines.isNotEmpty) {
       for (final l in e.lines) {
-        add(l.leg, l.seatType, l.qty, l.position);
+        add(l.leg, l.seatType, l.qty, l.position, band: l.band);
       }
     } else {
       add(e.tripType, SeatType.doubleSofa, e.doubleSofa, null);
@@ -438,6 +533,45 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   void _notify() => widget.onChanged?.call();
 
   // ─── PUBLIC CONTRACT ────────────────────────────────────────────────────
+
+  /// The request lines as they stand RIGHT NOW, without validating anything.
+  ///
+  /// Pure (no setState, no error surfacing), so a host can read it from a
+  /// widget build to price its own Pay button — the same reason
+  /// [legWeightedSeats] exists. [collect] runs the identical assembly after it
+  /// has validated, so the number on the button and the number submitted can
+  /// never drift.
+  List<RequestLine> get currentLines => _assembleLines();
+
+  /// Paise the customer must pay before this request can be submitted. Zero
+  /// when every line is free — a one-leg seat, or a tour with no bands.
+  int get chargePaise => requestChargePaise(_assembleLines());
+
+  /// One RequestLine per non-empty (leg, type) cell, plus one per chosen band
+  /// on the full-trip tab. Empty cells are dropped.
+  List<RequestLine> _assembleLines() => [
+        for (final leg in _legs)
+          for (final type in _selectableTypes)
+            if ((_cells[leg]?[type]?.qty ?? 0) > 0)
+              RequestLine(
+                seatType: type,
+                position: _cells[leg]![type]!.position,
+                qty: _cells[leg]![type]!.qty,
+                leg: widget.forcedLeg ?? leg,
+              ),
+        // The same seat type taken in two bands is TWO lines: each carries its
+        // own price and its own row binding.
+        for (final type in _selectableTypes)
+          for (final entry in _banded[type] ?? const <_BandEntry>[])
+            if (entry.qty > 0)
+              RequestLine(
+                seatType: type,
+                position: entry.position,
+                qty: entry.qty,
+                leg: TripType.roundTrip,
+                band: entry.band,
+              ),
+      ];
 
   /// Validate and collect. Returns `null` (and surfaces inline errors) when
   /// invalid; otherwise a fully-validated [BookingCaptureData].
@@ -490,18 +624,7 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
 
     final note = _note.text.trim();
 
-    // One RequestLine per non-empty (leg, type) cell. Empty cells are dropped.
-    final lines = <RequestLine>[
-      for (final leg in _legs)
-        for (final type in _selectableTypes)
-          if ((_cells[leg]?[type]?.qty ?? 0) > 0)
-            RequestLine(
-              seatType: type,
-              position: _cells[leg]![type]!.position,
-              qty: _cells[leg]![type]!.qty,
-              leg: widget.forcedLeg ?? leg,
-            ),
-    ];
+    final lines = _assembleLines();
 
     // Aggregate per-type counts (sum across rows of the same type / leg).
     var doubleSofa = 0, singleSofa = 0, seater = 0;
@@ -671,6 +794,43 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
     if (_totalSeats > 0) _seatsError = null;
     _notify();
   });
+
+  /// Ask which band this FULL-TRIP seat is for, then how many, and add the
+  /// answer as its own line. Called once per band — taking the same seat type
+  /// in two bands is two taps of "add" and produces two lines.
+  Future<void> _openBandPicker(SeatType type) async {
+    final options = _bandOptions[type] ?? const <BandOption>[];
+    final taken = (_banded[type] ?? const <_BandEntry>[])
+        .fold<int>(0, (s, e) => s + e.qty);
+    final remaining = (widget.maxPerType - taken).clamp(0, widget.maxPerType);
+    if (remaining <= 0) return;
+
+    final pick = await showBandPickerDialog(
+      context,
+      seatTypeLabel: _seatLabel(type),
+      options: options,
+      maxQty: remaining,
+    );
+    if (pick == null || !mounted) return;
+
+    setState(() {
+      _banded[type]!.add(
+        _BandEntry(band: pick.option.band, qty: pick.qty),
+      );
+      if (_totalSeats > 0) _seatsError = null;
+      _notify();
+    });
+  }
+
+  void _removeBandEntry(SeatType type, int index) {
+    final list = _banded[type];
+    if (list == null || index < 0 || index >= list.length) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      list.removeAt(index);
+      _notify();
+    });
+  }
 
   /// Switch the active leg tab.
   void _selectLeg(TripType leg) {
@@ -855,9 +1015,25 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
           ),
           const SizedBox(height: UgamSpacing.md),
         ],
-        // The active leg's seat-type counters.
+        // The active leg's seat-type counters. On the FULL-TRIP tab a banded
+        // type swaps its stepper for the band list — the customer has to say
+        // which band they are buying into before they can be charged. Every
+        // one-leg tab keeps the plain stepper: those seats are free.
         for (var i = 0; i < _selectableTypes.length; i++) ...[
           if (i > 0) const SizedBox(height: UgamSpacing.sm),
+          if (_activeLeg == TripType.roundTrip &&
+              _isBanded(_selectableTypes[i]))
+            _BandedSeatTile(
+              key: ValueKey('seatband-${_selectableTypes[i].name}'),
+              type: _selectableTypes[i],
+              icon: _seatIcon(_selectableTypes[i]),
+              label: _seatLabel(_selectableTypes[i]),
+              sublabel: _seatSublabel(_selectableTypes[i]),
+              entries: _banded[_selectableTypes[i]] ?? const [],
+              onAdd: () => _openBandPicker(_selectableTypes[i]),
+              onRemove: (index) => _removeBandEntry(_selectableTypes[i], index),
+            )
+          else
           _SeatCounterTile(
             key: ValueKey(
               'seatcell-${_activeLeg.name}-${_selectableTypes[i].name}',
@@ -1406,6 +1582,245 @@ class _SeatCounterTile extends StatelessWidget {
               HapticFeedback.lightImpact();
               onChanged(value + 1);
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── BANDED SEAT TILE (full-trip only — the seat that costs money) ──────────
+
+/// One seat type on the FULL-TRIP tab of a banded tour.
+///
+/// Replaces the plain stepper because a quantity alone cannot price this seat:
+/// the bus is priced by band, so the customer has to say WHICH band each seat
+/// is in. Each choice is its own removable line, so a party can take two seats
+/// in the front band and one at the back without leaving the form.
+class _BandedSeatTile extends StatelessWidget {
+  final SeatType type;
+  final IconData icon;
+  final String label;
+  final String sublabel;
+  final List<_BandEntry> entries;
+  final VoidCallback onAdd;
+  final ValueChanged<int> onRemove;
+
+  const _BandedSeatTile({
+    super.key,
+    required this.type,
+    required this.icon,
+    required this.label,
+    required this.sublabel,
+    required this.entries,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  int get _berths =>
+      entries.fold<int>(0, (s, e) => s + e.qty * type.berthsPerUnit);
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final selected = entries.isNotEmpty;
+
+    return AnimatedContainer(
+      duration: UgamMotion.tab,
+      curve: UgamMotion.easeOut,
+      padding: const EdgeInsets.all(UgamSpacing.md),
+      decoration: BoxDecoration(
+        color: selected ? c.accentFill : c.cardElev,
+        borderRadius: BorderRadius.circular(UgamRadius.card),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: selected ? c.accent.withValues(alpha: 0.18) : c.card,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: selected ? c.accent : c.ink2,
+                ),
+              ),
+              const SizedBox(width: UgamSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          UgamText.titleS.copyWith(color: c.ink, fontSize: 15),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      sublabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: UgamText.caption
+                          .copyWith(color: c.ink2, fontSize: 11),
+                    ),
+                  ],
+                ),
+              ),
+              if (_berths > 0)
+                Text(
+                  tr(
+                    'booking_form.band_berths',
+                    namedArgs: {'n': '$_berths'},
+                  ),
+                  style: UgamText.tabular(
+                    UgamText.bodyStrong.copyWith(color: c.accent),
+                  ),
+                ),
+            ],
+          ),
+          for (var i = 0; i < entries.length; i++) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            _BandEntryRow(
+              key: Key('seat-band-line-${type.name}-$i'),
+              removeKey: Key('seat-band-remove-${type.name}-$i'),
+              entry: entries[i],
+              type: type,
+              onRemove: () => onRemove(i),
+            ),
+          ],
+          const SizedBox(height: UgamSpacing.sm),
+          UgamTappable(
+            key: Key('seat-band-add-${type.name}'),
+            onTap: onAdd,
+            pressedScale: 0.97,
+            child: Container(
+              constraints:
+                  BoxConstraints(minHeight: UgamScale.tap(context, 44)),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: c.card,
+                borderRadius: BorderRadius.circular(UgamRadius.chip),
+                border: Border.all(color: c.border),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add_rounded, size: 16, color: c.ink2),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      tr(entries.isEmpty
+                          ? 'booking_form.band_add'
+                          : 'booking_form.band_add_another'),
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      style: UgamText.bodyStrong
+                          .copyWith(color: c.ink2, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One chosen band inside a seat type: what it costs, which rows it buys, and
+/// a way to take it back off.
+class _BandEntryRow extends StatelessWidget {
+  final Key removeKey;
+  final _BandEntry entry;
+  final SeatType type;
+  final VoidCallback onRemove;
+
+  const _BandEntryRow({
+    super.key,
+    required this.removeKey,
+    required this.entry,
+    required this.type,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final band = entry.band;
+    // Rows are 0-based internally, 1-based to a human counting from the front.
+    final rows = band == null
+        ? null
+        : (band.fromRow == band.toRow
+            ? tr('band_picker.row_one',
+                namedArgs: {'row': '${band.fromRow + 1}'})
+            : tr('band_picker.rows', namedArgs: {
+                'from': '${band.fromRow + 1}',
+                'to': '${band.toRow + 1}',
+              }));
+    // A legacy line carries no band and therefore no price — say so rather
+    // than rendering a confident Rs 0.
+    final price = band == null
+        ? tr('booking_form.band_unpriced')
+        : Formatters.formatMoneyInr(
+            band.pricePaise * type.berthsPerUnit * entry.qty / 100,
+          );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.sm + 2,
+        vertical: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(UgamRadius.input),
+      ),
+      child: Row(
+        children: [
+          Text(
+            '×${entry.qty}',
+            style: UgamText.tabular(
+              UgamText.bodyStrong.copyWith(color: c.ink),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Expanded(
+            child: Text(
+              rows ?? tr('booking_form.band_unbanded'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: UgamText.caption.copyWith(color: c.ink2),
+            ),
+          ),
+          const SizedBox(width: UgamSpacing.sm),
+          Text(
+            price,
+            style: UgamText.tabular(
+              UgamText.bodyStrong.copyWith(color: c.ink),
+            ),
+          ),
+          const SizedBox(width: 4),
+          UgamTappable(
+            key: removeKey,
+            onTap: onRemove,
+            pressedScale: 0.9,
+            child: SizedBox(
+              width: UgamScale.tap(context, 40),
+              height: UgamScale.tap(context, 40),
+              child: Icon(Icons.close_rounded, size: 16, color: c.ink3),
+            ),
           ),
         ],
       ),

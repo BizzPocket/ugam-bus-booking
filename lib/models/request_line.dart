@@ -1,4 +1,5 @@
 import '../utils/json_coerce.dart';
+import 'request_band.dart';
 import 'seat_type.dart';
 import 'trip_type.dart';
 
@@ -20,11 +21,19 @@ class RequestLine {
   /// [TripType.fromString].
   final TripType leg;
 
+  /// The price band this line was quoted and paid at, snapshotted at submit.
+  ///
+  /// Null for every line that carries no money: legacy rows written before
+  /// bands existed, and one-leg (Go-only / Return-only) lines, which are free
+  /// and join the waiting list rather than being charged.
+  final RequestBand? band;
+
   const RequestLine({
     required this.seatType,
     this.position,
     required this.qty,
     this.leg = TripType.roundTrip,
+    this.band,
   });
 
   /// Human-readable label like "Double Sofa Lower ×2" or "Seater ×1".
@@ -66,6 +75,9 @@ class RequestLine {
       'position': position?.name,
       'qty': qty,
       'leg': leg.storageKey,
+      // Omitted entirely when unbanded, so a free one-leg line and a legacy row
+      // serialize identically — nothing downstream has to tell them apart.
+      if (band != null) 'band': band!.toMap(),
     };
   }
 
@@ -92,6 +104,7 @@ class RequestLine {
       leg: map.containsKey('leg')
           ? TripType.fromString(coerceString(map['leg']))
           : fallbackLeg,
+      band: RequestBand.fromMap(map['band']),
     );
   }
 
@@ -100,12 +113,18 @@ class RequestLine {
     SeatPosition? position,
     int? qty,
     TripType? leg,
+    RequestBand? band,
+    /// Wins over [band] so a line can be UN-banded — plain copyWith cannot set
+    /// null through the `??` fallback. Needed when a full-trip line is moved to
+    /// a one-leg tab, where it stops being chargeable.
+    bool clearBand = false,
   }) {
     return RequestLine(
       seatType: seatType ?? this.seatType,
       position: position ?? this.position,
       qty: qty ?? this.qty,
       leg: leg ?? this.leg,
+      band: clearBand ? null : (band ?? this.band),
     );
   }
 
@@ -116,8 +135,9 @@ class RequestLine {
           other.seatType == seatType &&
           other.position == position &&
           other.qty == qty &&
-          other.leg == leg;
+          other.leg == leg &&
+          other.band == band;
 
   @override
-  int get hashCode => Object.hash(seatType, position, qty, leg);
+  int get hashCode => Object.hash(seatType, position, qty, leg, band);
 }

@@ -1068,7 +1068,8 @@
     "next_s2_title": "आयोजक जवाब देंगे",
     "next_s2_body": "वे खाली सीटें देखकर WhatsApp पर आपकी सीट पक्की करेंगे।",
     "next_s3_title": "आपकी बर्थ तय होगी",
-    "next_s3_body": "‘मेरी अनुरोध’ में कभी भी स्थिति देख सकते हैं।"
+    "next_s3_body": "‘मेरी अनुरोध’ में कभी भी स्थिति देख सकते हैं।",
+    "pay_now_label": "कुल भुगतान"
   },
   "booking_form": {
     "label_name": "आपका नाम",
@@ -1112,7 +1113,12 @@
     "leg_full": "पूरी यात्रा",
     "leg_go": "केवल जाना",
     "leg_ret": "केवल वापसी",
-    "seats_total": "कुल सीटें: {count}"
+    "seats_total": "कुल सीटें: {count}",
+    "band_berths": "{n} सीटें",
+    "band_add": "मूल्य बैंड चुनें",
+    "band_add_another": "एक और बैंड जोड़ें",
+    "band_unpriced": "कीमत नहीं",
+    "band_unbanded": "पहले अनुरोध किया"
   },
   "occupant": {
     "make_priority": "प्राथमिकता दें",
@@ -3405,5 +3411,14 @@
     "age_minutes": "{n} मि पहले",
     "age_hours": "{n} घं पहले",
     "age_days": "{n} दि पहले"
+  },
+  "band_picker": {
+    "choose_band": "कौन सा मूल्य बैंड?",
+    "choose_qty": "कितनी सीटें?",
+    "rows": "पंक्ति {from}–{to}",
+    "row_one": "पंक्ति {row}",
+    "standard": "सामान्य",
+    "unavailable_title": "तय कीमत पर कोई सीट बाकी नहीं",
+    "unavailable_body": "आप फिर भी अनुरोध भेज सकते हैं — यह मुफ़्त में प्रतीक्षा सूची में जाएगा, और सीट खाली होने पर हम संपर्क करेंगे."
   }
 }

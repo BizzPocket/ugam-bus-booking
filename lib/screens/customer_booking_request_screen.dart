@@ -11,12 +11,14 @@ import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../routes/app_routes.dart';
 import '../services/customer_requests_store.dart';
+import '../services/seat_chart_booking_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
 import '../utils/round_trip_combine.dart';
 import '../utils/time_format.dart';
+import '../utils/tour_public_summary.dart';
 import '../widgets/booking_capture_form.dart';
 
 /// Customer-side seat request form — image-5 fidelity.
@@ -68,9 +70,19 @@ class _CustomerBookingRequestScreenState
   // existing entry to resume). Built once in initState from [widget.existing].
   BookingCaptureInitial? _initial;
 
+  /// The tour's buses, fetched over the anon RPC.
+  ///
+  /// `Tour.buses` is ALWAYS empty on the customer side — `buses` has no anon
+  /// SELECT policy — so the price bands this form quotes from are unreachable
+  /// through the model and have to come from `public_tour_buses` (migration
+  /// 057). Until it answers the form simply shows no bands, which degrades to
+  /// exactly today's free request rather than to a wrong price.
+  TourPublicSummary _summary = TourPublicSummary.pending;
+
   @override
   void initState() {
     super.initState();
+    _loadBuses();
     final e = widget.existing;
     if (e != null) {
       _initial = BookingCaptureInitial(
@@ -84,6 +96,18 @@ class _CustomerBookingRequestScreenState
         pickupLocationName: e.pickupLocationName,
       );
     }
+  }
+
+  /// Never throws: [SeatChartBookingService.publicSummary] answers
+  /// [TourPublicSummary.pending] on any failure, so an offline customer — or a
+  /// server without migration 057 — sees the form without bands instead of an
+  /// error, and the request stays submittable.
+  Future<void> _loadBuses() async {
+    final summary = await SeatChartBookingService().publicSummary(
+      widget.tour.id,
+    );
+    if (!mounted) return;
+    setState(() => _summary = summary);
   }
 
   // ─── BUSINESS LOGIC — PRESERVED VERBATIM ───────────────────────────
@@ -501,13 +525,22 @@ class _CustomerBookingRequestScreenState
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    final seatCount = _formKey.currentState?.totalSeats ?? 0;
+    final form = _formKey.currentState;
+    final seatCount = form?.totalSeats ?? 0;
+    // What this request costs UP FRONT, summed from the bands the customer
+    // actually chose. Zero when nothing here is chargeable — a request made
+    // entirely of one-leg seats, or a tour whose buses carry no bands — in
+    // which case the older leg-weighted estimate is still the honest preview.
+    final chargePaise = form?.chargePaise ?? 0;
+    final payNow = chargePaise > 0;
     // Leg-weighted estimate: a one-way (Go-only / Return-only) berth is charged
     // at 0.5 of a round-trip berth, so the preview must apply the same factor —
     // otherwise a Go-only booking reads at the full round-trip price. Rounded to
     // whole rupees by Formatters.formatMoneyInr.
     final estTotal =
-        (_formKey.currentState?.legWeightedSeats ?? 0) * widget.tour.pricePerSeat;
+        (form?.legWeightedSeats ?? 0) * widget.tour.pricePerSeat;
+    final showEstimate =
+        !payNow && seatCount > 0 && widget.tour.pricePerSeat > 0;
 
     return UgamScaffold(
       body: SafeArea(
@@ -541,6 +574,10 @@ class _CustomerBookingRequestScreenState
                     fromCity: widget.tour.fromCity,
                     toCity: widget.tour.toCity,
                     initial: _initial,
+                    // Price bands for the full-trip tab. Empty until the anon
+                    // RPC answers, and empty forever on an unpriced tour —
+                    // both of which keep today's free-request behaviour.
+                    buses: _summary.buses,
                     enableContacts: false,
                     // Pickup is mandatory here as on every capture surface —
                     // it's the form's default now, no per-surface opt-in.
@@ -565,7 +602,28 @@ class _CustomerBookingRequestScreenState
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (seatCount > 0 && widget.tour.pricePerSeat > 0) ...[
+            if (payNow) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      tr('customer_booking.pay_now_label'),
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                    Text(
+                      Formatters.formatMoneyInr(chargePaise / 100),
+                      // The one number on this screen that is about to leave
+                      // the customer's bank account — it gets the accent.
+                      style: UgamText.tabular(
+                        UgamText.titleS.copyWith(color: c.accent),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (showEstimate) ...[
               Padding(
                 padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
                 child: Row(
@@ -586,6 +644,11 @@ class _CustomerBookingRequestScreenState
               ),
             ],
             UgamCTA(
+              // Deliberately still "send request": the payment step is not
+              // wired yet, and a button that says Pay had better take money.
+              // It becomes the pay gate once capacity holds exist — charging
+              // before capacity is gated is how you sell 38 seats on a 37-seat
+              // bus and owe refunds you promised never to make.
               label: _saving
                   ? tr('customer_booking.button_saving')
                   : (widget.isEditing

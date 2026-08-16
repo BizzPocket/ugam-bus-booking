@@ -1068,7 +1068,8 @@
     "next_s2_title": "આયોજક જવાબ આપશે",
     "next_s2_body": "તેઓ ખાલી સીટ તપાસીને WhatsApp પર તમારી સીટ પાકી કરશે.",
     "next_s3_title": "તમારી બેઠક નક્કી થશે",
-    "next_s3_body": "‘મારી વિનંતીઓ’ માં ગમે ત્યારે સ્થિતિ જોઈ શકશો."
+    "next_s3_body": "‘મારી વિનંતીઓ’ માં ગમે ત્યારે સ્થિતિ જોઈ શકશો.",
+    "pay_now_label": "કુલ ચૂકવવાનું"
   },
   "booking_form": {
     "label_name": "તમારું નામ",
@@ -1112,7 +1113,12 @@
     "leg_full": "આવક-જાવક",
     "leg_go": "ફક્ત જવું",
     "leg_ret": "ફક્ત આવવા",
-    "seats_total": "કુલ સીટ: {count}"
+    "seats_total": "કુલ સીટ: {count}",
+    "band_berths": "{n} બેઠકો",
+    "band_add": "ભાવ બેન્ડ પસંદ કરો",
+    "band_add_another": "બીજો બેન્ડ ઉમેરો",
+    "band_unpriced": "ભાવ નથી",
+    "band_unbanded": "અગાઉ વિનંતી કરેલ"
   },
   "occupant": {
     "make_priority": "પ્રાથમિકતા આપો",
@@ -3405,5 +3411,14 @@
     "age_minutes": "{n} મિ પહેલાં",
     "age_hours": "{n} ક પહેલાં",
     "age_days": "{n} દિ પહેલાં"
+  },
+  "band_picker": {
+    "choose_band": "કયો ભાવ બેન્ડ?",
+    "choose_qty": "કેટલી બેઠકો?",
+    "rows": "હરોળ {from}–{to}",
+    "row_one": "હરોળ {row}",
+    "standard": "સામાન્ય",
+    "unavailable_title": "નિયત ભાવે કોઈ બેઠક બાકી નથી",
+    "unavailable_body": "તમે વિનંતી મોકલી શકો છો — તે વિના મૂલ્યે પ્રતીક્ષા યાદીમાં જશે, અને બેઠક ખાલી થાય તો અમે સંપર્ક કરીશું."
   }
 }

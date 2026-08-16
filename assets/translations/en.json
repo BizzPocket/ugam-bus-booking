@@ -1068,7 +1068,8 @@
     "next_s2_title": "The organiser replies",
     "next_s2_body": "They check what is free and confirm your seats on WhatsApp.",
     "next_s3_title": "Your berth is assigned",
-    "next_s3_body": "Check the status any time under My Requests."
+    "next_s3_body": "Check the status any time under My Requests.",
+    "pay_now_label": "Total to pay"
   },
   "booking_form": {
     "label_name": "Your name",
@@ -1112,7 +1113,12 @@
     "leg_full": "Full trip",
     "leg_go": "Go only",
     "leg_ret": "Return only",
-    "seats_total": "Total seats: {count}"
+    "seats_total": "Total seats: {count}",
+    "band_berths": "{n} berths",
+    "band_add": "Choose a price band",
+    "band_add_another": "Add another band",
+    "band_unpriced": "No price",
+    "band_unbanded": "Requested earlier"
   },
   "occupant": {
     "make_priority": "Make priority",
@@ -3405,5 +3411,14 @@
     "age_minutes": "{n}m ago",
     "age_hours": "{n}h ago",
     "age_days": "{n}d ago"
+  },
+  "band_picker": {
+    "choose_band": "Which price band?",
+    "choose_qty": "How many?",
+    "rows": "Rows {from}–{to}",
+    "row_one": "Row {row}",
+    "standard": "Standard",
+    "unavailable_title": "No seats left at a set price",
+    "unavailable_body": "You can still send your request — it joins the waiting list, free, and we will contact you if a seat opens up."
   }
 }
