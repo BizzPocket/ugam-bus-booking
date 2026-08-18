@@ -31,6 +31,7 @@ import '../utils/phone_dialer.dart';
 import '../utils/tour_capacity.dart';
 import '../utils/wa_error_text.dart';
 import '../widgets/booking_capture_form.dart';
+import '../widgets/waitlist_collect_sheet.dart';
 import '../widgets/edit_request_sheet.dart';
 import '../widgets/group_picker.dart';
 import 'add_bus_screen.dart';
@@ -2213,6 +2214,13 @@ class _CardActions extends StatelessWidget {
     );
   }
 
+  /// Pair, price, QR and confirm a waitlisted one-leg rider — the whole
+  /// collection in one sheet, because confirming without a price quoted is the
+  /// mistake it exists to prevent.
+  Future<void> _openCollect(BuildContext context) async {
+    await showWaitlistCollectSheet(context, tour: tour, rider: passenger);
+  }
+
   Future<void> _promote() async {
     await _ctrl.setWaitlisted(tour.id, passenger.id, false);
     AppSnackBar.success(
@@ -2456,14 +2464,27 @@ class _CardActions extends StatelessWidget {
       primaryLabel = tr('requests.action.accept');
       primaryIcon = Icons.verified_rounded;
       primaryAction = _confirmAndSeat;
-      secondary = UgamIconButton(
-        icon: Icons.arrow_back_rounded,
-        onTap: _promote,
-        semanticLabel: tr('requests.action.back_to_new'),
+      // Collect is the SECOND labelled action, not a buried menu row: a
+      // one-leg rider on this list exists to be paired and charged, and
+      // burying that behind the overflow would leave Accept — which confirms
+      // them for FREE — as the only visible thing to do with them.
+      secondary = Expanded(
+        child: UgamButton(
+          label: tr('requests.action.collect_payment'),
+          icon: Icons.qr_code_2_rounded,
+          kind: UgamButtonKind.tonal,
+          expand: true,
+          onPressed: () => _openCollect(context),
+        ),
       );
       menu = [
         editItem,
         groupItem,
+        _MenuItem(
+          tr('requests.action.back_to_new'),
+          Icons.arrow_back_rounded,
+          _promote,
+        ),
         // No separate Accept here — the primary already accepts + notifies.
         declineItem,
       ];

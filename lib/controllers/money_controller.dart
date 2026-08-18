@@ -378,6 +378,68 @@ class MoneyController extends GetxController {
     _invalidateFinance();
   }
 
+  /// Record a payment the ORGANISER collected from a waitlisted rider, and
+  /// post it to the ledger.
+  ///
+  /// Goes claim -> confirm rather than writing a collection row, for a concrete
+  /// reason: `collections` is keyed (passenger, bus, seat) and a waitlisted
+  /// rider has no seat yet, so there is nothing to key a row to. The claim rail
+  /// is passenger-scoped and already posts bank.gateway -> ar.rider through
+  /// `confirm_payment_claim`, which is exactly the entry this money needs.
+  ///
+  /// Returns null on success, or a reason the caller can show. The commonest
+  /// failure is a rider the ORGANISER added by hand: they have no
+  /// booking_requests row, and `claim_upi_advance` is keyed by one. That is
+  /// reported rather than swallowed — silently confirming a rider whose money
+  /// never reached the ledger is how a tour's books stop adding up.
+  Future<String?> recordWaitlistPayment({
+    required String tourId,
+    required String passengerId,
+    required int amountPaise,
+    String? reference,
+  }) async {
+    if (amountPaise <= 0) return 'amount';
+    final client = SupabaseService.instance.client;
+    try {
+      final rows = await client
+          .from('booking_requests')
+          .select('id')
+          .eq('passenger_id', passengerId)
+          .limit(1);
+      final list = rows as List;
+      if (list.isEmpty) return 'no_request';
+      final requestId = (list.first as Map)['id']?.toString();
+      if (requestId == null || requestId.isEmpty) return 'no_request';
+
+      final claimId = await client.rpc(
+        'claim_upi_advance',
+        params: {
+          'p_request_id': requestId,
+          'p_amount_paise': amountPaise,
+          'p_upi_ref': reference,
+        },
+      );
+      if (claimId == null) return 'claim_failed';
+
+      await client.rpc(
+        'confirm_payment_claim',
+        params: {
+          'p_claim_id': claimId.toString(),
+          'p_note': 'waitlist collection',
+        },
+      );
+      await refreshForTour(tourId);
+      _invalidateFinance();
+      return null;
+    } catch (e, st) {
+      dev.log(
+        'recordWaitlistPayment failed for $passengerId: $e\n$st',
+        name: 'MoneyController',
+      );
+      return 'failed';
+    }
+  }
+
   Future<void> rejectPaymentClaim(String claimId, {String? note}) async {
     await SupabaseService.instance.client.rpc(
       'reject_payment_claim',

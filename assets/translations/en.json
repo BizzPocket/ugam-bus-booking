@@ -450,7 +450,8 @@
       "add_to_group": "Add to group",
       "change_group": "Change group",
       "approve_cancel": "Approve cancellation",
-      "dismiss_cancel": "Keep booking"
+      "dismiss_cancel": "Keep booking",
+      "collect_payment": "Collect"
     },
     "decline_dialog": {
       "title": "Decline request?",
@@ -3428,5 +3429,30 @@
     "unavailable_body": "You can still send your request — it joins the waiting list, free, and we will contact you if a seat opens up.",
     "left": "{n} left",
     "sold_out": "Sold out"
+  },
+  "waitlist_collect": {
+    "title": "Collect from waiting list",
+    "step_pair": "Pair with a rider going the other way",
+    "step_band": "Which band will you seat them in?",
+    "no_partner": "Nobody on the waiting list is travelling the opposite leg yet. You can still price and confirm this rider — the berth’s other leg simply goes unsold.",
+    "no_bands": "This tour’s buses are not priced yet, so there is nothing to quote. Add a price or bands to the bus first.",
+    "quote_label": "They pay",
+    "quote_hint": "Half the band price — a one-leg rider uses one of the berth’s two legs.",
+    "send_qr": "Send QR on WhatsApp",
+    "resend_qr": "Send QR again",
+    "mark_paid": "Mark paid & confirm",
+    "mark_paid_hint": "Only after the money is in your account.",
+    "sharing_with": "Sharing a berth with {name}",
+    "partner_goes": "Going only · {n} seat(s) shareable",
+    "partner_returns": "Returning only · {n} seat(s) shareable",
+    "unpaired_title": "Confirm without a partner?",
+    "unpaired_body": "Nobody is booked on the other leg of this berth, so it will travel half empty. You can pair someone later if they turn up.",
+    "unpaired_confirm": "Confirm anyway",
+    "confirmed": "{name} is confirmed",
+    "wa_message": "Namaste {name}, your seat on {trip} is held. Please pay {amount} using the QR below or the UPI link, and send us a screenshot.",
+    "err_no_vpa": "Set a collection UPI handle on this tour first (Booking settings).",
+    "err_pick_band": "Pick a band first — that is what sets the price.",
+    "err_no_request": "This rider was added by hand and has no booking record, so the payment cannot be posted to the ledger.",
+    "err_record": "Could not record the payment. Nothing was confirmed."
   }
 }
