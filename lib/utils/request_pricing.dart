@@ -1,3 +1,4 @@
+import '../models/request_band.dart';
 import '../models/request_line.dart';
 
 /// What a booking request costs UP FRONT, in integer paise.
@@ -54,3 +55,39 @@ bool requestNeedsPayment(Iterable<RequestLine> lines) =>
 /// list" rather than "Pay".
 bool requestIsAllWaitlist(Iterable<RequestLine> lines) =>
     lines.isNotEmpty && lines.every(isWaitlistLine);
+
+/// What the ORGANISER quotes a waitlisted rider, once they have picked which
+/// band to seat them in.
+///
+/// *** WHY THIS IS NOT [requestLineChargePaise] ***
+/// That function answers "what does the CUSTOMER owe at submit time", and for a
+/// one-leg line the answer is deliberately nothing: they were never shown a
+/// band, so they cannot be charged for one. This answers a later, different
+/// question — the organiser has now chosen a band, paired the rider with
+/// someone going the other way, and is sending them a QR.
+///
+/// A one-leg rider uses ONE of the berth's two leg-slots, so they pay half the
+/// band price; that is `Bus.tripFactor`, the same 0.5 the fare engine and
+/// `bus_berth_price_paise` already apply, so the quote agrees with what the
+/// ledger will later post. A round-trip line among their lines is charged in
+/// full — half price buys one leg, not a discount.
+///
+/// Any band already sitting on a line is IGNORED. A waitlisted rider never
+/// chose one; the organiser's pick is the price.
+///
+/// Rounds half away from zero, matching Dart's `round()` and Postgres's
+/// `round(numeric)`, so an odd band price lands on the same paise on both
+/// sides.
+int waitlistQuotePaise({
+  required RequestBand band,
+  required Iterable<RequestLine> lines,
+}) {
+  var total = 0;
+  for (final l in lines) {
+    if (l.qty <= 0) continue;
+    final berths = l.qty * l.seatType.berthsPerUnit;
+    final full = band.pricePaise * berths;
+    total += l.leg.isOneWay ? (full / 2).round() : full;
+  }
+  return total;
+}
