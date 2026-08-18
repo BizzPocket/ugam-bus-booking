@@ -16,6 +16,7 @@
 
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
+import '../models/request_band.dart';
 import '../models/request_line.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_layout.dart';
@@ -873,6 +874,7 @@ class SeatingEngine {
           position: null,
           lowerOnly: false,
           legs: legs,
+          band: line.band,
         );
         if (cell == null) return null;
         state.assign(passenger.id, busId, cell.seatId!, legs: legs);
@@ -896,6 +898,7 @@ class SeatingEngine {
           position: line.position,
           lowerOnly: requireLower,
           legs: legs,
+          band: line.band,
           guardLowerReserve: !priority,
           preferLower: preferLower,
         );
@@ -920,6 +923,7 @@ class SeatingEngine {
           position: line.position,
           lowerOnly: requireLower,
           legs: legs,
+          band: line.band,
           requesterGroupId: reqGroup,
           guardLowerReserve: !priority,
           preferLower: preferLower,
@@ -951,6 +955,7 @@ class SeatingEngine {
           position: line.position,
           lowerOnly: requireLower,
           legs: legs,
+          band: line.band,
           guardLowerReserve: !priority,
           preferLower: preferLower,
         );
@@ -993,6 +998,7 @@ class SeatingEngine {
               position: null,
               lowerOnly: requireLower,
               legs: legs,
+          band: line.band,
               guardLowerReserve: !priority,
               preferLower: preferLower,
             ) ??
@@ -1000,6 +1006,7 @@ class SeatingEngine {
                 position: null,
                 lowerOnly: requireLower,
                 legs: legs,
+          band: line.band,
                 requesterGroupId: reqGroup,
                 guardLowerReserve: !priority,
                 preferLower: preferLower,
@@ -1011,6 +1018,7 @@ class SeatingEngine {
               position: null,
               lowerOnly: requireLower,
               legs: legs,
+          band: line.band,
               guardLowerReserve: !priority,
               preferLower: preferLower,
             ) ??
@@ -1018,6 +1026,7 @@ class SeatingEngine {
                 position: null,
                 lowerOnly: requireLower,
                 legs: legs,
+          band: line.band,
                 requesterGroupId: reqGroup,
                 guardLowerReserve: !priority,
                 preferLower: preferLower,
@@ -1154,6 +1163,7 @@ class SeatingEngine {
           position: l.position,
           remaining: l.qty,
           leg: l.leg,
+          band: l.band,
         ),
     ];
 
@@ -1273,6 +1283,7 @@ class SeatingEngine {
             position: l.position,
             remaining: l.remaining,
             leg: l.leg,
+            band: l.band,
           ),
       ];
 
@@ -1372,11 +1383,20 @@ class _PendingLine {
   /// not set it keep the old whole-seat behavior.
   final TripType leg;
 
+  /// The band this line was SOLD in, when the customer paid for one.
+  ///
+  /// A rider who paid for rows 1-4 bought a seat in those rows; placing them
+  /// outside it takes the higher fare and delivers the cheaper seat. Null for
+  /// every line that was never priced — legacy requests and one-leg waitlist
+  /// riders — and those stay placeable anywhere.
+  final RequestBand? band;
+
   const _PendingLine({
     required this.seatType,
     this.position,
     required this.remaining,
     this.leg = TripType.roundTrip,
+    this.band,
   });
 
   /// The concrete [TripLeg]s this line occupies on its physical berth.
@@ -1387,6 +1407,7 @@ class _PendingLine {
         position: position,
         remaining: (remaining - n).clamp(0, remaining),
         leg: leg,
+        band: band,
       );
 }
 
@@ -1797,6 +1818,7 @@ class _PlanState {
     required List<TripLeg> legs,
     bool guardLowerReserve = false,
     bool preferLower = false,
+    RequestBand? band,
   }) {
     final bs = _busStates[busId];
     if (bs == null) return null;
@@ -1806,6 +1828,8 @@ class _PlanState {
     for (final lowerPass in preferLower ? [true, false] : [false]) {
       for (final c in bs._orderedSeats()) {
         if (c.seatType != type) continue;
+        // Paid-band bind: a rider who bought rows 1-4 may only be placed there.
+        if (band != null && !band.covers(c.row)) continue;
         if (position != null && c.position != position) continue;
         if (lowerOnly && !bs.isLowerBerth(c)) continue;
         if (preferLower && lowerPass && !bs.isLowerBerth(c)) continue;
@@ -1848,12 +1872,14 @@ class _PlanState {
     bool preferLower = false,
     bool allowStrangerShare = false,
     List<bool>? sawBlockedShare,
+    RequestBand? band,
   }) {
     final bs = _busStates[busId];
     if (bs == null) return null;
     for (final lowerPass in preferLower ? [true, false] : [false]) {
       for (final c in bs._orderedSeats()) {
         if (c.seatType != SeatType.doubleSofa) continue;
+        if (band != null && !band.covers(c.row)) continue;
         if (position != null && c.position != position) continue;
         if (lowerOnly && !bs.isLowerBerth(c)) continue;
         if (preferLower && lowerPass && !bs.isLowerBerth(c)) continue;
