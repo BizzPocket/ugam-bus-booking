@@ -270,14 +270,11 @@ class FinanceController extends GetxController {
   double get lifetimeRealisedNet =>
       totalsFor(FinancePeriod.allTime, completedOnly: true).net;
 
-  bool _inPeriod(DateTime date, FinancePeriod period, DateTime now) {
-    switch (period) {
-      case FinancePeriod.thisMonth:
-        return date.year == now.year && date.month == now.month;
-      case FinancePeriod.thisYear:
-        return date.year == now.year;
-      case FinancePeriod.allTime:
-        return true;
-    }
-  }
+  bool _inPeriod(DateTime date, FinancePeriod period, DateTime now) =>
+      switch (period) {
+        FinancePeriod.thisMonth =>
+          date.year == now.year && date.month == now.month,
+        FinancePeriod.thisYear => date.year == now.year,
+        FinancePeriod.allTime => true,
+      };
 }

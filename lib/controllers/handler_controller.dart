@@ -548,6 +548,20 @@ class HandlerController extends GetxController {
 
   // ── Writes ────────────────────────────────────────────────
 
+  /// The tour a write on [bus] belongs to: the bus's own `tourId` when it
+  /// carries one, else [orElse].
+  String _tourIdFor(Bus bus, {required String orElse}) =>
+      (bus.tourId?.isNotEmpty == true) ? bus.tourId! : orElse;
+
+  /// [_tourIdFor] falling back to the manifest's first rider, else ''.
+  String _tourIdOrManifest(Bus bus) {
+    final m = manifest.value;
+    return _tourIdFor(
+      bus,
+      orElse: m?.passengers.isNotEmpty == true ? m!.passengers.first.tourId : '',
+    );
+  }
+
   /// Marks [p] present / left-behind on [bus] for [leg]. Throws on rejection so
   /// the caller can toast; the cache is only touched on success.
   Future<void> setPresent(
@@ -556,7 +570,7 @@ class HandlerController extends GetxController {
     AttendanceLeg leg,
     bool present,
   ) async {
-    final tourId = (bus.tourId?.isNotEmpty == true) ? bus.tourId! : p.tourId;
+    final tourId = _tourIdFor(bus, orElse: p.tourId);
     final existing = attendanceFor(p.id, bus.id, leg);
     final base =
         existing ??
@@ -605,9 +619,7 @@ class HandlerController extends GetxController {
     required String note,
   }) async {
     final existing = collectionFor(passenger, bus.id, seatId);
-    final tourId = (bus.tourId?.isNotEmpty == true)
-        ? bus.tourId!
-        : passenger.tourId;
+    final tourId = _tourIdFor(bus, orElse: passenger.tourId);
     final updated = buildCollectionToSave(
       existing: existing,
       tourId: tourId,
@@ -636,7 +648,7 @@ class HandlerController extends GetxController {
     required double amount,
     required String paidBy,
   }) async {
-    final tourId = bus.tourId?.isNotEmpty == true ? bus.tourId! : '';
+    final tourId = _tourIdFor(bus, orElse: '');
     final base =
         existing ??
         Expense(id: draftId, tourId: tourId, busId: bus.id, label: label);
@@ -672,7 +684,7 @@ class HandlerController extends GetxController {
     required double amount,
     required String receivedBy,
   }) async {
-    final tourId = bus.tourId?.isNotEmpty == true ? bus.tourId! : '';
+    final tourId = _tourIdFor(bus, orElse: '');
     final base =
         existing ??
         IncomeEntry(id: draftId, tourId: tourId, busId: bus.id, label: label);
@@ -711,10 +723,7 @@ class HandlerController extends GetxController {
     required double amount,
     required String? note,
   }) async {
-    final m = manifest.value;
-    final tourId = (bus.tourId?.isNotEmpty == true)
-        ? bus.tourId!
-        : (m?.passengers.isNotEmpty == true ? m!.passengers.first.tourId : '');
+    final tourId = _tourIdOrManifest(bus);
     final saved = await _store.handlerUpsertHandover(
       requestId,
       BusHandover(
@@ -794,10 +803,7 @@ class HandlerController extends GetxController {
     required String message,
     String? reportedBy,
   }) async {
-    final m = manifest.value;
-    final tourId = (bus.tourId?.isNotEmpty == true)
-        ? bus.tourId!
-        : (m?.passengers.isNotEmpty == true ? m!.passengers.first.tourId : '');
+    final tourId = _tourIdOrManifest(bus);
     final saved = await _store.handlerCreateReport(
       requestId,
       HandlerReport(

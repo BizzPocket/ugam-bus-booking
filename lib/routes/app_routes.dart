@@ -98,6 +98,10 @@ class AppRoutes {
   static const String pickupLocations = '/settings/pickup-locations';
   static const String inbox = '/inbox';
 
+  /// The `tourId` route argument, or '' when absent.
+  static String _tourIdOf(Map<String, dynamic>? args) =>
+      (args?['tourId'] as String?) ?? '';
+
   static final routes = [
     GetPage(name: splash, page: () => const SplashScreen()),
     GetPage(name: login, page: () => const LoginScreen()),
@@ -131,7 +135,7 @@ class AppRoutes {
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
         return BoardScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
+          tourId: _tourIdOf(args),
           initialBusId: args?['busId'] as String?,
         );
       },
@@ -150,12 +154,12 @@ class AppRoutes {
         // callers keep the seat grid until the assign lens lands.
         if (boardReplacesChart && (passengerId == null || passengerId.isEmpty)) {
           return BoardScreen(
-            tourId: (args?['tourId'] as String?) ?? '',
+            tourId: _tourIdOf(args),
             initialBusId: args?['busId'] as String?,
           );
         }
         return SeatsScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
+          tourId: _tourIdOf(args),
           initialMode: SeatsMode.grid,
           initialPassengerId: passengerId,
           initialBusId: args?['busId'] as String?,
@@ -167,7 +171,7 @@ class AppRoutes {
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
         return SeatsScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
+          tourId: _tourIdOf(args),
           initialMode: SeatsMode.grid,
           initialPassengerId: args?['passengerId'] as String?,
           initialBusId: args?['busId'] as String?,
@@ -179,7 +183,7 @@ class AppRoutes {
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
         return SeatsScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
+          tourId: _tourIdOf(args),
           initialMode: SeatsMode.summary,
         );
       },
@@ -189,7 +193,7 @@ class AppRoutes {
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
         return SeatingExceptionsScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
+          tourId: _tourIdOf(args),
         );
       },
     ),
@@ -198,7 +202,7 @@ class AppRoutes {
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
         return TourGroupsScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
+          tourId: _tourIdOf(args),
         );
       },
     ),
@@ -207,7 +211,7 @@ class AppRoutes {
       page: () {
         final args = Get.arguments as Map<String, dynamic>?;
         return TourMoneyBoardScreen(
-          tourId: (args?['tourId'] as String?) ?? '',
+          tourId: _tourIdOf(args),
         );
       },
     ),
