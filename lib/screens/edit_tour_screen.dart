@@ -13,6 +13,7 @@ import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 import '../widgets/booking_settings_sheet.dart';
+import 'tour_form/tour_route_arrow.dart';
 
 part 'edit_tour/edit_tour_widgets.dart';
 part 'edit_tour/tour_actions.dart';
@@ -378,7 +379,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                     if (MediaQuery.of(context).size.width < 400) ...[
                       UgamInput(controller: _fromCtrl, errorText: _fromError),
                       const SizedBox(height: UgamSpacing.xs),
-                      Center(child: _RouteArrow(c: c, vertical: true)),
+                      Center(child: TourRouteArrow(c: c, vertical: true)),
                       const SizedBox(height: UgamSpacing.xs),
                       UgamInput(controller: _toCtrl, errorText: _toError),
                     ] else ...[
@@ -394,7 +395,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                             padding: const EdgeInsets.symmetric(
                               horizontal: UgamSpacing.tight,
                             ),
-                            child: _RouteArrow(c: c, vertical: false),
+                            child: TourRouteArrow(c: c, vertical: false),
                           ),
                           Expanded(
                             child: UgamInput(

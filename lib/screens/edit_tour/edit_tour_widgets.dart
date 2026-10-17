@@ -1,35 +1,5 @@
 part of '../edit_tour_screen.dart';
 
-/// The circle between the From and To city fields.
-///
-/// Was `accentFill` + `accent` in both orientations. A direction glyph is
-/// decoration, not a selection or an ownership state, so per the accent rule it
-/// carries no brand hue — and this screen was spending copper on it three times
-/// over (here, and on both preview pills) while the actual amber signal, the
-/// focused field ring, had to compete with all of it.
-class _RouteArrow extends StatelessWidget {
-  final UgamColorSet c;
-  final bool vertical;
-
-  const _RouteArrow({required this.c, required this.vertical});
-
-  @override
-  Widget build(BuildContext context) {
-    final d = UgamScale.px(context, 30);
-    return Container(
-      width: d,
-      height: d,
-      decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
-      alignment: Alignment.center,
-      child: Icon(
-        vertical ? Icons.arrow_downward_rounded : Icons.arrow_forward_rounded,
-        size: UgamScale.px(context, 14),
-        color: c.ink2,
-      ),
-    );
-  }
-}
-
 /// One-tap entry into the "apply this price sheet to all buses" flow. Only
 /// shown when the tour has two or more buses (nothing to copy with one).
 class _ApplyPriceSheetCard extends StatelessWidget {
