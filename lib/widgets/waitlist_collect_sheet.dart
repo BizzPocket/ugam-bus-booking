@@ -178,6 +178,7 @@ class _WaitlistCollectSheetState extends State<_WaitlistCollectSheet> {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final bands = _bands;
+    final candidates = _candidates;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -196,10 +197,10 @@ class _WaitlistCollectSheetState extends State<_WaitlistCollectSheet> {
           // ── 1. Pair ────────────────────────────────────────
           _eyebrow(c, tr('waitlist_collect.step_pair')),
           const SizedBox(height: UgamSpacing.sm),
-          if (_candidates.isEmpty)
+          if (candidates.isEmpty)
             _note(c, tr('waitlist_collect.no_partner'))
           else
-            for (final p in _candidates) ...[
+            for (final p in candidates) ...[
               _PairRow(
                 key: Key('pair-${p.key}'),
                 pair: p,
@@ -224,7 +225,6 @@ class _WaitlistCollectSheetState extends State<_WaitlistCollectSheet> {
               _BandRow(
                 key: Key('wlband-${b.key}'),
                 option: b,
-                type: _type,
                 selected: _band?.key == b.key,
                 onTap: b.soldOut ? null : () => setState(() => _band = b),
               ),
@@ -425,14 +425,12 @@ class _PairRow extends StatelessWidget {
 /// A band the organiser can put this rider in, priced at the HALF-leg rate.
 class _BandRow extends StatelessWidget {
   final BandOption option;
-  final SeatType type;
   final bool selected;
   final VoidCallback? onTap;
 
   const _BandRow({
     super.key,
     required this.option,
-    required this.type,
     required this.selected,
     required this.onTap,
   });
