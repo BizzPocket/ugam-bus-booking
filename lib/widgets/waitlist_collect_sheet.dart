@@ -54,6 +54,10 @@ class _WaitlistCollectSheetState extends State<_WaitlistCollectSheet> {
   bool _busy = false;
   bool _qrSent = false;
 
+  /// Set once [MoneyController.recordWaitlistPayment] succeeds, so a retry
+  /// after a failed confirm never posts the same money twice.
+  bool _paymentRecorded = false;
+
   /// The seat type this rider wants. A one-leg request is a single type in
   /// practice; when it is not, the first line's type prices the quote and the
   /// organiser can still see every line on the row behind this sheet.
@@ -96,27 +100,33 @@ class _WaitlistCollectSheetState extends State<_WaitlistCollectSheet> {
     }
 
     setState(() => _busy = true);
-    final sent = await WaitlistQrShare.send(
-      request: collectPayment(
-        vpa: vpa,
-        payeeName: (tour.collectPayeeName?.trim().isNotEmpty ?? false)
-            ? tour.collectPayeeName!
-            : tour.title,
-        amountPaise: _quotePaise,
-        note: '${tour.fromCity}-${tour.toCity} · ${widget.rider.name}',
-        bookingRef: widget.rider.id,
-      ),
-      message: tr('waitlist_collect.wa_message', namedArgs: {
-        'name': widget.rider.name,
-        'trip': '${tour.fromCity} → ${tour.toCity}',
-        'amount': Formatters.formatMoneyInr(_quotePaise / 100),
-      }),
-    );
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _qrSent = _qrSent || sent;
-    });
+    // try/finally: a throw from the QR render / share sheet used to leave
+    // `_busy` stuck true, which disabled BOTH buttons for good.
+    try {
+      final sent = await WaitlistQrShare.send(
+        request: collectPayment(
+          vpa: vpa,
+          payeeName: (tour.collectPayeeName?.trim().isNotEmpty ?? false)
+              ? tour.collectPayeeName!
+              : tour.title,
+          amountPaise: _quotePaise,
+          note: '${tour.fromCity}-${tour.toCity} · ${widget.rider.name}',
+          bookingRef: widget.rider.id,
+        ),
+        message: tr('waitlist_collect.wa_message', namedArgs: {
+          'name': widget.rider.name,
+          'trip': '${tour.fromCity} → ${tour.toCity}',
+          'amount': Formatters.formatMoneyInr(_quotePaise / 100),
+        }),
+      );
+      if (!mounted) return;
+      setState(() => _qrSent = _qrSent || sent);
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackBar.error('${tr('waitlist_collect.err_send_qr')}\n$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// Mark the money received and move the rider to Confirmed.
@@ -140,35 +150,54 @@ class _WaitlistCollectSheetState extends State<_WaitlistCollectSheet> {
     }
 
     setState(() => _busy = true);
-    final money = Get.isRegistered<MoneyController>()
-        ? Get.find<MoneyController>()
-        : null;
-    final reason = await money?.recordWaitlistPayment(
-      tourId: widget.tour.id,
-      passengerId: widget.rider.id,
-      amountPaise: _quotePaise,
-    );
+    var done = false;
+    // try/finally: a throw from setConfirmed (its write rethrows after its own
+    // toast) used to leave `_busy` stuck true — both buttons dead.
+    try {
+      // A retry after a failed CONFIRM must not post the money a second time:
+      // the payment already reached the ledger on the first press.
+      if (!_paymentRecorded) {
+        final money = Get.isRegistered<MoneyController>()
+            ? Get.find<MoneyController>()
+            : null;
+        final reason = await money?.recordWaitlistPayment(
+          tourId: widget.tour.id,
+          passengerId: widget.rider.id,
+          amountPaise: _quotePaise,
+        );
 
-    // The money failing to post is NOT a reason to silently confirm anyway —
-    // a confirmed rider whose payment never reached the ledger is a hole in the
-    // tour's books that nobody will notice until settlement.
-    if (reason != null) {
-      if (!mounted) return;
-      setState(() => _busy = false);
-      AppSnackBar.error(
-        reason == 'no_request'
-            ? tr('waitlist_collect.err_no_request')
-            : tr('waitlist_collect.err_record'),
-      );
-      return;
-    }
+        // The money failing to post is NOT a reason to silently confirm
+        // anyway — a confirmed rider whose payment never reached the ledger is
+        // a hole in the tour's books that nobody will notice until settlement.
+        if (reason != null) {
+          if (!mounted) return;
+          AppSnackBar.error(
+            reason == 'no_request'
+                ? tr('waitlist_collect.err_no_request')
+                : tr('waitlist_collect.err_record'),
+          );
+          return;
+        }
+        _paymentRecorded = true;
+      }
 
-    if (Get.isRegistered<TourController>()) {
-      await Get.find<TourController>()
-          .setConfirmed(widget.tour.id, widget.rider.id, true);
+      if (Get.isRegistered<TourController>()) {
+        try {
+          await Get.find<TourController>()
+              .setConfirmed(widget.tour.id, widget.rider.id, true);
+        } catch (_) {
+          // The controller already toasted the save failure; say what state
+          // the rider is in so the organiser retries rather than re-collects.
+          if (!mounted) return;
+          AppSnackBar.error(tr('waitlist_collect.err_confirm_after_paid'));
+          return;
+        }
+      }
+      done = true;
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    if (!mounted) return;
-    setState(() => _busy = false);
+    if (!done || !mounted) return;
     Navigator.of(context).pop();
     AppSnackBar.success(
       tr('waitlist_collect.confirmed', namedArgs: {'name': widget.rider.name}),

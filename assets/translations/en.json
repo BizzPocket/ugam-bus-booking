@@ -3513,6 +3513,8 @@
     "err_no_vpa": "Set a collection UPI handle on this tour first (Booking settings).",
     "err_pick_band": "Pick a band first — that is what sets the price.",
     "err_no_request": "This rider was added by hand and has no booking record, so the payment cannot be posted to the ledger.",
-    "err_record": "Could not record the payment. Nothing was confirmed."
+    "err_record": "Could not record the payment. Nothing was confirmed.",
+    "err_send_qr": "Could not open the share sheet for the QR.",
+    "err_confirm_after_paid": "Payment recorded, but the rider could not be confirmed. Tap again to retry the confirmation — the payment will not be posted twice."
   }
 }
