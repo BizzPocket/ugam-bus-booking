@@ -66,11 +66,11 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
     // fallback chart need them. Loaded alongside the snapshots so a deep link
     // straight here never renders an empty chart for a tour that has one.
     // Best-effort: a failure degrades to whatever is already in memory.
-    final ready = _ctrl
-        .ensureTourReadyForSeating(widget.tourId)
-        .catchError((Object e, StackTrace st) {
-      dev.log('past-tour hydrate failed: $e\n$st',
-          name: 'PastTourSeatHistory');
+    final ready = _ctrl.ensureTourReadyForSeating(widget.tourId).catchError((
+      Object e,
+      StackTrace st,
+    ) {
+      dev.log('past-tour hydrate failed: $e\n$st', name: 'PastTourSeatHistory');
     });
     try {
       await ready;
@@ -78,20 +78,18 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
       if (!mounted) return;
       setState(() => _snapshots = snaps);
     } catch (e, st) {
-      dev.log('past-tour snapshot load failed: $e\n$st',
-          name: 'PastTourSeatHistory');
+      dev.log(
+        'past-tour snapshot load failed: $e\n$st',
+        name: 'PastTourSeatHistory',
+      );
       // Fall through to the live/empty fallback in _body with an empty list.
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  TourSeatSnapshot? _snapshotFor(SnapshotLeg leg) {
-    for (final s in _snapshots) {
-      if (s.leg == leg) return s;
-    }
-    return null;
-  }
+  TourSeatSnapshot? _snapshotFor(SnapshotLeg leg) =>
+      _snapshots.firstWhereOrNull((s) => s.leg == leg);
 
   @override
   Widget build(BuildContext context) {
@@ -175,7 +173,7 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
   ) {
     final sections = <Widget>[];
     for (final snapBus in snapshot.buses) {
-      final bus = _busById(tour, snapBus.busId);
+      final bus = tour.buses.firstWhereOrNull((b) => b.id == snapBus.busId);
       final layout = bus?.layout;
       if (bus == null || layout == null) continue;
 
@@ -327,13 +325,6 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
       ],
     );
   }
-
-  Bus? _busById(Tour tour, String busId) {
-    for (final b in tour.buses) {
-      if (b.id == busId) return b;
-    }
-    return null;
-  }
 }
 
 /// A read-only seat tile for the history chart. Shows the seat id and, when
@@ -353,17 +344,19 @@ class _SnapshotSeatTile extends StatelessWidget {
 
   const _SnapshotSeatTile({required this.cell, this.names = const []});
 
-  List<String> get _shown =>
-      [for (final n in names) if (n.trim().isNotEmpty) n.trim()];
+  List<String> get _shown => [
+    for (final n in names)
+      if (n.trim().isNotEmpty) n.trim(),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return _shown.isEmpty ? _freeTile(c) : _bookedTile(c);
+    final shown = _shown;
+    return shown.isEmpty ? _freeTile(c) : _bookedTile(c, shown);
   }
 
-  Widget _bookedTile(UgamColorSet c) {
-    final shown = _shown;
+  Widget _bookedTile(UgamColorSet c, List<String> shown) {
     // Two riders share one tile — shrink and give each a single line so both
     // stay readable instead of one being ellipsed away.
     final shared = shown.length > 1;

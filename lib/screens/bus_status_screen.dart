@@ -25,6 +25,9 @@ import 'collection_screen.dart';
 import 'fullscreen_chart_screen.dart';
 import 'seats_screen.dart';
 
+part 'bus_status/bus_status_header.dart';
+part 'bus_status/bus_status_chart.dart';
+
 /// Read-only seat layout for a single bus on a tour. Renders each seat
 /// in the layout grid with the assigned passenger's name+phone overlaid
 /// when taken. Tapping a booked seat surfaces a sheet with the
@@ -107,9 +110,7 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
 
           // THE seat meter's slice for this bus — the same "x / n" the
           // manage-buses row, dashboard and tour detail show (see [SeatMeter]).
-          final busMeter = Get.find<TourController>()
-              .seatMeterFor(tour)
-              .byBus[bus.id];
+          final busMeter = tourCtrl.seatMeterFor(tour).byBus[bus.id];
           final totalSeats = busMeter?.capacity ?? layout.totalSeats;
           final assignedCount =
               busMeter?.occupied ?? tour.occupiedBerthsFor(bus.id);
@@ -184,8 +185,9 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                 tour: tour,
                 bus: bus,
                 onMoney: () => _openMoneyMenu(context, tour.id, bus),
-                showOperateAsHandler:
-                    tourAllowsAdminHandlerOperate(tour.status),
+                showOperateAsHandler: tourAllowsAdminHandlerOperate(
+                  tour.status,
+                ),
               ),
               const SizedBox(height: UgamSpacing.md),
             ],
@@ -214,18 +216,11 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
             expand: true,
             icon: Icons.groups_rounded,
             label: tr('tour_money_board.collect'),
-            onPressed: () {
-              Navigator.of(sheetCtx).pop();
-              final tour = Get.find<TourController>().getTour(tourId);
-              if (tour == null) {
-                AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
-                return;
-              }
-              Get.to(
-                () => CollectionScreen(tour: tour, bus: bus),
-                transition: Transition.cupertino,
-              );
-            },
+            onPressed: () => _openWithTour(
+              sheetCtx,
+              tourId,
+              (tour) => CollectionScreen(tour: tour, bus: bus),
+            ),
           ),
           const SizedBox(height: UgamSpacing.sm),
           UgamButton(
@@ -233,27 +228,33 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
             expand: true,
             icon: Icons.payments_rounded,
             label: tr('bus_status.action.collection_money'),
-            onPressed: () {
-              Navigator.of(sheetCtx).pop();
-              final tour = Get.find<TourController>().getTour(tourId);
-              if (tour == null) {
-                AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
-                return;
-              }
-              Get.to(
-                () => BusMoneyScreen(tour: tour, bus: bus),
-                transition: Transition.cupertino,
-              );
-            },
+            onPressed: () => _openWithTour(
+              sheetCtx,
+              tourId,
+              (tour) => BusMoneyScreen(tour: tour, bus: bus),
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// Bottom sheet that shows passenger details when a booked seat is
-  /// tapped. Business logic preserved verbatim — same seat-list build,
-  /// same handler-badge surfacing, same phone-call CTA.
+  /// Closes the money sheet, then pushes [screen] for the CURRENT tour row —
+  /// or says the tour is gone instead of pushing a stale snapshot.
+  void _openWithTour(
+    BuildContext sheetCtx,
+    String tourId,
+    Widget Function(Tour tour) screen,
+  ) {
+    Navigator.of(sheetCtx).pop();
+    final tour = Get.find<TourController>().getTour(tourId);
+    if (tour == null) {
+      AppSnackBar.error(tr('bus_status.tour_not_found_refresh'));
+      return;
+    }
+    Get.to(() => screen(tour), transition: Transition.cupertino);
+  }
+
   /// Routes a seat tap by how many DISTINCT riders sit there. A Double Sofa can
   /// carry up to four (two berths × GO+RET), so a lone rider opens their detail
   /// sheet as before, while a shared seat opens the canonical read-only
@@ -287,6 +288,9 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
     );
   }
 
+  /// Bottom sheet that shows passenger details when a booked seat is
+  /// tapped. Business logic preserved verbatim — same seat-list build,
+  /// same handler-badge surfacing, same phone-call CTA.
   void _showPassengerSheet(
     BuildContext context,
     Passenger passenger,
@@ -361,482 +365,6 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
               padding: EdgeInsets.only(top: 10),
               child: _HandlerBadge(),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusAppBar extends StatelessWidget {
-  final Bus bus;
-  final String tourTitle;
-
-  /// Opens the money actions sheet (Collect / Bus money). Null hides the action
-  /// (e.g. the not-found / no-layout app bars that reuse this widget elsewhere).
-  final VoidCallback? onMoney;
-
-  const _StatusAppBar({
-    required this.bus,
-    required this.tourTitle,
-    this.onMoney,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return UgamAppBar(
-      title: bus.name,
-      subtitle:
-          '$tourTitle'
-          '${bus.busNumber.isNotEmpty ? ' · ${bus.busNumber}' : ''}',
-      actions: [
-        if (onMoney != null)
-          UgamAppBarAction(
-            icon: Icons.payments_rounded,
-            onTap: onMoney!,
-            tooltip: tr('bus_status.action.collection_money'),
-          ),
-      ],
-    );
-  }
-}
-
-/// Compact tally row: big tabular count (assigned / total), label
-/// underneath, and a thin Ugam-tinted progress bar.
-class _Tally extends StatelessWidget {
-  final int assigned;
-  final int total;
-
-  const _Tally({required this.assigned, required this.total});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    final ratio = total == 0 ? 0.0 : assigned / total;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.sm + 2,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.row),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                '$assigned/$total',
-                style: UgamText.numLg.copyWith(color: c.ink),
-              ),
-              Text(
-                tr('bus_status.legend_booked').toUpperCase(),
-                style: UgamText.micro.copyWith(color: c.ink2),
-              ),
-            ],
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                // No percentage: "97%" restated the count above as a number no
-                // one books by. Whole seats only — the free count instead.
-                Text(
-                  tr('capacity.free_n',
-                      namedArgs: {'n': '${(total - assigned).clamp(0, total)}'}),
-                  style: UgamText.tabular(
-                    UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 12),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: ratio.clamp(0.0, 1.0),
-                    minHeight: 6,
-                    backgroundColor: c.card,
-                    // Neutral fill — the status tally is meta, not a primary
-                    // action, so copper stays rationed to the focal CTA.
-                    valueColor: AlwaysStoppedAnimation(c.ink2),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// The rounded card containing the bus chart. Renders the CANONICAL
-/// [SeatChartTile] (read-only) so the status chart reads identically to the
-/// auto-fill / assign / handler charts — same tile look, same group/priority
-/// rings, same one-way leg colours — just without the drag/drop wiring.
-class _SeatChartCard extends StatelessWidget {
-  final BusLayout layout;
-  final Map<String, List<Passenger>> assignments;
-  final GroupColorResolver groupColors;
-
-  /// The tapped seat's id + its occupants (berth-accurate, so a whole double
-  /// held solo arrives as the rider twice) — the handler de-dupes and shows one
-  /// or all.
-  final void Function(String seatId, List<Passenger> occupants) onSeatTap;
-
-  const _SeatChartCard({
-    required this.layout,
-    required this.assignments,
-    required this.groupColors,
-    required this.onSeatTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    if (layout.totalCells == 0) {
-      return UgamCard.plain(
-        child: Center(
-          child: Text(
-            tr('bus_status.no_layout'),
-            style: UgamText.body.copyWith(color: c.ink2),
-          ),
-        ),
-      );
-    }
-
-    return UgamCard.plain(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.md,
-        vertical: UgamSpacing.lg,
-      ),
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(
-          parent: BouncingScrollPhysics(),
-        ),
-        child: CombinedSeatGrid(
-          layout: layout,
-          cellWidth: kSeatTileW,
-          cellHeight: kSeatTileH,
-          colGap: 6,
-          rowGap: 6,
-          driverLabel: tr('bus_status.driver_label'),
-          // Header band so the top-left expand button clears the first seat.
-          reserveTopAction: true,
-          tileBuilder: (ctx, cell) {
-            final occupants = cell.seatId != null
-                ? (assignments[cell.seatId] ?? const <Passenger>[])
-                : const <Passenger>[];
-            return RepaintBoundary(
-              child: SeatChartTile(
-                cell: cell,
-                occupants: occupants,
-                groupColors: groupColors,
-                markHalfDouble: true,
-                // Read-only: a booked seat surfaces the passenger sheet; a free
-                // seat is inert here (re-seating lives in the unified grid).
-                onTapBooked: occupants.isEmpty
-                    ? null
-                    : () => onSeatTap(cell.seatId!, occupants),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _SheetRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _SheetRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Flexible(
-            flex: 2,
-            child: Text(label, style: UgamText.caption.copyWith(color: c.ink2)),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            flex: 3,
-            child: Text(
-              value.isEmpty ? '—' : value,
-              style: UgamText.bodyStrong.copyWith(color: c.ink, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Hero card at the top of the bus status screen. Bus backdrop + bus
-/// number + driver name/phone with quick-call and WhatsApp circle
-/// buttons on the right.
-class _DriverHeroCard extends StatelessWidget {
-  final Bus bus;
-
-  const _DriverHeroCard({required this.bus});
-
-  Future<void> _openWhatsApp(String phone) async {
-    final cleaned = phone.replaceAll(RegExp(r'[^\d+]'), '');
-    if (cleaned.isEmpty) return;
-    try {
-      final ok = await WhatsAppService().openChat(phone: phone, message: '');
-      if (!ok) {
-        AppSnackBar.error(
-          tr('bus_status.wa_open_failed', namedArgs: {'phone': phone}),
-          title: tr('bus_status.wa_failed_title'),
-        );
-      }
-    } catch (e) {
-      AppSnackBar.error(
-        tr('bus_status.wa_open_error', namedArgs: {'error': '$e'}),
-        title: tr('bus_status.wa_failed_title'),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    final phone = bus.driverPhone;
-    final hasPhone = phone.trim().isNotEmpty;
-    return UgamCard.media(
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(UgamRadius.photo),
-            child: SizedBox(
-              width: 84,
-              height: 84,
-              child: UgamBusBackdrop(seed: bus.id),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  bus.displayLabel,
-                  style: UgamText.titleM.copyWith(color: c.ink),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  bus.driverName.isEmpty
-                      ? tr('bus_status.driver_pending')
-                      : bus.driverName,
-                  style: UgamText.bodyStrong.copyWith(
-                    color: c.ink2,
-                    fontSize: 13,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (hasPhone)
-                  Text(
-                    phone,
-                    style: UgamText.tabular(
-                      UgamText.caption.copyWith(color: c.ink3, fontSize: 12),
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-              ],
-            ),
-          ),
-          // Call / message only exist when there is a number to reach — two
-          // greyed circles on a driver-less bus were dead controls.
-          if (hasPhone) ...[
-            const SizedBox(width: UgamSpacing.sm),
-            _CircleAction(
-              icon: Icons.phone_rounded,
-              tint: c.accent,
-              fill: c.accentFill,
-              enabled: hasPhone,
-              onTap: () => PhoneDialer.call(phone),
-            ),
-            const SizedBox(width: 6),
-            _CircleAction(
-              icon: Icons.chat_rounded,
-              tint: c.good,
-              fill: c.goodFill,
-              enabled: hasPhone,
-              onTap: () => _openWhatsApp(phone),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _CircleAction extends StatelessWidget {
-  final IconData icon;
-  final Color tint;
-  final Color fill;
-  final bool enabled;
-  final VoidCallback onTap;
-
-  const _CircleAction({
-    required this.icon,
-    required this.tint,
-    required this.fill,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: enabled ? fill : c.card,
-          shape: BoxShape.circle,
-        ),
-        alignment: Alignment.center,
-        child: Icon(icon, size: 18, color: enabled ? tint : c.ink3),
-      ),
-    );
-  }
-}
-
-/// Below-the-grid actions, two rows: Edit bus · Open seat assignment, then the
-/// ONE money door (opens the same Collect / Bus-money sheet as the app-bar
-/// icon) beside "Operate as handler" when that applies. There used to be five
-/// stacked buttons, two of them near-identical money links ("Collect" and
-/// "Collection & money") that each opened half of that sheet.
-class _BottomActions extends StatelessWidget {
-  final Tour tour;
-  final Bus bus;
-  final bool showOperateAsHandler;
-  final VoidCallback onMoney;
-
-  const _BottomActions({
-    required this.tour,
-    required this.bus,
-    required this.showOperateAsHandler,
-    required this.onMoney,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final tourId = tour.id;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: UgamButton(
-                  kind: UgamButtonKind.neutral,
-                  expand: true,
-                  icon: Icons.edit_rounded,
-                  label: tr('bus_status.action.edit_bus'),
-                  onPressed: () => Get.to(
-                    () => AddBusScreen(tourId: tourId, existing: bus),
-                    transition: Transition.cupertino,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: UgamButton(
-                  kind: UgamButtonKind.neutral,
-                  expand: true,
-                  icon: Icons.grid_view_rounded,
-                  label: tr('bus_status.action.open_seat_assignment'),
-                  onPressed: () => Get.to(
-                    () => SeatsScreen(
-                      tourId: tourId,
-                      initialMode: SeatsMode.grid,
-                      initialBusId: bus.id,
-                    ),
-                    transition: Transition.cupertino,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: UgamButton(
-                  kind: UgamButtonKind.neutral,
-                  expand: true,
-                  icon: Icons.payments_rounded,
-                  label: tr('bus_status.action.collection_money'),
-                  onPressed: onMoney,
-                ),
-              ),
-              if (showOperateAsHandler) ...[
-                const SizedBox(width: 10),
-                Expanded(
-                  child: UgamButton(
-                    kind: UgamButtonKind.tonal,
-                    expand: true,
-                    icon: Icons.manage_accounts_rounded,
-                    label: tr('bus_status.action_operate_as_handler'),
-                    onPressed: () =>
-                        openAdminHandlerOperate(tour: tour, busId: bus.id),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HandlerBadge extends StatelessWidget {
-  const _HandlerBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: c.warmFill,
-        borderRadius: BorderRadius.circular(9999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.workspace_premium_rounded, size: 14, color: c.warm),
-          const SizedBox(width: 6),
-          Text(
-            tr('bus_status.handler_badge'),
-            style: UgamText.micro.copyWith(
-              color: c.warm,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
         ],
       ),
     );
