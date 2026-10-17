@@ -156,10 +156,7 @@ class AuthController extends GetxController {
         roleName == UserRole.admin.name;
 
     if (!isPersistedAdmin) {
-      await prefs.remove(_keyPhone);
-      await prefs.remove(_keyRole);
-      await prefs.remove(_keyName);
-      await prefs.remove(_keyAdminId);
+      await _removeSessionKeys(prefs);
       // No admin session to restore ⇒ no cached tour graph may exist. This is
       // the second of the two guards that make "the cache cannot outlive the
       // session" true: [logout] wipes on the way out, and this wipes on the way
@@ -256,6 +253,15 @@ class AuthController extends GetxController {
       }
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
+  }
+
+  /// Drops every key [_persistSession] writes (NOT the last-phone hint, which
+  /// deliberately survives a logout).
+  Future<void> _removeSessionKeys(SharedPreferences prefs) async {
+    await prefs.remove(_keyPhone);
+    await prefs.remove(_keyRole);
+    await prefs.remove(_keyName);
+    await prefs.remove(_keyAdminId);
   }
 
   Future<void> _persistSession() async {
@@ -549,10 +555,7 @@ class AuthController extends GetxController {
   @visibleForTesting
   Future<void> clearSessionLocally() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyPhone);
-    await prefs.remove(_keyRole);
-    await prefs.remove(_keyName);
-    await prefs.remove(_keyAdminId);
+    await _removeSessionKeys(prefs);
     _restoredAdminId = null;
 
     // IDENTITY DIES BEFORE THE DISK DOES — the order is load-bearing.
