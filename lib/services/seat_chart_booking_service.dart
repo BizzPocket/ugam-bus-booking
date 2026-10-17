@@ -6,34 +6,7 @@ import '../utils/chart_seat_availability.dart';
 import '../utils/chart_selection.dart';
 import '../utils/tour_public_summary.dart';
 
-/// Outcome of a `chart_claim_seats` call.
-///
-/// A claim either wholly succeeds or wholly fails — there is no partial write.
-/// [conflicts] names the seats that were lost (taken in the meantime, held back
-/// by the organiser, or unknown), so the UI can point at them on the chart
-/// instead of showing a generic error.
-class ChartClaimResult {
-  final bool ok;
-  final String? requestId;
-  final String? passengerId;
-  final int berths;
-  final List<String> conflicts;
-
-  /// Set when the server refused outright (tour closed, bad leg, too many
-  /// seats) rather than losing a race.
-  final String? errorMessage;
-
-  const ChartClaimResult({
-    required this.ok,
-    this.requestId,
-    this.passengerId,
-    this.berths = 0,
-    this.conflicts = const [],
-    this.errorMessage,
-  });
-
-  bool get lostSeats => !ok && conflicts.isNotEmpty;
-}
+part 'seat_chart_booking_results.dart';
 
 /// Customer-side seat-chart booking. Every call goes through a SECURITY DEFINER
 /// RPC from migration 048 — customers are anonymous and cannot read `buses` or
@@ -153,19 +126,19 @@ class SeatChartBookingService {
     try {
       final result = await _client.rpc(
         'chart_claim_seats',
-        params: {
-          'p_request_id': requestId,
-          'p_tour_id': tourId,
-          'p_bus_id': busId,
-          'p_phone': phone,
-          'p_name': name,
-          'p_leg': leg.storageKey,
-          'p_seats': claimPayload(picks),
-          'p_gender': gender,
-          'p_note': note,
-          'p_pickup_location_id': pickupLocationId,
-          'p_pickup_location_name': pickupLocationName,
-        },
+        params: _singleBusParams(
+          requestId: requestId,
+          tourId: tourId,
+          busId: busId,
+          phone: phone,
+          name: name,
+          leg: leg,
+          picks: picks,
+          gender: gender,
+          note: note,
+          pickupLocationId: pickupLocationId,
+          pickupLocationName: pickupLocationName,
+        ),
       );
       return _parseClaimResult(result);
     } on PostgrestException catch (e) {
@@ -195,18 +168,18 @@ class SeatChartBookingService {
     try {
       final result = await _client.rpc(
         'chart_claim_seats_multi',
-        params: {
-          'p_party_id': partyId,
-          'p_tour_id': tourId,
-          'p_phone': phone,
-          'p_name': name,
-          'p_leg': leg.storageKey,
-          'p_buses': [for (final b in buses) b.toPayload()],
-          'p_gender': gender,
-          'p_note': note,
-          'p_pickup_location_id': pickupLocationId,
-          'p_pickup_location_name': pickupLocationName,
-        },
+        params: _multiBusParams(
+          partyId: partyId,
+          tourId: tourId,
+          phone: phone,
+          name: name,
+          leg: leg,
+          buses: buses,
+          gender: gender,
+          note: note,
+          pickupLocationId: pickupLocationId,
+          pickupLocationName: pickupLocationName,
+        ),
       );
       return ChartMultiClaimResult.fromRpc(result);
     } on PostgrestException catch (e) {
@@ -232,18 +205,18 @@ class SeatChartBookingService {
     try {
       final result = await _client.rpc(
         'chart_hold_seats_multi',
-        params: {
-          'p_party_id': partyId,
-          'p_tour_id': tourId,
-          'p_phone': phone,
-          'p_name': name,
-          'p_leg': leg.storageKey,
-          'p_buses': [for (final b in buses) b.toPayload()],
-          'p_gender': gender,
-          'p_note': note,
-          'p_pickup_location_id': pickupLocationId,
-          'p_pickup_location_name': pickupLocationName,
-        },
+        params: _multiBusParams(
+          partyId: partyId,
+          tourId: tourId,
+          phone: phone,
+          name: name,
+          leg: leg,
+          buses: buses,
+          gender: gender,
+          note: note,
+          pickupLocationId: pickupLocationId,
+          pickupLocationName: pickupLocationName,
+        ),
       );
       return ChartMultiHoldResult.fromRpc(result);
     } on PostgrestException catch (e) {
@@ -269,19 +242,19 @@ class SeatChartBookingService {
     try {
       final result = await _client.rpc(
         'chart_hold_seats',
-        params: {
-          'p_request_id': requestId,
-          'p_tour_id': tourId,
-          'p_bus_id': busId,
-          'p_phone': phone,
-          'p_name': name,
-          'p_leg': leg.storageKey,
-          'p_seats': claimPayload(picks),
-          'p_gender': gender,
-          'p_note': note,
-          'p_pickup_location_id': pickupLocationId,
-          'p_pickup_location_name': pickupLocationName,
-        },
+        params: _singleBusParams(
+          requestId: requestId,
+          tourId: tourId,
+          busId: busId,
+          phone: phone,
+          name: name,
+          leg: leg,
+          picks: picks,
+          gender: gender,
+          note: note,
+          pickupLocationId: pickupLocationId,
+          pickupLocationName: pickupLocationName,
+        ),
       );
       if (result is! Map) {
         return const ChartHoldResult(ok: false);
@@ -299,10 +272,7 @@ class SeatChartBookingService {
       }
       return ChartHoldResult(
         ok: false,
-        conflicts: (map['conflicts'] as List?)
-                ?.map((e) => e.toString())
-                .toList() ??
-            const [],
+        conflicts: _seatIds(map['conflicts']),
       );
     } on PostgrestException catch (e) {
       return ChartHoldResult(ok: false, errorMessage: e.message);
@@ -339,6 +309,66 @@ class SeatChartBookingService {
     }
   }
 
+  /// RPC params shared by the single-bus `chart_claim_seats` /
+  /// `chart_hold_seats` calls.
+  static Map<String, dynamic> _singleBusParams({
+    required String requestId,
+    required String tourId,
+    required String busId,
+    required String phone,
+    required String name,
+    required TripType leg,
+    required List<ChartPick> picks,
+    String? gender,
+    String? note,
+    String? pickupLocationId,
+    String? pickupLocationName,
+  }) =>
+      {
+        'p_request_id': requestId,
+        'p_tour_id': tourId,
+        'p_bus_id': busId,
+        'p_phone': phone,
+        'p_name': name,
+        'p_leg': leg.storageKey,
+        'p_seats': claimPayload(picks),
+        'p_gender': gender,
+        'p_note': note,
+        'p_pickup_location_id': pickupLocationId,
+        'p_pickup_location_name': pickupLocationName,
+      };
+
+  /// RPC params shared by the multi-bus `chart_claim_seats_multi` /
+  /// `chart_hold_seats_multi` calls (migration 068).
+  static Map<String, dynamic> _multiBusParams({
+    required String partyId,
+    required String tourId,
+    required String phone,
+    required String name,
+    required TripType leg,
+    required List<BusClaim> buses,
+    String? gender,
+    String? note,
+    String? pickupLocationId,
+    String? pickupLocationName,
+  }) =>
+      {
+        'p_party_id': partyId,
+        'p_tour_id': tourId,
+        'p_phone': phone,
+        'p_name': name,
+        'p_leg': leg.storageKey,
+        'p_buses': [for (final b in buses) b.toPayload()],
+        'p_gender': gender,
+        'p_note': note,
+        'p_pickup_location_id': pickupLocationId,
+        'p_pickup_location_name': pickupLocationName,
+      };
+
+  /// A bare seat-id conflict list (`null` → empty).
+  static List<String> _seatIds(dynamic raw) =>
+      (raw as List?)?.map((e) => e.toString()).toList() ?? const [];
+
   ChartClaimResult _parseClaimResult(dynamic result) {
     if (result is! Map) {
       return const ChartClaimResult(ok: false);
@@ -354,199 +384,8 @@ class SeatChartBookingService {
     }
     return ChartClaimResult(
       ok: false,
-      conflicts: (map['conflicts'] as List?)
-              ?.map((e) => e.toString())
-              .toList() ??
-          const [],
+      conflicts: _seatIds(map['conflicts']),
       errorMessage: map['error']?.toString(),
     );
   }
-}
-
-/// Outcome of `chart_hold_seats`.
-/// One bus's share of a multi-bus checkout.
-///
-/// Each bus carries its OWN `requestId` because the server writes one
-/// booking_request per bus — that is what keeps every passenger row's seats
-/// inside a single bus and leaves billing, the manifest and the WhatsApp
-/// ticket working unchanged.
-class BusClaim {
-  final String busId;
-  final String requestId;
-  final List<ChartPick> picks;
-
-  const BusClaim({
-    required this.busId,
-    required this.requestId,
-    required this.picks,
-  });
-
-  Map<String, dynamic> toPayload() => {
-        'busId': busId,
-        'requestId': requestId,
-        'seats': claimPayload(picks),
-      };
-}
-
-/// One bus's booking, as written by `chart_claim_seats_multi`.
-class PartyBooking {
-  final String busId;
-  final String requestId;
-  final String passengerId;
-  final int berths;
-
-  const PartyBooking({
-    required this.busId,
-    required this.requestId,
-    required this.passengerId,
-    this.berths = 0,
-  });
-}
-
-/// A seat lost during a multi-bus claim, named WITH its bus — a bare seat id
-/// would be ambiguous, since every sleeper on the tour has a "DU1".
-class PartyConflict {
-  final String busId;
-  final String seatId;
-  const PartyConflict({required this.busId, required this.seatId});
-}
-
-class ChartMultiClaimResult {
-  final bool ok;
-  final String? partyId;
-  final List<PartyBooking> bookings;
-  final List<PartyConflict> conflicts;
-  final int berths;
-  final String? errorMessage;
-
-  const ChartMultiClaimResult({
-    required this.ok,
-    this.partyId,
-    this.bookings = const [],
-    this.conflicts = const [],
-    this.berths = 0,
-    this.errorMessage,
-  });
-
-  bool get lostSeats => !ok && conflicts.isNotEmpty;
-
-  factory ChartMultiClaimResult.fromRpc(dynamic result) {
-    if (result is! Map) return const ChartMultiClaimResult(ok: false);
-    final map = Map<String, dynamic>.from(result);
-    if (map['ok'] != true) {
-      return ChartMultiClaimResult(
-        ok: false,
-        conflicts: _parseConflicts(map['conflicts']),
-      );
-    }
-    return ChartMultiClaimResult(
-      ok: true,
-      partyId: map['party_id']?.toString(),
-      berths: (map['berths'] as num?)?.toInt() ?? 0,
-      bookings: [
-        for (final row in (map['bookings'] as List? ?? const []))
-          if (row is Map)
-            PartyBooking(
-              busId: row['bus_id']?.toString() ?? '',
-              requestId: row['request_id']?.toString() ?? '',
-              passengerId: row['passenger_id']?.toString() ?? '',
-              berths: (row['berths'] as num?)?.toInt() ?? 0,
-            ),
-      ],
-    );
-  }
-}
-
-/// One bus's hold within a party hold.
-class PartyHold {
-  final String holdId;
-  final String busId;
-  final String requestId;
-
-  const PartyHold({
-    required this.holdId,
-    required this.busId,
-    required this.requestId,
-  });
-}
-
-class ChartMultiHoldResult {
-  final bool ok;
-  final String? partyId;
-  final List<PartyHold> holds;
-  final List<PartyConflict> conflicts;
-
-  /// One deadline for the WHOLE party — see migration 068.
-  final DateTime? expiresAt;
-  final int berths;
-  final String? errorMessage;
-
-  const ChartMultiHoldResult({
-    required this.ok,
-    this.partyId,
-    this.holds = const [],
-    this.conflicts = const [],
-    this.expiresAt,
-    this.berths = 0,
-    this.errorMessage,
-  });
-
-  bool get lostSeats => !ok && conflicts.isNotEmpty;
-
-  factory ChartMultiHoldResult.fromRpc(dynamic result) {
-    if (result is! Map) return const ChartMultiHoldResult(ok: false);
-    final map = Map<String, dynamic>.from(result);
-    if (map['ok'] != true) {
-      return ChartMultiHoldResult(
-        ok: false,
-        conflicts: _parseConflicts(map['conflicts']),
-      );
-    }
-    return ChartMultiHoldResult(
-      ok: true,
-      partyId: map['party_id']?.toString(),
-      berths: (map['berths'] as num?)?.toInt() ?? 0,
-      expiresAt: map['expires_at'] == null
-          ? null
-          : DateTime.tryParse(map['expires_at'].toString()),
-      holds: [
-        for (final row in (map['holds'] as List? ?? const []))
-          if (row is Map)
-            PartyHold(
-              holdId: row['hold_id']?.toString() ?? '',
-              busId: row['bus_id']?.toString() ?? '',
-              requestId: row['request_id']?.toString() ?? '',
-            ),
-      ],
-    );
-  }
-}
-
-List<PartyConflict> _parseConflicts(dynamic raw) => [
-      for (final row in (raw as List? ?? const []))
-        if (row is Map)
-          PartyConflict(
-            busId: row['bus_id']?.toString() ?? '',
-            seatId: row['seat_id']?.toString() ?? '',
-          ),
-    ];
-
-class ChartHoldResult {
-  final bool ok;
-  final String? holdId;
-  final String? requestId;
-  final DateTime? expiresAt;
-  final List<String> conflicts;
-  final String? errorMessage;
-
-  const ChartHoldResult({
-    required this.ok,
-    this.holdId,
-    this.requestId,
-    this.expiresAt,
-    this.conflicts = const [],
-    this.errorMessage,
-  });
-
-  bool get lostSeats => !ok && conflicts.isNotEmpty;
 }
