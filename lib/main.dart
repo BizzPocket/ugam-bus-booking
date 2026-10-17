@@ -203,7 +203,7 @@ class _BootstrapSplash extends StatelessWidget {
         backgroundColor: c.bg,
         body: const Center(child: UgamLogo(size: 140)),
       ),
-    ); 
+    );
   }
 }
 

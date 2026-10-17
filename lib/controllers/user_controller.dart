@@ -142,8 +142,7 @@ class UserController extends GetxController {
             source: UserSource.device,
           );
           if (created != null) {
-            users.add(created);
-            _byPhone[created.phone] = created.name;
+            _addKnown(created);
           }
         } on PostgrestException catch (err) {
           if (err.code != '23505') {
@@ -180,8 +179,7 @@ class UserController extends GetxController {
         source: UserSource.manual,
       );
       if (created != null) {
-        users.add(created);
-        _byPhone[created.phone] = created.name;
+        _addKnown(created);
       }
     } catch (e) {
       debugPrint('UserController: rememberContact failed — $e');
@@ -207,8 +205,7 @@ class UserController extends GetxController {
         source: UserSource.booking,
       );
       if (created != null && adminId == _currentAdminId) {
-        users.add(created);
-        _byPhone[created.phone] = created.name;
+        _addKnown(created);
       }
     } catch (e) {
       debugPrint('UserController: autoGrowFromBooking failed — $e');
@@ -237,6 +234,12 @@ class UserController extends GetxController {
     _byPhone.clear();
     _currentAdminId = null;
     _adminIdByPhone.clear();
+  }
+
+  /// Adds a freshly-created directory row to the list and the lookup index.
+  void _addKnown(AppUser created) {
+    users.add(created);
+    _byPhone[created.phone] = created.name;
   }
 
   void _rebuildIndex() {
