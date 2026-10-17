@@ -254,6 +254,12 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
     if (mounted) setState(() {});
   }
 
+  /// Close this sheet, then hand control to [then] (the caller's flow).
+  VoidCallback _popThen(VoidCallback then) => () {
+        Navigator.of(context).pop();
+        then();
+      };
+
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -263,6 +269,8 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
     final priorityOn = _liveOcc.isPriorityApproved;
     final handlerOfThisBus = _isHandlerOfThisBus;
     final pickup = _pickup;
+    // Which legs of THIS seat the occupant may strike (pure read).
+    final strike = _strikeable(occ);
 
     // Padding, the drag handle and the bottom-inset spacing are all provided by
     // the shared UgamSheet shell; this content is a plain min-height column.
@@ -435,10 +443,7 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
                 icon: Icons.tune_rounded,
                 label: tr('occupant_sheet.seat_flags'),
                 c: c,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  widget.onSeatFlags!();
-                },
+                onTap: _popThen(widget.onSeatFlags!),
               ),
 
             _ActionRow(
@@ -446,10 +451,7 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
               label: tr('occupant_sheet.free'),
               c: c,
               danger: true,
-              onTap: () {
-                Navigator.of(context).pop();
-                _free();
-              },
+              onTap: _popThen(_free),
             ),
 
             // Strike ONE leg from THIS seat, so the freed half can be resold
@@ -458,31 +460,25 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
             // without the other vanishing. The caller owns the confirm +
             // cancel + guided-rebook flow; [cancellableSeatLegs] owns which of
             // the two is offerable.
-            if (widget.onCancelSeatLeg != null) ...[
-              if (_strikeable(occ).ret) ...[
+            if (widget.onCancelSeatLeg case final cancelLeg?) ...[
+              if (strike.ret) ...[
                 const SizedBox(height: UgamSpacing.sm),
                 _ActionRow(
                   icon: Icons.event_busy_rounded,
                   label: tr('tour_detail.cancel_return_seat'),
                   c: c,
                   danger: true,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    widget.onCancelSeatLeg!(occ, TripType.returnOnly);
-                  },
+                  onTap: _popThen(() => cancelLeg(occ, TripType.returnOnly)),
                 ),
               ],
-              if (_strikeable(occ).go) ...[
+              if (strike.go) ...[
                 const SizedBox(height: UgamSpacing.sm),
                 _ActionRow(
                   icon: Icons.logout_rounded,
                   label: tr('tour_detail.cancel_go_seat'),
                   c: c,
                   danger: true,
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    widget.onCancelSeatLeg!(occ, TripType.outboundOnly);
-                  },
+                  onTap: _popThen(() => cancelLeg(occ, TripType.outboundOnly)),
                 ),
               ],
             ],
@@ -498,10 +494,7 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
                 ),
                 c: c,
                 accent: true,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  widget.onSeatHere!();
-                },
+                onTap: _popThen(widget.onSeatHere!),
               ),
             ],
 
@@ -518,10 +511,7 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
                 ),
                 c: c,
                 accent: true,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  widget.onSwapIn!();
-                },
+                onTap: _popThen(widget.onSwapIn!),
               ),
             ],
           ],
