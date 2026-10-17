@@ -11,6 +11,10 @@ import 'supabase_service.dart';
 import 'sync_read_projections.dart';
 import 'sync_retry_policy.dart' as retry;
 
+part 'sync_service_reads.dart';
+part 'sync_service_retry.dart';
+part 'sync_service_writes.dart';
+
 /// Fetch every row by paging through [fetchPage] (a Supabase `.range(from,to)`
 /// closure) until a page shorter than [pageSize] returns (X-5). Replaces the
 /// silent `.limit(cap)` truncation so roster/capacity/money never compute on a
@@ -39,15 +43,6 @@ Future<List<T>> paginateRows<T>(
   return all;
 }
 
-/// Online-only Supabase access layer.
-///
-/// The former SQLite offline cache + write-queue (`OfflineDatabase`) was
-/// removed: it let stale tours survive logout / reinstall (Android Auto
-/// Backup restored the DB) and masked real fetch failures as empty
-/// results. Reads now hit Supabase live; writes await the server and
-/// throw on failure so callers can revert optimistic UI and surface the
-/// real error. [isOnline] still tracks connectivity so writes fail fast
-/// with a clear message instead of hanging when there is no network.
 /// Thrown by [SyncService]'s RPC helpers when the backing Postgres function is
 /// not deployed yet (migration 011), so callers can fall back to the legacy
 /// per-row write path instead of failing the operation outright.
@@ -86,6 +81,15 @@ List<String> coldStartHydrationScope(List<Map<String, dynamic>> tourRows) {
   return out;
 }
 
+/// Online-only Supabase access layer.
+///
+/// The former SQLite offline cache + write-queue (`OfflineDatabase`) was
+/// removed: it let stale tours survive logout / reinstall (Android Auto
+/// Backup restored the DB) and masked real fetch failures as empty
+/// results. Reads now hit Supabase live; writes await the server and
+/// throw on failure so callers can revert optimistic UI and surface the
+/// real error. [isOnline] still tracks connectivity so writes fail fast
+/// with a clear message instead of hanging when there is no network.
 class SyncService extends GetxService {
   // Read timeout budget. Raised from 8s → 12s (wifi) and 28s (cellular):
   // measured EDGE cold-start of a scoped roster is ~10.7s payload alone before
@@ -232,6 +236,20 @@ class SyncService extends GetxService {
     // because the flag had corrected by the tap. Writes still fail-fast on
     // [isOnline] below; reads must attempt the network and let a real socket
     // / timeout failure surface instead.
+    // A failed read never throws into the UI: log it, answer no rows, and carry
+    // the server's reason.
+    ({List<Map<String, dynamic>> rows, bool failed, String? error}) failure(
+      Object e,
+      StackTrace st,
+    ) {
+      dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
+      return (
+        rows: const <Map<String, dynamic>>[],
+        failed: true,
+        error: describeReadError(e),
+      );
+    }
+
     return _withReadSlot(() async {
       try {
         // Reads are idempotent — retry transient failures (incl. timeout) so one
@@ -263,27 +281,12 @@ class SyncService extends GetxService {
             );
             return (rows: rows, failed: false, error: null);
           } catch (e2, st2) {
-            dev.log('FETCH FAILED $table — $e2\n$st2', name: 'SyncService');
-            return (
-              rows: const <Map<String, dynamic>>[],
-              failed: true,
-              error: describeReadError(e2),
-            );
+            return failure(e2, st2);
           }
         }
-        dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
-        return (
-          rows: const <Map<String, dynamic>>[],
-          failed: true,
-          error: describeReadError(e),
-        );
+        return failure(e, st);
       } catch (e, st) {
-        dev.log('FETCH FAILED $table — $e\n$st', name: 'SyncService');
-        return (
-          rows: const <Map<String, dynamic>>[],
-          failed: true,
-          error: describeReadError(e),
-        );
+        return failure(e, st);
       }
     });
   }
@@ -304,78 +307,6 @@ class SyncService extends GetxService {
     return e.toString();
   }
 
-  Future<List<Map<String, dynamic>>> _fetchFromSupabase(
-    String table,
-    Map<String, String>? filters,
-    String? orderBy, {
-    String? select,
-  }) async {
-    if (table == 'tours') return _fetchToursWithRelations(filters, orderBy);
-
-    // Archived rows never reach the app (054). Applied before the caller's
-    // filters so it can't be dropped by a call site that builds its own.
-    // Prefer an explicit column projection when the caller supplies one —
-    // `select(*)` is what blew bus payloads on 2G (layout jsonb).
-    final columns = (select == null || select.isEmpty) ? '*' : select;
-    var filtered = _liveOnly(table, _client.from(table).select(columns));
-    if (filters != null) {
-      filters.forEach((k, v) {
-        filtered = filtered.eq(k, v);
-      });
-    }
-    return paginateRows<Map<String, dynamic>>((from, to) async {
-      // X-5: pagination pages via repeated .range() round trips, which needs
-      // a deterministic ORDER BY — without one, Postgres does not guarantee
-      // row order between separate requests and a multi-page read can
-      // silently drop or duplicate rows at a page boundary. When the caller
-      // gave no orderBy, fall back to the primary key ('id') purely for a
-      // stable (arbitrary) order; callers re-sort for display so this
-      // doesn't need to match any display order.
-      final transform = orderBy != null
-          ? filtered.order(orderBy, ascending: false).range(from, to)
-          : filtered.order('id').range(from, to);
-      // Per-page timeout, not an aggregate one over the whole multi-page
-      // read — see the comment on smartFetch's _withRetry call.
-      final rows =
-          await _withTimeout(transform, readTimeout, '$table page fetch');
-      return List<Map<String, dynamic>>.from(
-        (rows as List).map((r) => Map<String, dynamic>.from(r)),
-      );
-    });
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchToursWithRelations(
-    Map<String, String>? filters,
-    String? orderBy,
-  ) async {
-    final tours = await fetchTourRows(filters: filters, orderBy: orderBy);
-    if (tours.isEmpty) return [];
-
-    // COLD-START SCOPE (2G).
-    //
-    // Rosters are fetched only for tours that are still RUNNING. A completed
-    // tour is archived history: its roster is re-downloaded on every single
-    // cold start forever, so the payload grows without bound as the business
-    // runs — after a year of trips the launch fetch is several times what it
-    // is today, and it is already the thing that breaks 2G.
-    //
-    // Measured on a realistic 25-tour book (50 passengers each), gzipped as
-    // the wire actually carries it:
-    //   all tours hydrated  → 105 kB → 10.7s on EDGE, 43s on GPRS
-    //   running tours only  →  10 kB →  1.0s on EDGE,  4.1s on GPRS
-    // The 12s read budget is what the first one blows once TLS handshake and
-    // query time are added on a 2G link.
-    //
-    // Live admin probe (2026-08-09): bus `layout` jsonb is ~71% of owner-wide
-    // bus bytes. Cold start therefore pulls bus METADATA only; charts call
-    // [fetchBusLayouts] on demand / via TourController background prefetch.
-    //
-    // An archived tour's roster is loaded on demand the moment it is opened —
-    // see [fetchRelationsForTours] and TourController.ensureTourHydrated.
-    final relations = await _fetchRelations(coldStartHydrationScope(tours));
-    return _attachRelations(tours, relations);
-  }
-
   /// Tour header rows only — no passengers/buses. Used so the UI can paint
   /// titles on 2G before the heavier roster round-trips finish.
   Future<List<Map<String, dynamic>>> fetchTourRows({
@@ -393,10 +324,9 @@ class SyncService extends GetxService {
         final transform = orderBy != null
             ? tourQuery.order(orderBy, ascending: false).range(from, to)
             : tourQuery.order('id').range(from, to);
-        final rows =
-            await _withTimeout(transform, readTimeout, 'tours page fetch');
-        return List<Map<String, dynamic>>.from(
-          (rows as List).map((r) => Map<String, dynamic>.from(r)),
+        return _timedRows(
+          transform,
+          'tours page fetch',
         );
       });
     });
@@ -417,18 +347,14 @@ class SyncService extends GetxService {
         final chunk = ids.sublist(i, math.min(i + chunkSize, ids.length));
         final page = await _withRetry(
           () async {
-            final rows = await _withTimeout(
+            return _timedRows(
               _liveOnly(
                 'buses',
                 _client
                     .from('buses')
                     .select(SyncReadProjections.busLayoutSelect),
               ).inFilter('id', chunk),
-              readTimeout,
               'bus layouts fetch',
-            );
-            return List<Map<String, dynamic>>.from(
-              (rows as List).map((r) => Map<String, dynamic>.from(r)),
             );
           },
           timeout: null,
@@ -459,16 +385,12 @@ class SyncService extends GetxService {
         final chunk = ids.sublist(i, math.min(i + chunkSize, ids.length));
         final rows = await paginateRows<Map<String, dynamic>>(
           (from, to) async {
-            final page = await _withTimeout(
+            return _timedRows(
               _liveOnly(
                 'buses',
                 _client.from('buses').select('id,tour_id'),
               ).inFilter('tour_id', chunk).order('id').range(from, to),
-              readTimeout,
               'bus counts fetch',
-            );
-            return List<Map<String, dynamic>>.from(
-              (page as List).map((r) => Map<String, dynamic>.from(r)),
             );
           },
         );
@@ -496,171 +418,6 @@ class SyncService extends GetxService {
         List<Map<String, dynamic>> groups,
       })> fetchRelationsForTours(List<String> tourIds) =>
       _fetchRelations(tourIds);
-
-  Future<
-      ({
-        List<Map<String, dynamic>> passengers,
-        List<Map<String, dynamic>> buses,
-        List<Map<String, dynamic>> groups,
-      })> _fetchRelations(List<String> tourIds) async {
-    if (tourIds.isEmpty) {
-      return (
-        passengers: const <Map<String, dynamic>>[],
-        buses: const <Map<String, dynamic>>[],
-        groups: const <Map<String, dynamic>>[],
-      );
-    }
-
-    return _withReadSlot(() => _fetchRelationsUnlocked(tourIds));
-  }
-
-  Future<
-      ({
-        List<Map<String, dynamic>> passengers,
-        List<Map<String, dynamic>> buses,
-        List<Map<String, dynamic>> groups,
-      })> _fetchRelationsUnlocked(List<String> tourIds) async {
-    // Passengers + buses are independent once we know tour ids — fetch
-    // them in parallel. Previously these awaits ran sequentially, which
-    // cost one full extra round-trip per tour load on cellular networks
-    // (passenger response gates the bus request for no reason). Each is
-    // now fully paginated (X-5) rather than capped, so a large roster or
-    // fleet never gets silently truncated.
-    // X-5: order by 'id' (each table's PK — passengers/passenger_groups
-    // confirmed in supabase/migrations/001_initial_schema.sql and
-    // 006_seat_groups_priority.sql; buses' `id` PK is confirmed indirectly —
-    // every generic write in this file addresses buses rows by `.eq('id',
-    // entityId)`) so repeated .range() round trips see a stable row order
-    // instead of an unordered one that can drop/duplicate rows at a page
-    // boundary. Each page fetch also gets its own timeout budget (not an
-    // aggregate one over the whole multi-page read) — see smartFetch.
-    final passengersFuture = paginateRows<Map<String, dynamic>>(
-      (from, to) async {
-        final rows = await _withTimeout(
-          _liveOnly(
-            'passengers',
-            _client
-                .from('passengers')
-                .select(SyncReadProjections.passengerSelect),
-          )
-              .inFilter('tour_id', tourIds)
-              .order('id')
-              .range(from, to),
-          readTimeout,
-          'passengers page fetch',
-        );
-        return List<Map<String, dynamic>>.from(
-          (rows as List).map((r) => Map<String, dynamic>.from(r)),
-        );
-      },
-    );
-    // Buses are joined by buses.tour_id (one-to-many). A tour can have
-    // multiple buses; the legacy single tours.bus_id is no longer used.
-    // Cold start omits `layout` jsonb (measured ~71% of bus payload).
-    final busesFuture = paginateRows<Map<String, dynamic>>(
-      (from, to) async {
-        final rows = await _withTimeout(
-          _liveOnly(
-            'buses',
-            _client.from('buses').select(SyncReadProjections.busListSelect),
-          )
-              .inFilter('tour_id', tourIds)
-              .order('id')
-              .range(from, to),
-          readTimeout,
-          'buses page fetch',
-        );
-        return List<Map<String, dynamic>>.from(
-          (rows as List).map((r) => Map<String, dynamic>.from(r)),
-        );
-      },
-    );
-    // Passenger groups (cross-booking groups) are also keyed by tour_id.
-    final groupsFuture = paginateRows<Map<String, dynamic>>(
-      (from, to) async {
-        final rows = await _withTimeout(
-          _client
-              .from('passenger_groups')
-              .select()
-              .inFilter('tour_id', tourIds)
-              .order('id')
-              .range(from, to),
-          readTimeout,
-          'passenger_groups page fetch',
-        );
-        return List<Map<String, dynamic>>.from(
-          (rows as List).map((r) => Map<String, dynamic>.from(r)),
-        );
-      },
-    );
-
-    // passengers + buses are the core relations and MUST load. passenger_groups
-    // is new (migration 006) and OPTIONAL — if that table isn't present yet (or
-    // its query fails for any reason) it must NOT take down the whole tour load
-    // via Future.wait. Degrade to "no groups" instead of breaking every screen.
-    final coreResults = await Future.wait([passengersFuture, busesFuture]);
-    final passengersRaw = coreResults[0];
-    final busesRaw = coreResults[1];
-    List<Map<String, dynamic>> groupsRaw;
-    try {
-      groupsRaw = await groupsFuture;
-    } catch (_) {
-      groupsRaw = const [];
-    }
-
-    return (passengers: passengersRaw, buses: busesRaw, groups: groupsRaw);
-  }
-
-  /// Groups [relations] by tour_id and nests them onto each row of [tours].
-  ///
-  /// A tour with no entry in the relation maps gets empty lists — which is
-  /// correct for BOTH "this tour genuinely has no passengers" and "this
-  /// archived tour was not hydrated at cold start". The caller distinguishes
-  /// the two (TourController tracks which tours it has hydrated); this layer
-  /// only shapes data.
-  List<Map<String, dynamic>> _attachRelations(
-    List<Map<String, dynamic>> tours,
-    ({
-      List<Map<String, dynamic>> passengers,
-      List<Map<String, dynamic>> buses,
-      List<Map<String, dynamic>> groups,
-    }) relations,
-  ) {
-    final passengersByTour = <String, List<Map<String, dynamic>>>{};
-    for (final p in relations.passengers) {
-      final m = Map<String, dynamic>.from(p as Map);
-      // A customer-cancelled passenger (migration 034) is kept in the DB for
-      // history but must never enter the active roster — drop it here so every
-      // downstream capacity/roster calc is correct without per-site filtering.
-      if (m['cancelled_at'] != null) continue;
-      final tId = m['tour_id'] as String?;
-      if (tId != null) passengersByTour.putIfAbsent(tId, () => []).add(m);
-    }
-
-    final busesByTour = <String, List<Map<String, dynamic>>>{};
-    for (final b in relations.buses) {
-      final m = Map<String, dynamic>.from(b);
-      final tId = m['tour_id'] as String?;
-      if (tId != null) busesByTour.putIfAbsent(tId, () => []).add(m);
-    }
-
-    final groupsByTour = <String, List<Map<String, dynamic>>>{};
-    for (final g in relations.groups) {
-      final m = Map<String, dynamic>.from(g as Map);
-      final tId = m['tour_id'] as String?;
-      if (tId != null) groupsByTour.putIfAbsent(tId, () => []).add(m);
-    }
-
-    return tours.map((t) {
-      final tId = t['id'] as String;
-      return {
-        ...t,
-        'passengers': passengersByTour[tId] ?? const [],
-        'buses': busesByTour[tId] ?? const [],
-        'groups': groupsByTour[tId] ?? const [],
-      };
-    }).toList();
-  }
 
   // ── Soft delete (migration 054) ─────────────────────────────────────
 
@@ -755,16 +512,6 @@ class SyncService extends GetxService {
 
   // ── Writes (live, online-only) ──────────────────────────────────────
 
-  /// Tables whose RLS policies require `owner_id = auth.uid()`. We backfill
-  /// `owner_id` from the current session before writing so an admin write
-  /// never lands without it.
-  static const _ownerScopedTables = {
-    'tours',
-    'buses',
-    'admin_contacts',
-    'customer_memory',
-  };
-
   void _ensureOnline() {
     if (!isOnline.value) {
       throw Exception('You appear to be offline. Connect to save changes.');
@@ -780,16 +527,7 @@ class SyncService extends GetxService {
     _ensureOnline();
     // Idempotent by entity id (23505 -> update-by-id fallback), so a timeout
     // that actually landed converges to the same row on retry.
-    await _withRetry(
-      () => _writeToServer(
-        operation: 'insert',
-        table: table,
-        entityId: entityId,
-        data: data,
-      ),
-      timeout: _writeTimeout,
-      label: 'insert $table',
-    );
+    await _retriedWrite('insert', table, entityId, data);
   }
 
   Future<void> smartUpdate({
@@ -800,16 +538,7 @@ class SyncService extends GetxService {
     _ensureOnline();
     // update-by-id (empty result -> insert fallback) is idempotent: re-running
     // with the same data yields the identical row. Safe to retry on timeout.
-    await _withRetry(
-      () => _writeToServer(
-        operation: 'update',
-        table: table,
-        entityId: entityId,
-        data: data,
-      ),
-      timeout: _writeTimeout,
-      label: 'update $table',
-    );
+    await _retriedWrite('update', table, entityId, data);
   }
 
   /// Column-scoped update: writes ONLY [fields], leaving every other column on
@@ -837,16 +566,7 @@ class SyncService extends GetxService {
     _ensureOnline();
     // Idempotent: re-applying identical field values yields the identical row,
     // so a timed-out patch that actually landed is safe to re-run.
-    await _withRetry(
-      () => _writeToServer(
-        operation: 'patch',
-        table: table,
-        entityId: entityId,
-        data: fields,
-      ),
-      timeout: _writeTimeout,
-      label: 'patch $table',
-    );
+    await _retriedWrite('patch', table, entityId, fields);
   }
 
   Future<void> smartDelete({
@@ -856,16 +576,7 @@ class SyncService extends GetxService {
     _ensureOnline();
     // delete-by-id is idempotent: deleting an already-deleted row is a no-op
     // (0 rows, no error). Safe to retry after a possibly-landed timeout.
-    await _withRetry(
-      () => _writeToServer(
-        operation: 'delete',
-        table: table,
-        entityId: entityId,
-        data: {'id': entityId},
-      ),
-      timeout: _writeTimeout,
-      label: 'delete $table',
-    );
+    await _retriedWrite('delete', table, entityId, {'id': entityId});
   }
 
   // ── Atomic seat RPCs (migration 011) ────────────────────────────────
@@ -920,209 +631,10 @@ class SyncService extends GetxService {
     );
   }
 
-  Future<void> _callRpc(String fn, Map<String, dynamic> params) async {
-    try {
-      await _client.rpc(fn, params: params);
-    } on PostgrestException catch (e) {
-      // PGRST202 (PostgREST) / 42883 (Postgres) = function does not exist —
-      // the migration isn't deployed. Signal a graceful fallback.
-      if (e.code == 'PGRST202' || e.code == '42883') {
-        throw RpcUnavailableException(fn);
-      }
-      rethrow;
-    }
-  }
-
   /// Like [_callRpc] but returns the RPC's raw result — for functions that
   /// report a boolean / row outcome the caller must branch on (e.g. the admin
   /// dismiss-cancellation RPC). Same not-deployed signalling as [_callRpc].
   Future<dynamic> callRpcResult(String fn, Map<String, dynamic> params) async {
-    try {
-      return await _client.rpc(fn, params: params);
-    } on PostgrestException catch (e) {
-      if (e.code == 'PGRST202' || e.code == '42883') {
-        throw RpcUnavailableException(fn);
-      }
-      rethrow;
-    }
-  }
-
-  /// Single source of truth for the actual server write. Throws on failure —
-  /// callers decide whether to revert optimistic UI or surface an error.
-  Future<void> _writeToServer({
-    required String operation,
-    required String table,
-    required String entityId,
-    required Map<String, dynamic> data,
-  }) async {
-    final clean = Map<String, dynamic>.from(data)
-      ..remove(r'$id')
-      ..remove(r'$createdAt')
-      ..remove(r'$updatedAt');
-    clean['id'] = entityId;
-
-    // Backfill owner_id from the current Supabase Auth session for tables
-    // whose RLS requires it.
-    //
-    // Skipped for 'patch': a patch promises to touch ONLY the caller's columns,
-    // and an UPDATE does not need owner_id in the payload anyway — RLS matches
-    // the row on its existing owner.
-    final authUid = _client.auth.currentUser?.id;
-    if (operation != 'patch' &&
-        _ownerScopedTables.contains(table) &&
-        authUid != null &&
-        (clean['owner_id'] == null ||
-            (clean['owner_id'] is String &&
-                (clean['owner_id'] as String).isEmpty))) {
-      clean['owner_id'] = authUid;
-    }
-
-    switch (operation) {
-      case 'insert':
-        try {
-          await _client.from(table).insert(clean);
-        } on PostgrestException catch (e) {
-          // 23505 = unique_violation. Usually the conflict is on a non-id
-          // column (e.g. (tour_id, phone) on passengers). Only fall back
-          // to UPDATE when a row with this exact id already exists.
-          final existing = e.code == '23505'
-              ? await _client
-                  .from(table)
-                  .select('id')
-                  .eq('id', entityId)
-                  .maybeSingle()
-              : null;
-          switch (retry.resolveInsertConflict(
-            code: e.code,
-            rowWithIdExists: existing != null,
-          )) {
-            case retry.InsertConflictAction.updateById:
-              final updateData = Map<String, dynamic>.from(clean)..remove('id');
-              await _client.from(table).update(updateData).eq('id', entityId);
-            case retry.InsertConflictAction.rethrowError:
-              rethrow;
-          }
-        }
-        break;
-      case 'update':
-        final updateData = Map<String, dynamic>.from(clean)..remove('id');
-        final res = await _client
-            .from(table)
-            .update(updateData)
-            .eq('id', entityId)
-            .select();
-        if ((res as List).isEmpty) {
-          // Row missing — fall back to insert.
-          await _client.from(table).insert(clean);
-        }
-        break;
-      case 'patch':
-        // Column-scoped update: writes ONLY the keys the caller supplied and
-        // NEVER falls back to insert. The insert fallback above is safe for a
-        // whole-entity map but catastrophic for a partial one — it would
-        // materialise a row containing just the patched columns and defaults
-        // for everything else.
-        //
-        // A patch that matches no row is therefore a BUG (wrong id, or the row
-        // was deleted underneath us), and it surfaces as an error rather than
-        // being papered over with a half-built row.
-        final patchData = Map<String, dynamic>.from(clean)..remove('id');
-        final patched = await _client
-            .from(table)
-            .update(patchData)
-            .eq('id', entityId)
-            .select();
-        if ((patched as List).isEmpty) {
-          throw StateError(
-            'patch $table/$entityId matched no row — refusing to insert a '
-            'partial row from ${patchData.keys.join(', ')}',
-          );
-        }
-        break;
-      case 'delete':
-        // SOFT DELETE (054): money-bearing rows are archived, never destroyed.
-        // Routed here rather than at the ~8 call sites so no future delete can
-        // opt out by accident — the table set is the single switch.
-        //
-        // Idempotent like the hard delete it replaces: re-stamping deleted_at
-        // on an already-archived row is harmless, so a timed-out write that
-        // actually landed still converges on retry. `deleted_by` is only
-        // stamped when there is a signed-in admin; handler-initiated deletes
-        // record their own actor server-side in their RPCs.
-        if (softDeletableTables.contains(table)) {
-          final archive = <String, dynamic>{
-            'deleted_at': DateTime.now().toUtc().toIso8601String(),
-          };
-          if (authUid != null) archive['deleted_by'] = authUid;
-          await _client.from(table).update(archive).eq('id', entityId);
-        } else {
-          await _client.from(table).delete().eq('id', entityId);
-        }
-        break;
-    }
-  }
-
-  // ── Retry / transient-failure policy ────────────────────────────────
-  // Single home for resilience. Each attempt is bounded by [_withTimeout];
-  // only transient (network/transport/5xx/timeout) failures are re-run.
-  // Terminal errors (RLS/auth, unique-violation, missing-function) surface
-  // immediately, and the LAST error is rethrown once attempts are exhausted.
-
-  /// Runs [action] up to [maxAttempts] times with exponential backoff
-  /// (~400ms, then ~1200ms) between attempts. A retry happens only when the
-  /// error is deemed retryable — by [isRetryable] if supplied, otherwise by
-  /// [_isRetryable] (which honours [retryOnTimeout]). Idempotent callers pass
-  /// nothing (retry transient incl. timeout); the non-idempotent swap RPC
-  /// passes a pre-send-only predicate so a timeout never triggers a re-swap.
-  ///
-  /// [timeout] bounds each ATTEMPT of [action] as a whole. Pass `null` when
-  /// [action] already bounds its own latency internally (X-5: a paginated
-  /// read applies [readTimeout] to each individual page round trip) — that
-  /// avoids double-bounding a multi-page read with one more aggregate
-  /// timeout on top of its own per-page ones.
-  Future<T> _withRetry<T>(
-    Future<T> Function() action, {
-    required Duration? timeout,
-    required String label,
-    int maxAttempts = 3,
-    bool retryOnTimeout = true,
-    bool Function(Object error)? isRetryable,
-  }) async {
-    final predicate = isRetryable ??
-        ((Object e) => retry.isRetryable(e, retryOnTimeout: retryOnTimeout));
-    Object? lastError;
-    StackTrace? lastStack;
-    for (var attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        return timeout != null
-            ? await _withTimeout(action(), timeout, label)
-            : await action();
-      } catch (e, st) {
-        lastError = e;
-        lastStack = st;
-        final isLastAttempt = attempt == maxAttempts - 1;
-        if (isLastAttempt || !predicate(e)) rethrow;
-        final backoffMs = (400 * math.pow(3, attempt)).round();
-        dev.log(
-          'RETRY $label — attempt ${attempt + 1}/$maxAttempts failed ($e); '
-          'waiting ${backoffMs}ms',
-          name: 'SyncService',
-        );
-        await Future<void>.delayed(Duration(milliseconds: backoffMs));
-      }
-    }
-    // Loop always returns or rethrows; this satisfies the analyzer.
-    Error.throwWithStackTrace(lastError!, lastStack ?? StackTrace.current);
-  }
-
-  Future<T> _withTimeout<T>(
-    Future<T> future,
-    Duration duration,
-    String label,
-  ) {
-    return future.timeout(
-      duration,
-      onTimeout: () => throw TimeoutException('$label timed out', duration),
-    );
+    return await _rpcOrUnavailable(fn, params);
   }
 }

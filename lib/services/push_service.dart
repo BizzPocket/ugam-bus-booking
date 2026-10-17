@@ -282,28 +282,31 @@ class PushService {
   ///   `booking_request` → the admin Requests tab.
   ///   `wa_message`      → the WhatsApp Inbox (a pushed route, not a tab).
   void _handleTapType(String? type) {
-    if (type == 'booking_request') {
-      if (Get.currentRoute != AppRoutes.home) {
-        Get.offAllNamed(AppRoutes.home);
-      }
-      // The shell mounts asynchronously after navigation; select the Requests
-      // tab once its controller exists.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (Get.isRegistered<ShellController>()) {
-          Get.find<ShellController>().switchTab(_requestsTabIndex);
-        }
-      });
-    } else if (type == 'wa_message') {
-      // Land on the home shell, then push the inbox over it so the back
-      // affordance returns to home.
-      if (Get.currentRoute != AppRoutes.home) {
-        Get.offAllNamed(AppRoutes.home);
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (Get.currentRoute != AppRoutes.inbox) {
-          Get.toNamed(AppRoutes.inbox);
-        }
-      });
+    switch (type) {
+      case 'booking_request':
+        _landOnHome();
+        // The shell mounts asynchronously after navigation; select the Requests
+        // tab once its controller exists.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (Get.isRegistered<ShellController>()) {
+            Get.find<ShellController>().switchTab(_requestsTabIndex);
+          }
+        });
+      case 'wa_message':
+        // Land on the home shell, then push the inbox over it so the back
+        // affordance returns to home.
+        _landOnHome();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (Get.currentRoute != AppRoutes.inbox) {
+            Get.toNamed(AppRoutes.inbox);
+          }
+        });
+    }
+  }
+
+  void _landOnHome() {
+    if (Get.currentRoute != AppRoutes.home) {
+      Get.offAllNamed(AppRoutes.home);
     }
   }
 

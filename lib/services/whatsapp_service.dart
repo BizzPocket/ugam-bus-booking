@@ -99,8 +99,7 @@ class WhatsAppService {
     final seatParts = passenger.requestLines
         .map((l) => '${l.qty} ${l.label.replaceAll(' ×', '')}')
         .join(' + ');
-    final dateLine = '📅 ${_formatDate(tour.departureDate)}'
-        '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}';
+    final dateLine = '📅 ${_dateRange(tour)}';
 
     if (passenger.assignedSeats.isNotEmpty) {
       // Describe the booking by what was requested ("2 Double Sofa") rather
@@ -191,21 +190,8 @@ class WhatsAppService {
     TripType tripType = TripType.roundTrip,
     String? pickupLocation,
   }) {
-    final seatParts = <String>[];
-    if (doubleSofaCount > 0) {
-      seatParts.add('$doubleSofaCount Double Sofa');
-    }
-    if (singleSofaCount > 0) {
-      seatParts.add('$singleSofaCount Single Sofa');
-    }
-
-    final tripLine = switch (tripType) {
-      TripType.roundTrip => '🔁 *Trip:* Round-trip (both legs)',
-      TripType.outboundOnly =>
-          '➡️ *Trip:* One-way — ${tour.fromCity} → ${tour.toCity} (outbound only)',
-      TripType.returnOnly =>
-          '⬅️ *Trip:* One-way — ${tour.toCity} → ${tour.fromCity} (return only)',
-    };
+    final seatParts = _sofaParts(doubleSofaCount, singleSofaCount);
+    final tripLine = _tripLine(tour, tripType);
 
     final lines = <String>[
       if (isUpdate)
@@ -221,8 +207,7 @@ class WhatsAppService {
       ],
       '🗺 *Tour:* ${tour.title}',
       '📍 ${tour.fromCity} → ${tour.toCity}',
-      '📅 ${_formatDate(tour.departureDate)}'
-          '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      '📅 ${_dateRange(tour)}',
       '',
       '👤 *Name:* $customerName',
       '💺 *Seats:* ${seatParts.join(' + ')}',
@@ -286,21 +271,8 @@ class WhatsAppService {
     String? pickupLocation,
     List<String> seatIds = const [],
   }) {
-    final seatParts = <String>[];
-    if (doubleSofaCount > 0) {
-      seatParts.add('$doubleSofaCount Double Sofa');
-    }
-    if (singleSofaCount > 0) {
-      seatParts.add('$singleSofaCount Single Sofa');
-    }
-
-    final tripLine = switch (tripType) {
-      TripType.roundTrip => '🔁 *Trip:* Round-trip (both legs)',
-      TripType.outboundOnly =>
-          '➡️ *Trip:* One-way — ${tour.fromCity} → ${tour.toCity} (outbound only)',
-      TripType.returnOnly =>
-          '⬅️ *Trip:* One-way — ${tour.toCity} → ${tour.fromCity} (return only)',
-    };
+    final seatParts = _sofaParts(doubleSofaCount, singleSofaCount);
+    final tripLine = _tripLine(tour, tripType);
 
     final lines = <String>[
       '🛑 *Cancellation Request — Ugam Booking*',
@@ -311,8 +283,7 @@ class WhatsAppService {
       '',
       '🗺 *Tour:* ${tour.title}',
       '📍 ${tour.fromCity} → ${tour.toCity}',
-      '📅 ${_formatDate(tour.departureDate)}'
-          '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      '📅 ${_dateRange(tour)}',
       '',
       '👤 *Name:* $customerName',
       '💺 *Seats:* ${seatParts.join(' + ')}',
@@ -385,7 +356,7 @@ class WhatsAppService {
       '👤 *${passenger.name}*',
       '🗺 *${tour.title}*',
       '📍 ${tour.fromCity} → ${tour.toCity}',
-      '📅 ${_formatDate(tour.departureDate)}${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      '📅 ${_dateRange(tour)}',
       '💺 *Seats:* $seats',
     ];
 
@@ -408,7 +379,7 @@ class WhatsAppService {
       '',
       '🗺 *${tour.title}*',
       '📍 ${tour.fromCity} → ${tour.toCity}',
-      '📅 ${_formatDate(tour.departureDate)}${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}',
+      '📅 ${_dateRange(tour)}',
     ];
 
     if (tour.description != null && tour.description!.isNotEmpty) {
@@ -484,6 +455,25 @@ class WhatsAppService {
     }
     return phone;
   }
+
+  /// "Doubles first, then singles" seat summary of a customer message.
+  static List<String> _sofaParts(int doubleSofaCount, int singleSofaCount) => [
+        if (doubleSofaCount > 0) '$doubleSofaCount Double Sofa',
+        if (singleSofaCount > 0) '$singleSofaCount Single Sofa',
+      ];
+
+  /// The trip-type line of a customer request / cancellation message.
+  static String _tripLine(Tour tour, TripType tripType) => switch (tripType) {
+        TripType.roundTrip => '🔁 *Trip:* Round-trip (both legs)',
+        TripType.outboundOnly =>
+          '➡️ *Trip:* One-way — ${tour.fromCity} → ${tour.toCity} (outbound only)',
+        TripType.returnOnly =>
+          '⬅️ *Trip:* One-way — ${tour.toCity} → ${tour.fromCity} (return only)',
+      };
+
+  /// `departure` or `departure – return` when the tour has a return date.
+  String _dateRange(Tour tour) => '${_formatDate(tour.departureDate)}'
+      '${tour.returnDate != null ? ' – ${_formatDate(tour.returnDate!)}' : ''}';
 
   String _formatDate(DateTime date) {
     final months = [

@@ -307,12 +307,13 @@ class LocationTrackerService extends GetxService {
         // RETURNED: the batch is spent, whatever it says.
         final error = result['error'] as String?;
 
-        if (error == 'window_closed') {
-          await _stopAndClear(TrackingStatus.windowClosed);
-          return;
-        }
-        if (error == 'forbidden') {
-          await _stopAndClear(TrackingStatus.forbidden);
+        final terminal = switch (error) {
+          'window_closed' => TrackingStatus.windowClosed,
+          'forbidden' => TrackingStatus.forbidden,
+          _ => null,
+        };
+        if (terminal != null) {
+          await _stopAndClear(terminal);
           return;
         }
         if (error == 'bad_payload') {
@@ -358,17 +359,11 @@ class LocationTrackerService extends GetxService {
 
     final raw = await Supabase.instance.client.rpc(
       _asPassenger ? 'passenger_push_locations' : 'handler_push_locations',
-      params: _asPassenger
-          ? {
-              'p_phone': _requestId,
-              'p_bus_id': _busId,
-              'p_fixes': payload,
-            }
-          : {
-              'p_request_id': _requestId,
-              'p_bus_id': _busId,
-              'p_fixes': payload,
-            },
+      params: {
+        _asPassenger ? 'p_phone' : 'p_request_id': _requestId,
+        'p_bus_id': _busId,
+        'p_fixes': payload,
+      },
     );
     return raw is Map<String, dynamic>
         ? raw

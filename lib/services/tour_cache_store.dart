@@ -297,19 +297,15 @@ Map<String, dynamic> encodeTour(Tour t) => {
 /// `buses` / `passengers` / `groups` lists, so this is mostly a guard that the
 /// nested lists are the shape it expects.
 @visibleForTesting
-Tour decodeTour(Map<String, dynamic> map) => Tour.fromMap({
-      ...map,
-      'buses': [
-        for (final b in (map['buses'] as List? ?? const []))
-          if (b is Map) Map<String, dynamic>.from(b),
-      ],
-      'passengers': [
-        for (final p in (map['passengers'] as List? ?? const []))
-          if (p is Map) Map<String, dynamic>.from(p),
-      ],
-      'groups': [
-        for (final g in (map['groups'] as List? ?? const []))
-          if (g is Map) Map<String, dynamic>.from(g),
-      ],
-    });
-
+Tour decodeTour(Map<String, dynamic> map) {
+  List<Map<String, dynamic>> maps(String key) => [
+        for (final m in (map[key] as List? ?? const []))
+          if (m is Map) Map<String, dynamic>.from(m),
+      ];
+  return Tour.fromMap({
+    ...map,
+    'buses': maps('buses'),
+    'passengers': maps('passengers'),
+    'groups': maps('groups'),
+  });
+}
