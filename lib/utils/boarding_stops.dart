@@ -9,6 +9,9 @@
 // to leave a stop.
 
 import '../models/passenger.dart';
+import '../models/seat_layout.dart';
+import 'aisle_order.dart';
+import 'passenger_display.dart';
 import 'pickup_grouping.dart';
 
 /// One pickup point plus how far the handler has got through it.
@@ -83,10 +86,128 @@ class BoardingProgress {
 /// serial). Passing it through keeps the stops in route order rather than
 /// alphabetical, which is the difference between a usable boarding list and a
 /// scramble.
+///
+/// Every seat code this rider holds on [busId], in aisle-walking order. A
+/// passenger with two double sofas at DL2 and DL9 therefore shows both codes
+/// even though the berths are not adjacent — attendance is still one row per
+/// person.
+List<String> seatIdsOnBus(
+  Passenger passenger,
+  String busId, {
+  AisleWalk? walk,
+}) {
+  final w = walk ?? AisleWalk.of(null);
+  final ids = <String>[];
+  for (final a in passenger.assignedSeats) {
+    if (a.busId != busId) continue;
+    final id = a.seatId;
+    if (id.isEmpty) continue;
+    if (!ids.contains(id)) ids.add(id);
+  }
+  ids.sort((a, b) {
+    final ia = w.indexOf(a);
+    final ib = w.indexOf(b);
+    if (ia != null && ib != null && ia != ib) return ia.compareTo(ib);
+    if (ia != null && ib == null) return -1;
+    if (ia == null && ib != null) return 1;
+    return a.compareTo(b);
+  });
+  return ids;
+}
+
+/// The frontmost seat on [busId] — used for sort position only.
+String? seatIdOnBus(Passenger passenger, String busId, {AisleWalk? walk}) {
+  final ids = seatIdsOnBus(passenger, busId, walk: walk);
+  return ids.isEmpty ? null : ids.first;
+}
+
+/// Aisle index of the frontmost seat on [busId], or a large sentinel.
+int frontSeatRank(Passenger passenger, String busId, AisleWalk walk) {
+  final id = seatIdOnBus(passenger, busId, walk: walk);
+  return walk.indexOf(id) ?? (1 << 30);
+}
+
+/// Sort riders the way the seat chart reads: front to back along the aisle.
+int comparePassengersByBusSeat(
+  Passenger a,
+  Passenger b, {
+  required String busId,
+  BusLayout? layout,
+}) {
+  final walk = AisleWalk.of(layout);
+  int rank(Passenger p) {
+    final id = seatIdOnBus(p, busId, walk: walk);
+    final i = walk.indexOf(id);
+    if (i != null) return i;
+    return 1 << 30;
+  }
+
+  final ra = rank(a);
+  final rb = rank(b);
+  if (ra != rb) return ra.compareTo(rb);
+  final sa = seatIdOnBus(a, busId, walk: walk) ?? '';
+  final sb = seatIdOnBus(b, busId, walk: walk) ?? '';
+  final bySeat = sa.compareTo(sb);
+  if (bySeat != 0) return bySeat;
+  return a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+}
+
+/// Orders riders at one pickup: booking groups stay together, positioned by the
+/// family's frontmost seat; inside a group, seat order; ungrouped riders sort
+/// by their own seats.
+List<Passenger> sortRidersForBoarding(
+  List<Passenger> riders, {
+  required String busId,
+  BusLayout? layout,
+}) {
+  if (riders.length <= 1) return riders;
+  final walk = AisleWalk.of(layout);
+
+  final clusters = <String, List<Passenger>>{};
+  for (final p in riders) {
+    final key = (p.groupId == null || p.groupId!.isEmpty) ? p.id : p.groupId!;
+    clusters.putIfAbsent(key, () => []).add(p);
+  }
+
+  int clusterRank(List<Passenger> members) {
+    var best = 1 << 30;
+    for (final m in members) {
+      final r = frontSeatRank(m, busId, walk);
+      if (r < best) best = r;
+    }
+    return best;
+  }
+
+  final ordered = clusters.entries.toList()
+    ..sort((a, b) {
+      final ra = clusterRank(a.value);
+      final rb = clusterRank(b.value);
+      if (ra != rb) return ra.compareTo(rb);
+      return a.key.compareTo(b.key);
+    });
+
+  final out = <Passenger>[];
+  for (final e in ordered) {
+    final members = List<Passenger>.from(e.value)
+      ..sort(
+        (a, b) => comparePassengersByBusSeat(
+          a,
+          b,
+          busId: busId,
+          layout: layout,
+        ),
+      );
+    out.addAll(members);
+  }
+  return out;
+}
+
 BoardingProgress buildBoardingProgress(
   List<Passenger> riders, {
   required bool Function(Passenger) isPresent,
   int? Function(String? locationId, String locationName)? rankOf,
+  String? seatSortBusId,
+  BusLayout? seatSortLayout,
 }) {
   final groups = groupByPickup<Passenger>(
     riders,
@@ -100,7 +221,13 @@ BoardingProgress buildBoardingProgress(
       BoardingStop(
         locationId: g.locationId,
         locationName: g.locationName,
-        riders: g.items,
+        riders: seatSortBusId == null
+            ? g.items
+            : sortRidersForBoarding(
+                g.items,
+                busId: seatSortBusId,
+                layout: seatSortLayout,
+              ),
         boarded: g.items.where(isPresent).length,
       ),
   ];

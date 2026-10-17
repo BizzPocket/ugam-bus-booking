@@ -160,6 +160,114 @@ void main() {
     });
   });
 
+  group('an admin-completed tour', () {
+    // Live, 2026-09-05: `handler_bus_trip_state` holds ONE row ever — the
+    // 13-Aug bus, stamped "departed" and nothing after. Its handler still saw
+    // "On the road · outbound / We've arrived" three weeks after the agent had
+    // completed the tour, because the phase only ever read the handler's own
+    // stamps. The tour's status is a fact the server already has; when the
+    // agent says the trip is over, it is over.
+    test('is settling even when the handler stamped nothing', () {
+      expect(
+        resolveHandlerPhase(
+          trip: const HandlerTripState.fresh('bus-1'),
+          hasReturnRiders: true,
+          moneySettled: false,
+          tourCompleted: true,
+        ),
+        HandlerPhase.settling,
+      );
+    });
+
+    test('is closed once the money is square', () {
+      expect(
+        resolveHandlerPhase(
+          trip: trip(go: t),
+          hasReturnRiders: true,
+          moneySettled: true,
+          tourCompleted: true,
+        ),
+        HandlerPhase.closed,
+      );
+    });
+
+    test('a live tour is unaffected by the flag', () {
+      expect(
+        resolveHandlerPhase(
+          trip: trip(go: t),
+          hasReturnRiders: true,
+          moneySettled: false,
+          tourCompleted: false,
+        ),
+        HandlerPhase.enRouteGo,
+      );
+    });
+  });
+
+  group('the calendar ends the GO leg', () {
+    // Live, Oct 2026: both buses stamped "departed" (one also "arrived" a day
+    // late, by the office) and nothing else. On the return morning the
+    // handler must be looking at the RETURN boarding list, stamp or no stamp.
+    test('departed but never arrived opens return boarding on return day', () {
+      expect(
+        resolveHandlerPhase(
+          trip: trip(go: t),
+          hasReturnRiders: true,
+          moneySettled: false,
+          goLegAutoCompleted: true,
+        ),
+        HandlerPhase.boardingRet,
+      );
+    });
+
+    test('a bus nobody stamped at all still reaches return boarding', () {
+      expect(
+        resolveHandlerPhase(
+          trip: const HandlerTripState.fresh('bus-1'),
+          hasReturnRiders: true,
+          moneySettled: false,
+          goLegAutoCompleted: true,
+        ),
+        HandlerPhase.boardingRet,
+      );
+    });
+
+    test('a handler who already stamped the return departure keeps it', () {
+      expect(
+        resolveHandlerPhase(
+          trip: trip(go: t, arrived: t, ret: t),
+          hasReturnRiders: true,
+          moneySettled: false,
+          goLegAutoCompleted: true,
+        ),
+        HandlerPhase.enRouteRet,
+      );
+    });
+
+    test('an outbound-only bus goes straight to the cash', () {
+      expect(
+        resolveHandlerPhase(
+          trip: trip(go: t),
+          hasReturnRiders: false,
+          moneySettled: false,
+          goLegAutoCompleted: true,
+        ),
+        HandlerPhase.settling,
+      );
+    });
+
+    test('before the cutoff nothing changes', () {
+      expect(
+        resolveHandlerPhase(
+          trip: trip(go: t),
+          hasReturnRiders: true,
+          moneySettled: false,
+        ),
+        HandlerPhase.enRouteGo,
+      );
+    });
+  });
+
   group('HandlerTripState', () {
     test('parses the RPC row', () {
       final s = HandlerTripState.fromMap({

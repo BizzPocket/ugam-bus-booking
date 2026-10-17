@@ -501,7 +501,9 @@ class _MessageBubble extends StatelessWidget {
       case 'video':
         return tr('inbox.video');
       default:
-        return message.displayBody;
+        // A kind the webhook does not model ('other', a future Meta type):
+        // the model's fallback is a raw "[other]", so say what it is instead.
+        return tr('inbox.unsupported');
     }
   }
 

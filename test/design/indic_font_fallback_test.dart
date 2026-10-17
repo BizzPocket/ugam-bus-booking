@@ -328,7 +328,7 @@ void main() {
     // theme.dart derives all 14 of its TextTheme slots from these, and a
     // hand-rolled TextStyle at a call site inherits from those slots, so the
     // ladder is the single place the fallback has to be present.
-    const ladder = <String, TextStyle>{
+    final ladder = <String, TextStyle>{
       'hero': UgamText.hero,
       'display': UgamText.display,
       'titleXl': UgamText.titleXl,

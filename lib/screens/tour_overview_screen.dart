@@ -9,7 +9,10 @@ import '../models/seat_type.dart';
 import '../routes/app_routes.dart';
 import '../services/seating_engine.dart';
 import '../utils/tour_capacity.dart';
+import '../models/tour_status.dart';
 import 'manage_buses_screen.dart';
+import 'notify_screen.dart';
+import 'tour_seat_assignment_screen.dart';
 import 'requests_screen.dart';
 
 /// SLICE 1 of the smart-seat UI: a per-tour cockpit for the "Fill bus"
@@ -93,6 +96,8 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
         confirmLabel: tr('tour_overview.cta_regenerate'),
         cancelLabel: tr('app.action.cancel'),
         confirmIcon: Icons.auto_awesome_rounded,
+        // It throws away every placed seat — say so with the danger button.
+        destructive: true,
       );
       if (!ok) return;
     }
@@ -388,6 +393,82 @@ class _TourOverviewScreenState extends State<TourOverviewScreen> {
               ? tr('tour_overview.regenerate_plan')
               : tr('tour_overview.fill_bus');
           final onEdit = widget.onEditByHand;
+          // Phase-appropriate primary. Once seats are placed, re-generate is a
+          // DESTRUCTIVE action (it discards every seat) and must never be the
+          // screen's one solid button: on a locked/completed tour the next job
+          // is telling riders their seats, otherwise it is working the chart.
+          final locked = tour != null &&
+              (tour.status == TourStatus.locked ||
+                  tour.status == TourStatus.completed);
+          void openNotify() => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NotifyScreen(tourId: widget.tourId),
+                ),
+              );
+          void openChart() => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      TourSeatAssignmentScreen(tourId: widget.tourId),
+                ),
+              );
+          Widget ghost(String label, IconData icon, VoidCallback? onTap,
+                  {bool busy = false}) =>
+              AnimatedSize(
+                duration: UgamMotion.tab,
+                curve: UgamMotion.easeOut,
+                child: IntrinsicWidth(
+                  child: UgamButton(
+                    label: label,
+                    icon: icon,
+                    kind: UgamButtonKind.ghost,
+                    loading: busy,
+                    onPressed: onTap,
+                  ),
+                ),
+              );
+          final regenerateGhost = ghost(
+            fillLabel,
+            Icons.auto_awesome_rounded,
+            hasBuses ? _fill : null,
+            busy: _filling,
+          );
+          if (placed > 0 && (onEdit == null || locked)) {
+            return UgamStickyCTA(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  locked
+                      ? UgamCTA(
+                          label: tr('tour_overview.cta_notify'),
+                          leadingIcon: Icons.campaign_rounded,
+                          onPressed: openNotify,
+                        )
+                      : UgamCTA(
+                          label: tr('tour_overview.cta_edit_by_hand'),
+                          leadingIcon: Icons.edit_rounded,
+                          onPressed: hasBuses ? openChart : null,
+                        ),
+                  const SizedBox(height: UgamSpacing.sm),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (locked) ...[
+                        Flexible(
+                          child: ghost(
+                            tr('tour_overview.cta_edit_by_hand'),
+                            Icons.edit_rounded,
+                            hasBuses ? (onEdit ?? openChart) : null,
+                          ),
+                        ),
+                        const SizedBox(width: UgamSpacing.sm),
+                      ],
+                      Flexible(child: regenerateGhost),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }
           // Thumb-zone stack. The ONE primary focal action stays the full-width
           // champagne UgamCTA "Edit seats by hand"; auto-fill / re-generate is
           // the subordinate. Standalone (no onEditByHand) collapses to the lone

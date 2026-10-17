@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
 import '../controllers/tour_controller.dart';
+import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
@@ -39,6 +40,10 @@ class _ToursScreenState extends State<ToursScreen> {
   final _searchCtrl = TextEditingController();
   bool _searchVisible = false;
   String _query = '';
+
+  /// "Past trips" section disclosure — collapsed by default so the browse
+  /// view stays on upcoming work, but one tap away instead of search-only.
+  bool _pastOpen = false;
 
   @override
   void dispose() {
@@ -248,6 +253,26 @@ class _ToursScreenState extends State<ToursScreen> {
                       final g = groups[i];
                       if (g.tours.isEmpty) return const SizedBox.shrink();
                       final isPast = g.bucket == _Bucket.past;
+                      final hasUpcoming = groups.any(
+                        (x) => x.bucket != _Bucket.past && x.tours.isNotEmpty,
+                      );
+                      final pastOpen =
+                          _pastOpen || _query.isNotEmpty || !hasUpcoming;
+                      if (isPast && !pastOpen) {
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            bottom:
+                                i == groups.length - 1 ? 0 : UgamSpacing.xl,
+                          ),
+                          child: _GroupHeader(
+                            label: g.label,
+                            count: g.tours.length,
+                            c: c,
+                            expanded: false,
+                            onTap: () => setState(() => _pastOpen = true),
+                          ),
+                        );
+                      }
                       return Padding(
                         padding: EdgeInsets.only(
                           bottom: i == groups.length - 1 ? 0 : UgamSpacing.xl,
@@ -260,6 +285,10 @@ class _ToursScreenState extends State<ToursScreen> {
                               label: g.label,
                               count: g.tours.length,
                               c: c,
+                              expanded: isPast ? true : null,
+                              onTap: isPast && _query.isEmpty && hasUpcoming
+                                  ? () => setState(() => _pastOpen = false)
+                                  : null,
                             ),
                             const SizedBox(height: UgamSpacing.md),
                             for (var j = 0; j < g.tours.length; j++) ...[
@@ -344,9 +373,10 @@ class _ToursScreenState extends State<ToursScreen> {
       _Group(_Bucket.thisWeek, tr('tours.group.this_week'), thisWeek),
       _Group(_Bucket.next30, tr('tours.group.next_30_days'), next30),
       _Group(_Bucket.later, tr('tours.group.later'), later),
-      // Past/closed tours are kept out of the default browse view so the list
-      // stays focused on upcoming work; they still surface when searching.
-      if (_query.isNotEmpty) _Group(_Bucket.past, tr('tours.group.past'), past),
+      // Past/closed tours sit LAST behind a collapsed "Past trips (n)" header
+      // so the browse view stays on upcoming work while finished trips are
+      // still reachable without guessing a search term. Searching opens it.
+      _Group(_Bucket.past, tr('tours.group.past_trips'), past),
     ];
   }
 }
@@ -367,14 +397,33 @@ class _GroupHeader extends StatelessWidget {
   final int count;
   final UgamColorSet c;
 
+  /// Non-null renders a disclosure chevron (collapsible section).
+  final bool? expanded;
+  final VoidCallback? onTap;
+
   const _GroupHeader({
     required this.label,
     required this.count,
     required this.c,
+    this.expanded,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final row = _row();
+    if (onTap == null) return row;
+    return UgamTappable(
+      onTap: onTap,
+      semanticLabel: label,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
+        child: Align(alignment: Alignment.centerLeft, child: row),
+      ),
+    );
+  }
+
+  Widget _row() {
     return Row(
       children: [
         // Gujarati group labels ("આગામી 30 દિવસ") run long; let the label take
@@ -387,6 +436,14 @@ class _GroupHeader extends StatelessWidget {
         // The shared badge, not a hand-rolled cardElev pill: same fill + ink,
         // and it tracks the component if the badge geometry changes.
         UgamReqChip(label: '$count', variant: UgamChipVariant.neutral),
+        if (expanded != null) ...[
+          const Spacer(),
+          Icon(
+            expanded! ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+            size: 20,
+            color: c.ink3,
+          ),
+        ],
       ],
     );
   }
@@ -410,8 +467,12 @@ class _TourRow extends StatelessWidget {
     // Leg-aware physical berths (max(GO, RET) per bus) — the SAME engine-truth
     // occupancy the Requests banner shows, so the card no longer reads a false
     // "full" by double-counting leg-shared berths. See [Tour.occupiedBerths].
-    final assigned = tour.occupiedBerths;
-    final capacity = tour.totalBusSeats;
+    //
+    // Now THE seat meter ([SeatMeter]) — identical to the dashboard, Requests
+    // and tour detail figures for the same tour.
+    final meter = Get.find<TourController>().seatMeterFor(tour);
+    final assigned = meter.occupied;
+    final capacity = meter.capacity;
     final pct = capacity > 0 ? (assigned / capacity).clamp(0.0, 1.0) : 0.0;
     final action = _actionFor(tour);
     final dimAlpha = dim ? 0.55 : 1.0;
@@ -483,10 +544,12 @@ class _TourRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // 2 lines before ellipsis — long Gujarati titles ("આસો
+                    // સુદ બીજ(…) AC બસ") lost their distinguishing tail at 1.
                     Text(
                       tour.title,
                       style: UgamText.titleS.copyWith(color: c.ink),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
@@ -626,7 +689,7 @@ class _TourRow extends StatelessWidget {
   static String? _routeLabel(Tour t) {
     String initial(String s) {
       final trimmed = s.trim();
-      return trimmed.isEmpty ? '' : trimmed.substring(0, 1).toUpperCase();
+      return trimmed.isEmpty ? '' : trimmed.characters.first.toUpperCase();
     }
 
     final from = initial(t.fromCity);

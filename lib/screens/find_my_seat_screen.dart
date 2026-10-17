@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +14,7 @@ import '../models/bus_details.dart';
 import '../models/handler_tour_ref.dart';
 import '../models/seat_ticket.dart';
 import '../models/trip_type.dart';
+import '../services/crowd_location_share.dart';
 import '../services/customer_requests_store.dart';
 import '../utils/formatters.dart';
 import 'handler/handler_shell.dart';
@@ -156,7 +159,13 @@ class _FindMySeatScreenState extends State<FindMySeatScreen> {
       });
       // Only a number that actually resolved is worth remembering — a typo
       // must never become the one this screen opens on tomorrow.
-      if (found) await _store.rememberSeatLookupPhone(phone);
+      if (found) {
+        await _store.rememberSeatLookupPhone(phone);
+        if (!mounted) return;
+        // Seated on a locked trip: this phone joins the other phones on the
+        // same bus. The server keeps one position per bus.
+        unawaited(CrowdLocationShare.offer(context, phone));
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -450,7 +459,10 @@ class _TicketCard extends StatelessWidget {
               label: tr('find_seat.manage_as_handler'),
               leadingIcon: Icons.manage_accounts_rounded,
               onPressed: () => Get.to(
-                () => HandlerShell(requestId: handlerRequestId!),
+                () => HandlerShell(
+                  requestId: handlerRequestId!,
+                  tourStatus: ticket.status,
+                ),
                 transition: Transition.cupertino,
               ),
             ),
@@ -507,7 +519,10 @@ class _HandlerEntryCard extends StatelessWidget {
             label: tr('find_seat.manage_as_handler'),
             leadingIcon: Icons.manage_accounts_rounded,
             onPressed: () => Get.to(
-              () => HandlerShell(requestId: ref.requestId),
+              () => HandlerShell(
+                requestId: ref.requestId,
+                tourStatus: ref.status,
+              ),
               transition: Transition.cupertino,
             ),
           ),

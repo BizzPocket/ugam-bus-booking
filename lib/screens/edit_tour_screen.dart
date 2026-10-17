@@ -920,7 +920,7 @@ class _TourPreviewCard extends StatelessWidget {
     final f = fromCity.trim();
     final t = toCity.trim();
     if (f.isEmpty || t.isEmpty) return null;
-    return '${f[0].toUpperCase()}→${t[0].toUpperCase()}';
+    return '${f.characters.first.toUpperCase()}→${t.characters.first.toUpperCase()}';
   }
 
   @override

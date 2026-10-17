@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../controllers/finance_controller.dart';
+import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/tour_finance.dart';
+import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
 import '../widgets/money_loading_skeleton.dart';
 import 'create_tour_screen.dart';
+import 'tour_detail_screen.dart';
 import 'tour_money_board_screen.dart';
 
 /// FINANCE — the cross-tour Profit & Loss report.
@@ -15,9 +18,10 @@ import 'tour_money_board_screen.dart';
 /// Sums the realised revenue (net cash collected) and expenses of every
 /// COMPLETED tour, scoped to a period (this month / this year / all time), and
 /// shows the headline net profit, a few roll-up stats, and one tappable row per
-/// past trip. Tapping a trip opens its existing per-tour money board, so the
-/// completed tour's full money record stays reachable — nothing is deleted, it
-/// just lives here now.
+/// past trip. Tapping a trip opens its full tour detail (passengers, buses,
+/// seat chart, and the money board via its Money tool), so a completed tour's
+/// whole record stays reachable. Long-pressing a trip offers to delete it,
+/// after a confirm that lists every rider and rupee the trip still holds.
 ///
 /// All aggregation is delegated to [FinanceController]; colour comes only from
 /// [UgamColors.of] and every figure uses tabular numerals, per the locked DNA.
@@ -62,14 +66,97 @@ class _FinanceScreenState extends State<FinanceScreen> {
     });
   }
 
+  /// A trip row opens the WHOLE trip — details, passengers, buses, seat chart
+  /// and its Money tool — not just the money board. [TourDetailScreen] hydrates
+  /// an archived tour on open (cold start skips completed rosters) and routes a
+  /// completed tour's Seats row to the frozen seat history, so nothing about
+  /// an old trip is lost by opening it from here.
   void _openTour(TourFinance tf) {
-    // Cupertino, matching every other push into or between the money screens
-    // (tour_money_board_screen.dart:62,:69,:79 and bus_money_screen.dart:366)
-    // so the same destination animates identically wherever it is opened from.
+    // Start the roster fetch now so it overlaps the push animation; the detail
+    // screen's own call then joins this in-flight request.
+    if (Get.isRegistered<TourController>()) {
+      // ignore: unawaited_futures
+      Get.find<TourController>()
+          .ensureTourReadyForSeating(tf.tourId)
+          .catchError((_) {});
+    }
+    Get.to(
+      () => TourDetailScreen(tourId: tf.tourId),
+      transition: Transition.cupertino,
+    );
+  }
+
+  /// The zero-state "record the first entry" CTA still goes straight to the
+  /// money board — that card is about money, not the trip. Cupertino, matching
+  /// every other push into or between the money screens.
+  void _openMoney(TourFinance tf) {
     Get.to(
       () => TourMoneyBoardScreen(tourId: tf.tourId),
       transition: Transition.cupertino,
     );
+  }
+
+  /// Long-press → delete a trip from the report (and the app).
+  ///
+  /// The roster is hydrated FIRST: an archived tour arrives with no passengers
+  /// in memory, and a confirm that says "no passengers" over a trip that has
+  /// fifty is exactly the silent wipe this must never be. If that check cannot
+  /// run, nothing is deleted. Whatever the trip still holds — riders, buses,
+  /// money in or out — is spelled out in the dialog before the agent confirms.
+  Future<void> _confirmDelete(TourFinance tf) async {
+    if (!Get.isRegistered<TourController>()) return;
+    final tourCtrl = Get.find<TourController>();
+    try {
+      await tourCtrl.ensureTourHydrated(tf.tourId);
+    } catch (_) {
+      AppSnackBar.error(tr('finance.delete_check_failed'));
+      return;
+    }
+    if (!mounted) return;
+    final tour = tourCtrl.getTour(tf.tourId);
+    if (tour == null) return;
+
+    final title = tf.title.isEmpty ? tf.route : tf.title;
+    final lines = <String>[
+      if (tour.passengers.isNotEmpty)
+        tr('finance.delete_line_passengers',
+            namedArgs: {'n': '${tour.passengers.length}'}),
+      if (tour.buses.isNotEmpty)
+        tr('finance.delete_line_buses',
+            namedArgs: {'n': '${tour.buses.length}'}),
+      if (tf.revenue.round() != 0)
+        tr('finance.delete_line_collected',
+            namedArgs: {'amount': _inr(tf.revenue)}),
+      if (tf.income.round() != 0)
+        tr('finance.delete_line_income',
+            namedArgs: {'amount': _inr(tf.income)}),
+      if (tf.expenses.round() != 0)
+        tr('finance.delete_line_expenses',
+            namedArgs: {'amount': _inr(tf.expenses)}),
+    ];
+    final message = lines.isEmpty
+        ? tr('finance.delete_body_empty')
+        : tr('finance.delete_body_data',
+            namedArgs: {'details': lines.join('\n')});
+
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('finance.delete_title', namedArgs: {'title': title}),
+      message: message,
+      confirmLabel: tr('finance.delete_trip'),
+      confirmIcon: Icons.delete_outline_rounded,
+      destructive: true,
+    );
+    if (!ok) return;
+    try {
+      // Soft delete (054): the row is archived with deleted_at, never
+      // destroyed. The report iterates TourController.tours, so the row and
+      // every total drop out on the same frame.
+      await tourCtrl.deleteTour(tf.tourId);
+      AppSnackBar.success(tr('finance.deleted', namedArgs: {'title': title}));
+    } catch (_) {
+      // deleteTour already surfaces its own error snackbar.
+    }
   }
 
   /// The real create-trip destination, pushed exactly the way the charts screen
@@ -206,7 +293,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                           onCreateTour: _createTour,
                           onOpenMoney: tours.isEmpty
                               ? null
-                              : () => _openTour(tours.first),
+                              : () => _openMoney(tours.first),
                         ),
                         if (tours.isNotEmpty)
                           const SizedBox(height: UgamSpacing.lg),
@@ -224,6 +311,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
                             child: _TourFinanceRow(
                               tf: tf,
                               onTap: () => _openTour(tf),
+                              onLongPress: () => _confirmDelete(tf),
                               c: c,
                             ),
                           ),
@@ -877,10 +965,14 @@ class _ZeroStep extends StatelessWidget {
 class _TourFinanceRow extends StatelessWidget {
   final TourFinance tf;
   final VoidCallback onTap;
+
+  /// Long-press → delete this trip (confirmed by a dialog first).
+  final VoidCallback? onLongPress;
   final UgamColorSet c;
   const _TourFinanceRow({
     required this.tf,
     required this.onTap,
+    this.onLongPress,
     required this.c,
   });
 
@@ -925,7 +1017,7 @@ class _TourFinanceRow extends StatelessWidget {
             namedArgs: {'n': '${(tf.net / grossIn * 100).round()}'})
         : null;
 
-    return UgamCard.plain(
+    final card = UgamCard.plain(
       onTap: onTap,
       padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Row(
@@ -1025,6 +1117,15 @@ class _TourFinanceRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+    if (onLongPress == null) return card;
+    // Long-press only — the card's own tap recogniser keeps quick taps, and a
+    // destructive action never sits one mis-tap away on a list row.
+    return GestureDetector(
+      key: ValueKey('finance-row-${tf.tourId}'),
+      behavior: HitTestBehavior.opaque,
+      onLongPress: onLongPress,
+      child: card,
     );
   }
 }

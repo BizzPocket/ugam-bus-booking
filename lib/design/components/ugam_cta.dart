@@ -66,7 +66,9 @@ class _UgamCTAState extends State<UgamCTA> with SingleTickerProviderStateMixin {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (widget.leadingIcon != null) ...[
+          // Icon OR spinner, never both: an icon parked beside a spinner read
+          // as two things happening at once (Find my seat, every save).
+          if (widget.leadingIcon != null && !widget.loading) ...[
             Icon(widget.leadingIcon, size: 18, color: c.onAccent),
             const SizedBox(width: UgamSpacing.sm),
           ],

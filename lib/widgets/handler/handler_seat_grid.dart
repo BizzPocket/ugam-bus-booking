@@ -115,6 +115,9 @@ class HandlerSeatGrid extends StatelessWidget {
                 // the empty resolver falls back to stable id-hash colours.
                 groupColors: const GroupColorResolver({}),
                 bandColor: bandColor,
+                // Phone lives in the occupant sheet (with Call); on a 68px tile
+                // it only ever rendered as a truncated "900000…".
+                showPhone: false,
                 moneyDotColor: occList.isEmpty
                     ? null
                     : money.dotColor(UgamColors.of(ctx)),

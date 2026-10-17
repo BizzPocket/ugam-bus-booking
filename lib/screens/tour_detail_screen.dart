@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 
+import '../config/ui_flags.dart';
 import '../controllers/tour_controller.dart';
 import '../components/content_block_view.dart';
 import '../design/components/ugam_tappable.dart';
@@ -16,7 +17,6 @@ import '../models/tour_status.dart';
 import '../models/trip_type.dart';
 
 import '../services/whatsapp_service.dart';
-import '../utils/app_dialogs.dart';
 import '../utils/app_nav.dart';
 import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
@@ -372,12 +372,13 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
   }
 
   Future<void> _confirmDelete(BuildContext context, TourController tourCtrl, Tour tour) async {
-    final ok = await AppDialogs.confirm(
+    final ok = await UgamDialog.confirm(
+      context,
       title: tr('tour_detail.delete_confirm_title'),
       message: tr('tour_detail.delete_confirm_body',
           namedArgs: {'title': tour.title}),
-      confirmText: tr('tour_detail.delete_tour'),
-      isDestructive: true,
+      confirmLabel: tr('tour_detail.delete_tour'),
+      destructive: true,
     );
     if (!ok) return;
     try {
@@ -804,27 +805,31 @@ class _OverviewTab extends StatelessWidget {
         TourOverviewVitals(tour: tour, c: c, onSwitchTab: onSwitchTab),
         const SizedBox(height: UgamSpacing.lg),
         _OverviewToolsRow(tour: tour, c: c, onSwitchTab: onSwitchTab),
-        const SizedBox(height: UgamSpacing.lg),
-        TourNeedsAttention(
-          tour: tour,
-          c: c,
-          onSwitchTab: onSwitchTab,
-          onOpenManageBuses: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => ManageBusesScreen(tourId: tour.id),
+        // Blocker list — off by default (UiFlags.showAttentionSections). Its
+        // leading gap is inside the guard so hiding it doesn't leave a double
+        // gap between the tools row and the broadcast card.
+        if (UiFlags.showAttentionSections) ...[
+          const SizedBox(height: UgamSpacing.lg),
+          TourNeedsAttention(
+            tour: tour,
+            c: c,
+            onSwitchTab: onSwitchTab,
+            onOpenManageBuses: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ManageBusesScreen(tourId: tour.id),
+              ),
             ),
           ),
-        ),
+        ],
         const SizedBox(height: UgamSpacing.md),
         // The broadcast poster. It used to be the screen's HEADER on this tab
         // only — which is what made the same tour look like two different
         // screens. It sits with the broadcast card because that is what it is
         // for, and below the working cards because the agent's next action
         // outranks decoration.
-        if ((tour.broadcastImageUrl ?? '').trim().isNotEmpty) ...[
+        // Carries its own bottom gap so a failed photo collapses cleanly.
+        if ((tour.broadcastImageUrl ?? '').trim().isNotEmpty)
           _TourCoverCard(tour: tour),
-          const SizedBox(height: UgamSpacing.md),
-        ],
         _BroadcastCard(tour: tour, c: c),
       ]),
     );
@@ -1151,10 +1156,13 @@ class _TourBroadcast {
 
 /// The tour's broadcast poster, rendered as ordinary Overview content.
 ///
-/// Only ever built when [Tour.broadcastImageUrl] is non-empty, so there is no
-/// "no photo" variant to diverge — an absent poster simply means this card
-/// isn't in the list. The header above is the same either way.
-class _TourCoverCard extends StatelessWidget {
+/// Only ever built when [Tour.broadcastImageUrl] is non-empty. When the photo
+/// cannot be shown it renders NOTHING: the old fallback painted a ~170pt
+/// decorative route monogram ("S→ભ") over a bus silhouette — a full card of
+/// height that said nothing the header doesn't. While the photo loads, the
+/// slot holds a quiet plain card so the poster doesn't shove the list down on
+/// arrival; if the load fails the slot collapses.
+class _TourCoverCard extends StatefulWidget {
   final Tour tour;
 
   const _TourCoverCard({required this.tour});
@@ -1171,57 +1179,58 @@ class _TourCoverCard extends StatelessWidget {
   }
 
   @override
+  State<_TourCoverCard> createState() => _TourCoverCardState();
+}
+
+class _TourCoverCardState extends State<_TourCoverCard> {
+  bool _failed = false;
+
+  @override
+  void didUpdateWidget(covariant _TourCoverCard old) {
+    super.didUpdateWidget(old);
+    if (old.tour.broadcastImageUrl != widget.tour.broadcastImageUrl) {
+      _failed = false;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(UgamRadius.photo),
-      child: SizedBox(
-        width: double.infinity,
-        // Decorative, so it tracks the responsive factor rather than the text
-        // scale — a poster does not need to grow with the font setting.
-        height: UgamScale.px(context, 168),
-        child: Image.network(
-          tour.broadcastImageUrl!,
-          fit: BoxFit.cover,
-          // Decode at the size we actually PAINT, not the size uploaded. The
-          // picker stores at maxWidth 1600 (create_tour_screen), so without
-          // this the poster decodes to a 1600x1067 ARGB bitmap — ~6.8 MB of
-          // RAM for a 168pt strip, on phones that have little to spare.
-          cacheWidth: _decodeWidth(context),
-          // While loading or if the photo fails, fall back to the graphite
-          // backdrop so the card never flashes raw/broken.
-          //
-          // HISTORY: this fallback used to be what ALWAYS rendered. The stored
-          // URL is a getPublicUrl() link, but the tour-broadcasts bucket was
-          // private live, so every uncredentialed fetch 400'd and the miss
-          // looked like a design choice rather than a failure. Fixed by
-          // migration 051, verified 2026-08-01: GET
-          // /object/public/tour-broadcasts/<file> with no credentials now
-          // returns 200 image/jpeg. Keep the fallback anyway — it still covers
-          // a slow network and a genuinely missing object.
-          loadingBuilder: (ctx, child, progress) => progress == null
-              ? child
-              : UgamBusBackdrop(seed: tour.id, label: _routeInitialsOf(tour)),
-          errorBuilder: (_, _, _) =>
-              UgamBusBackdrop(seed: tour.id, label: _routeInitialsOf(tour)),
+    final c = UgamColors.of(context);
+    // A failed photo collapses to zero height (the Image stays mounted, so a
+    // later successful retry/URL change can still paint without a remount).
+    return Padding(
+      padding: EdgeInsets.only(bottom: _failed ? 0 : UgamSpacing.md),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(UgamRadius.photo),
+        child: SizedBox(
+          width: double.infinity,
+          // Decorative, so it tracks the responsive factor rather than the
+          // text scale — a poster does not need to grow with the font setting.
+          height: _failed ? 0 : UgamScale.px(context, 168),
+          child: Image.network(
+            widget.tour.broadcastImageUrl!,
+            fit: BoxFit.cover,
+            // Decode at the size we actually PAINT, not the size uploaded. The
+            // picker stores at maxWidth 1600 (create_tour_screen), so without
+            // this the poster decodes to a 1600x1067 ARGB bitmap — ~6.8 MB of
+            // RAM for a 168pt strip, on phones that have little to spare.
+            cacheWidth: _TourCoverCard._decodeWidth(context),
+            // Loading: a plain card, no monogram. (Bucket history: the
+            // tour-broadcasts bucket was private until migration 051, so this
+            // fallback used to be what ALWAYS rendered.)
+            loadingBuilder: (ctx, child, progress) =>
+                progress == null ? child : ColoredBox(color: c.card),
+            errorBuilder: (_, _, _) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && !_failed) setState(() => _failed = true);
+              });
+              return const SizedBox.shrink();
+            },
+          ),
         ),
       ),
     );
   }
-}
-
-/// Short route monogram for the poster fallback backdrop, e.g. `"S→M"` from the
-/// from/to city initials. Returns null when either city is blank so the
-/// backdrop falls back to the bare bus glyph.
-String? _routeInitialsOf(Tour t) {
-  String first(String s) {
-    final v = s.trim();
-    return v.isEmpty ? '' : v[0].toUpperCase();
-  }
-
-  final from = first(t.fromCity);
-  final to = first(t.toCity);
-  if (from.isEmpty || to.isEmpty) return null;
-  return '$from→$to';
 }
 
 /// A single broadcast card: campaign icon + title + hint, a PRIMARY
@@ -1991,9 +2000,9 @@ class _PassengerRow extends StatelessWidget {
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
     if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
     }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
   }
 
   String _ago(DateTime t) {
@@ -2040,9 +2049,11 @@ class _BusesTab extends StatelessWidget {
     // ONE add-bus affordance per screen: the sticky bottom CTA owns "Add
     // another bus" (see _StickyAction case 2). The previously-duplicated inline
     // _AddBusTile is intentionally omitted here so the entry isn't doubled.
-    final occupied = tour.occupiedBerths;
-    final capacity = tour.totalBusSeats;
-    final fillPct = capacity == 0 ? 0 : ((occupied * 100) / capacity).round();
+    // THE seat meter ([SeatMeter]) — whole seats, never a percentage, and the
+    // same "x / n" the header vitals, dashboard and manage buses show.
+    final meter = Get.find<TourController>().seatMeterFor(tour);
+    final occupied = meter.occupied;
+    final capacity = meter.capacity;
     final driversSet = tour.buses.where((b) => b.driverName.trim().isNotEmpty).length;
 
     return SliverList(
@@ -2055,7 +2066,7 @@ class _BusesTab extends StatelessWidget {
                 child: Column(
                   children: [
                     Text(
-                      tr('tour_detail.fleet_filled_pct', namedArgs: {'n': '$fillPct'}),
+                      capacity == 0 ? '—' : '$occupied/$capacity',
                       style: UgamText.tabular(UgamText.titleM.copyWith(color: c.ink)),
                     ),
                     Text(tr('tour_detail.fleet_filled_label'),
@@ -2112,7 +2123,10 @@ class _BusesTab extends StatelessWidget {
             tourId: tour.id,
             // Leg-aware berths occupied on this bus (max of the busier leg) —
             // single-sourced from the same helper the capacity engine uses.
-            filled: tour.occupiedBerthsFor(tour.buses[i].id),
+            filled: meter.byBus[tour.buses[i].id]?.occupied ??
+                tour.occupiedBerthsFor(tour.buses[i].id),
+            capacity: meter.byBus[tour.buses[i].id]?.capacity ??
+                tour.buses[i].totalSeats,
             c: c,
           ),
           if (i != tour.buses.length - 1)
@@ -2131,11 +2145,13 @@ class _BusListItem extends StatelessWidget {
   /// same fallback at bus_status_screen.dart:257.
   final String tourId;
   final int filled;
+  final int capacity;
   final UgamColorSet c;
   const _BusListItem({
     required this.bus,
     required this.tourId,
     required this.filled,
+    required this.capacity,
     required this.c,
   });
 
@@ -2196,16 +2212,18 @@ class _BusListItem extends StatelessWidget {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(99),
                     child: LinearProgressIndicator(
-                      value: bus.totalSeats == 0
+                      value: capacity == 0
                           ? 0
-                          : (filled / bus.totalSeats).clamp(0.0, 1.0),
+                          : (filled / capacity).clamp(0.0, 1.0),
                       minHeight: 5,
                       backgroundColor: c.cardElev,
                       // Ink while filling, `good` once full: "how full" is a
                       // measurement, "full" is a state worth a colour. Amber
                       // said neither — and one bar per bus row put four or five
                       // copper strips down a tab whose CTA carries none.
-                      color: filled >= bus.totalSeats ? c.good : c.ink2,
+                      color: capacity > 0 && filled >= capacity
+                          ? c.good
+                          : c.ink2,
                     ),
                   ),
                   if (bus.driverPhone.trim().isNotEmpty)
@@ -2666,9 +2684,12 @@ class _StickyAction extends StatelessWidget {
             leadingIcon: Icons.event_seat_rounded,
             trailingValue: assigning
                 ? tr('tour_detail.seats_left', namedArgs: {'n': '$pending'})
-                : (tour.totalBusSeats > 0
-                    ? '${tour.totalSeatsAssigned}/${tour.totalBusSeats}'
-                    : null),
+                : (() {
+                    // THE seat meter — the raw entry count here read past
+                    // capacity on a leg-shared seat ([SeatMeter]).
+                    final m = Get.find<TourController>().seatMeterFor(tour);
+                    return m.capacity > 0 ? '${m.occupied}/${m.capacity}' : null;
+                  })(),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (context) => SeatsScreen(
@@ -2760,11 +2781,12 @@ void _runKind(
       () async {
         final ctrl = Get.find<TourController>();
         final n = ctrl.outboundOnlyActiveCount(tour.id);
-        final ok = await AppDialogs.confirm(
+        final ok = await UgamDialog.confirm(
+          context,
           title: tr('tour_detail.complete_go_confirm_title'),
           message: tr('tour_detail.complete_go_confirm_body',
               namedArgs: {'count': '$n'}),
-          confirmText: tr('tour_detail.complete_go_cta'),
+          confirmLabel: tr('tour_detail.complete_go_cta'),
         );
         if (ok) {
           final cleared = await ctrl.completeOutboundLeg(tour.id);
@@ -2775,11 +2797,12 @@ void _runKind(
       break;
     case _NextActionKind.markCompleted:
       () async {
-        final ok = await AppDialogs.confirm(
+        final ok = await UgamDialog.confirm(
+          context,
           title: tr('tour_detail.complete_confirm_title'),
           message: tr('tour_detail.complete_confirm_body',
               namedArgs: {'title': tour.title}),
-          confirmText: tr('tour_detail.mark_completed'),
+          confirmLabel: tr('tour_detail.mark_completed'),
         );
         if (ok) {
           await Get.find<TourController>().completeTour(tour.id);
@@ -2811,10 +2834,9 @@ class _SectionEyebrow extends StatelessWidget {
   }
 }
 
-/// Compact live-vitals strip for the hero: "X/Y seats · N riders" from
-/// tour-only data (no money controller). Seats use the leg-aware
-/// [Tour.occupiedBerths]; riders use [Tour.passengerCount]. Renders nothing
-/// until the tour actually has buses or riders, so a brand-new tour's hero
+/// Compact live-vitals strip for the hero: "N riders" from tour-only data.
+/// The seat fact lives in the Overview vitals + next-step card, not here.
+/// Renders nothing until the tour has riders, so a brand-new tour's hero
 /// stays clean.
 class _HeroVitals extends StatelessWidget {
   final Tour tour;
@@ -2823,13 +2845,10 @@ class _HeroVitals extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Riders only. The seat count used to lead this line too — the same
+    // "x / y seats" the vitals grid and the next-step card already carry, so
+    // the header said it a third time. Seats live in the vitals now.
     final parts = <String>[];
-    if (tour.totalBusSeats > 0) {
-      parts.add(tr('tour_detail.vitals_seats', namedArgs: {
-        'filled': '${tour.occupiedBerths}',
-        'total': '${tour.totalBusSeats}',
-      }));
-    }
     if (tour.passengerCount > 0) {
       parts.add(tour.passengerCount == 1
           ? tr('tour_detail.vitals_riders_one')
@@ -2841,7 +2860,7 @@ class _HeroVitals extends StatelessWidget {
       padding: const EdgeInsets.only(top: UgamSpacing.sm),
       child: Row(
         children: [
-          Icon(Icons.event_seat_rounded, size: 13, color: c.ink3),
+          Icon(Icons.people_alt_rounded, size: 13, color: c.ink3),
           const SizedBox(width: 5),
           Flexible(
             child: Text(

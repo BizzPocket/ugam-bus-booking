@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../config/ui_flags.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/inbox_controller.dart';
 import '../controllers/money_controller.dart';
@@ -38,6 +39,8 @@ import 'tour_money_board_screen.dart';
 ///   3. Quick actions (Create / Requests / Money / Finance)
 ///   4. "Needs attention" — tours blocked on agent action (incl. money
 ///      settlement), one accent CTA on the top item; else "All caught up".
+///      HIDDEN while [UiFlags.showAttentionSections] is off; the builder and
+///      its rows stay wired so flipping the switch restores the section.
 ///   5. Recent requests — last 5 new passengers across active tours.
 ///
 /// The widget pieces live in `lib/widgets/dashboard/`; this file keeps the
@@ -161,42 +164,52 @@ class DashboardScreen extends StatelessWidget {
                         child: _MessagesCard(count: unread, c: c),
                       );
                     }),
-                    const SizedBox(height: UgamSpacing.md),
-                    Obx(() {
-                      final attention = _needsAttention(context, tourCtrl.tours);
-                      if (attention.isEmpty) {
-                        // P2: explicit affirmation when there are tours but
-                        // nothing needs action — never a silent SizedBox.
-                        final activeTours = tourCtrl.tours
-                            .where((t) => t.status != TourStatus.completed)
-                            .length;
-                        if (activeTours == 0) return const SizedBox.shrink();
-                        return DashboardAllCaughtUp(count: activeTours, c: c);
-                      }
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          DashboardSectionLabel(
-                            label: tr('dashboard.section_attention'),
-                            meta: '${attention.length}',
-                            c: c,
-                          ),
-                          const SizedBox(height: UgamSpacing.md),
-                          for (var i = 0; i < attention.length; i++) ...[
-                            // Accent-rationing: only the single top-priority
-                            // (first) attention row gets the accent CTA chip.
-                            DashboardAttentionRow(
-                              item: attention[i],
+                    // The "Needs attention" blocker list and its "All caught
+                    // up" counterpart, behind ONE switch — with its leading
+                    // gap, since "Recent requests" below brings its own top
+                    // padding and would otherwise sit under a double gap.
+                    // Guarded HERE rather than inside the Obx: an Obx whose
+                    // builder reads no Rx throws, so the flag has to keep the
+                    // observer from being built at all.
+                    if (UiFlags.showAttentionSections) ...[
+                      const SizedBox(height: UgamSpacing.md),
+                      Obx(() {
+                        final attention =
+                            _needsAttention(context, tourCtrl.tours);
+                        if (attention.isEmpty) {
+                          // P2: explicit affirmation when there are tours but
+                          // nothing needs action — never a silent SizedBox.
+                          final activeTours = tourCtrl.tours
+                              .where((t) => t.status != TourStatus.completed)
+                              .length;
+                          if (activeTours == 0) return const SizedBox.shrink();
+                          return DashboardAllCaughtUp(count: activeTours, c: c);
+                        }
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            DashboardSectionLabel(
+                              label: tr('dashboard.section_attention'),
+                              meta: '${attention.length}',
                               c: c,
-                              isPrimary: i == 0,
                             ),
-                            if (i != attention.length - 1)
-                              const SizedBox(height: UgamSpacing.tight),
+                            const SizedBox(height: UgamSpacing.md),
+                            for (var i = 0; i < attention.length; i++) ...[
+                              // Accent-rationing: only the single top-priority
+                              // (first) attention row gets the accent CTA chip.
+                              DashboardAttentionRow(
+                                item: attention[i],
+                                c: c,
+                                isPrimary: i == 0,
+                              ),
+                              if (i != attention.length - 1)
+                                const SizedBox(height: UgamSpacing.tight),
+                            ],
                           ],
-                        ],
-                      );
-                    }),
+                        );
+                      }),
+                    ],
                     Obx(() {
                       final recent = _recentRequests(tourCtrl.tours);
                       // "No data yet" and "genuinely zero" are different
@@ -278,8 +291,17 @@ class DashboardScreen extends StatelessWidget {
                     ),
                     child: Align(
                       alignment: Alignment.bottomCenter,
+                      // `.toList()` READS the RxList inside this closure, so
+                      // the Obx subscribes to it. Handing over the bare RxList
+                      // reference read nothing here (the iteration happened
+                      // later, in _DashboardTail.build, outside the tracking
+                      // scope), so GetX threw "improper use of Obx" on every
+                      // build and main.dart's error box replaced the tail.
                       child: Obx(
-                        () => _DashboardTail(tours: tourCtrl.tours, c: c),
+                        () => _DashboardTail(
+                          tours: tourCtrl.tours.toList(),
+                          c: c,
+                        ),
                       ),
                     ),
                   ),

@@ -12,6 +12,7 @@ import '../models/tour.dart';
 import '../routes/app_routes.dart';
 import '../services/chart_advance_payment.dart';
 import '../services/customer_requests_store.dart';
+import '../services/error_reporter.dart';
 import '../services/seat_chart_booking_service.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
@@ -223,8 +224,13 @@ class _CustomerBookingRequestScreenState
         );
       }
     } catch (e, st) {
-      // Surface the real cause in logs so a failing submit can be diagnosed.
-      debugPrint('customer booking submit failed — $e\n$st');
+      // Surface the real cause so a failing submit can be diagnosed — to the
+      // error log, not a debugPrint that never leaves the device.
+      ErrorReporter.report(
+        kind: 'customer_booking_submit',
+        error: e,
+        stack: st,
+      );
       AppSnackBar.error(_submitErrorMessage(e));
     } finally {
       if (mounted) setState(() => _saving = false);

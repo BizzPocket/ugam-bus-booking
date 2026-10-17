@@ -20,6 +20,7 @@ import '../models/passenger.dart';
 import '../models/passenger_group.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
+import '../models/tour_status.dart';
 import '../models/trip_type.dart';
 import '../routes/app_routes.dart';
 import '../services/whatsapp_outbound.dart';
@@ -70,6 +71,12 @@ class _RequestsScreenState extends State<RequestsScreen> {
 
   int _selectedTourIndex = 0;
   _RequestFilter _filter = _RequestFilter.newRequests;
+
+  /// True until the agent picks a tab themselves. While set, the list opens
+  /// on the FIRST NON-EMPTY tab (New preferred) instead of always landing on
+  /// an empty "New 0" with every rider hidden one tap away. Re-armed by every
+  /// path that used to snap back to New (re-entry, deep link, tour switch).
+  bool _autoFilter = true;
   bool _searchVisible = false;
   String _query = '';
 
@@ -191,6 +198,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
       setState(() {
         if (idx >= 0) _selectedTourIndex = idx;
         _filter = _RequestFilter.newRequests;
+        _autoFilter = true;
         _expandedId = null;
         _selectionMode = false;
         _selectedIds.clear();
@@ -213,6 +221,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
     if (!mounted) return;
     setState(() {
       _filter = _RequestFilter.newRequests;
+      _autoFilter = true;
       _expandedId = null;
       _selectionMode = false;
       _selectedIds.clear();
@@ -673,6 +682,15 @@ class _RequestsScreenState extends State<RequestsScreen> {
         .toList();
     final assignedList = allPassengers.where((p) => p.isFullyAssigned).toList();
 
+    if (_autoFilter) {
+      // First non-empty tab, in tab order — so New wins whenever it has
+      // anyone (a fresh request is always in view), and a locked tour where
+      // everyone is seated opens on Assigned rather than an empty New.
+      final lists = [newList, waitlistList, confirmedList, assignedList];
+      final first = lists.indexWhere((l) => l.isNotEmpty);
+      _filter = _RequestFilter.values[first < 0 ? 0 : first];
+    }
+
     final base = switch (_filter) {
       _RequestFilter.newRequests => newList,
       _RequestFilter.waitlist => waitlistList,
@@ -700,6 +718,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
             currentIndex: _selectedTourIndex,
             onChanged: (i) => setState(() {
               _selectedTourIndex = i;
+              _autoFilter = true;
               _expandedId = null;
               _barShown = true;
               _exitSelection();
@@ -724,6 +743,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
             currentIndex: _filter.index,
             onChanged: (i) => setState(() {
               _filter = _RequestFilter.values[i];
+              _autoFilter = false;
               _expandedId = null;
               _barShown = true;
             }),
@@ -1037,8 +1057,14 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     // seater vs sofa). Reading the deterministic plan makes `free` mean GENUINELY
     // empty, and the riders the engine can't auto-seat surface as
     // "needs your decision" instead of hiding inside a phantom full bus.
-    final cap = Get.find<TourController>().capacityFor(tour);
-    final free = cap.free;
+    final tourCtrl = Get.find<TourController>();
+    final cap = tourCtrl.capacityFor(tour);
+    // The headline count comes from THE seat meter ([SeatMeter]) so this
+    // banner, the dashboard hero and the tour detail all read the same
+    // "x / n" — the plan alone under-counted a seated tour (68 vs 72 placed).
+    // The plan still owns "needs your decision".
+    final meter = tourCtrl.seatMeterFor(tour);
+    final free = meter.free;
     final needsDecision = cap.needsDecision;
     // GENUINELY-empty WHOLE tiles per seat type, split by open leg, read from
     // the SAME engine plan as [free] (see [TourCapacity.freeByType]). Each type
@@ -1053,7 +1079,7 @@ class _CapacityBannerState extends State<_CapacityBanner> {
         SeatType.seater,
       ])
         if ((cap.capByType[st] ?? 0) > 0)
-          (st.displayName, cap.freeByType[st] ?? const SeatTypeFree()),
+          (st.displayName, meter.freeByType[st] ?? const SeatTypeFree()),
     ];
     // Show the go/return colour caption only when some type actually has a
     // one-way-only opening — the common round-trip case stays clean.
@@ -1071,11 +1097,16 @@ class _CapacityBannerState extends State<_CapacityBanner> {
     // screen's to change. Everything the banner owns — icon, glyph, card tone
     // and the pressure chip below — now carries the semantic colour instead.
     const double kTightFrac = 0.85;
-    final double fillFrac = cap.capacity <= 0
+    final double fillFrac = meter.capacity <= 0
         ? 0
-        : (cap.occupied / cap.capacity).clamp(0.0, 1.0);
+        : (meter.occupied / meter.capacity).clamp(0.0, 1.0);
+    // A locked / completed tour is not "filling" any more — booking is shut.
+    // The pressure chip then names the tour's real phase instead.
+    final bool closed = tour.status == TourStatus.locked ||
+        tour.status == TourStatus.completed;
     final bool full = !noBus && free <= 0;
-    final bool tight = !noBus && !full && fillFrac >= kTightFrac;
+    final bool tight =
+        !noBus && !full && !closed && fillFrac >= kTightFrac;
 
     // The bar is a quiet soft card — surface, radius, shadow and press ink all
     // come from [UgamCard] so it reads as the same card family as the request
@@ -1141,12 +1172,18 @@ class _CapacityBannerState extends State<_CapacityBanner> {
                               : statusLabel,
                           style: UgamText.bodyStrong.copyWith(color: c.ink),
                         )
-                      : UgamCapacityMeter.tour(cap),
+                      : UgamCapacityMeter.seats(meter),
                 ),
                 // Pressure chip — the semantic read the neutral meter bar
                 // cannot give. Shown ONLY for the two states worth
                 // interrupting a scan for, so a healthy bus stays quiet.
-                if (!noBus && (full || tight)) ...[
+                if (!noBus && closed) ...[
+                  const SizedBox(width: UgamSpacing.sm),
+                  UgamReqChip(
+                    label: tour.status.displayName,
+                    variant: UgamChipVariant.neutral,
+                  ),
+                ] else if (!noBus && (full || tight)) ...[
                   const SizedBox(width: UgamSpacing.sm),
                   UgamReqChip(
                     label: statusLabel.toUpperCase(),
@@ -1441,6 +1478,13 @@ class _RequestCard extends StatelessWidget {
     if (parts.length == 1) return first.toUpperCase();
     return '$first${String.fromCharCode(parts[1].runes.first)}'.toUpperCase();
   }
+
+  /// New or waitlisted, not yet seated, no pending cancellation — the rows
+  /// whose positive move is "Confirm & seat" (same gate as the right swipe).
+  bool get _canQuickConfirm =>
+      !passenger.isConfirmed &&
+      !passenger.isFullyAssigned &&
+      !passenger.isCancelRequested;
 
   /// The row's state as ONE chip label + variant.
   ///
@@ -1947,6 +1991,29 @@ class _RequestCard extends StatelessWidget {
                 ),
               ],
             ),
+            // ── One visible "Accept" on rows that can still be confirmed ──
+            // Confirm & seat used to be reachable only by a right-swipe (an
+            // invisible gesture) or by expanding the row first. The swipe
+            // stays; this is the same action as a tonal button the agent can
+            // see. Hidden while expanded (the action row there carries it)
+            // and while multi-selecting (the bulk bar owns Confirm).
+            if (!expanded && !selectionMode && _canQuickConfirm)
+              Padding(
+                padding: const EdgeInsets.only(top: UgamSpacing.sm),
+                child: Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: IntrinsicWidth(
+                    child: UgamButton(
+                      label: tr('requests.action.accept'),
+                      icon: Icons.verified_rounded,
+                      kind: UgamButtonKind.tonal,
+                      onPressed: () =>
+                          _RequestActions(passenger: passenger, tour: tour)
+                              .confirmAndSeat(),
+                    ),
+                  ),
+                ),
+              ),
             // ── Expand region (single-open accordion) ──
             AnimatedSize(
               duration: UgamMotion.tab,

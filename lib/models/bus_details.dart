@@ -117,6 +117,12 @@ class Bus {
   /// Defaults to 0; agents set it when adding the bus.
   final double busPrice;
 
+  /// Whether the agreed bus rent/bhadu includes fuel (Diesel).
+  /// In tour bus operations (Pakku Bhadu), rent includes diesel and advances paid
+  /// along the trip, which are deducted from the owner's final payout.
+  /// Defaults to true.
+  final bool rentIncludesFuel;
+
   /// Per-bus departure place / venue. Overrides the tour-level boarding place
   /// wherever boarding is shown (esp. the PDF footer). Defaults to ''.
   final String boardingPoint;
@@ -172,6 +178,7 @@ class Bus {
     this.totalSeatsLegacy = 0,
     this.pricePerSeat = 0,
     this.busPrice = 0,
+    this.rentIncludesFuel = true,
     this.boardingPoint = '',
     this.departureTime,
     this.singleSofaPrice,
@@ -273,6 +280,7 @@ class Bus {
       'total_seats': totalSeatsLegacy,
       'price_per_seat': pricePerSeat,
       'bus_price': busPrice,
+      'rent_includes_fuel': rentIncludesFuel,
       'boarding_point': boardingPoint,
       'departure_time': departureTime,
       'single_sofa_price': singleSofaPrice,
@@ -307,6 +315,7 @@ class Bus {
       totalSeatsLegacy: map['total_seats'] as int? ?? 0,
       pricePerSeat: (map['price_per_seat'] as num?)?.toDouble() ?? 0,
       busPrice: (map['bus_price'] as num?)?.toDouble() ?? 0,
+      rentIncludesFuel: map['rent_includes_fuel'] as bool? ?? true,
       boardingPoint: (map['boarding_point'] ?? '').toString(),
       departureTime: (map['departure_time'] as String?)?.isNotEmpty == true
           ? map['departure_time'] as String
@@ -390,6 +399,7 @@ class Bus {
     int? totalSeatsLegacy,
     double? pricePerSeat,
     double? busPrice,
+    bool? rentIncludesFuel,
     String? boardingPoint,
     String? departureTime,
     double? singleSofaPrice,
@@ -417,6 +427,7 @@ class Bus {
       totalSeatsLegacy: totalSeatsLegacy ?? this.totalSeatsLegacy,
       pricePerSeat: pricePerSeat ?? this.pricePerSeat,
       busPrice: busPrice ?? this.busPrice,
+      rentIncludesFuel: rentIncludesFuel ?? this.rentIncludesFuel,
       boardingPoint: boardingPoint ?? this.boardingPoint,
       departureTime: departureTime ?? this.departureTime,
       singleSofaPrice: singleSofaPrice ?? this.singleSofaPrice,

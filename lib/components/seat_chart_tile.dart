@@ -105,6 +105,12 @@ class SeatChartTile extends StatelessWidget {
   /// the empty half reads the same as any un-highlighted seat).
   final TripType? mineLeg;
 
+  /// Whether a booked tile prints the occupant's mobile under the name. The
+  /// handler chart passes false: at tile width the number only ever showed as
+  /// "900000…", which nobody can dial, and the full number with a Call button
+  /// is one tap away in the occupant sheet. The freed line lets the name breathe.
+  final bool showPhone;
+
   const SeatChartTile({
     super.key,
     required this.cell,
@@ -121,6 +127,7 @@ class SeatChartTile extends StatelessWidget {
     this.anonymous = false,
     this.mine = false,
     this.mineLeg,
+    this.showPhone = true,
   });
 
   /// Occupants deduped by passenger id. A WHOLE double held by one person
@@ -157,9 +164,9 @@ class SeatChartTile extends StatelessWidget {
     if (n.isEmpty) return '?';
     final parts = n.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
     }
-    return parts.first[0].toUpperCase();
+    return parts.first.characters.first.toUpperCase();
   }
 
   /// Soft BACKGROUND fill marking a one-way leg by colour instead of a chip:
@@ -437,7 +444,7 @@ class SeatChartTile extends StatelessWidget {
               ),
               child: SeatOccupantLabel(
                 name: p.displayName,
-                phone: p.phone,
+                phone: showPhone ? p.phone : null,
                 nameColor: c.ink,
                 phoneColor: c.ink2,
               ),
@@ -632,7 +639,7 @@ class SeatChartTile extends StatelessWidget {
               Flexible(
                 child: SeatOccupantLabel(
                   name: p.displayName,
-                  phone: p.phone,
+                  phone: showPhone ? p.phone : null,
                   nameColor: c.ink,
                   phoneColor: c.ink2,
                   nameSize: 11.5,
@@ -708,7 +715,7 @@ class SeatChartTile extends StatelessWidget {
             child: Center(
               child: SeatOccupantLabel(
                 name: p.displayName,
-                phone: p.phone,
+                phone: showPhone ? p.phone : null,
                 nameColor: c.ink,
                 phoneColor: c.ink2,
                 nameSize: 11.5,

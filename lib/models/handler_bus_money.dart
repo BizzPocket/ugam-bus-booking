@@ -66,10 +66,25 @@ class HandlerBusMoney {
   /// Mirrors [BusMoneySummary.outstandingHandover].
   double get outstanding => inHand - handedOver;
 
-  /// True once this bus is settled — nothing material left to hand over.
-  /// Uses the shared money epsilon so sub-rupee dust never leaves a bus
-  /// looking unsettled.
-  bool get isSettled => outstanding.abs() <= Collection.kMoneyEpsilon;
+  /// True once this bus is settled: nothing material left to hand over, and
+  /// the books have actually been touched — either a handover was recorded or
+  /// there was never anything to collect.
+  ///
+  /// Settlement is about cash in hand, not about every rider having paid: a
+  /// full handover with one rider still unpaid is settled (that fare is the
+  /// agent's problem now, and `handler_handover_test` pins it). But
+  /// [outstanding] alone is ₹0 on a bus nobody has collected from yet
+  /// (0 + 0 − 0 − 0), so reading it as "settled" made an untouched bus open on
+  /// "Handed over ₹0 / nothing left to hand over" and sent an ended trip
+  /// straight to [HandlerPhase.closed] — "Trip closed · All square" over a
+  /// roster where every rider still read Owing (live, SHIVKAMAL 2026-09-05:
+  /// ₹56,800 uncollected). Requiring a recorded handover, unless there is
+  /// genuinely nothing to collect, is what keeps that bus open. Uses the shared
+  /// money epsilon so sub-rupee dust never leaves a bus looking unsettled.
+  bool get isSettled =>
+      outstanding.abs() <= Collection.kMoneyEpsilon &&
+      (toCollect <= Collection.kMoneyEpsilon ||
+          handedOver > Collection.kMoneyEpsilon);
 
   /// [dueForSeat] resolves a seated rider's fare for one seat (the bus's
   /// `amountDueForSeat`); injected so this stays decoupled from the heavy Bus
@@ -108,7 +123,9 @@ class HandlerBusMoney {
       collected: base.collected,
       toReturn: base.toReturnTotal,
       toCollect: base.toCollectTotal,
-      spent: base.expensesTotal, // busRent: 0 → logged ground expenses only
+      // EVERY row the handler paid (diesel, driver, advances, food, …) — the
+      // cash out of their pocket, whether or not a pakku rent absorbs it.
+      spent: base.groundExpenses,
       income: base.income,
       handedOver: base.handedOver,
     );

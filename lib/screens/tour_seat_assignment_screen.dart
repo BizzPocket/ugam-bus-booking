@@ -3748,8 +3748,14 @@ class _AssignmentDock extends StatelessWidget {
   /// the old horizontal cards that truncated names.
   Widget _queueRow(BuildContext context) {
     const cap = 6;
-    final visible = pending.take(cap).toList();
-    final overflow = pending.length - visible.length;
+    // The active rider already has the "Now seating" card right above (or the
+    // expanded detail) — listing them again as the first "Up next" chip showed
+    // the same person twice. Up next = everyone ELSE still waiting.
+    final upNext = passenger == null
+        ? pending
+        : pending.where((p) => p.id != passenger!.id).toList();
+    final visible = upNext.take(cap).toList();
+    final overflow = upNext.length - visible.length;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -3775,7 +3781,7 @@ class _AssignmentDock extends StatelessWidget {
                 ),
               ],
             )
-          else ...[
+          else if (upNext.isNotEmpty) ...[
             // "Up next" as a single COMPACT horizontal strip of passenger
             // chips, clearly under the "Now seating" card — no more stacked
             // near-identical full-width rows. Full names + request breakdown
@@ -3786,7 +3792,7 @@ class _AssignmentDock extends StatelessWidget {
                   child: UgamSectionLabel(
                     tr(
                       'tour_seat_assignment.up_next',
-                      namedArgs: {'count': '${pending.length}'},
+                      namedArgs: {'count': '${upNext.length}'},
                     ),
                   ),
                 ),
@@ -3878,7 +3884,12 @@ class _AssignmentDock extends StatelessWidget {
             UgamButton(
               label: tr('tour_seat_assignment.btn_download_chart'),
               icon: Icons.download_rounded,
-              kind: UgamButtonKind.primary,
+              // Solid only once everyone is seated: with riders still waiting
+              // the job on this screen is seating them, and a solid Download
+              // claimed the one accent for a chart that is not finished yet.
+              kind: pending.isEmpty
+                  ? UgamButtonKind.primary
+                  : UgamButtonKind.tonal,
               expand: true,
               onPressed: onDownloadChart,
             ),

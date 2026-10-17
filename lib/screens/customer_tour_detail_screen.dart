@@ -110,6 +110,9 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
               onShare: () async {
                 HapticFeedback.lightImpact();
                 await WhatsAppService().copyAnnouncementToClipboard(tour: t);
+                // It used to copy in silence, so a tap read as "nothing
+                // happened". Say where the text went and what to do with it.
+                AppSnackBar.success(tr('customer_tour_detail.share_copied'));
               },
             ),
           ),
@@ -300,6 +303,9 @@ class _Header extends StatelessWidget {
               Image.network(
                 tour.broadcastImageUrl!.trim(),
                 fit: BoxFit.cover,
+                // Tour posters put people/deities at the top; centre-cropping
+                // a 200px strip cut faces off at the forehead.
+                alignment: Alignment.topCenter,
                 cacheWidth: _decodeWidth(context),
                 // While loading, or if the object is missing, fall back to the
                 // backdrop so the strip never flashes raw or broken.
@@ -920,7 +926,7 @@ class _BusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final departure = _busDeparture(bus.boardingPoint, bus.departureTime);
+    final departure = _busDeparture(bus.boardingPoint);
     return Container(
       padding: const EdgeInsets.all(UgamSpacing.md),
       decoration: BoxDecoration(
@@ -984,16 +990,16 @@ class _BusCard extends StatelessWidget {
     );
   }
 
-  /// Per-bus boarding place + departure time as `<place> · <time>`. Either part
-  /// is omitted when empty; null when both are, so the caller hides the line.
-  static String? _busDeparture(String boardingPoint, String? departureTime) {
+  /// Per-bus boarding place, or null to hide the line.
+  ///
+  /// The TIME is deliberately not here. The journey section above already
+  /// prints the tour's departure time, and a bus row carrying its own
+  /// `departure_time` put two different times on one screen ("5:30 AM" in the
+  /// journey, "5:30 PM" on the bus card) — a pilgrim cannot tell which bus to
+  /// be at. One screen, one departure time: the tour's.
+  static String? _busDeparture(String boardingPoint) {
     final place = boardingPoint.trim();
-    final time = formatHhMm(departureTime);
-    final parts = [
-      if (place.isNotEmpty) place,
-      ?time,
-    ];
-    return parts.isEmpty ? null : parts.join(' · ');
+    return place.isEmpty ? null : place;
   }
 }
 

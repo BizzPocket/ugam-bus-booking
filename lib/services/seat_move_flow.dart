@@ -829,7 +829,7 @@ class _SwapSectionLabel extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: UgamSpacing.sm),
       child: Text(
         '${label.toUpperCase()} · $count',
-        style: UgamText.micro.copyWith(color: c.ink3, letterSpacing: 0.8),
+        style: UgamText.micro.copyWith(color: c.ink3, letterSpacing: UgamText.tracking(0.8)),
       ),
     );
   }

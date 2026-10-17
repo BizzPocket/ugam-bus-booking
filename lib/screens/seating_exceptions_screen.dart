@@ -5,6 +5,7 @@ import 'package:get/get.dart';
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/seat_assignment.dart';
+import '../models/seat_type.dart' show seatTypeLabel;
 import '../routes/app_routes.dart';
 import '../services/seating_engine.dart';
 import '../utils/app_snackbar.dart';
@@ -213,6 +214,60 @@ class SeatingExceptionsScreen extends StatelessWidget {
     return (label == null || label.isEmpty) ? null : label;
   }
 
+  /// A group's name for the card chip: the label the agent typed, else its
+  /// members ("Ramesh Patel +3") — never the raw [PassengerGroup.id] UUID.
+  String? _groupDisplay(String? groupId) {
+    final label = _groupLabel(groupId);
+    if (label != null || groupId == null) return label;
+    final tour = _ctrl.getTour(tourId);
+    if (tour == null) return null;
+    final names = [
+      for (final p in tour.passengers)
+        if (p.groupId == groupId && p.name.trim().isNotEmpty) p.name.trim(),
+    ];
+    if (names.isEmpty) return null;
+    if (names.length == 1) return names.first;
+    return tr(
+      'seating_exceptions.group_members',
+      namedArgs: {'name': names.first, 'n': '${names.length - 1}'},
+    );
+  }
+
+  /// The card's body copy, localized by exception KIND + its structured
+  /// params. The engine's [SeatingException.message] is English-only (and
+  /// for group kinds embeds the group UUID / bus ids), so it is used ONLY as
+  /// the fallback for a kind this switch does not know. The passenger's name
+  /// is already the card's title line, so the copy does not repeat it.
+  String _messageFor(SeatingException ex) {
+    final rl = ex.requestLine;
+    switch (ex.type) {
+      case SeatingExceptionType.priorityNoLowerBerth:
+        return tr('priority.no_lower_msg');
+      case SeatingExceptionType.sharedDoubleNeedsReview:
+        return tr('seating_exceptions.msg_shared_double');
+      case SeatingExceptionType.overflowWaitlist:
+        if (rl == null) break;
+        return tr(
+          'seating_exceptions.msg_overflow',
+          namedArgs: {'line': rl.label},
+        );
+      case SeatingExceptionType.seatTypeUnavailable:
+        if (rl == null) break;
+        return tr(
+          'seating_exceptions.msg_seat_type',
+          namedArgs: {
+            'type': seatTypeLabel(rl.seatType, rl.position),
+            'line': rl.label,
+          },
+        );
+      case SeatingExceptionType.groupWontFit:
+        return tr('seating_exceptions.msg_group_wont_fit');
+      case SeatingExceptionType.brokenPair:
+        return tr('seating_exceptions.msg_broken_pair');
+    }
+    return ex.message;
+  }
+
   /// True when tapping this exception will actually navigate.
   ///
   /// Mirrors [_onExceptionTap]'s candidate resolution exactly (the named
@@ -312,16 +367,13 @@ class SeatingExceptionsScreen extends StatelessWidget {
                             // Priority-no-lower-berth gets explicit alert copy
                             // (title + message) so the consequence is legible
                             // even without reading the engine's raw message.
-                            message: ex.type ==
-                                    SeatingExceptionType.priorityNoLowerBerth
-                                ? tr('priority.no_lower_msg')
-                                : ex.message,
+                            message: _messageFor(ex),
                             title: ex.type ==
                                     SeatingExceptionType.priorityNoLowerBerth
                                 ? tr('priority.no_lower_title')
                                 : null,
                             passengerName: _passengerName(ex.passengerId),
-                            groupLabel: _groupLabel(ex.groupId),
+                            groupLabel: _groupDisplay(ex.groupId),
                             // Priority misses are an ALERT, not a soft warm
                             // note — render the card in danger tones, pinned by
                             // the category order at the top of the list.

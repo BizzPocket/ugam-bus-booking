@@ -12,10 +12,12 @@ import '../models/passenger.dart';
 import '../models/payment_claim.dart';
 import '../models/tour.dart';
 import '../models/trip_type.dart';
+import '../utils/app_snackbar.dart';
 import '../utils/collection_seat_resolver.dart';
 import '../utils/formatters.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_money_state.dart';
+import '../widgets/board/passenger_sheet.dart' show BoardUndoToast;
 import '../widgets/money_loading_skeleton.dart';
 
 String? _tripLabel(TripType t) {
@@ -282,6 +284,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
                                     onTap: () =>
                                         _openCollectSheet(context, line),
                                     onMarkPaid: () => _markPaid(line),
+                                    // Only a seat that actually holds recorded
+                                    // money has anything to undo.
+                                    onUndoPayment: line.hasRecordedMoney
+                                        ? () => _confirmUndoPayment(line)
+                                        : null,
                                   );
                                 },
                               ),
@@ -316,7 +323,91 @@ class _CollectionScreenState extends State<CollectionScreen> {
       amountReceived: line.due,
       amountRefunded: 0,
     );
-    await controller.upsertCollection(updated);
+    // Captured BEFORE the await so no BuildContext crosses the async gap.
+    final overlay = Overlay.maybeOf(context);
+    final previous = line.col;
+    try {
+      await controller.upsertCollection(updated);
+    } catch (_) {
+      // upsertCollection already refetched and surfaced its own error toast.
+      return;
+    }
+    _refreshTotals();
+    if (!mounted) return;
+
+    final name = line.passenger.displayName;
+    final amountText = Formatters.formatMoneyInr(line.stillToCollect);
+    // The one place a mis-tap on ✓ can be taken back. Same toast + same
+    // restore rule as the Board's collect undo: a row that did not exist
+    // before is DELETED (a zeroed row would still post to the ledger and still
+    // read as "collected from"), an existing row is put back exactly as it was.
+    BoardUndoToast.show(
+      overlay,
+      message: tr(
+        'collection.paid_toast',
+        namedArgs: {'name': name, 'amount': amountText},
+      ),
+      semanticLabel: tr(
+        'collection.undo_paid_semantic',
+        namedArgs: {'name': name, 'amount': amountText},
+      ),
+      onUndo: () async {
+        try {
+          if (previous == null) {
+            await controller.deleteCollection(updated.id);
+          } else {
+            await controller.upsertCollection(previous);
+          }
+        } catch (_) {
+          // Both writes surface their own error toast and refetch.
+          return;
+        }
+        _refreshTotals();
+      },
+    );
+  }
+
+  /// Reverses money already recorded on a seat (a Paid / To-return row) after
+  /// an explicit confirm. Soft-deletes the collection row through the same
+  /// [MoneyController.deleteCollection] the Board's undo uses; 062's ledger
+  /// trigger posts the reversing entry, so the append-only ledger keeps the
+  /// history and nothing is destroyed server-side.
+  Future<void> _confirmUndoPayment(_SeatCollectionLine line) async {
+    final col = line.col;
+    if (col == null) return;
+    final amountText = Formatters.formatMoneyInr(line.net);
+    final ok = await UgamDialog.confirm(
+      context,
+      title: tr('collection.undo_payment_title'),
+      message: tr(
+        'collection.undo_payment_body',
+        namedArgs: {
+          'amount': amountText,
+          'name': line.passenger.displayName,
+          'seat': line.seatId,
+        },
+      ),
+      confirmLabel: tr('collection.undo_payment_confirm'),
+      confirmIcon: Icons.undo_rounded,
+      destructive: true,
+    );
+    if (!ok) return;
+    try {
+      await controller.deleteCollection(col.id);
+    } catch (_) {
+      // deleteCollection already refetched and surfaced its own error toast.
+      return;
+    }
+    _refreshTotals();
+    AppSnackBar.success(tr('collection.payment_undone'));
+  }
+
+  /// The header's "collected" figure comes from the ledger rollup, which only
+  /// moves on a refetch — the local list alone updates to-collect but not
+  /// collected. Best-effort and background: the write already landed.
+  void _refreshTotals() {
+    // ignore: unawaited_futures
+    controller.refreshForTour(widget.tour.id).catchError((_) {});
   }
 
   /// Numpad-first settle sheet. The hero amount is the cash **received**; the
@@ -541,6 +632,13 @@ class _SeatCollectionLine {
   bool get isReturnDue => liveBalance > Collection.kMoneyEpsilon;
   bool get isShortfall => liveBalance < -Collection.kMoneyEpsilon;
 
+  /// True when this seat has a collection row carrying real cash (received or
+  /// handed back) — the rows an "undo payment" can reverse.
+  bool get hasRecordedMoney =>
+      col != null &&
+      ((col!.amountReceived).abs() > Collection.kMoneyEpsilon ||
+          (col!.amountRefunded).abs() > Collection.kMoneyEpsilon);
+
   double get changeToReturn => isReturnDue ? liveBalance : 0;
   double get stillToCollect => isShortfall ? -liveBalance : 0;
 }
@@ -733,11 +831,15 @@ class _PassengerRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onMarkPaid;
 
+  /// Reverse the money recorded on this seat. Null when nothing is recorded.
+  final VoidCallback? onUndoPayment;
+
   const _PassengerRow({
     required this.line,
     required this.bus,
     required this.onTap,
     required this.onMarkPaid,
+    this.onUndoPayment,
   });
 
   @override
@@ -924,37 +1026,64 @@ class _PassengerRow extends StatelessWidget {
                   onTap: onMarkPaid,
                 ),
               ],
+              // Undo, in the SAME slot the ✓ occupies on an owing row — so a
+              // Paid / To-return row gets its reverse control exactly where the
+              // settle control was, and the two never share a row (no extra
+              // width at 320px). Confirmed by a dialog before anything moves.
+              //
+              // GHOST, not a filled disc: a paid row is finished business, so
+              // its reverse control must not shout as loud as the ✓ on an
+              // owing row. Same 44pt hit box (the touch floor), but no fill and
+              // a muted ink — it is there when wanted, invisible when scanning.
+              if (!isShortfall && onUndoPayment != null) ...[
+                const SizedBox(width: UgamSpacing.sm),
+                UgamIconButton(
+                  key: ValueKey('undo-paid-${line.seatId}-${passenger.id}'),
+                  icon: Icons.undo_rounded,
+                  tone: UgamIconButtonTone.neutral,
+                  fillOverride: Colors.transparent,
+                  inkOverride: c.ink3,
+                  iconSize: 17,
+                  semanticLabel: tr('collection.undo_payment_title'),
+                  onTap: onUndoPayment!,
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: UgamSpacing.sm),
-          Row(
-            children: [
-              Expanded(
-                child: _MetricCol(
-                  label: tr('collection.metric_due'),
-                  value: Formatters.formatMoneyInr(due),
-                  c: c,
+          // Fare · Received (· Returned) on ONE caption line. This used to be
+          // a two-column label-over-value block that labelled the FARE "Due",
+          // so a paid rider read "Due ₹3,400" and an unpaid one saw the same
+          // figure twice (chip + metric). The chip owns "how much is owed";
+          // this line is the record: what the seat costs and what came in.
+          // Money handed back appears only when there is some.
+          const SizedBox(height: 3),
+          Text.rich(
+            TextSpan(
+              children: [
+                _metricSpan(
+                  tr('collection.metric_fare'),
+                  Formatters.formatMoneyInr(due),
+                  c,
                 ),
-              ),
-              Expanded(
-                child: _MetricCol(
-                  label: tr('collection.received'),
-                  value: Formatters.formatMoneyInr(received),
-                  c: c,
+                _metricSep(c),
+                _metricSpan(
+                  tr('collection.received'),
+                  Formatters.formatMoneyInr(received),
+                  c,
                 ),
-              ),
-              // Money handed back (change or an explicit refund) — shown only
-              // when there is some, so the return is visible on the record, not
-              // hidden inside the collection row.
-              if (returned > 0)
-                Expanded(
-                  child: _MetricCol(
-                    label: tr('collection.metric_returned'),
-                    value: Formatters.formatMoneyInr(returned),
-                    c: c,
+                if (returned > 0) ...[
+                  _metricSep(c),
+                  _metricSpan(
+                    tr('collection.metric_returned'),
+                    Formatters.formatMoneyInr(returned),
+                    c,
                   ),
-                ),
-            ],
+                ],
+              ],
+            ),
+            style: UgamText.tabular(UgamText.caption.copyWith(color: c.ink2)),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -981,43 +1110,18 @@ class _PassengerRow extends StatelessWidget {
   }
 }
 
-class _MetricCol extends StatelessWidget {
-  final String label;
-  final String value;
-  final UgamColorSet c;
+/// "Fare ₹3,400" — the label in the caption ink, the figure a step stronger so
+/// the money still leads. Wraps (maxLines 2 on the host) rather than losing a
+/// digit at the 1.3x text scale.
+InlineSpan _metricSpan(String label, String value, UgamColorSet c) => TextSpan(
+  children: [
+    TextSpan(text: '$label '),
+    TextSpan(
+      text: value,
+      style: UgamText.captionStrong.copyWith(color: c.ink),
+    ),
+  ],
+);
 
-  const _MetricCol({required this.label, required this.value, required this.c});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Due / Received / Returned — the label half of a value pair, so
-        // [captionStrong] (Inter 12/w600), not `micro`. It stays a step below
-        // the bodyStrong figure under it, so the money still leads the cell.
-        Text(
-          label,
-          style: UgamText.captionStrong.copyWith(color: c.ink2),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        const SizedBox(height: 2),
-        // A money figure must never lose a digit, so it scales down to fit
-        // rather than ellipsising — three of these share the card width and a
-        // lakh-sized fare at the 1.3x text scale does not fit a third of it.
-        // Same treatment the money board gives its figures.
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
-            maxLines: 1,
-          ),
-        ),
-      ],
-    );
-  }
-}
+InlineSpan _metricSep(UgamColorSet c) =>
+    TextSpan(text: '  ·  ', style: TextStyle(color: c.ink3));

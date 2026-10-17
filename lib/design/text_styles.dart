@@ -305,7 +305,16 @@ class UgamText {
   /// strictly better than an arbitrary platform one. The fallback is not
   /// permission to use this step for translated text — it is damage control
   /// until the migration lands.
-  static const TextStyle micro = TextStyle(
+  ///
+  /// **Tracking is locale-gated, here, in one place.** The +1.4 tracking only
+  /// applies while the app runs in a Latin-script locale; in Gujarati or Hindi
+  /// it is 0, because ~175 call sites still hand this step translated copy
+  /// and the tracking shattered it ("આ ગ ળ નું"). [syncLocale] flips it from
+  /// app.dart's MaterialApp builder, which re-runs on every locale change
+  /// before any screen builds — so no call site has to change.
+  static TextStyle get micro => _latinTracking ? _microLatin : _microIndic;
+
+  static const TextStyle _microLatin = TextStyle(
     fontFamily: _display,
     fontFamilyFallback: indicFallback,
     fontSize: 10,
@@ -313,6 +322,24 @@ class UgamText {
     letterSpacing: 1.4,
     height: 1.2,
   );
+
+  static final TextStyle _microIndic = _microLatin.copyWith(letterSpacing: 0);
+
+  /// True while the active locale writes in Latin script (English). Defaults
+  /// to true so a test or tool that never runs the app builder keeps the
+  /// historical metrics.
+  static bool _latinTracking = true;
+
+  /// Called from the MaterialApp builder with the live locale. Every
+  /// wide-tracked style ([micro], [tracking]) reads the result.
+  static void syncLocale(Locale locale) {
+    _latinTracking = locale.languageCode == 'en';
+  }
+
+  /// Wide tracking for a call site that adds its own `letterSpacing` via
+  /// `copyWith` on a TRANSLATED string: [value] in a Latin locale, 0 in an
+  /// Indic one (tracking pulls Gujarati/Devanagari conjuncts apart).
+  static double tracking(double value) => _latinTracking ? value : 0;
 
   // ── Numeric (tabular figures) — Sora. ──
   static const TextStyle numLg = TextStyle(

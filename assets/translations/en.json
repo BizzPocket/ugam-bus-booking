@@ -252,7 +252,7 @@
     "section_preferences": "Preferences",
     "language": "Language",
     "section_about_legal": "About & Legal",
-    "about": "About Ugam Foj",
+    "about": "About Ugam Booking",
     "about_subtitle": "What this app is and who makes it",
     "privacy": "Privacy Policy",
     "privacy_subtitle": "How we handle your data",
@@ -353,9 +353,9 @@
     "all_caught_up": "All caught up",
     "all_caught_up_subtitle": "{n} tour(s) on track",
     "picker_phase_suffix": "· Phase {step}/{total}",
-    "ago_days": "{n}d",
-    "ago_hours": "{n}h",
-    "ago_mins": "{n}m",
+    "ago_days": "{n}d ago",
+    "ago_hours": "{n}h ago",
+    "ago_mins": "{n}m ago",
     "seats_full": "Full",
     "seats_filled_ratio": "{filled}/{total} filled",
     "seats_left_n": "{n} left",
@@ -385,7 +385,8 @@
       "this_week": "This week",
       "next_30_days": "Next 30 days",
       "later": "Later",
-      "past": "Past"
+      "past": "Past",
+      "past_trips": "Past trips"
     },
     "no_matches_title": "No matches",
     "no_matches_body": "No tours match \"{query}\".",
@@ -589,7 +590,7 @@
   },
   "find_seat": {
     "title": "Find my seat",
-    "intro": "Enter the mobile number you booked with to see your seat once the organiser has locked the tour.",
+    "intro": "Type the mobile number you gave when booking. Your seat will show here once the organiser has fixed everyone's seats.",
     "phone_label": "Mobile number",
     "phone_hint": "e.g. 98765 43210",
     "find_btn": "Find my seat",
@@ -699,7 +700,8 @@
     "next_steps_3": "Your seat number shows here once the trip is locked.",
     "payment_due": "{amount} due to confirm your seats",
     "payment_recorded": "Payment recorded — waiting for the organiser to confirm it",
-    "payment_pay_now": "Pay now"
+    "payment_pay_now": "Pay now",
+    "view_my_seat": "View my seat"
   },
   "add_bus": {
     "title": "Add Bus",
@@ -740,6 +742,8 @@
       "boarding_point_short": "e.g. Surat",
       "departure_time_short": "Set time"
     },
+    "rent_includes_fuel_label": "Rent includes diesel and driver (Pakku Bhadu)",
+    "rent_includes_fuel_hint": "Diesel, driver pay and advances paid on the trip are part of the rent — they are deducted from the owner's final payout, not added to the trip cost.",
     "group": {
       "bus": "The bus",
       "boarding": "Boarding",
@@ -842,7 +846,8 @@
       "subtitle": "Premium front rows or a discounted back range — price set per person.",
       "add": "Add price band",
       "remove_semantic": "Remove price band",
-      "rows_clamped_note": "Rows are clamped to the bus once it is built."
+      "rows_clamped_note": "Rows are clamped to the bus once it is built.",
+      "uncovered": "Row {rows} is in no band — it will use the plain per-seat price. Add a band to price it."
     },
     "band_sheet": {
       "title_add": "Add price band",
@@ -915,7 +920,7 @@
     "snackbar_unavailable_body": "Admin accounts are created in the Supabase dashboard. Ask your project owner to add you under Authentication → Users.",
     "mail_unavailable_title": "Mail unavailable",
     "mail_unavailable_body": "Could not open your mail app. Please email {email}.",
-    "support_heading": "Admin accounts are managed by the Ugam team",
+    "support_heading": "Admin accounts are managed by the Ugam Booking team",
     "support_body": "Contact our support team to add or modify admin access. You'll be added to the system within 24 hours.",
     "btn_contact_support": "Contact support",
     "email_copied": "Copied {email}",
@@ -941,11 +946,15 @@
     "wa_failed_title": "WhatsApp failed",
     "driver_pending": "Driver pending",
     "tour_not_found_refresh": "Tour not found. Pull to refresh.",
+    "action_operate_as_handler": "Operate as handler",
     "action": {
       "edit_bus": "Edit bus details",
       "open_seat_assignment": "Open seat assignment",
       "collection_money": "Collection & money"
     }
+  },
+  "admin_handler_operate": {
+    "locked_only": "Lock the tour first — handler tools open once the trip is locked."
   },
   "create_tour": {
     "title": "Create Tour",
@@ -973,6 +982,7 @@
     "validation": {
       "invalid_amount": "Invalid amount",
       "select_start_date": "Please select a start date",
+      "select_end_date": "Please select an end date",
       "name_required": "Please enter a tour name",
       "from_required": "Please enter a departure city",
       "to_required": "Please enter a destination city"
@@ -1037,7 +1047,7 @@
     "success_updated_wa": "Request updated. Tap Send in WhatsApp to confirm.",
     "success_updated_no_wa": "Request updated. The organiser will see the new details.",
     "success_title_updated": "Updated",
-    "warn_edit_blocked": "Seats may already be assigned. Refresh and contact the organiser.",
+    "warn_edit_blocked": "This booking can no longer be changed here. Refresh, or contact the organiser.",
     "warn_title_edit_blocked": "Edit blocked",
     "route_price": "{from} → {to}  ·  ₹{price} / seat",
     "totals_seat_one": "{} seat",
@@ -1182,7 +1192,8 @@
     "label_seats": "Seats",
     "seats_free_of_total": "{free} of {total} free",
     "label_destination": "Destination",
-    "seats_unavailable": "Couldn't check seat availability."
+    "seats_unavailable": "Couldn't check seat availability.",
+    "share_copied": "Tour details copied — paste in WhatsApp to share"
   },
   "edit_tour": {
     "title": "Edit Tour",
@@ -1255,7 +1266,7 @@
     }
   },
   "login": {
-    "brand_name": "UGAM",
+    "brand_name": "Ugam Booking",
     "tagline": "Tour Booking Agent",
     "hero": "Welcome\nback.",
     "description": "Sign in with your phone number to continue planning extraordinary journeys.",
@@ -1344,7 +1355,8 @@
     "status_sent": "Sent",
     "status_delivered": "Delivered",
     "status_read": "Read",
-    "status_failed": "Not delivered"
+    "status_failed": "Not delivered",
+    "unsupported": "📎 Media / unsupported message"
   },
   "broadcast_fallback": {
     "label_route": "Route",
@@ -1383,7 +1395,13 @@
     "group_label": "Group {label}",
     "nothing_placed_title": "Nothing placed yet",
     "nothing_placed_body": "These passengers are not seated yet — fill or assign them to a bus first, then open the chart.",
-    "held_toast": "Moved to waitlist — they won't be auto-seated."
+    "held_toast": "Moved to waitlist — they won't be auto-seated.",
+    "msg_shared_double": "Can only be seated by sharing a Double Sofa with another passenger — confirm the pairing.",
+    "msg_overflow": "No capacity left for {line} — waitlist.",
+    "msg_seat_type": "No matching {type} seat is free ({line}).",
+    "msg_group_wont_fit": "This group does not fit on any single bus.",
+    "msg_broken_pair": "This group is locked across several buses and cannot sit together on one bus.",
+    "group_members": "{name} +{n}"
   },
   "priority": {
     "alert_title": "Priority request",
@@ -1402,7 +1420,8 @@
     "remove": "Remove handler",
     "remove_done": "Handler removed from this bus.",
     "row_current": "Handler: {name}",
-    "row_empty": "No handler picked"
+    "row_empty": "No handler picked",
+    "set_cta": "Set handler"
   },
   "bus_message": {
     "composer_title": "Message this bus",
@@ -1492,6 +1511,8 @@
     "subtitle_seats": "{assigned}/{capacity} seats",
     "subtitle_seats_free": "{free} free of {capacity}",
     "menu_call_driver": "Call driver",
+    "menu_operate_as_handler": "Operate as handler",
+    "menu_operate_as_handler_subtitle": "Boarding, collections, and trip tools for this bus",
     "menu_duplicate": "Duplicate bus",
     "menu_more": "Bus actions",
     "menu_delete_subtitle": "Removes the bus and its seat assignments"
@@ -1726,13 +1747,13 @@
     "chip_seats_left": "{n}",
     "chip_seats_left_label": "seats left",
     "chip_filled": "{filled}/{total}",
-    "vitals_section": "Vitals",
-    "vitals_seats_left": "Seats left",
+    "vitals_section": "At a glance",
+    "vitals_seats_left": "Need a seat",
     "vitals_money_due": "Money due",
     "vitals_requests": "Requests",
     "vitals_bus_fill": "Bus fill",
     "vitals_collected": "collected {amount}",
-    "vitals_seated_open": "{seated} seated · {open} open",
+    "vitals_seated_open": "{seated} seated · {open} need a seat",
     "vitals_buses_free": "{buses} buses · {free} free",
     "tools_section": "Tools",
     "tool_broadcast": "Broadcast",
@@ -2156,6 +2177,13 @@
     "rollup_to_return": "To return",
     "expense_details": "Details",
     "bus_owner_rent": "Bus owner rent",
+    "malik_title": "Bus Malik settlement",
+    "malik_title_bus": "Bus Malik settlement ({bus})",
+    "malik_bhadu": "(A1) Bus Bhadu (agreed rent)",
+    "malik_diesel": "(1) Diesel paid on trip",
+    "malik_driver": "(2) Driver paid on trip",
+    "malik_advance": "(3) Advance paid to owner",
+    "malik_remaining": "(4) Remaining payable to Malik",
     "delete_expense_title": "Delete this expense?",
     "delete_expense_body": "This expense record will be permanently removed. This can't be undone.",
     "delete_handover_title": "Delete this handover?",
@@ -2201,8 +2229,14 @@
     "upi_pending_chip": "UPI claim {n}",
     "seat_label": "Seat {seat}",
     "phone_seat_label": "{phone} · Seat {seat}",
-    "metric_due": "Due",
-    "metric_returned": "Returned"
+    "metric_fare": "Fare",
+    "metric_returned": "Returned",
+    "paid_toast": "{name} marked paid · {amount}",
+    "undo_paid_semantic": "Undo marking {name} paid ({amount})",
+    "undo_payment_title": "Undo payment?",
+    "undo_payment_body": "This removes the {amount} recorded for {name} (seat {seat}). The seat will show as not collected again.",
+    "undo_payment_confirm": "Undo payment",
+    "payment_undone": "Payment removed"
   },
   "handler_chart": {
     "badge_half_suffix": "{leg} ½",
@@ -2243,6 +2277,11 @@
     "money_return_due": "Return due",
     "money_not_collected": "Not collected",
     "in_hand_secondary": "{amount} collected so far",
+    "in_hand_secondary_owing": "{owing} still to collect · {collected} collected so far",
+    "upi_claim_pending": "Rider says {amount} was paid by UPI — not yet checked by the agent",
+    "upi_claim_confirmed": "{amount} paid by UPI — confirmed by the agent",
+    "upi_claim_ref": "UPI ref {ref}",
+    "upi_claim_row": "Says {amount} paid by UPI (unverified)",
     "badge_round_trip": "RT",
     "badge_go": "GO",
     "badge_ret": "RET",
@@ -2272,12 +2311,15 @@
     "att_leg_ret": "Return",
     "att_present": "Present",
     "att_left_behind": "Left behind",
+    "att_not_boarded": "Not yet boarded",
     "att_total": "Total",
     "att_boarded": "Boarded {present}/{total}",
     "att_tally": "{present} present · {left} left behind",
     "att_none": "No passengers on this leg yet.",
     "pickup_none": "No pickup point",
     "att_mark_present": "Mark present",
+    "att_group_together": "{count} riders · same group",
+    "att_group_named": "{label} · {count} riders",
     "error_save_attendance": "Couldn't save attendance. Please try again.",
     "error_save_collection": "Couldn't save the collection. Please try again.",
     "error_save_collection_reason": "Couldn't save the collection: {reason}",
@@ -2352,7 +2394,11 @@
     "stops_done": "Stops done",
     "att_none_go_body": "Nobody is booked on this bus for the outbound leg.",
     "att_none_ret_body": "Nobody is booked on this bus for the return leg.",
-    "collect_section": "Collect from passengers"
+    "collect_section": "Collect from passengers",
+    "paid_in_full": "Paid in full {amount}",
+    "collect_more_details": "Returned, collected by, note",
+    "in_hand_secondary_owing_only": "{owing} still to collect",
+    "money_received_part": "{amount} received"
   },
   "seat_legend": {
     "free": "Free",
@@ -2364,7 +2410,8 @@
     "ret": "Return only",
     "half": "½ half fare",
     "paid": "Paid",
-    "owing": "Owing"
+    "owing": "Owing",
+    "title": "Legend"
   },
   "seat_swap_conflict": {
     "title": "Seat shares a leg",
@@ -2609,7 +2656,8 @@
     "cta_edit_by_hand": "Edit by hand",
     "cta_regenerate": "Re-generate",
     "regenerate_confirm_title": "Re-generate seating plan?",
-    "regenerate_confirm_body": "This discards the current seat arrangement and re-assigns every passenger from scratch."
+    "regenerate_confirm_body": "This discards the current seat arrangement and re-assigns every passenger from scratch.",
+    "cta_notify": "Notify riders"
   },
   "errors": {
     "save_failed": "Save failed",
@@ -2853,15 +2901,15 @@
       "s11_body": "Questions about these Terms:\n\nOccubit Solution\nEmail: zeel.shiyani68@gmail.com"
     },
     "about": {
-      "title": "About Ugam Foj",
+      "title": "About Ugam Booking",
       "meta": "Group bus tour booking · devam.org",
-      "intro": "Ugam Foj is the bus-booking companion for group pilgrimages and tours organised around Bhedapipaliya Dham (DEVAM). It brings the whole journey — from announcing a tour, to gathering seat requests, to assigning seats and sending tickets over WhatsApp — into one simple app.",
+      "intro": "Ugam Booking is the bus-booking companion for group pilgrimages and tours organised around Bhedapipaliya Dham (DEVAM). It brings the whole journey — from announcing a tour, to gathering seat requests, to assigning seats and sending tickets over WhatsApp — into one simple app.",
       "travellers_title": "For travellers",
       "travellers_body": "Browse upcoming tours, see what's available, and request your seats in a few taps. Track every request and its latest status under \"My Requests\", and pick up your seat details once the organiser confirms them.",
       "organisers_title": "For organisers",
       "organisers_body": "Publish tours, manage buses and seat layouts, review incoming requests, assign seats, and message travellers — all built to work offline and stay in sync.",
       "who_title": "Who makes it",
-      "who_body": "Ugam Foj is published by Occubit Solution.\n\nWeb: devam.org\nEmail: zeel.shiyani68@gmail.com"
+      "who_body": "Ugam Booking is published by Occubit Solution.\n\nWeb: devam.org\nEmail: zeel.shiyani68@gmail.com"
     }
   },
   "money": {
@@ -2925,7 +2973,18 @@
     "zero_step_cash_title": "Collect the fares",
     "zero_step_cash_body": "Cash and online payments taken on the seat chart become collected cash.",
     "zero_step_expense_title": "Log the costs",
-    "zero_step_expense_body": "Diesel, tolls, food and rent on the trip's money board."
+    "zero_step_expense_body": "Diesel, tolls, food and rent on the trip's money board.",
+    "delete_trip": "Delete trip",
+    "delete_title": "Delete \"{title}\"?",
+    "delete_body_empty": "This trip has no passengers, no buses and no money recorded. It will be removed from your trips and from this report.",
+    "delete_body_data": "This trip still has:\n{details}\n\nDeleting removes the trip — its passengers, buses, seat chart and ALL of this money — from your trips and from this report.",
+    "delete_line_passengers": "• Passengers: {n}",
+    "delete_line_buses": "• Buses: {n}",
+    "delete_line_collected": "• Collected from passengers: {amount}",
+    "delete_line_income": "• Extra income: {amount}",
+    "delete_line_expenses": "• Expenses: {amount}",
+    "delete_check_failed": "Couldn't load this trip to check what would be deleted. Check your connection and try again.",
+    "deleted": "Trip \"{title}\" deleted."
   },
   "trip_pnl": {
     "eyebrow": "Money",
@@ -2943,6 +3002,7 @@
     "bus_one": "1 bus",
     "bus_many": "{n} buses",
     "rent": "Rent {n}",
+    "malik_remaining": "Malik {n}",
     "profit": "profit",
     "loss": "loss",
     "cash_net": "Cash net",
@@ -3093,7 +3153,7 @@
   },
   "tracking": {
     "notification_title": "Sharing bus location",
-    "notification_text": "Your tour operator can see where the bus is while the trip is running.",
+    "notification_text": "This phone is sharing a precise GPS fix so the office can see where your bus is.",
     "card_live": "Sharing location",
     "card_updated_ago": "updated {n}",
     "card_starting": "Starting location sharing…",
@@ -3110,13 +3170,13 @@
     "card_stop": "Stop sharing",
     "strip_retry": "Check again",
     "rationale_title": "Share this bus's location",
-    "rationale_body": "While the trip is running, this app sends the bus's position to your tour operator so they can answer passengers asking where the bus is.\n\nIt collects only the bus position — never your calls, messages or contacts. It starts when the trip is locked and stops on its own when the trip is marked complete. You can stop it any time from the notification or this screen.",
+    "rationale_body": "While the trip is running, this phone shares its precise GPS with the other people on your bus. The office sees one position for that bus: the spot the phones on it agree on. A phone that is somewhere else is left out.\n\nOnly the bus position is collected — never your calls, messages or contacts. Sharing starts on a locked trip and stops when the trip is marked complete. You can stop it any time from the notification.",
     "rationale_continue": "Continue",
     "rationale_not_now": "Not now",
     "map_title": "Live map",
     "map_open": "Live map",
     "map_empty_title": "No bus has shared its location yet",
-    "map_empty_body": "A bus appears here once its handler opens the trip on their phone.",
+    "map_empty_body": "A bus appears here once someone riding it shares their location.",
     "map_last_seen": "Last seen {n}",
     "map_moving": "{n} km/h",
     "map_parked": "Parked",
@@ -3125,7 +3185,7 @@
     "ago_minutes": "{n}m ago",
     "ago_hours": "{n}h ago",
     "map_fit_all": "Show all buses",
-    "map_reporting": "{n} of {m} reporting",
+    "map_reporting": "Location showing for {n} of {m} buses",
     "map_not_started": "Not sharing yet",
     "map_check_again": "Check again"
   },

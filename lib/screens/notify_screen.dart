@@ -20,6 +20,7 @@ import '../utils/passenger_display.dart';
 // `displayPhone` — the shared "strip to a dialable 10 digits" rule, so the
 // number the organiser is told to call reads the same here as on every chart.
 import '../utils/seat_grid_placement.dart' show displayPhone;
+import '../utils/time_format.dart' show formatHhMm;
 import '../utils/wa_error_text.dart';
 import '../utils/wa_param_error_text.dart';
 
@@ -977,9 +978,19 @@ class _NotifyScreenState extends State<NotifyScreen> {
         driverPhone: null,
       );
     }
+    // Only REAL driver names, de-duplicated: joining every bus's raw
+    // driverName printed a bare "," when none had one entered. Empty → the
+    // hero hides the driver cell instead of showing punctuation.
+    final drivers = <String>{
+      for (final b in tour.buses)
+        if (b.driverName.trim().isNotEmpty) b.driverName.trim(),
+    };
     return _BusInfo(
-      busNo: tour.buses.map((b) => b.displayLabel).join(', '),
-      driverName: tour.buses.map((b) => b.driverName).join(', '),
+      // One bus per line (name · plate), so a multi-bus tour names EVERY bus
+      // in the header instead of ellipsising "RSR, BANSIDHAR…" mid-name.
+      busNo: tour.buses.map((b) => b.displayLabel).join('\n'),
+      busCount: tour.buses.length,
+      driverName: drivers.join(', '),
       driverPhone: tour.buses.first.driverPhone,
     );
   }
@@ -987,10 +998,12 @@ class _NotifyScreenState extends State<NotifyScreen> {
 
 class _BusInfo {
   final String busNo;
+  final int busCount;
   final String driverName;
   final String? driverPhone;
   _BusInfo({
     required this.busNo,
+    this.busCount = 1,
     required this.driverName,
     required this.driverPhone,
   });
@@ -1063,8 +1076,30 @@ class _HeroSummaryCard extends StatelessWidget {
     final handler = tour.handler;
     final locale = context.locale.toString();
     final departure = DateFormat('d MMM', locale).format(tour.departureDate);
-    final departureTime =
-        DateFormat('HH:mm', locale).format(tour.departureDate);
+    // The clock lives in the tour's `departure_time` ('HH:mm'), NOT in
+    // departureDate — a date-only column, so formatting its time always
+    // printed "00:00". Fall back to the first bus that has its own time; no
+    // time anywhere → the date alone, never a made-up midnight.
+    String? hhmm = tour.departureTime;
+    if (hhmm == null || hhmm.trim().isEmpty) {
+      for (final b in tour.buses) {
+        final t = b.departureTime;
+        if (t != null && t.trim().isNotEmpty) {
+          hhmm = t;
+          break;
+        }
+      }
+    }
+    final departureTime = formatHhMm(hhmm);
+    final departureValue = departureTime == null
+        ? departure
+        : '$departure · $departureTime';
+    final handlerCell = _InfoCell(
+      c: c,
+      icon: Icons.person_pin_rounded,
+      label: tr('notify.info_handler'),
+      value: handler?.displayName ?? tr('notify.not_assigned'),
+    );
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.lg),
       child: Column(
@@ -1114,7 +1149,7 @@ class _HeroSummaryCard extends StatelessWidget {
                   c: c,
                   icon: Icons.event_rounded,
                   label: tr('notify.info_departure'),
-                  value: '$departure · $departureTime',
+                  value: departureValue,
                 ),
               ),
               const SizedBox(width: UgamSpacing.sm),
@@ -1124,32 +1159,30 @@ class _HeroSummaryCard extends StatelessWidget {
                   icon: Icons.directions_bus_rounded,
                   label: tr('notify.info_bus'),
                   value: busInfo.busNo,
+                  maxLines: busInfo.busCount.clamp(1, 3),
                 ),
               ),
             ],
           ),
           const SizedBox(height: UgamSpacing.sm),
-          Row(
-            children: [
-              Expanded(
-                child: _InfoCell(
-                  c: c,
-                  icon: Icons.badge_outlined,
-                  label: tr('notify.info_driver'),
-                  value: busInfo.driverName,
+          // No driver entered on any bus → the handler cell takes the row.
+          if (busInfo.driverName.isEmpty)
+            handlerCell
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: _InfoCell(
+                    c: c,
+                    icon: Icons.badge_outlined,
+                    label: tr('notify.info_driver'),
+                    value: busInfo.driverName,
+                  ),
                 ),
-              ),
-              const SizedBox(width: UgamSpacing.sm),
-              Expanded(
-                child: _InfoCell(
-                  c: c,
-                  icon: Icons.person_pin_rounded,
-                  label: tr('notify.info_handler'),
-                  value: handler?.displayName ?? tr('notify.not_assigned'),
-                ),
-              ),
-            ],
-          ),
+                const SizedBox(width: UgamSpacing.sm),
+                Expanded(child: handlerCell),
+              ],
+            ),
         ],
       ),
     );
@@ -1161,12 +1194,14 @@ class _InfoCell extends StatelessWidget {
   final IconData icon;
   final String label;
   final String value;
+  final int maxLines;
 
   const _InfoCell({
     required this.c,
     required this.icon,
     required this.label,
     required this.value,
+    this.maxLines = 1,
   });
 
   @override
@@ -1212,7 +1247,7 @@ class _InfoCell extends StatelessWidget {
           Text(
             value,
             style: UgamText.bodyStrong.copyWith(color: c.ink),
-            maxLines: 1,
+            maxLines: maxLines,
             overflow: TextOverflow.ellipsis,
           ),
         ],
@@ -1400,14 +1435,20 @@ class _NotifyRow extends StatelessWidget {
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
     if (parts.length >= 2) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
     }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
   }
 
   @override
   Widget build(BuildContext context) {
-    final seats = passenger.assignedSeats.map((a) => a.seatId).join(', ');
+    // A whole double sofa is one SeatAssignment PER LEG, so the raw map
+    // listed "DL1, DL1". De-dupe on (bus, seat), first-seen order kept.
+    final seen = <String>{};
+    final seats = [
+      for (final a in passenger.assignedSeats)
+        if (seen.add('${a.busId}|${a.seatId}')) a.seatId,
+    ].join(', ');
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.md),
       radius: UgamRadius.row,
@@ -1437,31 +1478,15 @@ class _NotifyRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    // 2 lines before ellipsis — app-wide name rule, see
-                    // UgamRequestRow.
-                    Expanded(
-                      child: Text(
-                        passenger.displayName,
-                        style: UgamText.bodyStrong.copyWith(color: c.ink),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    // Bounded so the dot's own Flexible/ellipsis can do its
-                    // job — as a bare Row child it took unbounded width.
-                    Flexible(
-                      child: UgamStatusDot(
-                        label: _statusLabel,
-                        // A withdrawn seat is outstanding work, exactly like a
-                        // pending send — warm attention, not a "done" green.
-                        tone:
-                            _isSent ? UgamStatusTone.good : UgamStatusTone.warm,
-                      ),
-                    ),
-                  ],
+                // The name owns the full first line. The status dot used to
+                // share it and squeezed most Gujarati/English names onto two
+                // lines; it now rides the seat line below.
+                Text(
+                  passenger.displayName,
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                  // 2 lines before ellipsis — app-wide name rule.
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
                 Row(
@@ -1492,6 +1517,18 @@ class _NotifyRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const SizedBox(width: UgamSpacing.sm),
+                    // Bounded (Flexible): the dot's label is itself Flexible
+                    // and needs a finite width to ellipsize against.
+                    Flexible(
+                      child: UgamStatusDot(
+                        label: _statusLabel,
+                        // A withdrawn seat is outstanding work, exactly like a
+                        // pending send — warm attention, not a "done" green.
+                        tone:
+                            _isSent ? UgamStatusTone.good : UgamStatusTone.warm,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -1511,9 +1548,9 @@ class _NotifyRow extends StatelessWidget {
           UgamIconButton(
             icon: _removed ? Icons.call_rounded : Icons.chat_rounded,
             onTap: onSend,
-            tone: _isSent
-                ? UgamIconButtonTone.good
-                : UgamIconButtonTone.neutral,
+            // Neutral on every row: 47 green discs repeated what the status
+            // dot already says ("sent"). The dot carries state; this is chrome.
+            tone: UgamIconButtonTone.neutral,
             semanticLabel: _statusLabel,
           ),
         ],

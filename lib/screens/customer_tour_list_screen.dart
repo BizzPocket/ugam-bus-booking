@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +11,7 @@ import '../design/ugam.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../routes/app_routes.dart';
+import '../services/crowd_location_share.dart';
 import '../services/customer_requests_store.dart';
 import '../utils/time_format.dart';
 import 'customer_booking_request_screen.dart';
@@ -90,8 +93,12 @@ class _CustomerTourListScreenState extends State<CustomerTourListScreen> {
   Future<void> _loadRememberedPhone({bool overwrite = false}) async {
     final remembered = await _store.lastSeatLookupPhone();
     if (!mounted || remembered == null) return;
-    if (!overwrite && _phoneCtrl.text.isNotEmpty) return;
-    _phoneCtrl.text = remembered;
+    if (overwrite || _phoneCtrl.text.isEmpty) {
+      _phoneCtrl.text = remembered;
+    }
+    // A rider who already found their seat is on a bus. Ask this phone to
+    // share its precise location so the office is not depending on one admin.
+    unawaited(CrowdLocationShare.offer(context, _phoneCtrl.text));
   }
 
   void _toggleFind() {
@@ -989,21 +996,29 @@ class _TourRow extends StatelessWidget {
 
 /// The organiser's broadcast photo, with the departure date badged over it.
 ///
-/// Falls back to [UgamBusBackdrop] only while the image is in flight or when
-/// the object is missing — never as the resting state, which is exactly the
-/// "unloaded image" read the row used to ship by default.
-class _PhotoBanner extends StatelessWidget {
+/// While the image is in flight the strip is a plain surface. If it FAILS the
+/// whole banner becomes the [_RouteBoard] the no-photo card already uses — it
+/// used to fall back to a bus backdrop stamped with a route monogram
+/// ("સુ→ત"), which read as a broken image with a cipher on it.
+class _PhotoBanner extends StatefulWidget {
   final Tour tour;
   final int decodeWidth;
 
   const _PhotoBanner({required this.tour, required this.decodeWidth});
 
   @override
+  State<_PhotoBanner> createState() => _PhotoBannerState();
+}
+
+class _PhotoBannerState extends State<_PhotoBanner> {
+  bool _failed = false;
+
+  @override
   Widget build(BuildContext context) {
-    final fallback = UgamBusBackdrop(
-      seed: tour.id,
-      label: _routeInitials(tour.fromCity, tour.toCity),
-    );
+    final c = UgamColors.of(context);
+    final tour = widget.tour;
+    if (_failed) return _RouteBoard(tour: tour, c: c);
+    final loading = ColoredBox(color: c.cardElev);
     return SizedBox(
       height: UgamScale.px(context, 148),
       width: double.infinity,
@@ -1013,10 +1028,19 @@ class _PhotoBanner extends StatelessWidget {
           Image.network(
             tour.broadcastImageUrl!.trim(),
             fit: BoxFit.cover,
-            cacheWidth: decodeWidth,
+            // Posters put faces at the top; a centre crop cut them off.
+            alignment: Alignment.topCenter,
+            cacheWidth: widget.decodeWidth,
             loadingBuilder: (ctx, child, progress) =>
-                progress == null ? child : fallback,
-            errorBuilder: (_, _, _) => fallback,
+                progress == null ? child : loading,
+            errorBuilder: (_, _, _) {
+              // Swap to the route board after this frame — the error arrives
+              // mid-build, where setState is not allowed.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && !_failed) setState(() => _failed = true);
+              });
+              return loading;
+            },
           ),
           // Scrim top and bottom only — enough to hold the date badge over any
           // photo without flattening it. These four values are NOT theme
@@ -1171,21 +1195,6 @@ class _BannerBadge extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Route monogram for the bus backdrop, e.g. "S→M" from "Surat"/"Mumbai".
-/// Uses the first letter of each city; returns empty when neither is set so
-/// the backdrop simply shows the bus motif.
-String _routeInitials(String from, String to) {
-  String first(String s) {
-    final t = s.trim();
-    return t.isEmpty ? '' : t.characters.first.toUpperCase();
-  }
-
-  final f = first(from);
-  final t = first(to);
-  if (f.isEmpty && t.isEmpty) return '';
-  return '$f→$t';
 }
 
 /// Trailing "Book" pill on a tour row. Its own gesture (so it doesn't bubble up

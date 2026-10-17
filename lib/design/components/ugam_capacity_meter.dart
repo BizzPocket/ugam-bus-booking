@@ -87,6 +87,20 @@ class UgamCapacityMeter extends StatelessWidget {
         density: UgamMeterDensity.tour,
       );
 
+  /// Tour-wide meter from THE seat meter ([SeatMeter]) — the canonical source.
+  factory UgamCapacityMeter.seats(
+    SeatMeter meter, {
+    Key? key,
+    UgamMeterDensity density = UgamMeterDensity.tour,
+  }) =>
+      UgamCapacityMeter._(
+        key: key,
+        capacity: meter.capacity,
+        goOccupied: meter.goOccupied,
+        retOccupied: meter.retOccupied,
+        density: density,
+      );
+
   /// Dashboard-hero meter — same data, tighter type.
   factory UgamCapacityMeter.hero(TourCapacity cap, {Key? key}) =>
       UgamCapacityMeter._(

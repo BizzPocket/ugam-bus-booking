@@ -803,9 +803,9 @@ class BookingCaptureFormState extends State<BookingCaptureForm> {
   String _contactInitials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
     if (parts.length >= 2 && parts.first.isNotEmpty && parts.last.isNotEmpty) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
     }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
   }
 
   // ─── PICKUP POINT (required, global list) ─────────────────────────────────
@@ -2010,9 +2010,9 @@ class _ContactPickerSheetState extends State<_ContactPickerSheet> {
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
     if (parts.length >= 2 && parts.first.isNotEmpty && parts.last.isNotEmpty) {
-      return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+      return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
     }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
   }
 
   @override

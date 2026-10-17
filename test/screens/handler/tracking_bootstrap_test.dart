@@ -6,6 +6,7 @@ import 'package:occubusbooking/controllers/handler_controller.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/handler_manifest.dart';
 import 'package:occubusbooking/screens/handler/handler_shell.dart';
+import 'package:occubusbooking/services/crowd_location_share.dart';
 import 'package:occubusbooking/services/location_tracker_service.dart';
 import 'package:occubusbooking/widgets/handler/handler_tracking_strip.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -40,7 +41,12 @@ void main() {
     tracker = Get.put(LocationTrackerService());
   });
 
-  tearDown(Get.reset);
+  tearDown(() {
+    // Process-wide launch-gate state; one test's gate must not leak into the
+    // next.
+    CrowdLocationShare.reopenPrompt();
+    Get.reset();
+  });
 
   HandlerManifest oneBus() =>
       HandlerManifest(buses: [Bus(id: 'bus-1', tourId: 'tour-1', name: 'Bus 1')]);
@@ -195,6 +201,78 @@ void main() {
     expect(tracker.status.value, TrackingStatus.deniedForever);
     // The strip follows the new state: settings, not another permission ask.
     expect(find.text('tracking.card_settings_cta'), findsOneWidget);
+  });
+
+  // ─── Defect 4: the launch gate's cached answer is not the OS ─────────
+
+  testWidgets('GPS off at app launch is not latched for the whole run', (
+    tester,
+  ) async {
+    // Oct 2026: a whole trip produced zero fixes while the handler worked the
+    // app for hours. The launch gate ran with the GPS switch off — routine on
+    // Android — and the shell copied that answer and latched it, so turning
+    // GPS on changed nothing until the app was killed.
+    CrowdLocationShare.permissionGateDone = true;
+    CrowdLocationShare.launchStatus = TrackingStatus.serviceDisabled;
+    final device = _Device(
+      serviceEnabled: false,
+      permission: LocationPermission.denied,
+      acceptRationale: false,
+    );
+    await tester.pumpWidget(app(device));
+    await tester.pumpAndSettle();
+
+    expect(device.serviceChecks, 1, reason: 'the OS is read, not the cache');
+    expect(tracker.status.value, TrackingStatus.serviceDisabled);
+
+    device.serviceEnabled = true;
+    await reload(tester);
+
+    expect(
+      device.serviceChecks,
+      2,
+      reason: 'GPS switched on later must be picked up on the next load',
+    );
+  });
+
+  testWidgets('a launch-gate "no" is not re-asked, but the OS is still read', (
+    tester,
+  ) async {
+    CrowdLocationShare.permissionGateDone = true;
+    CrowdLocationShare.launchStatus = TrackingStatus.denied;
+    final device = _Device(permission: LocationPermission.denied);
+    await tester.pumpWidget(app(device));
+    await tester.pumpAndSettle();
+
+    expect(device.serviceChecks, 1);
+    expect(device.rationales, 0, reason: 'the gate already disclosed');
+    expect(device.prompts, 0, reason: 'never a second OS prompt in one run');
+    expect(tracker.status.value, TrackingStatus.denied);
+  });
+
+  test('only an explicit denial at the gate counts as declined', () {
+    expect(
+      launchGateDeclined(gateDone: true, launch: TrackingStatus.denied),
+      isTrue,
+    );
+    expect(
+      launchGateDeclined(gateDone: true, launch: TrackingStatus.deniedForever),
+      isTrue,
+    );
+    for (final s in [
+      TrackingStatus.serviceDisabled,
+      TrackingStatus.idle,
+      TrackingStatus.live,
+      TrackingStatus.foregroundOnly,
+      null,
+    ]) {
+      expect(launchGateDeclined(gateDone: true, launch: s), isFalse,
+          reason: '$s is not a "no"');
+    }
+    expect(
+      launchGateDeclined(gateDone: false, launch: TrackingStatus.denied),
+      isFalse,
+    );
   });
 
   testWidgets('a shell with no tracker registered renders no strip', (

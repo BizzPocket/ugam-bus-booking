@@ -14,6 +14,7 @@ import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/time_format.dart';
+import '../utils/admin_handler_operate.dart';
 import '../utils/tour_capacity.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
@@ -102,6 +103,17 @@ class ManageBusesScreen extends StatelessWidget {
                 onTap: () {
                   Navigator.of(ctx).pop();
                   PhoneDialer.call(bus.driverPhone);
+                },
+              ),
+            if (tourAllowsAdminHandlerOperate(tour.status))
+              _BusMenuTile(
+                c: c,
+                icon: Icons.manage_accounts_rounded,
+                label: tr('manage_buses.menu_operate_as_handler'),
+                subtitle: tr('manage_buses.menu_operate_as_handler_subtitle'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  openAdminHandlerOperate(tour: tour, busId: bus.id);
                 },
               ),
             if (canEditLayout) ...[
@@ -267,10 +279,10 @@ class ManageBusesScreen extends StatelessWidget {
             );
           }
 
-          // Single engine-sourced capacity snapshot for the whole screen:
+          // THE seat meter (see [SeatMeter]) for the whole screen:
           // feeds the app-bar "free seats" subtitle AND each per-bus meter
           // (via cap.byBus[bus.id]) so the list never re-derives its own count.
-          final cap = _tourCtrl.capacityFor(tour);
+          final cap = _tourCtrl.seatMeterFor(tour);
           final totalCapacity = cap.capacity;
           final canEdit = _layoutEditable(tour);
 
@@ -311,6 +323,9 @@ class ManageBusesScreen extends StatelessWidget {
                   child: UgamCaveat(
                     message: tr('manage_buses.layout_locked_body'),
                     icon: Icons.lock_outline_rounded,
+                    // Information, not an alarm: a locked tour is the normal
+                    // state after Lock & notify.
+                    tone: UgamCaveatTone.info,
                   ),
                 ),
               const SizedBox(height: UgamSpacing.sm),
@@ -485,8 +500,6 @@ class _BusListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Decorative thumbnail — [px], not [tap]: nothing lands on it.
-    final photo = UgamScale.px(context, 76);
     return UgamCard.media(
       onTap: onOpen,
       elev: true,
@@ -494,17 +507,11 @@ class _BusListItem extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // No thumbnail: buses carry no photo, so the 76pt slot only ever
+            // painted an empty generated backdrop beside the name.
             Row(
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(UgamRadius.photo),
-                  child: SizedBox(
-                    width: photo,
-                    height: photo,
-                    child: UgamBusBackdrop(seed: bus.id),
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.md),
+                const SizedBox(width: UgamSpacing.xs),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -588,6 +595,21 @@ class _HandlerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasHandler = handlerName != null && handlerName!.trim().isNotEmpty;
+    // No handler yet: the action is "set one" — a content-width TONAL button,
+    // not a full-width slab. Once set, a quiet neutral row names the handler.
+    if (!hasHandler) {
+      return Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: IntrinsicWidth(
+          child: UgamButton(
+            label: tr('bus_handler.set_cta'),
+            icon: Icons.badge_outlined,
+            kind: UgamButtonKind.tonal,
+            onPressed: onTap,
+          ),
+        ),
+      );
+    }
     return UgamTappable(
       onTap: onTap,
       semanticLabel: hasHandler
@@ -606,8 +628,12 @@ class _HandlerRow extends StatelessWidget {
         // instead of a hairline. The set state keeps the copper accent tint:
         // an assigned handler is an ownership marker, which is exactly what
         // the accent is rationed for.
+        // Neutral recessed row in BOTH states. The set state used to paint a
+        // full-width copper slab per bus — two buses, two accent slabs on a
+        // screen whose one accent belongs to its CTA. The badge glyph in
+        // accent ink is the ownership marker now; the row itself stays quiet.
         decoration: BoxDecoration(
-          color: hasHandler ? c.accentFill : c.card,
+          color: c.card,
           borderRadius: BorderRadius.circular(UgamRadius.row),
         ),
         child: Row(
@@ -685,7 +711,7 @@ class _HandlerPickTile extends StatelessWidget {
               alignment: Alignment.center,
               child: Text(
                 passenger.displayName.isNotEmpty
-                    ? passenger.displayName[0].toUpperCase()
+                    ? passenger.displayName.characters.first.toUpperCase()
                     : '?',
                 style: UgamText.bodyStrong.copyWith(
                   color: isCurrent ? c.onAccent : c.ink,

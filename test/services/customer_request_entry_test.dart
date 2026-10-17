@@ -6,6 +6,8 @@ CustomerRequestEntry _entry({
   String status = 'pending',
   List<SeatAssignment> assignedSeats = const [],
   bool tourLocked = false,
+  bool isConfirmed = false,
+  DateTime? cancelRequestedAt,
 }) =>
     CustomerRequestEntry(
       id: 'r1',
@@ -24,6 +26,8 @@ CustomerRequestEntry _entry({
       status: status,
       assignedSeats: assignedSeats,
       tourLocked: tourLocked,
+      isConfirmed: isConfirmed,
+      cancelRequestedAt: cancelRequestedAt,
     );
 
 void main() {
@@ -65,6 +69,50 @@ void main() {
       expect(cancelled.id, 'r1');
       expect(cancelled.tourTitle, 'punam');
       expect(cancelled.customerPhone, '+919328959204');
+    });
+  });
+
+  group('CustomerRequestEntry.canEdit', () {
+    const seated = [
+      SeatAssignment(busId: 'b1', seatId: 'DU1'),
+      SeatAssignment(busId: 'b1', seatId: 'DL1'),
+    ];
+
+    // Punam books three berths a fortnight out. The agent seats the party the
+    // same evening — that is normal, seating is not a late step here. Two days
+    // later she calls to say one traveller dropped out. Before this, holding a
+    // seat closed the edit door, so that change could only happen by phone and
+    // by hand on the admin side.
+    test('a rider already on the chart can still fix their own booking', () {
+      final e = _entry(assignedSeats: seated, isConfirmed: true);
+      expect(e.hasSeatsAssigned, isTrue);
+      expect(e.canEdit, isTrue);
+    });
+
+    // The card already reads "Cancellation requested" and the agent is deciding
+    // on it. Offering "Edit request" underneath that asks her to argue with
+    // herself, and edits the booking the agent is looking at.
+    test('asking to cancel takes the edit door away', () {
+      final e = _entry(
+        assignedSeats: seated,
+        isConfirmed: true,
+        cancelRequestedAt: DateTime(2026, 6, 14),
+      );
+      expect(e.cancellationRequested, isTrue);
+      expect(e.canEdit, isFalse);
+    });
+
+    // Once the agent locks the tour, seat numbers have gone out on WhatsApp.
+    // A change from here goes through them, not around them.
+    test('a locked tour sends the change back to the organiser', () {
+      expect(_entry(assignedSeats: seated, tourLocked: true).canEdit, isFalse);
+      // ...including the not-yet-seated rider on that locked tour.
+      expect(_entry(tourLocked: true).canEdit, isFalse);
+    });
+
+    test('a cancelled or declined ticket is not editable', () {
+      expect(_entry(status: 'cancelled').canEdit, isFalse);
+      expect(_entry(status: 'rejected').canEdit, isFalse);
     });
   });
 }

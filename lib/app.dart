@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'design/text_styles.dart';
 import 'design/theme.dart';
 import 'design/tokens.dart';
 import 'design/ui_scale.dart';
@@ -96,6 +97,9 @@ class MyApp extends StatelessWidget {
         // nav-bar ground is ever wanted on 15+, paint it in Dart behind
         // MediaQuery.viewPaddingOf(context).bottom.
         builder: (context, child) {
+          // Locale-gated tracking (UgamText.micro / UgamText.tracking): this
+          // builder re-runs on every locale change before any screen builds.
+          UgamText.syncLocale(context.locale);
           final c = UgamColors.of(context);
           final isDark = Theme.of(context).brightness == Brightness.dark;
           // App-wide responsive text scaling. One override here scales every

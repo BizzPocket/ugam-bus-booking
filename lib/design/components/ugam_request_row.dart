@@ -91,10 +91,15 @@ class UgamReqChip extends StatelessWidget {
   }
 }
 
-/// Dense admin request row. Avatar + name + chips + time + arrow.
+/// Dense admin request row. Avatar + name (+ optional context line) + chips +
+/// time + a quiet chevron. The whole row is the tap target.
 class UgamRequestRow extends StatelessWidget {
   final String initials;
   final String name;
+
+  /// Optional one-line context under the name (e.g. which tour the request is
+  /// for, on a cross-tour list like the dashboard).
+  final String? subtitle;
 
   /// Any number of chips. They lay out in a [Wrap], so a set too wide for the
   /// row runs onto a second line instead of overflowing — see the note on the
@@ -107,6 +112,7 @@ class UgamRequestRow extends StatelessWidget {
     super.key,
     required this.initials,
     required this.name,
+    this.subtitle,
     this.chips = const [],
     this.timeAgo,
     this.onTap,
@@ -158,6 +164,15 @@ class UgamRequestRow extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+                if (subtitle != null && subtitle!.trim().isNotEmpty) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    subtitle!,
+                    style: UgamText.caption.copyWith(color: c.ink2),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
                 if (chips.isNotEmpty || timeAgo != null) ...[
                   const SizedBox(height: 3),
                   Row(
@@ -199,10 +214,9 @@ class UgamRequestRow extends StatelessWidget {
                         const SizedBox(width: UgamSpacing.sm),
                         Text(
                           timeAgo!,
-                          style: UgamText.caption.copyWith(
-                            color: c.ink3,
-                            fontSize: 10,
-                          ),
+                          maxLines: 1,
+                          softWrap: false,
+                          style: UgamText.caption.copyWith(color: c.ink3),
                         ),
                       ],
                     ],
@@ -211,17 +225,12 @@ class UgamRequestRow extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: c.accentFill,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.arrow_forward_rounded, size: 14, color: c.accent),
-          ),
+          const SizedBox(width: UgamSpacing.xs),
+          // A quiet chevron, not an accent circle: a list of five rows put five
+          // copper discs on the dashboard, each shouting "tap me" for what is
+          // just "this row opens". The whole card is already the tap target.
+          if (onTap != null)
+            Icon(Icons.chevron_right_rounded, size: 20, color: c.ink3),
         ],
       ),
     );

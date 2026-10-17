@@ -190,23 +190,39 @@ enum HandlerMilestone {
 /// takes it straight to [HandlerPhase.settling] rather than parking it on a
 /// return boarding screen nobody will ever use.
 ///
-/// [moneySettled] is `HandlerBusMoney.isSettled` — nothing left to hand over.
-/// It is the ONLY thing separating [HandlerPhase.settling] from
+/// [moneySettled] is `HandlerBusMoney.isSettled` — nothing left to collect or
+/// hand over. It is the ONLY thing separating [HandlerPhase.settling] from
 /// [HandlerPhase.closed], so a handler still holding cash can never reach a
 /// state that reads as finished.
+///
+/// [tourCompleted] is the AGENT's word that the trip is over (`tours.status ==
+/// completed`), and it counts exactly like the handler's own "Trip finished"
+/// stamp. Live, handlers stamp "departed" and then nothing: without this, a
+/// completed tour kept reading "On the road · outbound / We've arrived" for
+/// weeks, and the return boarding list never opened by itself.
+///
+/// [goLegAutoCompleted] is the CALENDAR's word that the outbound is over (the
+/// return day has started — see `goLegAutoCompleteAt` in
+/// `utils/trip_auto_complete.dart`). It counts exactly like a "We've arrived"
+/// stamp, so a handler who never stamped arrival still gets the return
+/// boarding list on the morning of the return. Derived, never written: no fake
+/// stamp lands in `handler_bus_trip_state`.
 HandlerPhase resolveHandlerPhase({
   required HandlerTripState trip,
   required bool hasReturnRiders,
   required bool moneySettled,
+  bool tourCompleted = false,
+  bool goLegAutoCompleted = false,
 }) {
-  // Trip explicitly ended, or an outbound-only bus that has arrived: nothing
-  // left but the cash.
-  final overOnArrival = trip.goArrivedAt != null && !hasReturnRiders;
-  if (trip.completedAt != null || overOnArrival) {
+  final goArrived = trip.goArrivedAt != null || goLegAutoCompleted;
+  // Trip explicitly ended (by the handler's stamp or the agent closing the
+  // tour), or an outbound-only bus that has arrived: nothing left but the cash.
+  final overOnArrival = goArrived && !hasReturnRiders;
+  if (trip.completedAt != null || tourCompleted || overOnArrival) {
     return moneySettled ? HandlerPhase.closed : HandlerPhase.settling;
   }
   if (trip.retDepartedAt != null) return HandlerPhase.enRouteRet;
-  if (trip.goArrivedAt != null) return HandlerPhase.boardingRet;
+  if (goArrived) return HandlerPhase.boardingRet;
   if (trip.goDepartedAt != null) return HandlerPhase.enRouteGo;
   return HandlerPhase.boardingGo;
 }

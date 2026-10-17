@@ -84,4 +84,38 @@ void main() {
       expect(find.text('9876543210'), findsOneWidget);
     },
   );
+
+  // The handler chart passes showPhone: false — at tile width the number only
+  // ever rendered as "900000…"; the full number + Call is in the occupant
+  // sheet.
+  testWidgets('showPhone: false keeps the name and drops the mobile', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark),
+        home: Scaffold(
+          body: Center(
+            child: SeatChartTile(
+              cell: const SeatCell(
+                row: 0,
+                col: 0,
+                seatType: SeatType.singleSofa,
+                position: SeatPosition.lower,
+                seatId: 'SL1',
+              ),
+              occupants: [
+                _p('a', 'Falgun Shah', TripType.roundTrip, '+919876543210'),
+              ],
+              groupColors: const GroupColorResolver(<String, int>{}),
+              showPhone: false,
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.text('Falgun Shah'), findsOneWidget);
+    expect(find.text('9876543210'), findsNothing);
+  });
 }

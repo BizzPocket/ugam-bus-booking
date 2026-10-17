@@ -119,6 +119,7 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
       setState(() {
         if (isReturn) {
           _returnDate = picked;
+          _dateError = null;
         } else {
           _departureDate = picked;
           _dateError = null;
@@ -175,6 +176,12 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
       );
       return;
     }
+    if (_returnDate == null) {
+      setState(
+        () => _dateError = tr('create_tour.validation.select_end_date'),
+      );
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -215,8 +222,8 @@ class _CreateTourScreenState extends State<CreateTourScreen> {
         departureTime: _departureTime != null
             ? hhmmFromTimeOfDay(_departureTime!)
             : null,
-        returnDate: _returnDate,
-        returnTime: (_returnDate != null && _returnTime != null)
+        returnDate: _returnDate!,
+        returnTime: _returnTime != null
             ? hhmmFromTimeOfDay(_returnTime!)
             : null,
         description: _descCtrl.text.trim().isEmpty
@@ -531,7 +538,7 @@ class _TourPreviewCard extends StatelessWidget {
     final f = fromCity.trim();
     final t = toCity.trim();
     if (f.isEmpty || t.isEmpty) return null;
-    return '${f[0].toUpperCase()}→${t[0].toUpperCase()}';
+    return '${f.characters.first.toUpperCase()}→${t.characters.first.toUpperCase()}';
   }
 
   @override

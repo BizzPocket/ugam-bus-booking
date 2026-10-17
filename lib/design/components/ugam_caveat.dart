@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../text_styles.dart';
 import '../tokens.dart';
 
-enum UgamCaveatTone { warm, danger }
+/// [info] is the neutral note — a plain statement of how things are (e.g.
+/// "this tour is locked, so buses can't be added"), not a warning.
+enum UgamCaveatTone { warm, danger, info }
 
 /// Contained caveat strip — one short sentence qualifying the figure directly
 /// above it ("this is a forecast", "a cost is missing, so this reads high").
@@ -36,6 +38,7 @@ class UgamCaveat extends StatelessWidget {
     final (Color ink, Color fill) = switch (tone) {
       UgamCaveatTone.warm => (c.warm, c.warmFill),
       UgamCaveatTone.danger => (c.danger, c.dangerFill),
+      UgamCaveatTone.info => (c.ink2, c.cardElev),
     };
 
     return Container(

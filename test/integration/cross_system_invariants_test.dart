@@ -289,7 +289,15 @@ void main() {
       // owner's rent is ADMIN-only — the admin pays it out of this handover, so
       // it must never shrink what the handler is asked to hand over.
       expect(handler.inHand, 1200 - 500);
-      expect(admin.netCollected, handler.inHand - busRent);
+      // Admin profit under the pakku-bhadu rule (diesel + driver INSIDE the
+      // rent): the ₹500 diesel the handler paid is a payment TOWARD the ₹2000
+      // rent, so the admin only owes the owner 2000 − 500 = 1500 more.
+      //   netCollected = collected − busCost = 1200 − max(2000, 500) = −800
+      //                = inHand − busMalikPayable = 700 − 1500 = −800
+      // (exact whenever rent ≥ the absorbed payments).
+      expect(admin.busMalikPayable, busRent - 500);
+      expect(admin.netCollected, handler.inHand - admin.busMalikPayable);
+      expect(admin.netCollected, -800);
       expect(handler.toCollect, 1200); // p2 uncollected, full round-trip fare
     });
   });

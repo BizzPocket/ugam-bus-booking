@@ -132,6 +132,7 @@ class HandlerChartTab extends StatelessWidget {
         seatId: seatId,
         due: due,
         existing: c.collectionFor(passenger, bus.id, seatId),
+        claims: c.claimsFor(passenger.id),
         onSave: (received, returned, collectedBy, note) => c.saveCollection(
           bus: bus,
           passenger: passenger,

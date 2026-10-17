@@ -119,8 +119,11 @@ void main() {
     expect(find.text('Anjali QA'), findsOneWidget);
     // Seat summary is plural-free "2 · <type>" — assert on the count prefix.
     expect(find.textContaining('2 ·'), findsOneWidget);
-    // Collapsed → the per-card primary action is NOT built yet.
-    expect(find.text('requests.action.accept'), findsNothing);
+    // Collapsed → the expanded action row is NOT built yet, but a confirmable
+    // row carries ONE visible tonal Accept (Confirm & seat used to be
+    // swipe-only — changed intentionally).
+    expect(find.text('requests.action.assign_seats'), findsNothing);
+    expect(find.text('requests.action.accept'), findsOneWidget);
   });
 
   testWidgets('tapping a row expands it to reveal note + primary action',
@@ -132,7 +135,9 @@ void main() {
       ]),
     );
 
-    expect(find.text('requests.action.accept'), findsNothing);
+    // Collapsed: the quick Accept only; the action row is not built.
+    expect(find.text('requests.action.accept'), findsOneWidget);
+    expect(find.text('requests.action.assign_seats'), findsNothing);
     expect(find.textContaining('qa-note-xyz'), findsNothing);
 
     await tester.tap(find.text('Anjali QA'));
@@ -203,8 +208,8 @@ void main() {
     expect(iconInRow(Icons.chat_bubble_outline_rounded), findsOneWidget); // note
     expect(iconInRow(Icons.arrow_forward_rounded),
         findsOneWidget); // outbound one-way
-    // Not yet expanded → the action row is not built.
-    expect(find.text('requests.action.accept'), findsNothing);
+    // Not yet expanded → the action row is not built (the quick Accept is).
+    expect(find.text('requests.action.assign_seats'), findsNothing);
   });
 
   testWidgets('confirmed tab lists partially assigned riders before unseated',

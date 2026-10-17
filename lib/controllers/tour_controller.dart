@@ -38,6 +38,7 @@ import '../utils/seat_occupants.dart';
 import '../models/bus_type.dart';
 import '../utils/bus_layout_recovery.dart';
 import '../utils/tour_capacity.dart';
+import '../utils/trip_auto_complete.dart';
 import '../widgets/seat_move_money_notice.dart';
 import 'auth_controller.dart';
 import 'customer_memory_controller.dart';
@@ -146,6 +147,15 @@ class TourController extends GetxController {
     _actualCapacityCache[t.id] = (sig: sig, capacity: capacity);
     return capacity;
   }
+
+  /// THE seat meter for [t] — the one "x / n" every admin surface shows. Built
+  /// from the two memoized snapshots above, so it costs nothing extra once
+  /// either has been read this frame. See [SeatMeter].
+  SeatMeter seatMeterFor(Tour t) => computeSeatMeter(
+        t,
+        plan: capacityFor(t),
+        actual: actualCapacityFor(t),
+      );
 
   /// True once every bus on [tourId] has had its `layout` jsonb resolved —
   /// fetched, or confirmed absent on the server.
@@ -856,6 +866,9 @@ class TourController extends GetxController {
       _markFresh();
       _scheduleDiskCacheSave();
 
+      // GO first: a tour whose whole trip lapsed unattended still releases its
+      // outbound-only seats (and snapshots the GO chart) before it is archived.
+      await _autoCompleteOutboundLegs();
       await _archiveExpiredTours();
       await _applyRememberedPriority();
 
@@ -931,16 +944,18 @@ class TourController extends GetxController {
     // or a mistyped date would silently wipe real financial data. Instead we
     // flip expired-but-still-active tours to `completed` so they drop out of
     // the active list while every record stays viewable in the archive.
+    // The cutoff is the shared calendar rule (utils/trip_auto_complete.dart),
+    // which also ignores a return date typed BEFORE the departure — taken
+    // literally, that archived a tour (and closed its live-location window)
+    // before the bus had even left.
     final expiredIds = tours
         .where((t) {
           if (t.status == TourStatus.completed) return false;
-          final end = t.returnDate ?? t.departureDate;
-          final cutoff = DateTime(
-            end.year,
-            end.month,
-            end.day,
-          ).add(const Duration(days: 1));
-          return now.isAfter(cutoff);
+          return isTripAutoComplete(
+            now: now,
+            departure: t.departureDate,
+            returnDate: t.returnDate,
+          );
         })
         .map((t) => t.id)
         .toList();
@@ -950,6 +965,61 @@ class TourController extends GetxController {
       } catch (_) {
         // completeTour surfaces its own error; keep sweeping the rest.
       }
+    }
+  }
+
+  /// Auto-completes the OUTBOUND leg by the calendar: once the return day has
+  /// started (the day after departure for a one-way tour — see
+  /// `goLegAutoCompleteAt`), every still-active outbound-only rider is done,
+  /// so [completeOutboundLeg] frees their seats exactly as the handler's
+  /// "We've arrived" would have. Handlers stamp "departed" and then forget the
+  /// rest, so without this those seats stayed held for the return chart.
+  ///
+  /// Idempotent: [completeOutboundLeg] marks each rider `journeyDone`, so a
+  /// tour drops out of this sweep the moment it has run once. Admin-only and
+  /// best-effort; a completed tour is never touched; a tour whose roster has
+  /// not been hydrated (no passengers in memory) is skipped rather than judged
+  /// on missing data.
+  bool _autoCompletingOutbound = false;
+
+  Future<void> _autoCompleteOutboundLegs() async {
+    if (_autoCompletingOutbound) return;
+    if (!_auth.isAdmin) return;
+    final now = DateTime.now();
+    final due = tours
+        .where((t) {
+          if (t.status == TourStatus.completed) return false;
+          if (!isGoLegAutoComplete(
+            now: now,
+            departure: t.departureDate,
+            returnDate: t.returnDate,
+          )) {
+            return false;
+          }
+          // Only a rider still HOLDING a GO seat makes the sweep worth a write.
+          return t.passengers.any(
+            (p) =>
+                p.tripType == TripType.outboundOnly &&
+                !p.journeyDone &&
+                p.assignedSeats.isNotEmpty,
+          );
+        })
+        .map((t) => t.id)
+        .toList();
+    if (due.isEmpty) return;
+    _autoCompletingOutbound = true;
+    try {
+      for (final id in due) {
+        try {
+          await completeOutboundLeg(id);
+        } catch (e, st) {
+          // completeOutboundLeg surfaces its own failure; keep sweeping.
+          dev.log('auto GO-leg completion failed for $id: $e\n$st',
+              name: 'TourController');
+        }
+      }
+    } finally {
+      _autoCompletingOutbound = false;
     }
   }
 
@@ -1159,6 +1229,19 @@ class TourController extends GetxController {
   /// - return, `overwriteIfExists: true` — round-trip + return-only riders
   ///   (`.ret`); skipped automatically when empty (one-way tours).
   Future<void> completeTour(String tourId) async {
+    // The snapshot is built from the IN-MEMORY roster. A tour whose roster was
+    // never fetched (served from a header-only cache, or completed from a
+    // surface that did not hydrate it) would freeze an EMPTY chart — and the
+    // capture is skipped silently when nothing is seated. Load it first.
+    // Best-effort: a failed hydrate must not block the status change, and the
+    // seats themselves are not freed by completion, so the live-chart fallback
+    // in the history view still has them.
+    try {
+      await ensureTourHydrated(tourId);
+    } catch (e, st) {
+      dev.log('completeTour hydrate failed for $tourId: $e\n$st',
+          name: 'TourController');
+    }
     await _captureSeatSnapshot(tourId, SnapshotLeg.outbound,
         overwriteIfExists: false);
     await _captureSeatSnapshot(tourId, SnapshotLeg.return_,

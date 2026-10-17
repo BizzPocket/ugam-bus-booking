@@ -6,7 +6,9 @@ import 'package:occubusbooking/design/ugam.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/collection.dart';
 import 'package:occubusbooking/models/handler_manifest.dart';
+import 'package:occubusbooking/models/handler_phase.dart';
 import 'package:occubusbooking/models/passenger.dart';
+import 'package:occubusbooking/models/payment_claim.dart';
 import 'package:occubusbooking/models/request_line.dart';
 import 'package:occubusbooking/models/seat_assignment.dart';
 import 'package:occubusbooking/models/seat_layout.dart';
@@ -50,10 +52,15 @@ void main() {
     ],
   );
 
-  Widget app({HandlerManifestReader? reader}) => GetMaterialApp(
-    theme: ThemeData(brightness: Brightness.dark),
-    home: HandlerShell(requestId: 'req-1', manifestReader: reader),
-  );
+  Widget app({HandlerManifestReader? reader, String? tourStatus}) =>
+      GetMaterialApp(
+        theme: ThemeData(brightness: Brightness.dark),
+        home: HandlerShell(
+          requestId: 'req-1',
+          manifestReader: reader,
+          tourStatus: tourStatus,
+        ),
+      );
 
   /// The dock button for a tab, scoped through [UgamDockNav] so it can never
   /// match the same icon used elsewhere (the phase banner reuses several).
@@ -214,6 +221,237 @@ void main() {
     expect(dockTab(Icons.account_balance_wallet_rounded), findsOneWidget);
     expect(dockTab(Icons.grid_view_rounded), findsOneWidget);
     expect(dockTab(Icons.directions_bus_filled_rounded), findsOneWidget);
+  });
+
+  // ─── The agent closing the tour ──────────────────────────────────────
+  //
+  // Live (2026-09-05): `handler_bus_trip_state` held one row ever — a bus
+  // stamped "departed" and nothing after — so its handler saw "On the road ·
+  // outbound / We've arrived" three weeks after the agent completed the tour.
+  // The shell now takes the tour's status at the door and treats "completed"
+  // exactly like the handler's own "Trip finished" stamp.
+
+  /// A one-seat bus with a ₹1,200 single sofa.
+  Bus seatedBus() => Bus(
+    id: 'bus-1',
+    tourId: 'tour-1',
+    name: 'Bus 1',
+    pricePerSeat: 1000,
+    singleSofaPrice: 1200,
+    layout: BusLayout(
+      rows: 1,
+      cols: SeatGridCols.count,
+      grid: const [
+        SeatCell(
+          row: 0,
+          col: SeatGridCols.singleLower,
+          seatType: SeatType.singleSofa,
+          position: SeatPosition.lower,
+          seatId: 'SL1',
+        ),
+      ],
+    ),
+  );
+
+  /// A round-trip rider seated on that sofa.
+  Passenger seatedRider() => Passenger(
+    id: 'p-1',
+    tourId: 'tour-1',
+    name: 'Rider',
+    phone: '9990000000',
+    assignedSeats: const [SeatAssignment(busId: 'bus-1', seatId: 'SL1')],
+    requestLines: [
+      RequestLine(seatType: SeatType.singleSofa, qty: 1, leg: TripType.roundTrip),
+    ],
+    tripType: TripType.roundTrip,
+  );
+
+  testWidgets('a completed tour opens on settling with no stamps at all', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        reader: (_) async =>
+            HandlerManifest(buses: [seatedBus()], passengers: [seatedRider()]),
+        tourStatus: 'completed',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('HANDLER_PHASE.SETTLING'), findsOneWidget);
+    // No milestone is offered: the trip is over, whatever the handler stamped.
+    expect(find.text('handler_phase.milestone_depart_go'), findsNothing);
+    expect(find.text('handler_phase.milestone_end_trip'), findsNothing);
+  });
+
+  testWidgets('settling with fares still owing leads with what is left to collect', (
+    tester,
+  ) async {
+    // Nothing collected from the one rider: ₹1,200 still to collect, ₹0 in
+    // hand. The banner must say the former — "₹0 to hand over" over a roster
+    // that still reads Owing was the live "Trip closed · All square" bug.
+    await tester.pumpWidget(
+      app(
+        reader: (_) async =>
+            HandlerManifest(buses: [seatedBus()], passengers: [seatedRider()]),
+        tourStatus: 'completed',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('handler_phase.detail_to_collect'), findsOneWidget);
+  });
+
+  testWidgets('settling with nothing in hand offers no hand-over CTA', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        reader: (_) async =>
+            HandlerManifest(buses: [seatedBus()], passengers: [seatedRider()]),
+        tourStatus: 'completed',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('handler_phase.action_settle'), findsNothing);
+  });
+
+  testWidgets('settling with cash in hand offers the hand-over CTA', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        reader: (_) async => HandlerManifest(
+          buses: [seatedBus()],
+          passengers: [seatedRider()],
+          collections: [
+            Collection(
+              tourId: 'tour-1',
+              busId: 'bus-1',
+              passengerId: 'p-1',
+              seatId: 'SL1',
+              amountDue: 1200,
+              amountReceived: 1200,
+            ),
+          ],
+        ),
+        tourStatus: 'completed',
+      ),
+    );
+    await tester.pumpAndSettle();
+    // The action lives on the phase's own tab; elsewhere the banner is a
+    // one-line strip that leads there.
+    expect(find.text('handler_phase.action_settle'), findsNothing);
+    await openMoney(tester);
+
+    expect(find.text('handler_phase.action_settle'), findsOneWidget);
+  });
+
+  // Correctness gate: a part-paid bus must not be handed over. The live
+  // render offered "Hand over cash ₹26,800" while ₹24,500 was still owed by
+  // riders — a handover the next collection would immediately make short.
+  testWidgets('settling with cash in hand but fares still owed offers NO hand-over', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        reader: (_) async => HandlerManifest(
+          buses: [seatedBus()],
+          passengers: [seatedRider()],
+          collections: [
+            Collection(
+              tourId: 'tour-1',
+              busId: 'bus-1',
+              passengerId: 'p-1',
+              seatId: 'SL1',
+              amountDue: 1200,
+              amountReceived: 600,
+            ),
+          ],
+        ),
+        tourStatus: 'completed',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await openMoney(tester);
+
+    expect(find.text('HANDLER_PHASE.SETTLING'), findsOneWidget);
+    expect(find.text('handler_phase.action_settle'), findsNothing);
+  });
+
+  group('settleOffered', () {
+    test('requires settling, cash in hand, and nothing left to collect', () {
+      expect(
+        settleOffered(
+          phase: HandlerPhase.settling,
+          toCollect: 0,
+          outstanding: 26800,
+        ),
+        isTrue,
+      );
+      // The live bug: ₹24,500 still owed.
+      expect(
+        settleOffered(
+          phase: HandlerPhase.settling,
+          toCollect: 24500,
+          outstanding: 26800,
+        ),
+        isFalse,
+      );
+      // Sub-paisa float dust is "nothing owed", not a block.
+      expect(
+        settleOffered(
+          phase: HandlerPhase.settling,
+          toCollect: 0.001,
+          outstanding: 26800,
+        ),
+        isTrue,
+      );
+      expect(
+        settleOffered(phase: HandlerPhase.settling, toCollect: 0, outstanding: 0),
+        isFalse,
+      );
+      expect(
+        settleOffered(
+          phase: HandlerPhase.enRouteRet,
+          toCollect: 0,
+          outstanding: 26800,
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  // ─── UPI claims on the collect list ──────────────────────────────────
+  //
+  // A rider who sent a UPI advance and is still waiting on the agent's check
+  // shows as plain "Owing" on the Money tab, so the handler walks up and asks
+  // for the full fare. The row now carries the claim.
+
+  testWidgets('a rider with a pending UPI claim says so on their money row', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      app(
+        reader: (_) async =>
+            HandlerManifest(buses: [seatedBus()], passengers: [seatedRider()]),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Get.find<HandlerController>(tag: 'handler-req-1').claims.value = [
+      PaymentClaim(
+        id: 'c-1',
+        tourId: 'tour-1',
+        passengerId: 'p-1',
+        amountRupees: 1200,
+        status: PaymentClaimStatus.pending,
+        claimedAt: DateTime(2026, 9, 3),
+      ),
+    ];
+    await openMoney(tester);
+
+    expect(find.text('handler_chart.upi_claim_row'), findsOneWidget);
   });
 
   // ─── Duplicate collections ───────────────────────────────────────────

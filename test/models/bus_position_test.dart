@@ -1,8 +1,39 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:occubusbooking/models/bus_position.dart';
 
 void main() {
   group('LocationFix', () {
+    Position pos(DateTime ts) => Position(
+      latitude: 21.65,
+      longitude: 70.68,
+      timestamp: ts,
+      accuracy: 10,
+      altitude: 0,
+      altitudeAccuracy: 0,
+      heading: 90,
+      headingAccuracy: 0,
+      speed: 10,
+      speedAccuracy: 0,
+    );
+
+    test('a sane GPS timestamp is kept as-is', () {
+      final now = DateTime.utc(2026, 10, 11, 12, 0, 30);
+      final ts = DateTime.utc(2026, 10, 11, 12);
+      expect(LocationFix.fromPosition(pos(ts), now: now).recordedAt, ts);
+    });
+
+    test('a GPS clock 19 years out (week rollover) uses the capture time', () {
+      // The server refuses anything older than 24 h without an error, so
+      // every fix from such a phone would vanish while the card said "live".
+      final now = DateTime.utc(2026, 10, 11, 12);
+      final rolledBack = DateTime.utc(2007, 2, 25, 12);
+      expect(
+        LocationFix.fromPosition(pos(rolledBack), now: now).recordedAt,
+        now,
+      );
+    });
+
     test('toJson uses exactly the keys handler_push_locations reads', () {
       final fix = LocationFix(
         lat: 23.0225,

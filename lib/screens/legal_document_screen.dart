@@ -33,7 +33,10 @@ class LegalDocumentScreen extends StatelessWidget {
         bottom: false,
         child: Column(
           children: [
-            UgamAppBar(title: doc.title),
+            // The title is printed ONCE: in the app bar for a policy, or as
+            // the centred hero under the logo on About (where the bar stays
+            // empty). It used to sit in both, one above the other.
+            UgamAppBar(title: doc.showLogo ? '' : doc.title),
             Expanded(
               child: ListView(
                 physics: const BouncingScrollPhysics(),
@@ -58,11 +61,12 @@ class LegalDocumentScreen extends StatelessWidget {
                         const UgamLogo(size: 84),
                         const SizedBox(height: UgamSpacing.lg),
                       ],
-                      Text(
-                        doc.title,
-                        style: UgamText.titleXl.copyWith(color: c.ink),
-                        textAlign: headerAlign,
-                      ),
+                      if (doc.showLogo)
+                        Text(
+                          doc.title,
+                          style: UgamText.titleXl.copyWith(color: c.ink),
+                          textAlign: headerAlign,
+                        ),
                       if (doc.meta != null) ...[
                         const SizedBox(height: UgamSpacing.sm),
                         Text(

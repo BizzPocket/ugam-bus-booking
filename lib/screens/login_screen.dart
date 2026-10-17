@@ -207,7 +207,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                         textAlign: TextAlign.center,
                                         style: UgamText.hero.copyWith(
                                           color: c.ink,
-                                          letterSpacing: 2.0,
+                                          // Tracking is a Latin wordmark
+                                          // device; on Gujarati/Hindi it pulls
+                                          // the matras off their consonants.
+                                          letterSpacing:
+                                              Localizations.localeOf(
+                                                    context,
+                                                  ).languageCode ==
+                                                  'en'
+                                              ? 2.0
+                                              : 0,
                                         ),
                                       ),
                                       const SizedBox(height: UgamSpacing.sm),

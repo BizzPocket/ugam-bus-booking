@@ -337,10 +337,12 @@ class _WholeTile extends StatelessWidget {
             ),
           ),
           // The code still has to match the printed ticket and the handler's
-          // call at boarding, so it stays — just not as the headline.
+          // call at boarding, so it stays — just not as the headline. Top-right,
+          // beside the berth bar: in the bottom corner it sat on top of the
+          // price ("₹1,800" over "DU1") on every wide fare.
           Positioned(
-            right: 3,
-            bottom: 2,
+            right: 4,
+            top: 2,
             child: Text(
               seatId,
               style: UgamText.tabular(
@@ -385,7 +387,8 @@ class _BerthGlyph extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: wide ? 26 : 18,
+      // Narrow enough to leave the top-right corner to the seat code.
+      width: wide ? 20 : 16,
       height: 10,
       child: Column(
         mainAxisAlignment:

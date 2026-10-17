@@ -12,6 +12,7 @@ import '../models/tour.dart';
 import '../models/trip_type.dart';
 import '../services/chart_advance_payment.dart';
 import '../services/customer_requests_store.dart';
+import '../services/error_reporter.dart';
 import '../services/seat_chart_booking_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/chart_selection.dart';
@@ -274,11 +275,12 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
 
       AppSnackBar.success(tr('seat_confirm.success'));
       Navigator.of(context).pop(true);
-    } catch (e) {
+    } catch (e, st) {
+      // Reported, not printed: a debugPrint never left the device.
+      ErrorReporter.report(kind: 'chart_claim', error: e, stack: st);
       if (!mounted) return;
       setState(() => _saving = false);
       AppSnackBar.error(tr('seat_confirm.err_failed'));
-      debugPrint('chart claim failed — $e');
     }
   }
 

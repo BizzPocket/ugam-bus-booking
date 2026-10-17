@@ -9,10 +9,12 @@ import '../design/group_color.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
 import '../models/passenger.dart';
+import '../models/tour.dart';
 import '../models/seat_layout.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
+import '../utils/admin_handler_operate.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
@@ -103,8 +105,14 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
             }
           }
 
-          final totalSeats = layout.totalSeats;
-          final assignedCount = tour.occupiedBerthsFor(bus.id);
+          // THE seat meter's slice for this bus — the same "x / n" the
+          // manage-buses row, dashboard and tour detail show (see [SeatMeter]).
+          final busMeter = Get.find<TourController>()
+              .seatMeterFor(tour)
+              .byBus[bus.id];
+          final totalSeats = busMeter?.capacity ?? layout.totalSeats;
+          final assignedCount =
+              busMeter?.occupied ?? tour.occupiedBerthsFor(bus.id);
 
           return Column(
             children: [
@@ -168,9 +176,17 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
                 ),
               ),
               const SizedBox(height: UgamSpacing.sm),
-              UgamSeatChartLegend(c: c),
-              const SizedBox(height: UgamSpacing.sm + 2),
-              _BottomActions(tourId: tour.id, bus: bus),
+              // Collapsed behind a one-line toggle: the 10-key grid sat open
+              // under every chart and took ~4 rows from the seats themselves.
+              UgamSeatChartLegendToggle(c: c),
+              const SizedBox(height: UgamSpacing.sm),
+              _BottomActions(
+                tour: tour,
+                bus: bus,
+                onMoney: () => _openMoneyMenu(context, tour.id, bus),
+                showOperateAsHandler:
+                    tourAllowsAdminHandlerOperate(tour.status),
+              ),
               const SizedBox(height: UgamSpacing.md),
             ],
           );
@@ -427,8 +443,11 @@ class _Tally extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                // No percentage: "97%" restated the count above as a number no
+                // one books by. Whole seats only — the free count instead.
                 Text(
-                  '${(ratio * 100).round()}%',
+                  tr('capacity.free_n',
+                      namedArgs: {'n': '${(total - assigned).clamp(0, total)}'}),
                   style: UgamText.tabular(
                     UgamText.bodyStrong.copyWith(color: c.ink2, fontSize: 12),
                   ),
@@ -642,22 +661,26 @@ class _DriverHeroCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          _CircleAction(
-            icon: Icons.phone_rounded,
-            tint: c.accent,
-            fill: c.accentFill,
-            enabled: hasPhone,
-            onTap: () => PhoneDialer.call(phone),
-          ),
-          const SizedBox(width: 6),
-          _CircleAction(
-            icon: Icons.chat_rounded,
-            tint: c.good,
-            fill: c.goodFill,
-            enabled: hasPhone,
-            onTap: () => _openWhatsApp(phone),
-          ),
+          // Call / message only exist when there is a number to reach — two
+          // greyed circles on a driver-less bus were dead controls.
+          if (hasPhone) ...[
+            const SizedBox(width: UgamSpacing.sm),
+            _CircleAction(
+              icon: Icons.phone_rounded,
+              tint: c.accent,
+              fill: c.accentFill,
+              enabled: hasPhone,
+              onTap: () => PhoneDialer.call(phone),
+            ),
+            const SizedBox(width: 6),
+            _CircleAction(
+              icon: Icons.chat_rounded,
+              tint: c.good,
+              fill: c.goodFill,
+              enabled: hasPhone,
+              onTap: () => _openWhatsApp(phone),
+            ),
+          ],
         ],
       ),
     );
@@ -699,17 +722,27 @@ class _CircleAction extends StatelessWidget {
   }
 }
 
-/// Below-the-grid row with two outlined pill links: "Edit bus details"
-/// and "Open seat assignment". Surfaces the next contextual actions an
-/// agent typically wants after eyeballing the chart.
+/// Below-the-grid actions, two rows: Edit bus · Open seat assignment, then the
+/// ONE money door (opens the same Collect / Bus-money sheet as the app-bar
+/// icon) beside "Operate as handler" when that applies. There used to be five
+/// stacked buttons, two of them near-identical money links ("Collect" and
+/// "Collection & money") that each opened half of that sheet.
 class _BottomActions extends StatelessWidget {
-  final String tourId;
+  final Tour tour;
   final Bus bus;
+  final bool showOperateAsHandler;
+  final VoidCallback onMoney;
 
-  const _BottomActions({required this.tourId, required this.bus});
+  const _BottomActions({
+    required this.tour,
+    required this.bus,
+    required this.showOperateAsHandler,
+    required this.onMoney,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final tourId = tour.id;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
       child: Column(
@@ -748,57 +781,30 @@ class _BottomActions extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          // Money/collection actions reachable in ONE push each (no longer
-          // chained Bus money → Collect): "Collect" jumps straight into the
-          // per-bus CollectionScreen — the SAME canonical destination the
-          // Tour money board's "Collect" shortcut uses — and "Bus money"
-          // opens the per-bus ledger directly. Both are demoted to neutral
-          // (not solid champagne) per the accent-rationing law.
           Row(
             children: [
               Expanded(
                 child: UgamButton(
                   kind: UgamButtonKind.neutral,
                   expand: true,
-                  icon: Icons.groups_rounded,
-                  label: tr('tour_money_board.collect'),
-                  onPressed: () {
-                    final tour = Get.find<TourController>().getTour(tourId);
-                    if (tour == null) {
-                      AppSnackBar.error(
-                        tr('bus_status.tour_not_found_refresh'),
-                      );
-                      return;
-                    }
-                    Get.to(
-                      () => CollectionScreen(tour: tour, bus: bus),
-                      transition: Transition.cupertino,
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: UgamButton(
-                  kind: UgamButtonKind.neutral,
-                  expand: true,
                   icon: Icons.payments_rounded,
                   label: tr('bus_status.action.collection_money'),
-                  onPressed: () {
-                    final tour = Get.find<TourController>().getTour(tourId);
-                    if (tour == null) {
-                      AppSnackBar.error(
-                        tr('bus_status.tour_not_found_refresh'),
-                      );
-                      return;
-                    }
-                    Get.to(
-                      () => BusMoneyScreen(tour: tour, bus: bus),
-                      transition: Transition.cupertino,
-                    );
-                  },
+                  onPressed: onMoney,
                 ),
               ),
+              if (showOperateAsHandler) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: UgamButton(
+                    kind: UgamButtonKind.tonal,
+                    expand: true,
+                    icon: Icons.manage_accounts_rounded,
+                    label: tr('bus_status.action_operate_as_handler'),
+                    onPressed: () =>
+                        openAdminHandlerOperate(tour: tour, busId: bus.id),
+                  ),
+                ),
+              ],
             ],
           ),
         ],

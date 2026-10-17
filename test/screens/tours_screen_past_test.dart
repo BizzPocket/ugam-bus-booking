@@ -51,7 +51,7 @@ void main() {
   tearDown(Get.reset);
 
   testWidgets(
-      'browse mode HIDES past tours (kept out of the default view), upcoming '
+      'browse mode collapses past tours behind a Past trips header, upcoming '
       'visible', (tester) async {
     final ctrl = _FakeTourController();
     Get.put<TourController>(ctrl);
@@ -60,14 +60,19 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pumpAndSettle();
 
-    // Past/closed tours are deliberately kept OUT of the default browse view
-    // (tours_screen: the Past group is only added when `_query.isNotEmpty`), so
-    // neither the group header nor the past tour appears while just browsing.
-    expect(find.text('tours.group.past'), findsNothing);
+    // Past tours sit behind a COLLAPSED "Past trips (n)" header in browse
+    // mode (changed intentionally — they used to be reachable only by
+    // search): the header shows, the past tour itself does not until tapped.
+    expect(find.text('tours.group.past_trips'), findsOneWidget);
     expect(find.text('Old Somnath Yatra'), findsNothing);
 
     // The upcoming tour IS visible.
     expect(find.text('Future Dwarka Yatra'), findsOneWidget);
+
+    // One tap on the header reveals the past tour.
+    await tester.tap(find.text('tours.group.past_trips'));
+    await tester.pumpAndSettle();
+    expect(find.text('Old Somnath Yatra'), findsOneWidget);
   });
 
   testWidgets('searching surfaces the Past group with the matching past tour',
@@ -87,7 +92,7 @@ void main() {
 
     // Now the Past group renders (search surfaces it) with the matching tour,
     // and the non-matching upcoming tour is filtered out.
-    expect(find.text('tours.group.past'), findsOneWidget);
+    expect(find.text('tours.group.past_trips'), findsOneWidget);
     expect(find.text('Future Dwarka Yatra'), findsNothing);
   });
 }

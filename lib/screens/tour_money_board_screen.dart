@@ -237,7 +237,7 @@ class _TourMoneyBoardScreenState extends State<TourMoneyBoardScreen> {
                         tr('tour_money_board.per_bus'),
                         style: UgamText.micro.copyWith(
                           color: c.ink3,
-                          letterSpacing: 1.4,
+                          letterSpacing: UgamText.tracking(1.4),
                         ),
                       ),
                       const SizedBox(height: UgamSpacing.md),

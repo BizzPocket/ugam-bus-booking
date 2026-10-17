@@ -440,6 +440,48 @@ class SyncService extends GetxService {
     });
   }
 
+  /// Live bus count per tour for [tourIds] — `id, tour_id` only, no roster.
+  ///
+  /// Exists for the archive: cold start skips completed tours' relations
+  /// ([coldStartHydrationScope]), so their `Tour.buses` is empty and the P&L
+  /// would print "0 buses" for a trip that ran three. Hydrating every archived
+  /// roster just to count buses is exactly the payload the scope avoids on 2G;
+  /// two short columns per bus is not. Tours with no live bus are absent from
+  /// the map (read: 0). Empty [tourIds] → no request.
+  Future<Map<String, int>> fetchBusCountsByTour(List<String> tourIds) async {
+    final ids = tourIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (ids.isEmpty) return const {};
+
+    return _withReadSlot(() async {
+      const chunkSize = 40;
+      final counts = <String, int>{};
+      for (var i = 0; i < ids.length; i += chunkSize) {
+        final chunk = ids.sublist(i, math.min(i + chunkSize, ids.length));
+        final rows = await paginateRows<Map<String, dynamic>>(
+          (from, to) async {
+            final page = await _withTimeout(
+              _liveOnly(
+                'buses',
+                _client.from('buses').select('id,tour_id'),
+              ).inFilter('tour_id', chunk).order('id').range(from, to),
+              readTimeout,
+              'bus counts fetch',
+            );
+            return List<Map<String, dynamic>>.from(
+              (page as List).map((r) => Map<String, dynamic>.from(r)),
+            );
+          },
+        );
+        for (final r in rows) {
+          final tid = r['tour_id'];
+          if (tid is! String || tid.isEmpty) continue;
+          counts[tid] = (counts[tid] ?? 0) + 1;
+        }
+      }
+      return counts;
+    });
+  }
+
   /// Fetches passengers + buses + groups for [tourIds] and attaches nothing —
   /// callers decide how to merge. Public so an archived tour can be hydrated
   /// on demand when the user actually opens it.

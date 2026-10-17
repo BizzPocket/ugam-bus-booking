@@ -190,7 +190,10 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
           const SizedBox(height: UgamSpacing.md),
           // Lower panel: seat-fill gauge while filling, inline P&L once the
           // tour is locked and its departure date has arrived.
-          if (pnl) _pnlBreakdown(c, m, tour) else _seatGauge(c, tour, cap),
+          if (pnl)
+            _pnlBreakdown(c, m, tour)
+          else
+            _seatGauge(c, tour, Get.find<TourController>().seatMeterFor(tour)),
           const SizedBox(height: UgamSpacing.md),
           // Footer — pax + open affordance.
           Row(
@@ -234,8 +237,8 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
   /// Return, each "placed / cap" + free), and how many passengers are
   /// waitlisted (left behind). No money here — the filling phase is about
   /// seats, not P&L.
-  Widget _seatGauge(UgamColorSet c, Tour tour, TourCapacity cap) {
-    if (!cap.hasBuses) {
+  Widget _seatGauge(UgamColorSet c, Tour tour, SeatMeter meter) {
+    if (!meter.hasBuses) {
       return Text(tr('dashboard.no_bus_added'),
           style: UgamText.caption.copyWith(color: c.ink3));
     }
@@ -243,7 +246,7 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        UgamCapacityMeter.hero(cap),
+        UgamCapacityMeter.seats(meter, density: UgamMeterDensity.hero),
         if (behind > 0) ...[
           const SizedBox(height: UgamSpacing.sm),
           Row(
@@ -282,7 +285,18 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
   /// same `totalNetBilled` basis as the full Trip P&L screen, so they agree.
   Widget _pnlBreakdown(UgamColorSet c, TourMoneySummary? m, Tour tour) {
     if (m == null) {
-      return Text('—', style: UgamText.caption.copyWith(color: c.ink3));
+      // Money still loading — hold the three P&L lines' shape with a skeleton
+      // instead of a bare "—" that reads as "no money on this trip".
+      return const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          UgamSkeleton(height: 16, radius: 4),
+          SizedBox(height: UgamSpacing.sm),
+          UgamSkeleton(height: 16, radius: 4),
+          SizedBox(height: UgamSpacing.sm),
+          UgamSkeleton(height: 22, radius: 4),
+        ],
+      );
     }
     final profit = m.totalNetBilled;
     final isProfit = profit >= 0;

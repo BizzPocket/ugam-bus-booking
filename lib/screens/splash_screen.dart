@@ -75,11 +75,9 @@ class _SplashScreenState extends State<SplashScreen>
     _routeWhenReady();
   }
 
-  /// Route only AFTER the persisted session has actually been restored, not
-  /// after an arbitrary timer. We still hold the brand on screen for a short
-  /// minimum so the splash doesn't flash by, but the routing DECISION waits on
-  /// real auth state — so a logged-in admin always lands on the admin home and
-  /// a customer always lands on the customer home, deterministically.
+  /// Route only AFTER the persisted session has actually been restored.
+  /// Location permission runs on the destination screen via [LaunchLocationGate]
+  /// so a bottom sheet is never orphaned when this route is replaced.
   Future<void> _routeWhenReady() async {
     final auth = Get.find<AuthController>();
     var restoreTimedOut = false;

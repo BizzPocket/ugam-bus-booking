@@ -78,6 +78,8 @@ class LedgerBusRollup {
       toCollectTotal: toCollect,
       income: income,
       busRent: rent,
+      busMalikPayable: ownerUnpaid,
+      otherExpensesTotal: groundExpenses,
     );
   }
 }

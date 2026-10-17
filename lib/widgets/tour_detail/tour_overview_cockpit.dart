@@ -2,13 +2,20 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../config/ui_flags.dart';
 import '../../controllers/money_controller.dart';
+import '../../controllers/tour_controller.dart';
 import '../../design/ugam.dart';
 import '../../models/tour.dart';
 import '../../utils/formatters.dart';
 import '../../utils/tour_detail_cockpit.dart';
 
-/// Hero identity chip — seats left / price / fill (never a misleading ₹0).
+/// Hero identity chip — the per-seat PRICE only (never a misleading ₹0).
+///
+/// It used to fall back to "seats left" / "x/y filled", which put the seat
+/// fact in the header a third and fourth time (badge, meta line, vitals, next
+/// step). Seats now live in the vitals grid + next-step card only; a tour with
+/// no flat price (banded / not set) shows no badge at all.
 class TourHeroChipBadge extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
@@ -17,24 +24,9 @@ class TourHeroChipBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final chip = resolveTourHeroChip(tour);
-    late final String primary;
-    late final String secondary;
-    switch (chip.kind) {
-      case TourHeroChipKind.seatsLeft:
-        primary = tr('tour_detail.chip_seats_left',
-            namedArgs: {'n': '${chip.seatsLeft}'});
-        secondary = tr('tour_detail.chip_seats_left_label');
-      case TourHeroChipKind.pricePerSeat:
-        primary = Formatters.formatMoneyInr(chip.pricePerSeat ?? 0);
-        secondary = tr('tour_detail.per_seat');
-      case TourHeroChipKind.seatsFilled:
-        primary = tr('tour_detail.chip_filled', namedArgs: {
-          'filled': '${chip.filled}',
-          'total': '${chip.capacity}',
-        });
-        secondary = tr('tour_detail.vitals_bus_fill');
-    }
+    if (tour.pricePerSeat <= 0) return const SizedBox.shrink();
+    final primary = Formatters.formatMoneyInr(tour.pricePerSeat);
+    final secondary = tr('tour_detail.per_seat');
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: UgamSpacing.md,
@@ -80,7 +72,10 @@ class TourOverviewVitals extends StatelessWidget {
     final pending = tour.pendingSeatsToAssign;
     final seatedOpen = tour.passengers.where(passengerNeedsSeat).length;
     final seated = tour.passengerCount - seatedOpen;
-    final free = (tour.totalBusSeats - tour.occupiedBerths).clamp(0, 1 << 30);
+    // THE seat meter ([SeatMeter]) — the same "x / n" as the dashboard hero,
+    // Requests banner and manage buses.
+    final meter = Get.find<TourController>().seatMeterFor(tour);
+    final free = meter.free;
 
     String moneyDueLabel = '—';
     String moneySub = '';
@@ -145,9 +140,9 @@ class TourOverviewVitals extends StatelessWidget {
               child: _VitalCard(
                 c: c,
                 label: tr('tour_detail.vitals_bus_fill'),
-                value: tour.totalBusSeats == 0
+                value: meter.capacity == 0
                     ? '—'
-                    : '${tour.occupiedBerths}/${tour.totalBusSeats}',
+                    : '${meter.occupied}/${meter.capacity}',
                 accent: false,
                 sub: tour.buses.isEmpty
                     ? null
@@ -220,6 +215,10 @@ class _VitalCard extends StatelessWidget {
 }
 
 /// Needs-attention blocker rows.
+///
+/// Hidden while [UiFlags.showAttentionSections] is off — the tour Overview tab
+/// already leads with the next-action card, and this block re-listed the same
+/// blockers underneath it.
 class TourNeedsAttention extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;
@@ -236,6 +235,7 @@ class TourNeedsAttention extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!UiFlags.showAttentionSections) return const SizedBox.shrink();
     final items = buildNeedsAttention(tour);
     if (items.isEmpty) return const SizedBox.shrink();
 

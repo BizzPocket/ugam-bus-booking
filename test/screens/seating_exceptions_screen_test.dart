@@ -184,16 +184,12 @@ void main() {
     expect(find.text('priority.no_lower_title'), findsOneWidget);
     expect(find.text('priority.no_lower_msg'), findsOneWidget);
 
-    // The seat-type and group cards render the engine's own message text. The
-    // seat-type label is itself an un-translated key fragment in tests.
-    expect(
-      find.textContaining('No matching enums.seat_type.double_sofa'),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('does not fit on any single bus'),
-      findsOneWidget,
-    );
+    // The seat-type and group cards are localized by exception KIND (the
+    // engine's English message is only a fallback for an unknown kind), so in
+    // tests the visible strings are the raw tr() keys.
+    expect(find.text('seating_exceptions.msg_seat_type'), findsOneWidget);
+    expect(find.text('seating_exceptions.msg_group_wont_fit'), findsOneWidget);
+    expect(find.textContaining('No matching'), findsNothing);
 
     // Resolved passenger names (from the tour roster) appear as card titles for
     // the passenger-scoped exceptions.

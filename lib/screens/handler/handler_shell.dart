@@ -11,8 +11,11 @@ import '../../controllers/handler_controller.dart';
 import '../../design/price_band_color.dart';
 import '../../design/ugam.dart';
 import '../../models/bus_details.dart';
+import '../../models/collection.dart';
 import '../../models/handler_manifest.dart';
 import '../../models/handler_phase.dart';
+import '../../models/tour_status.dart';
+import '../../services/crowd_location_share.dart';
 import '../../services/error_reporter.dart';
 import '../../services/location_tracker_service.dart';
 import '../../utils/app_snackbar.dart';
@@ -45,6 +48,12 @@ import 'handler_trip_tab.dart';
 class HandlerShell extends StatefulWidget {
   final String requestId;
 
+  /// The tour's lifecycle status as the opening screen knew it (`locked`,
+  /// `completed`, …), or null when the caller has no such fact. Only
+  /// `completed` changes anything: it ends the trip for the phase resolver —
+  /// see [HandlerController.tourCompleted].
+  final String? tourStatus;
+
   /// TEST SEAM — see [HandlerController.manifestReader].
   @visibleForTesting
   final HandlerManifestReader? manifestReader;
@@ -56,6 +65,7 @@ class HandlerShell extends StatefulWidget {
   const HandlerShell({
     super.key,
     required this.requestId,
+    this.tourStatus,
     this.manifestReader,
     this.trackingProbes,
   });
@@ -89,6 +99,23 @@ class TrackingProbes {
     required this.rationale,
   });
 }
+
+/// Whether the phase banner offers "Hand over cash".
+///
+/// Only in [HandlerPhase.settling], only with cash actually in hand, and only
+/// once every fare is in: a bus is squared with the admin after its riders are
+/// squared with the handler. Offering "Hand over ₹26,800" while ₹24,500 is
+/// still owed invited a handover the next collection would immediately make
+/// short.
+@visibleForTesting
+bool settleOffered({
+  required HandlerPhase phase,
+  required double toCollect,
+  required double outstanding,
+}) =>
+    phase == HandlerPhase.settling &&
+    outstanding > Collection.kMoneyEpsilon &&
+    toCollect <= Collection.kMoneyEpsilon;
 
 /// The four things a handler does. Order is the order of the trip.
 enum _Tab { board, money, chart, trip }
@@ -142,6 +169,9 @@ class _HandlerShellState extends State<HandlerShell>
       HandlerController(
         requestId: widget.requestId,
         manifestReader: widget.manifestReader,
+        tourCompleted:
+            widget.tourStatus?.trim().toLowerCase() ==
+            TourStatus.completed.name,
       ),
       tag: _tag,
     );
@@ -194,6 +224,7 @@ class _HandlerShellState extends State<HandlerShell>
     // being met with a skeleton on return would read as a crash.
     if (state != AppLifecycleState.resumed) return;
     c.reconcile();
+    unawaited(_resumeTrackingIfGranted());
   }
 
   // ── Live location ─────────────────────────────────────────
@@ -237,17 +268,43 @@ class _HandlerShellState extends State<HandlerShell>
     // is assigned, so the very first trigger of every cold start lands here.
     if (busId == null || c.manifest.value == null) return;
 
-    _trackingInFlight = true;
     final tracker = Get.find<LocationTrackerService>();
+    // A passenger (or this same phone, from the home screen) is already
+    // reporting for this bus. Don't ask again, and don't open a second stream.
+    if (tracker.isSharing && tracker.attachedBusId == busId) {
+      _trackingBootstrapped = true;
+      return;
+    }
+
+    _trackingInFlight = true;
     try {
       tracker.status.value = TrackingStatus.awaitingPermission;
 
+      // The OS is the truth, read EVERY time — never the launch gate's cached
+      // answer. Trusting that cache is what kept buses dark: a phone whose GPS
+      // switch was off at app launch (very common on Android) was latched
+      // "location off" for the whole run, and turning GPS on — or granting
+      // permission in system settings — changed nothing until the app was
+      // killed. Reading the state is free and never shows a prompt.
       var serviceEnabled = await _serviceEnabled();
       var permission = await _checkPermission();
       var state = resolveTrackingStatus(
         serviceEnabled: serviceEnabled,
         permission: permission,
       );
+
+      // The launch gate already ASKED this run and was told no. Don't ask a
+      // second time; the strip's Allow button clears the gate first. This only
+      // suppresses the PROMPT — a permission granted since still starts below.
+      if (state == TrackingStatus.denied &&
+          launchGateDeclined(
+            gateDone: CrowdLocationShare.permissionGateDone,
+            launch: CrowdLocationShare.launchStatus,
+          )) {
+        tracker.status.value = TrackingStatus.denied;
+        _trackingBootstrapped = true;
+        return;
+      }
 
       // First ask ever: disclose BEFORE the OS prompt (Play policy), once only.
       if (state == TrackingStatus.denied) {
@@ -323,14 +380,59 @@ class _HandlerShellState extends State<HandlerShell>
   /// keeps an explicit decline from turning into a permission-prompt loop.
   Future<void> _onTrackingFix() async {
     if (!Get.isRegistered<LocationTrackerService>()) return;
-    switch (Get.find<LocationTrackerService>().status.value) {
-      case TrackingStatus.serviceDisabled:
-        await Geolocator.openLocationSettings();
-      case TrackingStatus.deniedForever:
-        await Geolocator.openAppSettings();
+    CrowdLocationShare.reopenPrompt();
+    final shown = Get.find<LocationTrackerService>().status.value;
+    if (shown == TrackingStatus.serviceDisabled ||
+        shown == TrackingStatus.deniedForever) {
+      // The card may be stale: the handler already fixed it in settings and
+      // came back. Look again before sending them to settings a second time —
+      // otherwise this button loops between the app and settings forever.
+      final now = await _readOsTrackingState();
+      if (now == shown) {
+        if (shown == TrackingStatus.serviceDisabled) {
+          await Geolocator.openLocationSettings();
+        } else {
+          await Geolocator.openAppSettings();
+        }
+        return;
+      }
+    }
+    _trackingBootstrapped = false;
+    await _bootstrapTracking();
+  }
+
+  /// The OS's current answer, without prompting. Null when a probe throws.
+  Future<TrackingStatus?> _readOsTrackingState() async {
+    try {
+      return resolveTrackingStatus(
+        serviceEnabled: await _serviceEnabled(),
+        permission: await _checkPermission(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// App resume: the handler may be coming back from system settings with the
+  /// GPS switch on or permission granted. If the OS now allows sharing and
+  /// this phone is not sharing, re-arm the bootstrap — it will find the grant
+  /// and start without asking anything.
+  Future<void> _resumeTrackingIfGranted() async {
+    if (_trackingInFlight) return;
+    if (!Get.isRegistered<LocationTrackerService>()) return;
+    final tracker = Get.find<LocationTrackerService>();
+    if (tracker.isSharing) return;
+    switch (tracker.status.value) {
+      case TrackingStatus.windowClosed || TrackingStatus.forbidden:
+        // The SERVER said no; the phone's settings cannot change that.
+        return;
       default:
-        _trackingBootstrapped = false;
-        await _bootstrapTracking();
+        break;
+    }
+    final now = await _readOsTrackingState();
+    if (now == TrackingStatus.live || now == TrackingStatus.foregroundOnly) {
+      _trackingBootstrapped = false;
+      await _bootstrapTracking();
     }
   }
 
@@ -436,14 +538,25 @@ class _HandlerShellState extends State<HandlerShell>
           ),
         );
       case HandlerPhase.settling:
+        // Fares still owed come first: a bus can only be squared with the
+        // admin once the riders are squared with the handler, and "₹0 to hand
+        // over" over a roster that still reads Owing is what made an ended
+        // trip look finished.
+        final owing = summary.toCollect > Collection.kMoneyEpsilon;
+        final toHandOver = tr(
+          'handler_phase.detail_outstanding',
+          namedArgs: {'amount': Formatters.formatMoneyInr(summary.outstanding)},
+        );
         return (
-          detail: tr(
-            'handler_phase.detail_outstanding',
-            namedArgs: {
-              'amount': Formatters.formatMoneyInr(summary.outstanding),
-            },
-          ),
-          sub: null,
+          detail: owing
+              ? tr(
+                  'handler_phase.detail_to_collect',
+                  namedArgs: {
+                    'amount': Formatters.formatMoneyInr(summary.toCollect),
+                  },
+                )
+              : toHandOver,
+          sub: owing ? toHandOver : null,
         );
       case HandlerPhase.closed:
         return (detail: tr('handler_phase.detail_closed'), sub: null);
@@ -526,6 +639,29 @@ class _HandlerShellState extends State<HandlerShell>
     final copy = _bannerCopy(bus, phase);
     final milestone = milestoneFor(phase);
     final summary = c.summaryFor(bus);
+    final phaseTab = _tabForPhase(phase);
+    final onPhaseTab = _tab == phaseTab;
+    // The full banner lives on its phase's own tab. The Money tab's hero
+    // already carries every figure the banner would print (in hand, still to
+    // collect), so there it shrinks to the phase name + its action; on the
+    // Board tab the tally owns the boarded count, so the banner leads with
+    // the stop instead. Every other tab gets the one-line strip.
+    final compact = !onPhaseTab || phaseTab == _Tab.money;
+    final String detail;
+    final String? sub;
+    if (onPhaseTab && phaseTab == _Tab.money) {
+      detail = '';
+      sub = null;
+    } else if (onPhaseTab && phase.isBoarding) {
+      detail = copy.sub ?? copy.detail;
+      sub = null;
+    } else {
+      detail = copy.detail;
+      sub = copy.sub;
+    }
+    final boardingPending = phase.isBoarding
+        ? c.boardingFor(bus, c.legForBoarding).pending
+        : 0;
 
     return Column(
       children: [
@@ -542,15 +678,24 @@ class _HandlerShellState extends State<HandlerShell>
           padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
           child: HandlerPhaseBanner(
             phase: phase,
-            detail: copy.detail,
-            sublabel: copy.sub,
+            detail: detail,
+            sublabel: sub,
             milestone: milestone,
             outstanding: summary.outstanding,
+            compact: compact,
+            showAction: onPhaseTab,
+            // "We've left" stays tappable while riders are missing (someone
+            // always no-shows) but only turns solid once everyone is aboard.
+            milestoneReady: boardingPending == 0,
             onMilestone: (_stamping || milestone == null)
                 ? null
                 : () => _stamp(bus, milestone),
-            onOpen: () => setState(() => _tab = _tabForPhase(phase)),
-            onSettle: phase == HandlerPhase.settling
+            onOpen: () => setState(() => _tab = phaseTab),
+            onSettle: settleOffered(
+                  phase: phase,
+                  toCollect: summary.toCollect,
+                  outstanding: summary.outstanding,
+                )
                 ? () => setState(() {
                     _tab = _Tab.money;
                     _openSettleOnMoney = true;
@@ -631,6 +776,7 @@ class _HandlerShellState extends State<HandlerShell>
   Widget _dock() {
     final bus = c.selectedBus;
     final boarding = bus == null ? null : c.boardingFor(bus, c.legForBoarding);
+    final boardingPhase = bus != null && c.phaseForBus(bus).isBoarding;
     return UgamDockNav(
       currentIndex: _Tab.values.indexOf(_tab),
       onTap: (i) => setState(() => _tab = _Tab.values[i]),
@@ -640,7 +786,13 @@ class _HandlerShellState extends State<HandlerShell>
           label: tr('handler_tabs.board'),
           tooltip: tr('handler_tabs.board'),
           // Riders still to board — the number the handler is working down.
-          badgeCount: (boarding?.pending ?? 0) > 0 ? boarding!.pending : null,
+          // Only while this leg is actually boarding (a "17" left on the dock
+          // after the trip is over read as 17 people stranded), and not on the
+          // Board tab itself, whose tally already shows it.
+          badgeCount:
+              boardingPhase && _tab != _Tab.board && (boarding?.pending ?? 0) > 0
+              ? boarding!.pending
+              : null,
         ),
         UgamDockItem(
           icon: Icons.account_balance_wallet_rounded,

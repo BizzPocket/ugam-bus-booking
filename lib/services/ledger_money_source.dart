@@ -75,6 +75,67 @@ class LedgerMoneySource {
     }
   }
 
+  /// Test inject for [fetchRentAbsorbableByBus]: raw `bus_id, category, amount`
+  /// expense rows.
+  Future<List<Map<String, dynamic>>> Function()? debugFetchAbsorbableRows;
+
+  /// busId → the diesel / driver / owner-advance rupees logged on it — the
+  /// expense rows a pakku-bhadu rent absorbs ([BusExpenseRollup.fromLedger]).
+  ///
+  /// The ledger's `expense.ground` is ONE uncategorised figure, so Finance
+  /// needs these to apply the same per-bus rule as the money board. A narrow
+  /// three-column read of only the three absorbable categories — never the
+  /// whole expense table.
+  ///
+  /// Fails soft — an empty map (Finance then treats every rupee as on-top
+  /// cost, i.e. the old, over-stated figure) rather than failing the report.
+  Future<Map<String, ({double fuel, double driver, double ownerAdvance})>>
+      fetchRentAbsorbableByBus() async {
+    try {
+      final rows = debugFetchAbsorbableRows != null
+          ? await debugFetchAbsorbableRows!()
+          : await _queryAbsorbableExpenses();
+      final acc = <String, List<double>>{};
+      for (final row in rows) {
+        final bid = row['bus_id'] as String?;
+        if (bid == null || bid.isEmpty) continue;
+        final raw = row['amount'];
+        final amount =
+            raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0;
+        final slot = acc.putIfAbsent(bid, () => [0, 0, 0]);
+        switch (row['category']) {
+          case 'fuel':
+            slot[0] += amount;
+          case 'driver':
+            slot[1] += amount;
+          case 'busOwner':
+            slot[2] += amount;
+        }
+      }
+      return {
+        for (final e in acc.entries)
+          e.key: (
+            fuel: e.value[0],
+            driver: e.value[1],
+            ownerAdvance: e.value[2],
+          ),
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _queryAbsorbableExpenses() async {
+    final raw = await _supabase.client
+        .from('expenses')
+        .select('bus_id, category, amount')
+        .inFilter('category', const ['fuel', 'driver', 'busOwner'])
+        .isFilter('deleted_at', null);
+    return [
+      for (final r in (raw as List)) Map<String, dynamic>.from(r as Map),
+    ];
+  }
+
   Future<List<Map<String, dynamic>>> _queryTourSummary() async {
     final raw = await _supabase.client
         .from('finance_tour_summary')

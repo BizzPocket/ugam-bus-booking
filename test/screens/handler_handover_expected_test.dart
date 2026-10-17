@@ -24,7 +24,9 @@ import 'package:occubusbooking/screens/handler/handler_money_tab.dart';
 /// where the bug lived. `tr()` returns raw keys with EasyLocalization
 /// uninitialised, so the finders match keys.
 class _CapturingController extends HandlerController {
-  _CapturingController() : super(requestId: 'req-1');
+  // tourCompleted: the handover is only offered once the bus has left; a
+  // completed tour puts the bus in settling without needing trip stamps.
+  _CapturingController() : super(requestId: 'req-1', tourCompleted: true);
 
   final saved = <({double expected, double amount})>[];
 

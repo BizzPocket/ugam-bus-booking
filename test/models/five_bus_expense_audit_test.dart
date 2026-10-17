@@ -80,6 +80,25 @@ void main() {
   const totalRents = 216000.0; // 40000+35000+52000+28000+61000
   const totalGround = 36200.0; // 8200+6500+7250+8400+5850
 
+  // Per-bus COST under the pakku-bhadu rule (every bus defaults to
+  // rentIncludesFuel): diesel + driver are INSIDE the rent — they only reduce
+  // what is owed to the owner; toll / food / misc stay ON TOP.
+  //   bus1  max(40000, 5000 drv + 3200 fuel)   + 0 on top             = 40000
+  //   bus2  max(35000, 0)                      + 1500+4100+900 = 6500 = 41500
+  //   bus3  max(52000, 7250 fuel)              + 0                    = 52000
+  //   bus4  max(28000, 6400 drv)               + 2000 toll            = 30000
+  //   bus5  max(61000, 1750 fuel)              + 3300+800 = 4100      = 65100
+  const costExpectedByBus = <String, double>{
+    'bus1': 40000,
+    'bus2': 41500,
+    'bus3': 52000,
+    'bus4': 30000,
+    'bus5': 65100,
+  };
+  // Σ = 228600 = rents 216000 + on-top 12600 (= ground 36200 − absorbed
+  // 23600, absorbed = 3200+5000+7250+6400+1750).
+  const totalCost = 228600.0;
+
   List<BusMoneySummary> summarise() => [
         for (final id in busIds)
           BusMoneySummary.compute(
@@ -92,12 +111,17 @@ void main() {
           ),
       ];
 
+  // As MoneyController.tourSummary() builds it: the per-bus Σ is the trip
+  // total (totalExpensesOverride), with the fleet known.
   TourMoneySummary tourSummary() => TourMoneySummary.compute(
         collections: collections,
         expenses: expenses,
         handovers: handovers,
         incomes: incomes,
         busRentsTotal: totalRents,
+        knownBusIds: busIds.toSet(),
+        totalExpensesOverride:
+            summarise().fold<double>(0, (a, s) => a + s.expensesTotal),
       );
 
   group('5 buses — per-bus expense isolation', () {
@@ -111,8 +135,9 @@ void main() {
         expect(s.busRent, rents[s.busId], reason: '${s.busId} rent wrong');
         expect(
           s.expensesTotal,
-          groundExpectedByBus[s.busId]! + rents[s.busId]!,
-          reason: '${s.busId} expensesTotal != own rows + own rent',
+          costExpectedByBus[s.busId],
+          reason: '${s.busId} expensesTotal != own rent (incl. diesel + '
+              'driver) + own on-top rows',
         );
       }
     });
@@ -130,7 +155,7 @@ void main() {
   group('5 buses — roll-up identity (per-bus Σ == trip total)', () {
     test('expenses', () {
       final perBus = summarise().fold<double>(0, (a, s) => a + s.expensesTotal);
-      expect(perBus, totalGround + totalRents);
+      expect(perBus, totalCost);
       expect(tourSummary().totalExpenses, perBus);
     });
 
@@ -196,6 +221,7 @@ void main() {
           incomes: incomes,
           busRentsTotal: totalRents,
           knownBusIds: busIds.toSet(),
+          totalExpensesOverride: perBusVisible(),
         );
 
     test('the orphan is surfaced, so rows + orphan == the trip total', () {
@@ -209,10 +235,13 @@ void main() {
 
     test('orphan money stays INSIDE the trip total (never silently dropped)',
         () {
-      expect(orphanTrip().totalExpenses, totalGround + totalRents + 9999);
+      // Visible buses 228600 (the orphan row is on no visible bus) + the
+      // orphan 9999 → 238599.
+      expect(orphanTrip().totalExpenses, totalCost + 9999);
     });
 
     test('a clean 5-bus tour reports no orphan money', () {
+      // (No override needed — only the orphan figures are asserted.)
       final t = TourMoneySummary.compute(
         collections: collections,
         expenses: expenses,
@@ -236,22 +265,39 @@ void main() {
         busRentsTotal: totalRents,
       );
       expect(t.hasOrphanMoney, isFalse);
-      // …but the money is still counted.
+      // …but the money is still counted. (No fleet resolved → no per-bus
+      // override → the raw `rows + rents` fallback.)
       expect(t.totalExpenses, totalGround + totalRents + 9999);
     });
   });
 
   group('Settings → Finance must agree with the per-tour money board', () {
-    // Replays FinanceController.load()'s fold verbatim: revenue from
-    // `collections` (received − refunded), expenses from `expenses` rows PLUS
-    // every `buses.bus_price`, income from `incomes`.
+    // Replays FinanceController.load()'s fold: revenue from `collections`
+    // (received − refunded), income from `incomes`, and per bus the SAME
+    // pakku-bhadu rule the board uses — [BusExpenseRollup.fromLedger] over the
+    // ledger's ground total + the diesel / driver / advance rows.
     test('FinanceController fold == TourMoneySummary.totalNet', () {
       final revenue = collections.fold<double>(
         0,
         (a, c) => a + (c.amountReceived - c.amountRefunded),
       );
-      final expenseTotal =
-          expenses.fold<double>(0, (a, e) => a + e.amount) + totalRents;
+      double sumOf(String bus, ExpenseCategory cat) => expenses
+          .where((e) => e.busId == bus && e.category == cat)
+          .fold<double>(0, (a, e) => a + e.amount);
+      final expenseTotal = busIds.fold<double>(
+        0,
+        (a, id) =>
+            a +
+            BusExpenseRollup.fromLedger(
+              ground: groundExpectedByBus[id]!,
+              busRent: rents[id]!,
+              fuel: sumOf(id, ExpenseCategory.fuel),
+              driver: sumOf(id, ExpenseCategory.driver),
+              ownerAdvance: sumOf(id, ExpenseCategory.busOwner),
+              rentIncludesFuel: true,
+            ).expensesTotal,
+      );
+      expect(expenseTotal, totalCost);
       final incomeTotal = incomes.fold<double>(0, (a, i) => a + i.amount);
       final financeNet = revenue + incomeTotal - expenseTotal;
 

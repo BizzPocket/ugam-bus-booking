@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../design/ugam.dart';
@@ -123,23 +125,46 @@ class SeatOccupantLabel extends StatelessWidget {
     final scaler = MediaQuery.textScalerOf(
       context,
     ).clamp(maxScaleFactor: kSeatLabelMaxTextScale);
+    final nameStyle = UgamText.bodyStrong.copyWith(
+      color: nameColor,
+      fontSize: nameSize,
+      fontWeight: FontWeight.w700,
+      height: 1.12,
+    );
+    Widget nameText(TextStyle style) => Text(
+      name,
+      textAlign: TextAlign.center,
+      textScaler: scaler,
+      maxLines: nameMaxLines,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
     return Column(
       mainAxisSize: MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(
-          name,
-          textAlign: TextAlign.center,
-          textScaler: scaler,
-          maxLines: nameMaxLines,
-          overflow: TextOverflow.ellipsis,
-          style: UgamText.bodyStrong.copyWith(
-            color: nameColor,
-            fontSize: nameSize,
-            fontWeight: FontWeight.w700,
-            height: 1.12,
-          ),
-        ),
+        // A wrapping name breaks on SPACES only. Flutter force-breaks a word
+        // wider than the line mid-glyph ("હસમુખભા / ઈ વાઘાણી"), so when any
+        // single word would not fit, the name steps down just enough (never
+        // below 80%) for its widest word to sit on one line.
+        if (nameMaxLines > 1)
+          LayoutBuilder(
+            builder: (context, box) => nameText(
+              nameStyle.copyWith(
+                fontSize: _wordFitFontSize(
+                  name,
+                  // Measure what the Text will actually paint: the ambient
+                  // DefaultTextStyle merged under ours (theme tracking etc.).
+                  DefaultTextStyle.of(context).style.merge(nameStyle),
+                  scaler,
+                  box.maxWidth,
+                  Localizations.maybeLocaleOf(context),
+                ),
+              ),
+            ),
+          )
+        else
+          nameText(nameStyle),
         if (number != null && number.isNotEmpty) ...[
           const SizedBox(height: 2),
           Text(
@@ -159,4 +184,33 @@ class SeatOccupantLabel extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The largest font size (≤ the style's own, ≥ 80% of it) at which every
+/// space-separated word of [name] fits [maxWidth] on its own line.
+double _wordFitFontSize(
+  String name,
+  TextStyle style,
+  TextScaler scaler,
+  double maxWidth,
+  Locale? locale,
+) {
+  final size = style.fontSize ?? 13;
+  if (!maxWidth.isFinite || maxWidth <= 0) return size;
+  var widest = 0.0;
+  for (final word in name.trim().split(RegExp(r'\s+'))) {
+    if (word.isEmpty) continue;
+    final tp = TextPainter(
+      text: TextSpan(text: word, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+      locale: locale,
+      maxLines: 1,
+    )..layout();
+    widest = math.max(widest, tp.width);
+    tp.dispose();
+  }
+  if (widest <= maxWidth) return size;
+  // 0.98: a hair of slack for glyph-advance rounding at the new size.
+  return math.max(size * maxWidth / widest * 0.98, size * 0.8);
 }

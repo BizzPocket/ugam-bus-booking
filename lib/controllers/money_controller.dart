@@ -1020,22 +1020,67 @@ class MoneyController extends GetxController {
   }
 
   BusMoneySummary summaryForBus(String busId) {
+    final bus = _busById()[busId];
+    final rent = bus?.busPrice ?? _busRents()[busId] ?? 0;
+    final includesFuel = bus?.rentIncludesFuel ?? true;
+
+    BusMoneySummary computed() => BusMoneySummary.compute(
+      busId: busId,
+      collections: collections.toList(),
+      expenses: expenses.toList(),
+      handovers: handovers.toList(),
+      incomes: incomes.toList(),
+      busRent: rent,
+      rentIncludesFuel: includesFuel,
+      revenueBilled: _billedRevenues()[busId] ?? 0,
+      passengers: _tourPassengers(),
+      dueForSeat: bus?.amountDueForSeat,
+    );
+
     if (_ledgerReady) {
       final rollup = _ledgerByBus[busId];
       if (rollup != null) {
         final ar =
             _seatArForBus(busId) ??
             (toCollect: rollup.toCollect, toReturn: rollup.toReturn);
-        return BusMoneySummary(
-          busId: busId,
+        final base = computed();
+        final busRent = rent > 0 ? rent : rollup.rent;
+        // The LEDGER is the authority on how much was spent on the ground (it
+        // posts every expense row as one `expense.ground` figure); the
+        // categorised legacy rows only say how much of that was diesel / driver
+        // / owner advance, which the pakku-bhadu rule absorbs into the rent
+        // (see [BusExpenseRollup]; on a non-pakku bus `base` already moved
+        // diesel + driver into `other`, so only advances absorb). Keep the
+        // ledger's ground total — dropping it zeroed the expenses of a bus the
+        // tour no longer lists (no Bus, no rows) while `orphanExpenses` still
+        // read the ledger, so the trip total came out BELOW its own orphan.
+        //
+        // Owner payable applies the same rule. The ledger's `payable.owner`
+        // only ever carries the rent accrual (072), never the diesel / driver /
+        // advances paid along the way, so preferring it showed the full rent
+        // as "remaining" on every ledgered bus. Finance runs this SAME helper.
+        final r = BusExpenseRollup.fromLedger(
+          ground: rollup.groundExpenses,
+          busRent: busRent,
+          fuel: base.fuelTotal,
+          driver: base.driverTotal,
+          ownerAdvance: base.ownerAdvanceTotal,
+          rentIncludesFuel: includesFuel,
+        );
+        return base.copyWith(
           collected: rollup.collected,
           revenueBilled: rollup.billed,
-          expensesTotal: rollup.expensesTotal,
           handedOver: rollup.handedOver,
           toReturnTotal: ar.toReturn,
           toCollectTotal: ar.toCollect,
           income: rollup.income,
-          busRent: rollup.rent,
+          busRent: busRent,
+          fuelTotal: r.fuelTotal,
+          driverTotal: r.driverTotal,
+          ownerAdvanceTotal: r.ownerAdvanceTotal,
+          otherExpensesTotal: r.otherExpensesTotal,
+          busMalikPayable: r.busMalikPayable,
+          expensesTotal: r.expensesTotal,
         );
       }
       // Ledger loaded but holding no lines for this bus — fall through to the
@@ -1054,17 +1099,7 @@ class MoneyController extends GetxController {
       // zeros (plus rent and billed revenue), so falling back is never worse
       // than the figure it replaces.
     }
-    return BusMoneySummary.compute(
-      busId: busId,
-      collections: collections.toList(),
-      expenses: expenses.toList(),
-      handovers: handovers.toList(),
-      incomes: incomes.toList(),
-      busRent: _busRents()[busId] ?? 0,
-      revenueBilled: _billedRevenues()[busId] ?? 0,
-      passengers: _tourPassengers(),
-      dueForSeat: _busById()[busId]?.amountDueForSeat,
-    );
+    return computed();
   }
 
   TourMoneySummary tourSummary() {
@@ -1124,6 +1159,12 @@ class MoneyController extends GetxController {
         totalToCollect: toCollect,
         totalIncome: buses.fold(0.0, (s, b) => s + b.income),
         totalBusRent: buses.fold(0.0, (s, b) => s + b.busRent),
+        // Not `totalExpenses − totalBusRent`: diesel / driver / advances absorbed
+        // into a pakku rent would vanish from the handover expectation.
+        groundExpensesTotal: buses.fold<double>(
+          0.0,
+          (s, b) => s + b.groundExpenses,
+        ),
         busesMissingRent: _busesMissingRent(),
         orphanCollected: orphanCollected,
         orphanExpenses: orphanExpenses,
@@ -1146,11 +1187,17 @@ class MoneyController extends GetxController {
     final perBus = busById.isEmpty
         ? null
         : summariesForBuses(busById.keys).toList();
+    final expensesFromBuses = perBus?.fold<double>(
+      0,
+      (sum, s) => sum + s.expensesTotal,
+    );
+
     return TourMoneySummary.compute(
       collections: collections.toList(),
       expenses: expenses.toList(),
       handovers: handovers.toList(),
       incomes: incomes.toList(),
+      totalExpensesOverride: expensesFromBuses,
       // Only claim to know the fleet when we actually resolved one. An empty
       // busById here means the tour/controller wasn't resolvable, NOT that the
       // tour has no buses — passing an empty set then would flag every single

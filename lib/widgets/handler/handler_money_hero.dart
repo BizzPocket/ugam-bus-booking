@@ -36,17 +36,42 @@ class HandlerMoneyHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final hasHandover = handedOver.abs() > Collection.kMoneyEpsilon;
+    final owing = toCollect > Collection.kMoneyEpsilon;
 
     // ONE money hero. The headline is what the handler STILL has to hand over,
     // not the gross take: once they settle on the roadside the number they are
     // looking at must actually go down. With no handover recorded the two are
     // identical, so this changes nothing until settlement is used.
+    //
+    // The breakdown below folds away behind a chevron, so the secondary line
+    // is the only other figure a handler reads. While fares are still owed it
+    // carries them: on an untouched bus the headline is ₹0 and "₹0 collected
+    // so far" said nothing about the ₹56,800 the bus was still to collect.
+    final headline = settled ? handedOver : outstanding;
+    // "₹26,800 collected so far" under a ₹26,800 headline is the same number
+    // twice. Only name the collected figure when it actually differs from the
+    // headline (spent, income or a handover moved them apart).
+    final collectedRepeatsHeadline =
+        (collected - headline).abs() <= Collection.kMoneyEpsilon;
     return UgamHeroStat(
       label: settled
           ? tr('handler_chart.stat_settled')
           : tr('handler_chart.stat_in_hand'),
-      value: Formatters.formatMoneyInr(settled ? handedOver : outstanding),
-      secondary: hasHandover
+      value: Formatters.formatMoneyInr(headline),
+      secondary: owing
+          ? (collectedRepeatsHeadline
+                ? tr(
+                    'handler_chart.in_hand_secondary_owing_only',
+                    namedArgs: {'owing': Formatters.formatMoneyInr(toCollect)},
+                  )
+                : tr(
+                    'handler_chart.in_hand_secondary_owing',
+                    namedArgs: {
+                      'owing': Formatters.formatMoneyInr(toCollect),
+                      'collected': Formatters.formatMoneyInr(collected),
+                    },
+                  ))
+          : hasHandover
           ? tr(
               'handler_chart.handed_secondary',
               namedArgs: {
@@ -54,6 +79,8 @@ class HandlerMoneyHero extends StatelessWidget {
                 'total': Formatters.formatMoneyInr(inHand),
               },
             )
+          : collectedRepeatsHeadline
+          ? tr('handler_phase.detail_all_collected')
           : tr(
               'handler_chart.in_hand_secondary',
               namedArgs: {'amount': Formatters.formatMoneyInr(collected)},

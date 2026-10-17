@@ -64,6 +64,7 @@ class UgamSheet {
     if (isCupertino) {
       return showCupertinoModalPopup<T>(
         context: context,
+        useRootNavigator: true,
         barrierColor: scrim,
         // `showCupertinoModalPopup` defaults this to true. Omitting it made
         // `isDismissible: false` a lie on iOS/macOS only — the caller's

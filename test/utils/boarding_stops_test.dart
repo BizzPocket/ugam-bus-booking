@@ -1,5 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/passenger.dart';
+import 'package:occubusbooking/models/request_line.dart';
+import 'package:occubusbooking/models/seat_assignment.dart';
+import 'package:occubusbooking/models/seat_layout.dart';
+import 'package:occubusbooking/models/seat_type.dart';
+import 'package:occubusbooking/models/trip_type.dart';
+import 'package:occubusbooking/utils/aisle_order.dart';
 import 'package:occubusbooking/utils/boarding_stops.dart';
 
 /// Stop-by-stop boarding is what replaces the flat attendance list. The
@@ -122,6 +128,167 @@ void main() {
       expect(p.total, 0);
       // total == 0 must not read as "everyone is aboard".
       expect(p.isComplete, isFalse);
+    });
+
+    test('riders within a stop follow bus seat order, not name order', () {
+      const busId = 'bus-1';
+      final layout = BusLayout(
+        rows: 3,
+        cols: SeatGridCols.count,
+        grid: [
+          for (var r = 0; r < 3; r++) ...[
+            SeatCell(
+              row: r,
+              col: SeatGridCols.singleLower,
+              seatType: SeatType.singleSofa,
+              position: SeatPosition.lower,
+              seatId: 'SL$r',
+            ),
+            SeatCell(
+              row: r,
+              col: SeatGridCols.singleUpper,
+              seatType: SeatType.singleSofa,
+              position: SeatPosition.upper,
+              seatId: 'SU$r',
+            ),
+          ],
+        ],
+      );
+      Passenger seated(String id, String seatId, String pickup) => Passenger(
+        id: id,
+        tourId: 'tour-1',
+        name: id,
+        phone: '9000000000',
+        pickupLocationId: 'adajan',
+        pickupLocationName: pickup,
+        assignedSeats: [SeatAssignment(busId: busId, seatId: seatId)],
+        requestLines: [
+          RequestLine(
+            seatType: SeatType.singleSofa,
+            qty: 1,
+            leg: TripType.roundTrip,
+          ),
+        ],
+        tripType: TripType.roundTrip,
+      );
+      // Names are A→Z but seats are SU2, SL0, SU1 — aisle order is SL0, SU0, …
+      final roster = [
+        seated('z', 'SU2', 'Adajan'),
+        seated('a', 'SL0', 'Adajan'),
+        seated('m', 'SU1', 'Adajan'),
+      ];
+      final p = buildBoardingProgress(
+        roster,
+        isPresent: (_) => false,
+        rankOf: rank,
+        seatSortBusId: busId,
+        seatSortLayout: layout,
+      );
+      expect(p.stops.single.riders.map((r) => r.id).toList(), ['a', 'm', 'z']);
+    });
+
+    test('booking group members stay adjacent when their seats are not', () {
+      const busId = 'bus-1';
+      final layout = BusLayout(
+        rows: 4,
+        cols: SeatGridCols.count,
+        grid: [
+          for (var r = 0; r < 4; r++)
+            SeatCell(
+              row: r,
+              col: SeatGridCols.singleLower,
+              seatType: SeatType.singleSofa,
+              position: SeatPosition.lower,
+              seatId: 'SL$r',
+            ),
+        ],
+      );
+      const group = 'fam';
+      Passenger rider(String id, String seat) => Passenger(
+        id: id,
+        tourId: 'tour-1',
+        name: id,
+        phone: '9000000000',
+        groupId: group,
+        pickupLocationId: 'adajan',
+        pickupLocationName: 'Adajan',
+        assignedSeats: [SeatAssignment(busId: busId, seatId: seat)],
+        requestLines: [
+          RequestLine(
+            seatType: SeatType.singleSofa,
+            qty: 1,
+            leg: TripType.roundTrip,
+          ),
+        ],
+        tripType: TripType.roundTrip,
+      );
+      final roster = [
+        rider('early', 'SL0'),
+        rider('late', 'SL3'),
+        Passenger(
+          id: 'solo',
+          tourId: 'tour-1',
+          name: 'solo',
+          phone: '9000000000',
+          pickupLocationId: 'adajan',
+          pickupLocationName: 'Adajan',
+          assignedSeats: [SeatAssignment(busId: busId, seatId: 'SL1')],
+          requestLines: [
+            RequestLine(
+              seatType: SeatType.singleSofa,
+              qty: 1,
+              leg: TripType.roundTrip,
+            ),
+          ],
+          tripType: TripType.roundTrip,
+        ),
+      ];
+      final p = buildBoardingProgress(
+        roster,
+        isPresent: (_) => false,
+        rankOf: rank,
+        seatSortBusId: busId,
+        seatSortLayout: layout,
+      );
+      final ids = p.stops.single.riders.map((r) => r.id).toList();
+      expect(ids.indexOf('early'), lessThan(ids.indexOf('late')));
+      expect(ids.indexOf('early') + 1, ids.indexOf('late'));
+    });
+
+    test('seatIdsOnBus lists every berth in walk order', () {
+      const busId = 'bus-1';
+      final layout = BusLayout(
+        rows: 2,
+        cols: SeatGridCols.count,
+        grid: [
+          SeatCell(
+            row: 0,
+            col: SeatGridCols.singleLower,
+            seatType: SeatType.singleSofa,
+            position: SeatPosition.lower,
+            seatId: 'SL0',
+          ),
+          SeatCell(
+            row: 1,
+            col: SeatGridCols.singleLower,
+            seatType: SeatType.singleSofa,
+            position: SeatPosition.lower,
+            seatId: 'SL1',
+          ),
+        ],
+      );
+      final walk = AisleWalk.of(layout);
+      final p = Passenger(
+        id: 'p1',
+        tourId: 't1',
+        name: 'Pat',
+        phone: '9',
+        assignedSeats: [
+          SeatAssignment(busId: busId, seatId: 'SL1'),
+          SeatAssignment(busId: busId, seatId: 'SL0'),
+        ],
+      );
+      expect(seatIdsOnBus(p, busId, walk: walk), ['SL0', 'SL1']);
     });
   });
 }

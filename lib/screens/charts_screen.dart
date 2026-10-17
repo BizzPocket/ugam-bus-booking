@@ -288,7 +288,17 @@ class _ChartsScreenState extends State<ChartsScreen> {
           // on ONE physical berth; folding them double-counts and can read
           // past capacity (e.g. "40/37"). `assignments` itself is untouched —
           // it still feeds the tile grid, which needs the raw per-seat lists.
-          final assignedCount = tour.occupiedBerthsFor(bus.id);
+          //
+          // Both numbers then come from THE seat meter's slice for this bus
+          // when it has one ([SeatMeter]), so this bar reads the same "x / n"
+          // as manage buses, bus status and the dashboard.
+          final busMeter =
+              Get.find<TourController>().seatMeterFor(tour).byBus[bus.id];
+          final assignedCount =
+              busMeter?.occupied ?? tour.occupiedBerthsFor(bus.id);
+          final meterTotal = (busMeter?.capacity ?? 0) > 0
+              ? busMeter!.capacity
+              : totalSeats;
           // ONE truth for "there is a grid on screen", so the expand button,
           // the edit-seats pill and the legend can never disagree. Non-null
           // exactly when a real grid renders, which also keeps type promotion
@@ -331,7 +341,7 @@ class _ChartsScreenState extends State<ChartsScreen> {
                   tour: tour,
                   bus: bus,
                   assigned: assignedCount,
-                  total: totalSeats,
+                  total: meterTotal,
                   onPickBus: _pickBus,
                   c: c,
                 ),

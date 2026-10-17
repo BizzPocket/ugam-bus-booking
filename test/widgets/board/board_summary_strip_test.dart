@@ -122,7 +122,7 @@ void main() {
         const BoardBerth(code: 'A4'), // empty: contributes nothing
       ]);
 
-      expect(s.primary, '₹1,600 બાકી');
+      expect(s.primary, 'લેવાના ₹1,600');
       expect(s.secondary, '47% એકઠી');
       expect(s.tone, BoardStripTone.danger);
     });
@@ -137,7 +137,7 @@ void main() {
       final done = BoardStripSummary.of(BoardStripMetric.moneyOutstanding, [
         seated('A1', fare: 1000, paid: 1000),
       ]);
-      expect(done.primary, '₹0 બાકી');
+      expect(done.primary, 'લેવાના ₹0');
       expect(done.tone, BoardStripTone.good);
     });
 
@@ -331,7 +331,7 @@ void main() {
         pending: 3,
       );
 
-      expect(find.text('3 ક્રિયા બાકી · સિંક થશે'), findsOneWidget);
+      expect(find.text('3 ક્રિયા પેન્ડિંગ · સિંક થશે'), findsOneWidget);
       expect(find.byIcon(Icons.cloud_off_rounded), findsOneWidget);
     });
 

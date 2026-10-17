@@ -275,10 +275,20 @@ void main() {
       ),
       scale: 1.3,
     );
-    // 2 lines x 13pt x 1.12 line-height x the 1.10 ceiling.
+    // Still TWO lines. The name may step down (to no less than 80% of 13pt)
+    // so its widest word fits one line — the label breaks on spaces, never
+    // mid-word — so the height is two lines at the fitted size.
+    final ro = tester.renderObject<RenderParagraph>(
+      find.descendant(
+        of: find.byType(SeatOccupantLabel),
+        matching: find.text(_guName),
+      ),
+    );
+    final fitted = ro.text.style!.fontSize!;
+    expect(fitted, inInclusiveRange(13 * 0.8, 13));
     expect(
       _paragraphHeight(tester, _guName),
-      closeTo(2 * 13 * 1.12 * kSeatLabelMaxTextScale, 0.5),
+      closeTo(2 * fitted * 1.12 * kSeatLabelMaxTextScale, 0.5),
     );
   });
 

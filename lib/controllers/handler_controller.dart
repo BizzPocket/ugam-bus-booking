@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:uuid/uuid.dart';
 
@@ -13,13 +14,17 @@ import '../models/handler_manifest.dart';
 import '../models/handler_phase.dart';
 import '../models/handler_report.dart';
 import '../models/income_entry.dart';
+import '../design/group_color.dart';
 import '../models/passenger.dart';
+import '../models/passenger_group.dart';
+import '../models/payment_claim.dart';
 import '../services/customer_requests_store.dart';
 import '../utils/boarding_stops.dart';
 import '../utils/collection_seat_resolver.dart';
 import '../utils/collection_write.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_occupants.dart';
+import '../utils/trip_auto_complete.dart';
 import 'pickup_controller.dart';
 
 /// Signature of [CustomerRequestsStore.handlerTourManifest].
@@ -59,9 +64,59 @@ enum HandlerLoadKind {
 /// one reactive source. A write lands in the cache once and every surface that
 /// depends on it re-renders — no cross-tab callbacks, no duplicated derivation.
 class HandlerController extends GetxController {
-  HandlerController({required this.requestId, this.manifestReader});
+  HandlerController({
+    required this.requestId,
+    this.manifestReader,
+    this.tourCompleted = false,
+    this.scheduleReader,
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
 
   final String requestId;
+
+  /// Whether the AGENT has closed this tour (`tours.status == completed`).
+  /// Handed in at the door by whichever screen opened the shell — the manifest
+  /// RPC does not carry it — and read by [phaseForBus] exactly like the
+  /// handler's own "Trip finished" stamp. Live, handlers stamp "departed" and
+  /// nothing after, so without this a finished tour stayed "On the road" for
+  /// good. Completion is terminal, so a value captured at open never goes
+  /// stale.
+  final bool tourCompleted;
+
+  /// TEST SEAM for the tour's dates + status. Production reads `tours`.
+  final Future<List<TourSchedule>> Function(String tourId)? scheduleReader;
+
+  /// TEST SEAM for "now" in the calendar rules.
+  final DateTime Function() _clock;
+
+  /// The tour's calendar, read best-effort after the manifest. Null until read
+  /// (or when unreadable) — the calendar rules then simply do not apply.
+  final schedule = Rxn<TourSchedule>();
+
+  /// The tour a manifest belongs to, from its buses (or riders).
+  static String _tourIdOf(HandlerManifest? m) {
+    for (final b in m?.buses ?? const <Bus>[]) {
+      final id = b.tourId;
+      if (id != null && id.isNotEmpty) return id;
+    }
+    final ps = m?.passengers ?? const <Passenger>[];
+    return ps.isEmpty ? '' : ps.first.tourId;
+  }
+
+  /// Trip over: the agent closed the tour (at open, or since), or the calendar
+  /// says so (`tripAutoCompleteAt` — the day after the return / departure).
+  bool get tripOver {
+    if (tourCompleted) return true;
+    final s = schedule.value;
+    return s != null && s.tripOver(_clock());
+  }
+
+  /// The outbound leg is over by the calendar (the return day has started),
+  /// whether or not anyone stamped "We've arrived".
+  bool get goLegOverByDate {
+    final s = schedule.value;
+    return s != null && s.goLegOver(_clock());
+  }
 
   /// TEST SEAM for the manifest read — [CustomerRequestsStore] is a
   /// private-constructor singleton wired straight to Supabase, so without this
@@ -114,6 +169,11 @@ class HandlerController extends GetxController {
   /// Problems raised with the agent, newest first.
   final reports = <HandlerReport>[].obs;
 
+  /// UPI advances claimed by riders on this handler's buses — pending and
+  /// confirmed — so the collect sheet can say "this rider already paid ₹X
+  /// online" instead of asking for the full fare a second time.
+  final claims = <PaymentClaim>[].obs;
+
   /// The leg the handler has explicitly switched the boarding list to, or null
   /// to follow the phase. Kept separate from the effective leg so that
   /// [legForBoarding] can lead by default without ever fighting a handler who
@@ -131,6 +191,20 @@ class HandlerController extends GetxController {
   // ── Derived: buses ────────────────────────────────────────
 
   List<Bus> get buses => manifest.value?.buses ?? const <Bus>[];
+
+  List<PassengerGroup> get passengerGroups =>
+      manifest.value?.groups ?? const <PassengerGroup>[];
+
+  /// Stable group ring colour — uses manifest colour_index when present.
+  Color groupColorFor(String groupId) => _groupColorResolver.colorFor(groupId);
+
+  String? groupLabelFor(String? groupId) =>
+      manifest.value?.groupLabel(groupId);
+
+  GroupColorResolver get _groupColorResolver {
+    final list = manifest.value?.groups ?? const <PassengerGroup>[];
+    return GroupColorResolver({for (final g in list) g.id: g.colorIndex});
+  }
 
   bool get isMultiBus => buses.length > 1;
 
@@ -189,6 +263,8 @@ class HandlerController extends GetxController {
     trip: tripFor(bus.id),
     hasReturnRiders: hasReturnRiders(bus.id),
     moneySettled: summaryFor(bus).isSettled,
+    tourCompleted: tripOver,
+    goLegAutoCompleted: goLegOverByDate,
   );
 
   /// The single milestone offered right now, or null when the phase's next step
@@ -335,11 +411,25 @@ class HandlerController extends GetxController {
       expectedForLeg(bus, leg),
       isPresent: (p) => isPresent(p.id, bus.id, leg),
       rankOf: pk == null ? null : (id, name) => pk.rankFor(id: id, name: name),
+      seatSortBusId: bus.id,
+      seatSortLayout: bus.layout,
     );
   }
 
   /// Unacknowledged problem reports — what the Trip tab badges.
   int get openReportCount => reports.where((r) => !r.isAcknowledged).length;
+
+  /// Every UPI claim [passengerId] has made on this tour, pending or
+  /// confirmed, newest first. Rejected claims never reach the client.
+  List<PaymentClaim> claimsFor(String passengerId) =>
+      claims.where((c) => c.passengerId == passengerId).toList();
+
+  /// What [passengerId] says they paid online that the agent has NOT yet
+  /// verified. A confirmed claim is already money on the collection row, so
+  /// only the unverified balance needs calling out on the collect list.
+  double pendingClaimedFor(String passengerId) => claimsFor(
+    passengerId,
+  ).where((c) => c.isPending).fold(0.0, (sum, c) => sum + c.amountRupees);
 
   // ── Load ──────────────────────────────────────────────────
 
@@ -383,14 +473,25 @@ class HandlerController extends GetxController {
         () => _store.handlerBusTripState(requestId),
       );
       final freshReports = await _safe(() => _store.handlerReports(requestId));
+      final freshClaims = await _safe(
+        () => _store.handlerPaymentClaims(requestId),
+      );
+      final scheduleTourId = _tourIdOf(fresh);
+      final freshSchedule = await _safe(
+        () => (scheduleReader ?? _store.tourSchedule)(scheduleTourId),
+      );
 
       if (token != _loadToken) return;
 
       manifest.value = fresh;
+      // Keep the last good calendar when a re-read fails: dates do not move
+      // mid-trip, and losing them would bounce the phase back a leg.
+      if (freshSchedule.isNotEmpty) schedule.value = freshSchedule.first;
       handovers.value = {for (final h in freshHandovers) h.id: h};
       legState.value = {for (final s in freshLegState) s.busId: s};
       tripState.value = {for (final t in freshTrip) t.busId: t};
       reports.value = freshReports;
+      claims.value = freshClaims;
       collections.value = {
         for (final c in fresh?.collections ?? const <Collection>[])
           _collectionKey(c.passengerId, c.busId, c.seatId): c,

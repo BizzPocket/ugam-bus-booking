@@ -1,4 +1,6 @@
 import 'package:get/get.dart';
+
+import '../controllers/auth_controller.dart';
 import '../screens/board/board_screen.dart';
 import '../screens/charts_screen.dart';
 import '../screens/main_shell.dart';
@@ -18,6 +20,8 @@ import '../screens/notifications_settings_screen.dart';
 import '../screens/finance_screen.dart';
 import '../screens/pickup_locations_screen.dart';
 import '../screens/inbox_screen.dart';
+import '../services/crowd_location_share.dart';
+import '../widgets/launch_location_gate.dart';
 
 class AppRoutes {
   /// **The stop-and-review gate** (Board interaction spec §15, step 2).
@@ -98,12 +102,29 @@ class AppRoutes {
     GetPage(name: splash, page: () => const SplashScreen()),
     GetPage(name: login, page: () => const LoginScreen()),
     GetPage(name: adminSetup, page: () => const AdminSetupScreen()),
-    GetPage(name: customerHome, page: () => const CustomerTourListScreen()),
+    GetPage(
+      name: customerHome,
+      page: () => const LaunchLocationGate(
+        child: CustomerTourListScreen(),
+      ),
+    ),
     GetPage(
       name: customerMyRequests,
       page: () => const CustomerMyRequestsScreen(),
     ),
-    GetPage(name: home, page: () => const MainShell()),
+    GetPage(
+      name: home,
+      page: () => LaunchLocationGate(
+        child: const MainShell(),
+        afterGate: (context) async {
+          if (!Get.isRegistered<AuthController>()) return;
+          await CrowdLocationShare.offer(
+            context,
+            Get.find<AuthController>().userPhone.value,
+          );
+        },
+      ),
+    ),
     GetPage(name: createTour, page: () => const CreateTourScreen()),
     GetPage(
       name: board,

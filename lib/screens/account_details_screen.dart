@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../config/whatsapp_cloud_config.dart';
 import '../controllers/auth_controller.dart';
 import '../design/ugam.dart';
 
@@ -41,7 +42,11 @@ class _AccountDetailsScreenState extends State<AccountDetailsScreen> {
     _businessName = TextEditingController(text: admin?.businessName ?? '');
     _businessEmail = TextEditingController(text: admin?.businessEmail ?? '');
     final phone = _authCtrl.userPhone.value;
-    _phone = TextEditingController(text: phone.isEmpty ? '—' : '+91 $phone');
+    _phone = TextEditingController(
+      text: phone.isEmpty
+          ? '—'
+          : '+${WhatsAppCloudConfig.defaultCountryCode} $phone',
+    );
   }
 
   @override

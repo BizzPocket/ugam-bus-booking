@@ -384,19 +384,25 @@ void main() {
     line('  ${pad("summaryForBus.collected", 26)}${pad(inr(0), 12)}'
         '${pad(inr(s.collected), 12)}${inr(2600)}');
     line('  ${pad("summaryForBus.expenses", 26)}${pad(inr(30000), 12)}'
-        '${pad(inr(s.expensesTotal), 12)}${inr(34000)}');
+        '${pad(inr(s.expensesTotal), 12)}${inr(30000)}');
     line('  ${pad("tourSummary.totalCollected", 26)}${pad(inr(0), 12)}'
         '${pad(inr(t.totalCollected), 12)}${inr(2600)}');
     line('  ${pad("tourSummary.totalNet", 26)}${pad(inr(-30000), 12)}'
-        '${pad(inr(t.totalNet), 12)}${inr(2600 - 34000)}');
+        '${pad(inr(t.totalNet), 12)}${inr(2600 - 30000)}');
     line('\n  FIXED: summaryForBus now falls through to the legacy recompute');
     line('  when the ledger holds no lines for a bus, instead of returning hard');
     line('  zeros. A genuinely empty bus computes the same zeros, so the');
     line('  fallback is never worse than the figure it replaced.');
 
     expect(s.collected, 2600);
-    expect(s.expensesTotal, 34000);
-    expect(t.totalNet, 2600 - 34000);
+    // Pakku-bhadu rule (rent includes diesel + driver): the ₹4,000 diesel is
+    // paid TOWARD the ₹30,000 rent, not on top of it.
+    //   bus cost = max(30000, 4000) = 30000; on top = 0 → expenses 30000
+    //   net      = 2600 − 30000 = −27400
+    //   owner    = 30000 − 4000 = 26000 still owed
+    expect(s.expensesTotal, 30000);
+    expect(s.busMalikPayable, 26000);
+    expect(t.totalNet, 2600 - 30000);
   });
 
   // ── 5 · E1 · orphan money vanishes from the trip total ─────────────────────

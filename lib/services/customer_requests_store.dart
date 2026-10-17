@@ -13,10 +13,12 @@ import '../models/income_entry.dart';
 import '../models/handler_manifest.dart';
 import '../models/handler_phase.dart';
 import '../models/handler_report.dart';
+import '../models/payment_claim.dart';
 import '../models/handler_tour_ref.dart';
 import '../models/seat_assignment.dart';
 import '../models/seat_ticket.dart';
 import '../models/trip_type.dart';
+import '../utils/trip_auto_complete.dart';
 import 'chart_hold_status.dart';
 
 /// Device-local journal of booking requests the customer submitted from
@@ -225,7 +227,24 @@ class CustomerRequestEntry {
   /// Until the organiser locks the tour, assignments are provisional, so the
   /// UI must neither reveal seat numbers nor open the seat-layout sheet.
   bool get seatsVisible => tourLocked && hasSeatsAssigned;
-  bool get canEdit => status == 'pending' && !hasSeatsAssigned;
+  /// Whether the customer may re-open their own booking in the request form.
+  ///
+  /// Having a seat no longer closes the door. The organiser seats people days
+  /// before departure, and a customer still legitimately needs to move their
+  /// pickup point or change the party after that; blocking it sent every such
+  /// change through a phone call. Migration 094 takes the same view server-side
+  /// and trims any berths the edit leaves surplus off the chart — the same
+  /// thing the admin's own edit sheet does.
+  ///
+  /// Two gates remain:
+  ///   * a raised cancellation request — offering "Edit request" on a card that
+  ///     already reads "Cancellation requested" asks the customer to argue with
+  ///     themselves, and the organiser is mid-decision on that booking;
+  ///   * the tour LOCK — once locked, seat numbers have gone out and the chart
+  ///     is final, so a change goes through the organiser (the server enforces
+  ///     the same gate, so a stale client can't slip past it).
+  bool get canEdit =>
+      status == 'pending' && !cancellationRequested && !tourLocked;
   bool get wasEdited => customerEditedAt != null;
 
   /// True once the tour's departure date has passed — the trip is over, so
@@ -1120,6 +1139,22 @@ class CustomerRequestsStore {
     return result.whereType<Map>().map(HandlerTripState.fromMap).toList();
   }
 
+  /// The tour's dates + status, for the calendar auto-complete rules
+  /// (`utils/trip_auto_complete.dart`). A plain read: `tours` is anon-readable
+  /// (`is_public`), and the handler manifest RPC carries no dates. Returns a
+  /// one-element list (or empty) so it fits the controller's best-effort reads.
+  Future<List<TourSchedule>> tourSchedule(String tourId) async {
+    if (tourId.isEmpty) return const [];
+    final row = await Supabase.instance.client
+        .from('tours')
+        .select('departure_date, return_date, status')
+        .eq('id', tourId)
+        .maybeSingle();
+    if (row == null) return const [];
+    final s = TourSchedule.fromMap(row);
+    return s == null ? const [] : [s];
+  }
+
   /// Stamps one trip milestone on one bus and returns the bus's whole updated
   /// state.
   ///
@@ -1176,6 +1211,27 @@ class CustomerRequestsStore {
     );
     if (result is! Map) return null;
     return HandlerReport.fromMap(result);
+  }
+
+  /// The UPI advances riders on the handler's bus have claimed (migration 060,
+  /// `handler_payment_claims`): pending ones still awaiting the agent's check
+  /// and confirmed ones alike, newest first. The RPC itself scopes to the
+  /// buses this handler owns and answers `[]` for anyone else.
+  ///
+  /// Had no caller from August to September 2026, so the collect sheet priced
+  /// from the seat fare alone and a rider who had already paid the advance was
+  /// asked for the full fare again on the bus.
+  Future<List<PaymentClaim>> handlerPaymentClaims(String requestId) async {
+    final client = Supabase.instance.client;
+    final result = await client.rpc(
+      'handler_payment_claims',
+      params: {'p_request_id': requestId},
+    );
+    if (result is! List) return const [];
+    return result
+        .whereType<Map>()
+        .map((m) => PaymentClaim.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
   }
 }
 

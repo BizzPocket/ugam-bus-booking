@@ -69,6 +69,22 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
       ? tr('trip_pnl.bus_one')
       : tr('trip_pnl.bus_many', namedArgs: {'n': '$n'});
 
+  String _busPnlSubtitle(Bus? bus, BusMoneySummary s) {
+    if (bus == null || bus.busPrice <= 0) {
+      return tr('trip_pnl.rent_not_set');
+    }
+    final rent = tr(
+      'trip_pnl.rent',
+      namedArgs: {'n': Formatters.formatMoneyInr(bus.busPrice)},
+    );
+    if (s.busMalikPayable <= 0.005) return rent;
+    final malik = tr(
+      'trip_pnl.malik_remaining',
+      namedArgs: {'n': Formatters.formatMoneyInr(s.busMalikPayable)},
+    );
+    return '$rent · $malik';
+  }
+
   /// Drill from "this bus lost money" into that bus's ledger — the same
   /// destination, entry style and transition the board one screen back uses
   /// (tour_money_board_screen.dart:61-66).
@@ -218,16 +234,7 @@ class _TripPnlScreenState extends State<TripPnlScreen> {
                             // "Rent ₹0" is the exact ambiguity that lets a
                             // missing cost pass for a free bus, so an unentered
                             // rent says so in words instead of printing a zero.
-                            subtitle: (busById[s.busId]?.busPrice ?? 0) <= 0
-                                ? tr('trip_pnl.rent_not_set')
-                                : tr(
-                                    'trip_pnl.rent',
-                                    namedArgs: {
-                                      'n': Formatters.formatMoneyInr(
-                                        busById[s.busId]!.busPrice,
-                                      ),
-                                    },
-                                  ),
+                            subtitle: _busPnlSubtitle(busById[s.busId], s),
                             revenueBilled: s.revenueBilled,
                             collected: s.collected,
                             costs: s.expensesTotal,

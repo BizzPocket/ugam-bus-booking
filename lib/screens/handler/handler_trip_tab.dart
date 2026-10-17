@@ -233,7 +233,10 @@ class _HandlerTripTabState extends State<HandlerTripTab> {
             }),
 
           // Only when arriving failed to release them.
-          if (pendingRelease > 0 && trip.goArrivedAt != null) ...[
+          // Arrival may be the calendar's (return day started, nobody stamped
+          // "arrived") — the seats still need releasing either way.
+          if (pendingRelease > 0 &&
+              (trip.goArrivedAt != null || c.goLegOverByDate)) ...[
             UgamCard.plain(
               padding: const EdgeInsets.all(UgamSpacing.lg),
               child: Column(

@@ -45,11 +45,16 @@ class TourFinance {
   /// Builds a [TourFinance] from a loaded [Tour] plus its pre-aggregated money
   /// figures. Uses [Tour.returnDate] (falling back to departure) as the date a
   /// trip's money is "booked", so a multi-day trip lands in the period it ended.
+  ///
+  /// [busCount] overrides `tour.buses.length` when the roster is not loaded —
+  /// an archived tour arrives from cold start with an EMPTY bus list, which is
+  /// "not fetched", not "no buses".
   factory TourFinance.from(
     Tour tour,
     double revenue,
     double expenses, {
     double income = 0,
+    int? busCount,
   }) {
     return TourFinance(
       tourId: tour.id,
@@ -58,7 +63,7 @@ class TourFinance {
       date: tour.returnDate ?? tour.departureDate,
       isCompleted: tour.status == TourStatus.completed,
       passengers: tour.passengerCount,
-      buses: tour.buses.length,
+      buses: tour.buses.isNotEmpty ? tour.buses.length : (busCount ?? 0),
       revenue: revenue,
       expenses: expenses,
       income: income,

@@ -308,12 +308,21 @@ class AuthController extends GetxController {
 
   String get initials {
     final name = userName.value;
-    if (name.isEmpty) return '?';
-    final parts = name.trim().split(' ');
+    // Grapheme-safe: `s[0]` is a UTF-16 code unit, so an emoji or other
+    // surrogate-pair first letter yielded a lone surrogate (an invalid
+    // string Text renders as an error box). Split on runs of whitespace so a
+    // double space cannot hand back an empty part to index into.
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
     if (parts.length >= 2) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+      return '${parts[0].characters.first}${parts[1].characters.first}'
+          .toUpperCase();
     }
-    return name[0].toUpperCase();
+    return parts[0].characters.first.toUpperCase();
   }
 
   /// Step 1 — phone lookup. Falls through to passenger session on no match.

@@ -8,6 +8,7 @@ import '../../models/attendance.dart';
 import '../../models/bus_details.dart';
 import '../../models/passenger.dart';
 import '../../utils/app_snackbar.dart';
+import '../../utils/aisle_order.dart';
 import '../../utils/boarding_stops.dart';
 import '../../widgets/handler/handler_stop_section.dart';
 
@@ -77,6 +78,11 @@ class _HandlerBoardTabState extends State<HandlerBoardTab> {
     return Obx(() {
       final leg = c.legForBoarding;
       final progress = c.boardingFor(widget.bus, leg);
+      // While the bus is still loading, an unmarked rider is simply not aboard
+      // YET; only once it has rolled are they left behind. The tally used to
+      // say "24 left behind" at the depot before anyone had been asked to
+      // board.
+      final boarding = c.phaseForBus(widget.bus).isBoarding;
 
       return ListView(
         padding: const EdgeInsets.fromLTRB(
@@ -99,7 +105,11 @@ class _HandlerBoardTabState extends State<HandlerBoardTab> {
                 c.setLeg(i == 0 ? AttendanceLeg.go : AttendanceLeg.ret),
           ),
           const SizedBox(height: UgamSpacing.md),
-          _BoardingTally(progress: progress, c: colors),
+          _BoardingTally(
+            progress: progress,
+            beforeDeparture: boarding,
+            c: colors,
+          ),
           const SizedBox(height: UgamSpacing.md),
           if (progress.stops.isEmpty)
             Padding(
@@ -129,6 +139,13 @@ class _HandlerBoardTabState extends State<HandlerBoardTab> {
                     ? null
                     : () => _boardAll(leg, progress.stops[i]),
                 isPresent: (p) => c.isPresent(p.id, widget.bus.id, leg),
+                seatLabelsFor: (p) => seatIdsOnBus(
+                  p,
+                  widget.bus.id,
+                  walk: AisleWalk.of(widget.bus.layout),
+                ),
+                groupLabelFor: c.groupLabelFor,
+                groupColorFor: c.groupColorFor,
                 c: colors,
               ),
         ],
@@ -141,12 +158,19 @@ class _HandlerBoardTabState extends State<HandlerBoardTab> {
   String _key(BoardingStop stop, int i) => '$i|${stop.locationName ?? ''}';
 }
 
-/// Present / left behind / total, plus how many stops are cleared.
+/// Present / not yet boarded (or left behind, once rolling) / stops cleared.
 class _BoardingTally extends StatelessWidget {
   final BoardingProgress progress;
+
+  /// True while the bus is still at its pickup points for this leg.
+  final bool beforeDeparture;
   final UgamColorSet c;
 
-  const _BoardingTally({required this.progress, required this.c});
+  const _BoardingTally({
+    required this.progress,
+    required this.beforeDeparture,
+    required this.c,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -162,8 +186,12 @@ class _BoardingTally extends StatelessWidget {
           ),
           _Stat(
             value: '${progress.pending}',
-            label: tr('handler_chart.att_left_behind'),
-            tone: progress.pending > 0 ? c.warm : c.ink2,
+            label: beforeDeparture
+                ? tr('handler_chart.att_not_boarded')
+                : tr('handler_chart.att_left_behind'),
+            // Pending riders are only alarming once the bus has gone without
+            // them; at the depot they are simply the work still to do.
+            tone: progress.pending > 0 && !beforeDeparture ? c.warm : c.ink2,
             c: c,
           ),
           _Stat(

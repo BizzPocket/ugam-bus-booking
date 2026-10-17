@@ -34,6 +34,11 @@ enum ExpenseCategory {
       orElse: () => ExpenseCategory.other,
     );
   }
+
+  bool get isFuel => this == ExpenseCategory.fuel;
+
+  /// Advance or part-payment to the bus owner (Malik), deducted from bhadu.
+  bool get isOwnerPayment => this == ExpenseCategory.busOwner;
 }
 
 /// An expense logged against a specific bus on a tour.

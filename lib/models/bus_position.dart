@@ -36,11 +36,24 @@ class LocationFix {
   /// `Position.speed` is METRES PER SECOND; the column is km/h. A negative
   /// speed, accuracy or heading means "unavailable" on both platforms, which
   /// becomes null rather than a bogus reading.
+  ///
+  /// [now] is the phone's clock at capture. A live fix is seconds old, so a
+  /// GPS timestamp more than [maxClockSkew] away from it is a broken GPS clock
+  /// (the 1024-week rollover still ships on older Android handsets), not a
+  /// real age. The server silently refuses anything outside now-24h..now+5min
+  /// — every fix from such a phone would be dropped with no error — so the
+  /// capture time is used instead.
   factory LocationFix.fromPosition(
     Position p, {
     String? leg,
     String trackingState = 'live',
+    DateTime? now,
   }) {
+    var recordedAt = p.timestamp;
+    if (now != null &&
+        recordedAt.difference(now).abs() > maxClockSkew) {
+      recordedAt = now.toUtc();
+    }
     return LocationFix(
       lat: p.latitude,
       lng: p.longitude,
@@ -48,10 +61,12 @@ class LocationFix {
       speedKmh: p.speed >= 0 ? p.speed * 3.6 : null,
       headingDeg: p.heading >= 0 ? p.heading : null,
       leg: leg,
-      recordedAt: p.timestamp,
+      recordedAt: recordedAt,
       trackingState: trackingState,
     );
   }
+
+  static const Duration maxClockSkew = Duration(minutes: 10);
 
   Map<String, dynamic> toJson() => {
         'lat': lat,

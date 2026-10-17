@@ -78,7 +78,7 @@ void main() {
       expect(s.foregroundNotificationConfig!.enableWakeLock, isTrue);
       expect(s.distanceFilter, 50);
       expect(s.intervalDuration, const Duration(seconds: 30));
-      expect(s.accuracy, LocationAccuracy.high);
+      expect(s.accuracy, LocationAccuracy.bestForNavigation);
     });
 
     test('iOS enables background updates and never auto-pauses', () {

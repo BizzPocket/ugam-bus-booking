@@ -18,8 +18,8 @@ class DashboardRecentRow extends StatelessWidget {
 
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.length >= 2) return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    if (parts.length >= 2) return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
+    return name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
   }
 
   String _ago(DateTime t) {
@@ -42,6 +42,8 @@ class DashboardRecentRow extends StatelessWidget {
     return UgamRequestRow(
       initials: _initials(p.name),
       name: p.name,
+      // Which tour — the dashboard list mixes every active tour.
+      subtitle: entry.tour.title,
       timeAgo: _ago(p.createdAt),
       chips: [
         UgamReqChip(

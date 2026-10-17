@@ -604,6 +604,121 @@ ActualCapacity computeActualCapacity(Tour tour) {
   );
 }
 
+/// THE seat meter — the one "x / n seats" every admin surface shows (tour
+/// header vitals, overview summary + bus rows, seat-assignment badge, Requests
+/// banner, dashboard hero, manage-buses rows, bus status).
+///
+/// Why it exists: the screens used to read two different snapshots of the same
+/// tour. The would-fill PLAN ([computeTourCapacity]) re-plans every rider from
+/// scratch and on a live locked tour placed 68 berths, while 72 riders were
+/// physically seated ([computeActualCapacity]) — so the dashboard and Requests
+/// said 68/73 while the tour detail and chart said 72/73, and a bus read 35/37
+/// on one screen and 36/37 on the next.
+///
+/// The meter takes BOTH snapshots and picks ONE of them for the whole tour —
+/// whichever ties up more berths on its busier leg:
+///  * before (or partway through) seating, the plan is bigger: the meter shows
+///    the seats the current riders will take, which is what "will it fit?"
+///    needs;
+///  * once riders are placed, the actual seats are at least as big: the meter
+///    shows exactly what the chart shows.
+/// One source per snapshot means the per-bus rows always add up to the tour
+/// total and the per-type free breakdown agrees with the headline.
+///
+/// Two-leg, whole seats only (`max(GO, RET)`) — never a percentage, never a
+/// fraction (see [UgamCapacityMeter]).
+class SeatMeter {
+  /// Sellable berths across every bus (held seats excluded).
+  final int capacity;
+
+  /// Berths taken on the outbound (GO) leg, summed across buses.
+  final int goOccupied;
+
+  /// Berths taken on the return (RETURN) leg, summed across buses.
+  final int retOccupied;
+
+  /// Per-bus slice, keyed by bus id — sums to the tour totals.
+  final Map<String, BusCapacity> byBus;
+
+  /// Whole free tiles per seat type across the tour (round / go-only /
+  /// return-only), read from the SAME snapshot as [byBus].
+  final Map<SeatType, SeatTypeFree> freeByType;
+
+  /// True when the numbers come from real seat assignments rather than the
+  /// engine's would-fill plan.
+  final bool fromActual;
+
+  const SeatMeter({
+    required this.capacity,
+    required this.goOccupied,
+    required this.retOccupied,
+    required this.byBus,
+    required this.freeByType,
+    required this.fromActual,
+  });
+
+  /// Busier leg — the berths tied up at the peak of the journey.
+  int get occupied => math.max(goOccupied, retOccupied).clamp(0, capacity);
+
+  /// Berths empty on BOTH legs.
+  int get free => (capacity - occupied).clamp(0, capacity);
+
+  /// Both legs carry the same load — one bar, not two.
+  bool get legsSymmetric => goOccupied == retOccupied;
+
+  /// The tour has at least one bus with seats.
+  bool get hasBuses => capacity > 0;
+
+  /// A seat is free → the tour is NOT full.
+  bool get isFull => hasBuses && free == 0;
+}
+
+/// Build the [SeatMeter] from the two snapshots (pass the memoized ones from
+/// `TourController.capacityFor` / `actualCapacityFor` where available).
+SeatMeter computeSeatMeter(
+  Tour tour, {
+  TourCapacity? plan,
+  ActualCapacity? actual,
+}) {
+  final p = plan ?? computeTourCapacity(tour);
+  final a = actual ?? computeActualCapacity(tour);
+  final planPeak = math.max(p.goOccupied, p.retOccupied);
+  if (a.occupied >= planPeak) {
+    final byType = <SeatType, SeatTypeFree>{};
+    for (final perBus in a.freeByType.values) {
+      perBus.forEach((st, f) {
+        final prev = byType[st] ?? const SeatTypeFree();
+        byType[st] = SeatTypeFree(
+          round: prev.round + f.round,
+          goOnly: prev.goOnly + f.goOnly,
+          retOnly: prev.retOnly + f.retOnly,
+        );
+      });
+    }
+    return SeatMeter(
+      capacity: a.capacity,
+      goOccupied: a.goOccupied,
+      retOccupied: a.retOccupied,
+      byBus: a.byBus,
+      freeByType: byType,
+      fromActual: true,
+    );
+  }
+  var go = 0, ret = 0;
+  for (final b in p.byBus.values) {
+    go += b.goOccupied;
+    ret += b.retOccupied;
+  }
+  return SeatMeter(
+    capacity: p.capacity,
+    goOccupied: go.clamp(0, p.capacity),
+    retOccupied: ret.clamp(0, p.capacity),
+    byBus: p.byBus,
+    freeByType: p.freeByType,
+    fromActual: false,
+  );
+}
+
 /// The live, non-mutating list of seating exceptions that genuinely still need
 /// the agent's decision: the engine's exceptions MINUS overflow riders the agent
 /// has already HELD on the waitlist (a held rider isn't a pending decision).

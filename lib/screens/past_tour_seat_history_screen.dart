@@ -61,7 +61,19 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
   }
 
   Future<void> _load() async {
+    // An archived tour's roster + bus layouts are not loaded at cold start, and
+    // both the snapshot sections (keyed to the live bus layout) and the live
+    // fallback chart need them. Loaded alongside the snapshots so a deep link
+    // straight here never renders an empty chart for a tour that has one.
+    // Best-effort: a failure degrades to whatever is already in memory.
+    final ready = _ctrl
+        .ensureTourReadyForSeating(widget.tourId)
+        .catchError((Object e, StackTrace st) {
+      dev.log('past-tour hydrate failed: $e\n$st',
+          name: 'PastTourSeatHistory');
+    });
     try {
+      await ready;
       final snaps = await _ctrl.loadSeatSnapshots(widget.tourId);
       if (!mounted) return;
       setState(() => _snapshots = snaps);

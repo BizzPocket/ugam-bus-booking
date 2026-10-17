@@ -117,6 +117,10 @@ class _AddBusScreenState extends State<AddBusScreen> {
   List<PriceBand> _stashedBands = const [];
 
   bool _isAC = true;
+
+  /// Pakku bhadu: agreed rent includes diesel; trip diesel/advances deduct from
+  /// Malik payout. Defaults true for Indian tour-bus contracts.
+  bool _rentIncludesFuel = true;
   int _totalSeats = 40;
   // Every bus is a sleeper coach — no seater/mixed types in this app.
   static const BusType _busType = BusType.sleeper;
@@ -278,6 +282,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
     }
     _priceBands = List<PriceBand>.from(e.priceBands);
     _isAC = e.isAC;
+    _rentIncludesFuel = e.rentIncludesFuel;
     _seedCapacityFromLayout(e);
   }
 
@@ -720,6 +725,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
           isAC: _isAC,
           pricePerSeat: pricePerSeat,
           busPrice: busPrice,
+          rentIncludesFuel: _rentIncludesFuel,
           singleSofaPrice: singleSofaPrice,
           doubleSofaPrice: doubleSofaPrice,
           rearRows: rearRows,
@@ -770,6 +776,7 @@ class _AddBusScreenState extends State<AddBusScreen> {
         totalSeatsLegacy: _totalSeats,
         pricePerSeat: pricePerSeat,
         busPrice: busPrice,
+        rentIncludesFuel: _rentIncludesFuel,
         singleSofaPrice: singleSofaPrice,
         doubleSofaPrice: doubleSofaPrice,
         rearRows: rearRows,
@@ -1032,6 +1039,11 @@ class _AddBusScreenState extends State<AddBusScreen> {
           onModeChanged: (m) => setState(() => _priceMode = m),
           stashedBands: _stashedBands,
           onStashBands: (b) => _stashedBands = b,
+          rentIncludesFuel: _rentIncludesFuel,
+          onRentIncludesFuelChanged: (v) => setState(() {
+            _rentIncludesFuel = v;
+            _dirty = true;
+          }),
         );
     }
   }
@@ -1833,6 +1845,8 @@ class _Step3Price extends StatefulWidget {
   final ValueChanged<_PriceMode> onModeChanged;
   final List<PriceBand> stashedBands;
   final ValueChanged<List<PriceBand>> onStashBands;
+  final bool rentIncludesFuel;
+  final ValueChanged<bool> onRentIncludesFuelChanged;
 
   const _Step3Price({
     required this.c,
@@ -1850,6 +1864,8 @@ class _Step3Price extends StatefulWidget {
     required this.onModeChanged,
     required this.stashedBands,
     required this.onStashBands,
+    required this.rentIncludesFuel,
+    required this.onRentIncludesFuelChanged,
   });
 
   @override
@@ -2040,6 +2056,28 @@ class _Step3PriceState extends State<_Step3Price> {
           prefix: _RupeePrefix(c: c),
           onChanged: (_) => _onBusPriceChanged(),
         ),
+        if (busPriceParsed > 0) ...[
+          const SizedBox(height: UgamSpacing.md),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: widget.rentIncludesFuel,
+            onChanged: widget.onRentIncludesFuelChanged,
+            title: Text(
+              tr('add_bus.rent_includes_fuel_label'),
+              style: UgamText.body.copyWith(color: c.ink),
+            ),
+            subtitle: Text(
+              tr('add_bus.rent_includes_fuel_hint'),
+              style: UgamText.caption.copyWith(color: c.ink3),
+            ),
+          ),
+        ],
+        // Per-seat price only in "Same for all": under bands every banded row
+        // ignores it, so a visible box there invited typing the bus RENT into
+        // it — where it silently never became an expense (bus_price stayed 0).
+        // The value is kept (not cleared) and still prices any row no band
+        // covers; the uncovered-rows warning below says when that happens.
+        if (_mode == _PriceMode.fixed) ...[
         const SizedBox(height: UgamSpacing.lg),
         UgamInput(
           label: tr('add_bus.label.price_per_seat'),
@@ -2052,7 +2090,10 @@ class _Step3PriceState extends State<_Step3Price> {
           prefix: _RupeePrefix(c: c),
           onChanged: (_) => _onPerSeatChanged(),
         ),
-        if (busPriceParsed > 0 && totalSeats > 0) ...[
+        ],
+        if (_mode == _PriceMode.fixed &&
+            busPriceParsed > 0 &&
+            totalSeats > 0) ...[
           const SizedBox(height: UgamSpacing.xs),
           Text(
             tr('add_bus.per_seat.auto_note', namedArgs: {'seats': '$totalSeats'}),
@@ -2159,6 +2200,13 @@ class _Step3PriceState extends State<_Step3Price> {
           expand: true,
           onPressed: () => _openBandSheet(),
         ),
+        if (_uncoveredRowsLabel() case final gaps?) ...[
+          const SizedBox(height: UgamSpacing.md),
+          UgamCaveat(
+            tone: UgamCaveatTone.warm,
+            message: tr('add_bus.bands.uncovered', namedArgs: {'rows': gaps}),
+          ),
+        ],
         if (_rowCount == null) ...[
           const SizedBox(height: UgamSpacing.sm),
           Text(
@@ -2168,6 +2216,35 @@ class _Step3PriceState extends State<_Step3Price> {
         ],
       ],
     );
+  }
+
+  /// 1-based "3, 7–9" list of rows NO band covers, or null when every row is
+  /// banded (or the bus has no layout yet / no bands at all). Those rows fall
+  /// back to the uniform per-seat price, which bands mode no longer shows.
+  String? _uncoveredRowsLabel() {
+    final rows = _rowCount;
+    if (rows == null || rows <= 0 || _bands.isEmpty) return null;
+    final covered = List<bool>.filled(rows, false);
+    for (final b in _bands) {
+      for (var r = b.fromRow; r <= b.toRow; r++) {
+        if (r >= 0 && r < rows) covered[r] = true;
+      }
+    }
+    final parts = <String>[];
+    var r = 0;
+    while (r < rows) {
+      if (covered[r]) {
+        r++;
+        continue;
+      }
+      final start = r;
+      while (r < rows && !covered[r]) {
+        r++;
+      }
+      final end = r - 1;
+      parts.add(start == end ? '${start + 1}' : '${start + 1}–${end + 1}');
+    }
+    return parts.isEmpty ? null : parts.join(', ');
   }
 
   /// Open the add/edit sheet for a band. [index] null = adding a new band.
@@ -2399,6 +2476,9 @@ class _BandRow extends StatelessWidget {
             'add_bus.band_row.range',
             namedArgs: {'from': '${band.fromRow + 1}', 'to': '${band.toRow + 1}'},
           );
+    final name = band.label.trim();
+    final untitled =
+        name.isEmpty || name == tr('add_bus.band_sheet.default_label');
     return UgamTappable(
       onTap: onEdit,
       semanticLabel: tr('add_bus.band_sheet.title_edit'),
@@ -2418,17 +2498,20 @@ class _BandRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // An unnamed band (blank, or the generic "Band" the sheet
+                  // stores for blank) is titled by its rows — "Rows 1–6" —
+                  // so a list of them is not three identical "Band" rows.
                   Text(
-                    band.label.isEmpty
-                        ? tr('add_bus.band_sheet.default_label')
-                        : band.label,
+                    untitled ? rangeLabel : band.label,
                     style: UgamText.bodyStrong.copyWith(color: c.ink),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    rangeLabel,
-                    style: UgamText.caption.copyWith(color: c.ink2),
-                  ),
+                  if (!untitled) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      rangeLabel,
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -40,7 +40,12 @@ typedef LocationPusher =
       List<Map<String, dynamic>> fixes,
     );
 
-/// Owns the handler's outbound location pipeline: buffer → RPC.
+/// Owns one phone's outbound location pipeline: buffer → RPC.
+///
+/// A handler phone calls [start] and uploads through `handler_push_locations`.
+/// Every other phone on the bus calls [startPassenger] and uploads through
+/// `passenger_push_locations`. The server folds both into one dot per bus
+/// (migration 095); this service only ever speaks for the device it is on.
 ///
 /// THE ONE RULE THAT MATTERS. `handler_push_locations` reports refusals as
 /// DATA (`{"error": "forbidden"}`), never as a throw. So:
@@ -62,6 +67,10 @@ class LocationTrackerService extends GetxService {
 
   String? _requestId;
   String? _busId;
+
+  /// True when this device is uploading as a seated passenger rather than as
+  /// the handler. The buffer and the flush rules are the same either way.
+  bool _asPassenger = false;
   LocationFixBuffer? _buffer;
   bool _flushing = false;
   Duration _backoff = _minBackoff;
@@ -74,6 +83,20 @@ class LocationTrackerService extends GetxService {
 
   /// True once the tracker has been attached to a bus and not stopped.
   bool get _attached => _requestId != null && _busId != null;
+
+  /// The bus this phone is currently reporting for, if any.
+  String? get attachedBusId => _busId;
+
+  /// A stream is up and the server is accepting it. Used so a second screen
+  /// (the handler chart, after the passenger home already asked) does not
+  /// prompt for permission again on the same bus.
+  bool get isSharing =>
+      _attached &&
+      (status.value == TrackingStatus.live ||
+          status.value == TrackingStatus.foregroundOnly);
+
+  /// Sharing through the handler RPC (not as a seated passenger).
+  bool get isSharingAsHandler => isSharing && !_asPassenger;
 
   /// The leg stamped on newly captured fixes: `'go'`, `'ret'`, or null.
   /// Mutable so the chart screen can retarget it when the handler switches leg.
@@ -121,8 +144,23 @@ class LocationTrackerService extends GetxService {
     required String busId,
     String? leg,
   }) async {
+    _asPassenger = false;
     await _attach(requestId: requestId, busId: busId, leg: leg);
     // Anything buffered through a dead zone or a kill goes out immediately.
+    if (_buffer!.length > 0) await flushNow();
+  }
+
+  /// Same pipeline as [start], uploaded against the phone number of a seated
+  /// passenger. [phone] is whatever the rider typed; the server matches the
+  /// last 10 digits and refuses a bus this number does not hold a seat on.
+  Future<void> startPassenger({
+    required String phone,
+    required String busId,
+    String? leg,
+  }) async {
+    if (isSharing && _busId == busId) return;
+    _asPassenger = true;
+    await _attach(requestId: phone, busId: busId, leg: leg);
     if (_buffer!.length > 0) await flushNow();
   }
 
@@ -130,6 +168,7 @@ class LocationTrackerService extends GetxService {
     await stopStream();
     _requestId = null;
     _busId = null;
+    _asPassenger = false;
     leg = null;
     _buffer = null;
     _backoff = _minBackoff;
@@ -156,7 +195,9 @@ class LocationTrackerService extends GetxService {
             notificationText: tr('tracking.notification_text'),
           ),
         ).listen(
-          (p) => record(LocationFix.fromPosition(p, leg: leg)),
+          (p) => record(
+            LocationFix.fromPosition(p, leg: leg, now: DateTime.now()),
+          ),
           onError: (Object e, StackTrace st) {
             ErrorReporter.report(kind: 'location_stream', error: e, stack: st);
           },
@@ -286,6 +327,21 @@ class LocationTrackerService extends GetxService {
           continue;
         }
 
+        // Every fix refused as invalid: the batch is still spent (resending
+        // never helps), but this must not pass for a healthy upload — it is
+        // exactly how a bus goes dark with the card still saying "live".
+        final accepted = (result['accepted'] as num?)?.toInt();
+        if (accepted == 0 && batch.isNotEmpty) {
+          ErrorReporter.report(
+            kind: 'location_all_skipped',
+            error: StateError('server accepted none of ${batch.length} fixes'),
+            context: {
+              'bus_id': _busId,
+              'first_recorded_at': batch.first.recordedAt.toIso8601String(),
+            },
+          );
+        }
+
         await _buffer!.drop(batch.length);
         lastUploadAt.value = DateTime.now();
         _backoff = _minBackoff;
@@ -301,12 +357,18 @@ class LocationTrackerService extends GetxService {
     if (push != null) return push(_requestId!, _busId!, payload);
 
     final raw = await Supabase.instance.client.rpc(
-      'handler_push_locations',
-      params: {
-        'p_request_id': _requestId,
-        'p_bus_id': _busId,
-        'p_fixes': payload,
-      },
+      _asPassenger ? 'passenger_push_locations' : 'handler_push_locations',
+      params: _asPassenger
+          ? {
+              'p_phone': _requestId,
+              'p_bus_id': _busId,
+              'p_fixes': payload,
+            }
+          : {
+              'p_request_id': _requestId,
+              'p_bus_id': _busId,
+              'p_fixes': payload,
+            },
     );
     return raw is Map<String, dynamic>
         ? raw
@@ -320,6 +382,7 @@ class LocationTrackerService extends GetxService {
     await _buffer?.clear();
     _requestId = null;
     _busId = null;
+    _asPassenger = false;
     _buffer = null;
     _backoff = _minBackoff;
     status.value = next;
@@ -350,7 +413,11 @@ TrackingStatus resolveTrackingStatus({
   };
 }
 
-/// 30 s / 50 m on both platforms.
+/// 30 s / 50 m, at the finest GPS the platform will give.
+///
+/// `bestForNavigation` is the fine-location mode (GPS, not cell tower). The
+/// server then weights a tight accuracy_m above a coarse one, so a phone that
+/// only has a rough fix cannot outvote the phones that have a real one.
 ///
 /// iOS honours only `distanceFilter` (there is no interval), which is why the
 /// tracker also emits a heartbeat when a flush finds nothing buffered —
@@ -362,7 +429,7 @@ LocationSettings buildLocationSettings({
 }) {
   if (isAndroid) {
     return AndroidSettings(
-      accuracy: LocationAccuracy.high,
+      accuracy: LocationAccuracy.bestForNavigation,
       distanceFilter: 50,
       intervalDuration: const Duration(seconds: 30),
       foregroundNotificationConfig: ForegroundNotificationConfig(
@@ -373,7 +440,7 @@ LocationSettings buildLocationSettings({
     );
   }
   return AppleSettings(
-    accuracy: LocationAccuracy.high,
+    accuracy: LocationAccuracy.bestForNavigation,
     activityType: ActivityType.automotiveNavigation,
     distanceFilter: 50,
     // A bus idling at a dhaba is exactly when the office looks at the map.

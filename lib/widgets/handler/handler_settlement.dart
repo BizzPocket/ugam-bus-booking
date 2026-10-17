@@ -25,6 +25,11 @@ class HandlerSettlementCard extends StatelessWidget {
   final VoidCallback onSettle;
   final void Function(BusHandover) onDelete;
 
+  /// False before the bus has left: nobody hands the admin the takings of a
+  /// trip that has not started, and a third button there only competed with
+  /// "We've left". An admin-recorded handover still lists below.
+  final bool canRecord;
+
   const HandlerSettlementCard({
     super.key,
     required this.summary,
@@ -32,6 +37,7 @@ class HandlerSettlementCard extends StatelessWidget {
     required this.c,
     required this.onSettle,
     required this.onDelete,
+    this.canRecord = true,
   });
 
   @override
@@ -107,11 +113,15 @@ class HandlerSettlementCard extends StatelessWidget {
                 ),
               ),
           ],
-          if (!settled) ...[
+          if (!settled && canRecord) ...[
             const SizedBox(height: UgamSpacing.md),
-            UgamCTA(
+            // Tonal: the screen's one solid focal is the phase banner's
+            // action ("Hand over cash" in settling), not this card's.
+            UgamButton(
               label: tr('handler_chart.settle_cta'),
-              leadingIcon: Icons.south_east_rounded,
+              icon: Icons.south_east_rounded,
+              kind: UgamButtonKind.tonal,
+              expand: true,
               onPressed: onSettle,
             ),
           ],

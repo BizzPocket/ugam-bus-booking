@@ -913,6 +913,9 @@ class _RequestRow extends StatelessWidget {
               entry: entry,
               c: c,
               isHandler: isHandler,
+              // The row tap opens the seat-layout sheet once seats are
+              // visible, so "View my seat" is that same action, named.
+              onViewSeat: onTap,
               onEdit: onEdit,
               onViewChart: onViewChart,
               onCancel: onCancel,
@@ -1005,23 +1008,22 @@ class _DateBlock extends StatelessWidget {
 
   const _DateBlock({required this.date, required this.c});
 
-  /// Three-letter month. Deliberately the same twelve constants the old date
-  /// pill used — switching to a locale-aware [DateFormat] here would need
-  /// `initializeDateFormatting` for gu/hi, which is an app-wide change this
-  /// pass does not own.
-  static const _months = [
-    'JAN',
-    'FEB',
-    'MAR',
-    'APR',
-    'MAY',
-    'JUN',
-    'JUL',
-    'AUG',
-    'SEP',
-    'OCT',
-    'NOV',
-    'DEC',
+  /// Three-letter month in the reader's language (`app.month.short.*`, the
+  /// same keys the tour detail uses). The hard-coded English array printed
+  /// "OCT" on a Gujarati screen.
+  static const _monthKeys = [
+    'app.month.short.jan',
+    'app.month.short.feb',
+    'app.month.short.mar',
+    'app.month.short.apr',
+    'app.month.short.may',
+    'app.month.short.jun',
+    'app.month.short.jul',
+    'app.month.short.aug',
+    'app.month.short.sep',
+    'app.month.short.oct',
+    'app.month.short.nov',
+    'app.month.short.dec',
   ];
 
   @override
@@ -1039,7 +1041,7 @@ class _DateBlock extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            _months[date.month - 1],
+            tr(_monthKeys[date.month - 1]),
             style: UgamText.micro.copyWith(color: c.ink3),
             maxLines: 1,
           ),
@@ -1068,7 +1070,9 @@ class _RowFooter extends StatelessWidget {
   /// chip past one line. UgamReqChip has no maxLines of its own, so we cap the
   /// list at source and append "…" (with a leading count) once it overflows.
   static String _seatsChipLabel(CustomerRequestEntry e) {
-    final ids = e.assignedSeats.map((s) => s.seatId).toList();
+    // Distinct, in order: a whole double sofa is stored as TWO assignments on
+    // one seat id, which printed "DU1, DU1, SL1".
+    final ids = e.assignedSeats.map((s) => s.seatId).toSet().toList();
     const maxShown = 4;
     if (ids.length <= maxShown) return ids.join(', ');
     return tr(
@@ -1220,11 +1224,18 @@ class _RowAction {
   /// the only action left it renders inline as danger-tonal, never affirmative.
   final bool destructive;
 
+  /// An exit, not a next step ("I want to cancel my seat", "Call to cancel").
+  /// Never promoted over a real action, and when it is all there is it renders
+  /// as a quiet ghost link — on a confirmed ticket the biggest button on the
+  /// card used to be the one that gives the seat away.
+  final bool quiet;
+
   const _RowAction({
     required this.icon,
     required this.label,
     required this.onTap,
     this.destructive = false,
+    this.quiet = false,
   });
 }
 
@@ -1248,6 +1259,7 @@ class _ActionBar extends StatelessWidget {
   final CustomerRequestEntry entry;
   final UgamColorSet c;
   final bool isHandler;
+  final VoidCallback onViewSeat;
   final VoidCallback onEdit;
   final VoidCallback onViewChart;
   final VoidCallback onCancel;
@@ -1258,6 +1270,7 @@ class _ActionBar extends StatelessWidget {
     required this.entry,
     required this.c,
     required this.isHandler,
+    required this.onViewSeat,
     required this.onEdit,
     required this.onViewChart,
     required this.onCancel,
@@ -1267,6 +1280,16 @@ class _ActionBar extends StatelessWidget {
 
   List<_RowAction> _actions() {
     final actions = <_RowAction>[];
+    // Locked and seated: the one thing a confirmed rider comes here for.
+    if (entry.seatsVisible) {
+      actions.add(
+        _RowAction(
+          icon: Icons.event_seat_rounded,
+          label: tr('customer_my_requests.view_my_seat'),
+          onTap: onViewSeat,
+        ),
+      );
+    }
     if (entry.canEdit) {
       actions.add(
         _RowAction(
@@ -1303,6 +1326,7 @@ class _ActionBar extends StatelessWidget {
             icon: Icons.event_seat_outlined,
             label: tr('customer_my_requests.request_cancel_action'),
             onTap: onRequestCancel,
+            quiet: true,
           ),
         );
       } else {
@@ -1311,6 +1335,7 @@ class _ActionBar extends StatelessWidget {
             icon: Icons.call_rounded,
             label: tr('customer_my_requests.contact_to_cancel'),
             onTap: onContact,
+            quiet: true,
           ),
         );
       }
@@ -1351,9 +1376,13 @@ class _ActionBar extends StatelessWidget {
     // ⋮ over an empty row.
     if (actions.isEmpty) return const SizedBox.shrink();
 
-    // Never lead with the destructive self-cancel unless it is all there is.
+    // Never lead with the destructive self-cancel (or a quiet exit) unless it
+    // is all there is.
+    final firstReal = actions.indexWhere((a) => !a.destructive && !a.quiet);
     final firstSafe = actions.indexWhere((a) => !a.destructive);
-    final primaryIndex = firstSafe >= 0 ? firstSafe : 0;
+    final primaryIndex = firstReal >= 0
+        ? firstReal
+        : (firstSafe >= 0 ? firstSafe : 0);
     final primary = actions[primaryIndex];
     final overflow = [
       for (var i = 0; i < actions.length; i++)
@@ -1372,6 +1401,8 @@ class _ActionBar extends StatelessWidget {
               // destructive sole action stays danger-tinted.
               kind: primary.destructive
                   ? UgamButtonKind.dangerTonal
+                  : primary.quiet
+                  ? UgamButtonKind.ghost
                   : UgamButtonKind.tonal,
               expand: true,
               onPressed: primary.onTap,

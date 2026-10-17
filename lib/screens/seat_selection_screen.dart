@@ -995,7 +995,10 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
       children: [
         item(c.cardElev, c.border, tr('seat_pick.legend_open')),
         item(c.accent, null, tr('seat_pick.legend_yours')),
-        item(c.bg, c.border, tr('seat_pick.legend_taken')),
+        // The taken tile is the page ground with a hairline; at swatch size on
+        // the dark rail that hairline vanished and the swatch read as nothing.
+        // A stronger outline keeps it legible while still reading "empty-ish".
+        item(c.bg, c.ink3, tr('seat_pick.legend_taken')),
         item(c.warmFill, null, tr('seat_pick.legend_lady')),
       ],
     );

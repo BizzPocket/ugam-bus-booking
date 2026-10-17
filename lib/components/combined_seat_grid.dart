@@ -196,7 +196,7 @@ class CombinedSeatGrid extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           (driverLabel ?? tr('seat_ui.driver')).toUpperCase(),
-          style: UgamText.micro.copyWith(letterSpacing: 1, color: c.ink3),
+          style: UgamText.micro.copyWith(letterSpacing: UgamText.tracking(1), color: c.ink3),
         ),
       ],
     );

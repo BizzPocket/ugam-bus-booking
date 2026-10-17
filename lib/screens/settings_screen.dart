@@ -5,6 +5,8 @@ import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_info.dart';
+import '../config/whatsapp_cloud_config.dart';
+import '../content/legal_content.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/finance_controller.dart';
 import '../controllers/theme_controller.dart';
@@ -13,6 +15,7 @@ import '../utils/app_snackbar.dart';
 import '../widgets/language_picker_sheet.dart';
 import 'account_details_screen.dart';
 import 'finance_screen.dart';
+import 'legal_document_screen.dart';
 import 'notifications_settings_screen.dart';
 import 'pickup_locations_screen.dart';
 import 'whatsapp_settings_screen.dart';
@@ -169,6 +172,46 @@ class SettingsScreen extends StatelessWidget {
                         ),
                       ],
                     ),
+                    const SizedBox(height: UgamSpacing.xl),
+                    // ── About & legal ── Same three documents (and the same
+                    // strings) the customer "More" menu links to: the store
+                    // listing's privacy/terms surface must be reachable from
+                    // the signed-in admin app too, not only the rider side.
+                    UgamSectionLabel(
+                      tr('customer_more.section_about_legal'),
+                      color: c.ink2,
+                    ),
+                    const SizedBox(height: UgamSpacing.sm),
+                    _GroupCard(
+                      children: [
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.info_outline_rounded,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('customer_more.about'),
+                          subtitle: tr('customer_more.about_subtitle'),
+                          onTap: () => _openDoc(context, LegalContent.about),
+                        ),
+                        _Divider(c: c),
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.shield_outlined,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('customer_more.privacy'),
+                          subtitle: tr('customer_more.privacy_subtitle'),
+                          onTap: () => _openDoc(context, LegalContent.privacy),
+                        ),
+                        _Divider(c: c),
+                        _SettingsRow(
+                          c: c,
+                          icon: Icons.description_outlined,
+                          iconTone: UgamStatVariant.neutral,
+                          title: tr('customer_more.terms'),
+                          subtitle: tr('customer_more.terms_subtitle'),
+                          onTap: () => _openDoc(context, LegalContent.terms),
+                        ),
+                      ],
+                    ),
                     // The destructive action is pushed away from the ordinary
                     // rows by a seam visibly wider than any section gap above
                     // it (26 vs 16), so log-out can't be caught by a thumb
@@ -216,6 +259,12 @@ class SettingsScreen extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  void _openDoc(BuildContext context, LegalDoc doc) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => LegalDocumentScreen(doc: doc)),
     );
   }
 }
@@ -571,7 +620,7 @@ class _AccountRow extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          '+91',
+                          '+${WhatsAppCloudConfig.defaultCountryCode}',
                           // `micro` IS 10 — the fontSize just restated the step.
                           // Weight/tracking stay as deliberate badge overrides.
                           style: UgamText.micro.copyWith(

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/models/collection.dart';
 import 'package:occubusbooking/models/expense.dart';
 import 'package:occubusbooking/models/bus_handover.dart';
+import 'package:occubusbooking/models/income_entry.dart';
 import 'package:occubusbooking/models/money_summary.dart';
 
 void main() {
@@ -107,14 +108,20 @@ void main() {
         handovers: const [],
         busRent: 20000,
       );
-      // ground 8000 + rent 20000 folded into expensesTotal.
-      expect(s.expensesTotal, 28000);
+      // Pakku bhadu: driver 5000 AND diesel 3000 are inside the 20000 rent.
+      //   cost = max(20000, 5000 + 3000) + 0 on top = 20000
+      //   owner still owed = 20000 − 5000 − 3000 = 12000
+      expect(s.expensesTotal, 20000);
+      expect(s.busMalikPayable, 12000);
       expect(s.groundExpenses, 8000);
       // The handler hands over cash less their GROUND costs only …
       expect(s.expectedHandover, 2100 - 8000); // -5900
-      // … and the admin's cash net is that, less the rent they then pay.
-      expect(s.netCollected, 2100 - 28000); // -25900
-      expect(s.expectedHandover - s.netCollected, 20000);
+      // … and the admin's cash net is that, less what they still owe the
+      // owner: −5900 − 12000 = 2100 − 20000 = −17900.
+      expect(s.netCollected, 2100 - 20000);
+      expect(s.netCollected, s.expectedHandover - s.busMalikPayable);
+      // Contract cost in P&L minus cash paid on the ground = owner remaining.
+      expect(s.expensesTotal - s.groundExpenses, 12000);
     });
 
     test('totalExpectedHandover excludes the rents (= totalNet + rents)', () {
@@ -164,6 +171,68 @@ void main() {
     // Same "0 means unknown, never a false alarm" rule the orphan and
     // detached-cash figures follow: an unresolvable fleet must not accuse the
     // agent of forgetting a rent.
+    test('pakku bhadu matches reference sheet (₹3,000 profit)', () {
+      final expenses = [
+        Expense(
+          tourId: 't1',
+          busId: 'b1',
+          amount: 35000,
+          category: ExpenseCategory.fuel,
+          label: 'Diesel',
+        ),
+        Expense(
+          tourId: 't1',
+          busId: 'b1',
+          amount: 5000,
+          category: ExpenseCategory.busOwner,
+          label: 'Advance',
+        ),
+        Expense(
+          tourId: 't1',
+          busId: 'b1',
+          amount: 500,
+          category: ExpenseCategory.food,
+          label: 'Driver food',
+        ),
+        Expense(
+          tourId: 't1',
+          busId: 'b1',
+          amount: 500,
+          category: ExpenseCategory.other,
+          label: 'Other',
+        ),
+      ];
+      final s = BusMoneySummary.compute(
+        busId: 'b1',
+        collections: [
+          Collection(
+            tourId: 't1',
+            busId: 'b1',
+            passengerId: 'p1',
+            amountDue: 53000,
+            amountReceived: 53000,
+          ),
+        ],
+        expenses: expenses,
+        handovers: const [],
+        incomes: [
+          IncomeEntry(
+            tourId: 't1',
+            busId: 'b1',
+            amount: 1000,
+            label: 'Extra',
+          ),
+        ],
+        busRent: 50000,
+        rentIncludesFuel: true,
+        revenueBilled: 53000,
+      );
+      expect(s.busMalikPayable, 10000);
+      expect(s.expensesTotal, 51000);
+      expect(s.netBilled, 3000);
+      expect(s.netCollected, 3000);
+    });
+
     test('stays silent when the caller supplied no bus rents at all', () {
       final t = TourMoneySummary.compute(
         collections: const [],
@@ -172,6 +241,110 @@ void main() {
       );
       expect(t.busesMissingRent, 0);
       expect(t.hasUnrecordedRent, isFalse);
+    });
+  });
+  // The user's rule, verbatim: "in bus rent the diesel and the driver is added
+  // like in total we have to give 40k".
+  group('pakku bhadu — diesel AND driver are inside the rent', () {
+    final rows = [
+      Expense(
+        tourId: 't1',
+        busId: 'b1',
+        amount: 3200,
+        category: ExpenseCategory.fuel,
+        label: 'Diesel',
+      ),
+      Expense(
+        tourId: 't1',
+        busId: 'b1',
+        amount: 5000,
+        category: ExpenseCategory.driver,
+        label: 'Driver',
+      ),
+      Expense(
+        tourId: 't1',
+        busId: 'b1',
+        amount: 600,
+        category: ExpenseCategory.toll,
+        label: 'Toll',
+      ),
+    ];
+
+    test('rent 40000, diesel 3200, driver 5000 → cost 40000, owed 31800', () {
+      final r = BusExpenseRollup.fromExpenses(
+        busExpenses: rows.take(2),
+        busRent: 40000,
+        rentIncludesFuel: true,
+      );
+      expect(r.effectiveBusCost, 40000);
+      expect(r.expensesTotal, 40000);
+      expect(r.busMalikPayable, 31800); // 40000 − 3200 − 5000
+      expect(r.fuelTotal, 3200);
+      expect(r.driverTotal, 5000);
+      expect(r.otherExpensesTotal, 0);
+    });
+
+    test('toll stays on top of the rent', () {
+      final s = BusMoneySummary.compute(
+        busId: 'b1',
+        collections: const [],
+        expenses: rows,
+        handovers: const [],
+        busRent: 40000,
+      );
+      // 40000 rent (diesel + driver inside) + 600 toll = 40600.
+      expect(s.expensesTotal, 40600);
+      expect(s.busMalikPayable, 31800);
+      // Handler still deducts every rupee they paid: 3200 + 5000 + 600.
+      expect(s.groundExpenses, 8800);
+      expect(s.expectedHandover, -8800);
+    });
+
+    test('rent that EXCLUDES fuel keeps diesel + driver on top', () {
+      final s = BusMoneySummary.compute(
+        busId: 'b1',
+        collections: const [],
+        expenses: rows,
+        handovers: const [],
+        busRent: 40000,
+        rentIncludesFuel: false,
+      );
+      // 40000 + 3200 + 5000 + 600 = 48800; owner still owed the full 40000.
+      expect(s.expensesTotal, 48800);
+      expect(s.busMalikPayable, 40000);
+      expect(s.driverTotal, 0);
+      expect(s.fuelTotal, 0);
+      expect(s.groundExpenses, 8800);
+    });
+
+    test('payments past the rent raise the cost instead of vanishing', () {
+      final r = BusExpenseRollup.fromExpenses(
+        busExpenses: rows.take(2),
+        busRent: 6000,
+        rentIncludesFuel: true,
+      );
+      // 3200 + 5000 = 8200 > 6000 → cost 8200, owner owed 0.
+      expect(r.expensesTotal, 8200);
+      expect(r.busMalikPayable, 0);
+    });
+
+    test('fromLedger agrees with fromExpenses on the same bus', () {
+      final a = BusExpenseRollup.fromExpenses(
+        busExpenses: rows,
+        busRent: 40000,
+        rentIncludesFuel: true,
+      );
+      final b = BusExpenseRollup.fromLedger(
+        ground: 8800,
+        busRent: 40000,
+        fuel: 3200,
+        driver: 5000,
+        ownerAdvance: 0,
+        rentIncludesFuel: true,
+      );
+      expect(b.expensesTotal, a.expensesTotal);
+      expect(b.busMalikPayable, a.busMalikPayable);
+      expect(b.otherExpensesTotal, a.otherExpensesTotal);
     });
   });
 }

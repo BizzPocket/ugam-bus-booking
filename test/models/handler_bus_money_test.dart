@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:occubusbooking/models/bus_handover.dart';
 import 'package:occubusbooking/models/collection.dart';
 import 'package:occubusbooking/models/expense.dart';
 import 'package:occubusbooking/models/income_entry.dart';
@@ -260,6 +261,96 @@ void main() {
       expect(m.collected, 1500);
       expect(m.toCollect, 0);
       expect(m.toReturn, 0);
+    });
+  });
+
+  group('settled', () {
+    // The live bug: SHIVKAMAL on 2026-09-05, 24 riders seated, nothing
+    // collected yet. `outstanding` (collected + income − spent − handedOver)
+    // is ₹0 on an untouched bus, so the old rule read it as SETTLED — the hero
+    // said "Handed over ₹0", the settlement card said "nothing left to hand
+    // over", and ending the trip flipped the banner to "Trip closed · All
+    // square" while every rider still showed Owing.
+    test('an untouched bus with fares still owing is NOT settled', () {
+      final m = HandlerBusMoney.compute(
+        busId: 'bus1',
+        passengers: [pax('p1', ['SU1']), pax('p2', ['SU2'])],
+        collections: const [],
+        expenses: const [],
+        incomes: const [],
+        dueForSeat: dueForSeat, // ₹2000 each, nothing taken
+      );
+      expect(m.toCollect, 4000);
+      expect(m.outstanding, 0);
+      expect(m.isSettled, isFalse);
+    });
+
+    test('every fare collected but not yet handed over is NOT settled', () {
+      final m = HandlerBusMoney.compute(
+        busId: 'bus1',
+        passengers: [pax('p1', ['SU1'])],
+        collections: [
+          Collection(
+            tourId: 't1',
+            busId: 'bus1',
+            passengerId: 'p1',
+            seatId: 'SU1',
+            amountDue: 2000,
+            amountReceived: 2000,
+          ),
+        ],
+        expenses: const [],
+        incomes: const [],
+        dueForSeat: dueForSeat,
+      );
+      expect(m.toCollect, 0);
+      expect(m.outstanding, 2000);
+      expect(m.isSettled, isFalse);
+    });
+
+    test('every fare collected AND handed over is settled', () {
+      final m = HandlerBusMoney.compute(
+        busId: 'bus1',
+        passengers: [pax('p1', ['SU1'])],
+        collections: [
+          Collection(
+            tourId: 't1',
+            busId: 'bus1',
+            passengerId: 'p1',
+            seatId: 'SU1',
+            amountDue: 2000,
+            amountReceived: 2000,
+          ),
+        ],
+        expenses: const [],
+        incomes: const [],
+        handovers: [
+          BusHandover(
+            tourId: 't1',
+            busId: 'bus1',
+            expectedAmount: 2000,
+            handedOverAmount: 2000,
+          ),
+        ],
+        dueForSeat: dueForSeat,
+      );
+      expect(m.toCollect, 0);
+      expect(m.outstanding, 0);
+      expect(m.isSettled, isTrue);
+    });
+
+    test('a bus with nobody to collect from and no cash taken is settled', () {
+      // Nothing owed, nothing held: there is genuinely nothing left to do, so
+      // the corrected rule must not swing the other way and strand it open.
+      final m = HandlerBusMoney.compute(
+        busId: 'bus1',
+        passengers: const [],
+        collections: const [],
+        expenses: const [],
+        incomes: const [],
+        dueForSeat: dueForSeat,
+      );
+      expect(m.isSettled, isTrue);
     });
   });
 }

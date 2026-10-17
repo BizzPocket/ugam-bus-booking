@@ -2,9 +2,13 @@ import 'dart:developer' as dev;
 
 import 'package:get/get.dart';
 
+import '../models/bus_details.dart';
+import '../models/ledger_bus_rollup.dart';
+import '../models/money_summary.dart';
 import '../models/tour_finance.dart';
 import '../models/tour_status.dart';
 import '../services/ledger_money_source.dart';
+import '../services/sync_service.dart';
 import 'tour_controller.dart';
 
 /// Cross-tour Profit & Loss data source.
@@ -51,6 +55,12 @@ class FinanceController extends GetxController {
   final Map<String, double> _revenueByTour = {};
   final Map<String, double> _expensesByTour = {};
   final Map<String, double> _incomeByTour = {};
+
+  /// Bus count per tour for tours whose roster is NOT in memory (cold start
+  /// skips completed tours' relations — see `coldStartHydrationScope`). Seeded
+  /// from the ledger rollups' distinct bus ids, then corrected by a light
+  /// `id, tour_id` read. Reactive so the rows repaint when the read lands.
+  final _busCountByTour = <String, int>{}.obs;
 
   Future<void>? _loadInFlight;
   int _loadGeneration = 0;
@@ -105,11 +115,22 @@ class FinanceController extends GetxController {
 
       final rollups = await _ledgerSource.fetchAllBusRollups();
       if (gen != _loadGeneration) return;
+      // Diesel / driver / owner advances per bus — what a pakku-bhadu rent
+      // absorbs. Without them Finance summed `ground + rent` (every rupee on
+      // top of the rent) and printed a smaller profit than the trip P&L and
+      // the money board for the very same trip.
+      final absorbable = await _ledgerSource.fetchRentAbsorbableByBus();
+      if (gen != _loadGeneration) return;
+      final busesById = <String, Bus>{
+        for (final t in _tours.tours)
+          for (final b in t.buses) b.id: b,
+      };
       for (final r in rollups) {
         final tid = r.tourId;
         if (tid.isEmpty) continue;
         revenue[tid] = (revenue[tid] ?? 0) + r.collected;
-        expenses[tid] = (expenses[tid] ?? 0) + r.expensesTotal;
+        expenses[tid] =
+            (expenses[tid] ?? 0) + _busExpenses(r, busesById, absorbable);
         income[tid] = (income[tid] ?? 0) + r.income;
       }
 
@@ -134,15 +155,80 @@ class FinanceController extends GetxController {
       _incomeByTour
         ..clear()
         ..addAll(income);
+      // Every bus that carries rent or money has a rollup row, so its distinct
+      // bus ids are a correct floor for an archived tour's bus count before the
+      // exact count below lands.
+      final rollupBuses = <String, Set<String>>{};
+      for (final r in rollups) {
+        final bid = r.busId;
+        if (r.tourId.isEmpty || bid == null || bid.isEmpty) continue;
+        (rollupBuses[r.tourId] ??= <String>{}).add(bid);
+      }
+      _busCountByTour.assignAll({
+        for (final e in rollupBuses.entries) e.key: e.value.length,
+      });
+
       _rollupCount.value = rollups.length;
       loadedOnce.value = true;
       _stale = false;
+      // Background: never gates the report's first paint.
+      // ignore: unawaited_futures
+      _loadArchivedBusCounts(gen);
     } catch (e, st) {
       if (gen != _loadGeneration) return;
       dev.log('finance load failed: $e\n$st', name: 'FinanceController');
       loadFailed.value = true;
     } finally {
       if (gen == _loadGeneration) isLoading.value = false;
+    }
+  }
+
+  /// One bus's cost under the SAME rule [MoneyController.summaryForBus] uses
+  /// ([BusExpenseRollup.fromLedger]): on a pakku-bhadu bus diesel, driver and
+  /// owner advances sit INSIDE the rent; everything else is on top. Rent and
+  /// the pakku flag come from the in-memory bus when the roster is loaded
+  /// (exactly as the board reads them), else the ledger's rent and the
+  /// column's default (true).
+  static double _busExpenses(
+    LedgerBusRollup r,
+    Map<String, Bus> busesById,
+    Map<String, ({double fuel, double driver, double ownerAdvance})> absorbable,
+  ) {
+    final bid = r.busId;
+    if (bid == null || bid.isEmpty) return r.expensesTotal;
+    final bus = busesById[bid];
+    final price = bus?.busPrice ?? 0;
+    final a = absorbable[bid];
+    return BusExpenseRollup.fromLedger(
+      ground: r.groundExpenses,
+      busRent: price > 0 ? price : r.rent,
+      fuel: a?.fuel ?? 0,
+      driver: a?.driver ?? 0,
+      ownerAdvance: a?.ownerAdvance ?? 0,
+      rentIncludesFuel: bus?.rentIncludesFuel ?? true,
+    ).expensesTotal;
+  }
+
+  /// Exact bus counts for tours whose roster is not loaded (archived tours),
+  /// WITHOUT hydrating their whole roster — the cold-start skip is a deliberate
+  /// low-end-device choice, and counting buses must not undo it. Best-effort: a
+  /// failure keeps the rollup-derived floor.
+  Future<void> _loadArchivedBusCounts(int gen) async {
+    if (!Get.isRegistered<SyncService>()) return;
+    final ids = [
+      for (final t in _tours.tours)
+        if (t.buses.isEmpty) t.id,
+    ];
+    if (ids.isEmpty) return;
+    try {
+      final counts =
+          await Get.find<SyncService>().fetchBusCountsByTour(ids);
+      if (gen != _loadGeneration) return;
+      for (final id in ids) {
+        _busCountByTour[id] = counts[id] ?? 0;
+      }
+    } catch (e, st) {
+      dev.log('archived bus count failed: $e\n$st', name: 'FinanceController');
     }
   }
 
@@ -167,6 +253,7 @@ class FinanceController extends GetxController {
         _revenueByTour[tour.id] ?? 0,
         _expensesByTour[tour.id] ?? 0,
         income: _incomeByTour[tour.id] ?? 0,
+        busCount: _busCountByTour[tour.id],
       );
       if (!_inPeriod(tf.date, period, now)) continue;
       out.add(tf);

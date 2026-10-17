@@ -6,6 +6,7 @@ import '../controllers/inbox_controller.dart';
 import '../design/ugam.dart';
 import '../models/wa_conversation.dart';
 import '../routes/app_routes.dart';
+import '../utils/formatters.dart';
 import 'conversation_screen.dart';
 
 /// WhatsApp inbox — the two-way conversation list.
@@ -139,7 +140,35 @@ class _ConversationTile extends StatelessWidget {
     if (sameDay) {
       return ml.formatTimeOfDay(TimeOfDay.fromDateTime(local));
     }
-    return ml.formatShortDate(local);
+    // Year only when it is NOT this year — "12 Oct" reads at a glance;
+    // "12 Oct 2026" on every row was noise. Month names follow the app locale.
+    final locale = context.locale.languageCode;
+    return now.year == local.year
+        ? Formatters.formatDateShort(local, locale: locale)
+        : Formatters.formatDateMedium(local, locale: locale);
+  }
+
+  /// The wa-webhook edge function writes `last_message_preview` in ENGLISH
+  /// for a caption-less attachment ("📷 Photo", …) and a bare bracketed
+  /// placeholder ("[message]", "[other]") for a kind it does not model. Both
+  /// are server artefacts, not something the customer typed, so they are
+  /// swapped for the app's localized label here. Real text passes through.
+  static String? _localizedPreview(String? raw) {
+    final p = raw?.trim();
+    if (p == null || p.isEmpty) return null;
+    switch (p) {
+      case '📷 Photo':
+      case '🙂 Sticker':
+        return tr('inbox.photo');
+      case '📎 Document':
+        return tr('inbox.document');
+      case '🎤 Audio':
+        return tr('inbox.audio');
+      case '🎥 Video':
+        return tr('inbox.video');
+    }
+    if (RegExp(r'^\[[a-z_]+\]$').hasMatch(p)) return tr('inbox.unsupported');
+    return p;
   }
 
   @override
@@ -147,7 +176,7 @@ class _ConversationTile extends StatelessWidget {
     final name = conversation.displayName.trim().isEmpty
         ? tr('inbox.unknown')
         : conversation.displayName;
-    final preview = conversation.lastMessagePreview?.trim();
+    final preview = _localizedPreview(conversation.lastMessagePreview);
     final hasUnread = conversation.hasUnread;
 
     return UgamPersonRow(

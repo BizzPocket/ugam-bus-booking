@@ -30,6 +30,7 @@ class HandlerBoardedSummary extends StatelessWidget {
         Expanded(
           child: _BoardedChip(
             icon: Icons.north_east_rounded,
+            legLabel: tr('handler_chart.att_leg_go'),
             tint: kOneWayTint,
             counts: go,
             c: c,
@@ -39,6 +40,7 @@ class HandlerBoardedSummary extends StatelessWidget {
         Expanded(
           child: _BoardedChip(
             icon: Icons.south_west_rounded,
+            legLabel: tr('handler_chart.att_leg_ret'),
             tint: kReturnTint,
             counts: ret,
             c: c,
@@ -51,12 +53,18 @@ class HandlerBoardedSummary extends StatelessWidget {
 
 class _BoardedChip extends StatelessWidget {
   final IconData icon;
+
+  /// The leg in words. The two chips used to differ by tint alone, so
+  /// "Boarded 10/20" vs "Boarded 0/17" never said which was going and which
+  /// was return.
+  final String legLabel;
   final Color tint;
   final HandlerBoardedCounts counts;
   final UgamColorSet c;
 
   const _BoardedChip({
     required this.icon,
+    required this.legLabel,
     required this.tint,
     required this.counts,
     required this.c,
@@ -80,13 +88,13 @@ class _BoardedChip extends StatelessWidget {
           const SizedBox(width: UgamSpacing.sm),
           Expanded(
             child: Text(
-              tr(
+              '$legLabel · ${tr(
                 'handler_chart.att_boarded',
                 namedArgs: {
                   'present': '${counts.present}',
                   'total': '${counts.total}',
                 },
-              ),
+              )}',
               style: UgamText.micro.copyWith(
                 color: c.ink,
                 fontWeight: FontWeight.w800,

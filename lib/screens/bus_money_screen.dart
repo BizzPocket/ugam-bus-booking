@@ -251,7 +251,11 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                           // so it counts as content for the empty check. Read
                           // LIVE (not from the pushed snapshot) so this row can
                           // never contradict the Expenses tile above it.
-                          if (_liveBus.busPrice <= 0 && expenses.isEmpty)
+                          if (_liveBus.busPrice <= 0 &&
+                              expenses.isEmpty &&
+                              s.fuelTotal <= 0 &&
+                              s.driverTotal <= 0 &&
+                              s.ownerAdvanceTotal <= 0)
                             Padding(
                               padding: const EdgeInsets.symmetric(
                                 vertical: UgamSpacing.lg,
@@ -262,18 +266,22 @@ class _BusMoneyScreenState extends State<BusMoneyScreen> {
                               ),
                             )
                           else ...[
-                            // Fixed, non-deletable rent row at the top: derived from
-                            // the bus, not a DB row, so it has no delete icon.
                             if (_liveBus.busPrice > 0)
                               Padding(
                                 padding: const EdgeInsets.only(
-                                  bottom: UgamSpacing.sm,
+                                  bottom: UgamSpacing.md,
                                 ),
-                                child: _BusOwnerRentRow(
-                                  busPrice: _liveBus.busPrice,
+                                child: _BusMalikSettlementCard(
+                                  bus: _liveBus,
+                                  summary: s,
                                 ),
                               ),
-                            ...expenses.map(
+                            ...expenses
+                                .where(
+                                  (e) =>
+                                      !_rollupExpenseInMalikCard(e, s),
+                                )
+                                .map(
                               (e) => Padding(
                                 padding: const EdgeInsets.only(
                                   bottom: UgamSpacing.sm,
@@ -696,11 +704,7 @@ class _ExpenseSheetBody extends StatefulWidget {
 }
 
 class _ExpenseSheetBodyState extends State<_ExpenseSheetBody> {
-  // busOwner is excluded: the bus rent is the single source of truth
-  // (Bus.busPrice) and must never be added manually, or it double-counts.
-  final List<ExpenseCategory> _cats = ExpenseCategory.values
-      .where((c) => c != ExpenseCategory.busOwner)
-      .toList();
+  final List<ExpenseCategory> _cats = ExpenseCategory.values;
 
   late ExpenseCategory _category = widget.initialCategory;
   late final ValueNotifier<String> _value = ValueNotifier<String>(_seed());
@@ -1186,39 +1190,104 @@ class _DetachedCashCard extends StatelessWidget {
 /// [_ExpenseRow] styling but is derived from [Bus.busPrice] (the single source
 /// of truth, already folded into expensesTotal) — so it is non-deletable and
 /// not editable.
-class _BusOwnerRentRow extends StatelessWidget {
-  final double busPrice;
+bool _rollupExpenseInMalikCard(Expense e, BusMoneySummary s) {
+  if (!s.rentIncludesFuel) return false;
+  return e.category.isFuel || e.category.isOwnerPayment;
+}
 
-  const _BusOwnerRentRow({required this.busPrice});
+/// Bus Malik settlement (A1): agreed bhadu minus diesel and advances paid on
+/// the trip.
+class _BusMalikSettlementCard extends StatelessWidget {
+  final Bus bus;
+  final BusMoneySummary summary;
+
+  const _BusMalikSettlementCard({
+    required this.bus,
+    required this.summary,
+  });
 
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return UgamCard.plain(
-      radius: UgamRadius.row,
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.gutter,
-        vertical: UgamSpacing.md,
-      ),
-      child: Row(
-        children: [
-          UgamReqChip(
-            label: ExpenseCategory.busOwner.displayName,
-            variant: UgamChipVariant.neutral,
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Text(
-              tr('bus_money.bus_owner_rent'),
-              style: UgamText.bodyStrong.copyWith(color: c.ink),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+    final reg = bus.busNumber.trim();
+    final title = reg.isEmpty
+        ? tr('bus_money.malik_title')
+        : tr(
+            'bus_money.malik_title_bus',
+            namedArgs: {'bus': reg},
+          );
+
+    Widget line(String label, double amount, {bool deduct = false}) {
+      final text = deduct
+          ? '-${Formatters.formatMoneyInr(amount)}'
+          : Formatters.formatMoneyInr(amount);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: UgamSpacing.xs),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: UgamText.caption.copyWith(color: c.ink2),
+              ),
             ),
+            Text(
+              text,
+              style: UgamText.tabular(
+                UgamText.bodyStrong.copyWith(
+                  color: deduct ? c.warm : c.ink,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return UgamCard.plain(
+      radius: UgamRadius.card,
+      padding: const EdgeInsets.all(UgamSpacing.gutter),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.directions_bus_rounded, size: 18, color: c.accent),
+              const SizedBox(width: UgamSpacing.sm),
+              Expanded(
+                child: Text(
+                  title,
+                  style: UgamText.bodyStrong.copyWith(color: c.ink),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: UgamSpacing.sm),
-          Text(
-            Formatters.formatMoneyInr(busPrice),
-            style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
+          const SizedBox(height: UgamSpacing.md),
+          line(tr('bus_money.malik_bhadu'), summary.busRent),
+          if (summary.rentIncludesFuel && summary.fuelTotal > 0)
+            line(
+              tr('bus_money.malik_diesel'),
+              summary.fuelTotal,
+              deduct: true,
+            ),
+          // Driver pay is inside a pakku rent (like diesel) — it only shrinks
+          // what is still owed to the owner.
+          if (summary.rentIncludesFuel && summary.driverTotal > 0)
+            line(
+              tr('bus_money.malik_driver'),
+              summary.driverTotal,
+              deduct: true,
+            ),
+          if (summary.ownerAdvanceTotal > 0)
+            line(
+              tr('bus_money.malik_advance'),
+              summary.ownerAdvanceTotal,
+              deduct: true,
+            ),
+          const Divider(height: UgamSpacing.lg),
+          line(
+            tr('bus_money.malik_remaining'),
+            summary.busMalikPayable,
           ),
         ],
       ),

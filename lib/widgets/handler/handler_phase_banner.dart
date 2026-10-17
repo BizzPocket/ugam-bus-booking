@@ -45,6 +45,24 @@ class HandlerPhaseBanner extends StatelessWidget {
   final double outstanding;
   final VoidCallback? onSettle;
 
+  /// One-line strip instead of the full card. The full banner (number, stop,
+  /// CTA) belongs on the tab its number lives on; on every other tab it was
+  /// ~200px of chrome repeating what that tab's own hero already says, so it
+  /// shrinks to "where the trip is" plus a tap target back to its tab. An
+  /// empty [detail] shows the phase name alone (the Money tab, whose hero
+  /// already carries every figure the banner would repeat).
+  final bool compact;
+
+  /// Whether the milestone / hand-over action shows at all. Only on the tab the
+  /// phase belongs to — elsewhere the strip's tap leads there instead.
+  final bool showAction;
+
+  /// False while the milestone is offered EARLY — "We've left" with riders
+  /// still not aboard. The action stays available (somebody always no-shows)
+  /// but drops from the solid accent slab to a neutral button, so the screen
+  /// stops shouting "leave now" over half an empty bus.
+  final bool milestoneReady;
+
   const HandlerPhaseBanner({
     super.key,
     required this.phase,
@@ -55,6 +73,9 @@ class HandlerPhaseBanner extends StatelessWidget {
     this.onOpen,
     this.outstanding = 0,
     this.onSettle,
+    this.compact = false,
+    this.showAction = true,
+    this.milestoneReady = true,
   });
 
   /// Phase colour. Settling is the only one that shouts: it is the state where
@@ -93,82 +114,122 @@ class HandlerPhaseBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final tone = _tone(c);
-    final showSettle = phase == HandlerPhase.settling && onSettle != null;
+    final showSettle =
+        showAction && phase == HandlerPhase.settling && onSettle != null;
+    final showMilestone = showAction && !showSettle && milestone != null;
 
     return UgamCard.plain(
-      padding: const EdgeInsets.all(UgamSpacing.md),
+      padding: compact
+          ? const EdgeInsets.symmetric(
+              horizontal: UgamSpacing.md,
+              vertical: UgamSpacing.sm,
+            )
+          : const EdgeInsets.all(UgamSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
             onTap: onOpen,
             borderRadius: BorderRadius.circular(UgamRadius.row),
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: tone,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: UgamSpacing.sm),
-                Icon(_icon, size: 16, color: tone),
-                const SizedBox(width: UgamSpacing.xs),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        phase.label.toUpperCase(),
-                        style: UgamText.micro.copyWith(color: tone),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        detail,
-                        style: UgamText.bodyStrong.copyWith(color: c.ink),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (sublabel != null && sublabel!.isNotEmpty)
-                        Text(
-                          sublabel!,
-                          style: UgamText.caption.copyWith(color: c.ink2),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                    ],
-                  ),
-                ),
-                if (onOpen != null)
-                  Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
-              ],
-            ),
+            child: compact ? _stripRow(c, tone) : _fullRow(c, tone),
           ),
           if (showSettle) ...[
-            const SizedBox(height: UgamSpacing.md),
+            SizedBox(height: compact ? UgamSpacing.sm : UgamSpacing.md),
             UgamCTA(
               label: tr('handler_phase.action_settle'),
               leadingIcon: Icons.account_balance_wallet_rounded,
               trailingValue: Formatters.formatMoneyInr(outstanding),
               onPressed: onSettle,
             ),
-          ] else if (milestone != null) ...[
-            const SizedBox(height: UgamSpacing.md),
-            UgamCTA(
-              label: milestone!.label,
-              leadingIcon: _milestoneIcon(milestone!),
-              // Null while in flight — UgamCTA renders a disabled state, which
-              // is the whole feedback a handler gets on a slow link.
-              onPressed: onMilestone,
-            ),
+          ] else if (showMilestone) ...[
+            SizedBox(height: compact ? UgamSpacing.sm : UgamSpacing.md),
+            if (milestoneReady)
+              UgamCTA(
+                label: milestone!.label,
+                leadingIcon: _milestoneIcon(milestone!),
+                // Null while in flight — UgamCTA renders a disabled state,
+                // which is the whole feedback a handler gets on a slow link.
+                onPressed: onMilestone,
+              )
+            else
+              UgamButton(
+                label: milestone!.label,
+                icon: _milestoneIcon(milestone!),
+                kind: UgamButtonKind.neutral,
+                expand: true,
+                onPressed: onMilestone,
+              ),
           ],
         ],
       ),
     );
   }
+
+  Widget _fullRow(UgamColorSet c, Color tone) => Row(
+    children: [
+      Container(
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(color: tone, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: UgamSpacing.sm),
+      Icon(_icon, size: 16, color: tone),
+      const SizedBox(width: UgamSpacing.xs),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              phase.label.toUpperCase(),
+              style: UgamText.micro.copyWith(color: tone),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (detail.isNotEmpty)
+              Text(
+                detail,
+                style: UgamText.bodyStrong.copyWith(color: c.ink),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            if (sublabel != null && sublabel!.isNotEmpty)
+              Text(
+                sublabel!,
+                style: UgamText.caption.copyWith(color: c.ink2),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+          ],
+        ),
+      ),
+      if (onOpen != null)
+        Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+    ],
+  );
+
+  /// The compact form: phase + (optional) headline on ONE line.
+  Widget _stripRow(UgamColorSet c, Color tone) => Row(
+    children: [
+      Icon(_icon, size: 16, color: tone),
+      const SizedBox(width: UgamSpacing.sm),
+      Text(
+        phase.label.toUpperCase(),
+        style: UgamText.micro.copyWith(color: tone),
+        maxLines: 1,
+      ),
+      const SizedBox(width: UgamSpacing.sm),
+      Expanded(
+        child: Text(
+          detail,
+          style: UgamText.caption.copyWith(color: c.ink),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      if (onOpen != null)
+        Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
+    ],
+  );
 
   IconData _milestoneIcon(HandlerMilestone m) {
     switch (m) {

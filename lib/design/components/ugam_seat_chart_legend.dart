@@ -98,6 +98,77 @@ class UgamSeatChartLegend extends StatelessWidget {
   }
 }
 
+/// [UgamSeatChartLegend] behind a one-line "Legend" toggle — collapsed by
+/// default. For screens where the chart is the point and the full 10-key grid
+/// (~4 rows) permanently steals height from it (single-bus status). Same keys,
+/// same component — only the disclosure is new.
+class UgamSeatChartLegendToggle extends StatefulWidget {
+  final UgamColorSet c;
+  final bool initiallyExpanded;
+  const UgamSeatChartLegendToggle({
+    super.key,
+    required this.c,
+    this.initiallyExpanded = false,
+  });
+
+  @override
+  State<UgamSeatChartLegendToggle> createState() =>
+      _UgamSeatChartLegendToggleState();
+}
+
+class _UgamSeatChartLegendToggleState extends State<UgamSeatChartLegendToggle> {
+  late bool _open = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.c;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            button: true,
+            expanded: _open,
+            child: InkWell(
+              onTap: () => setState(() => _open = !_open),
+              borderRadius: BorderRadius.circular(UgamRadius.chip),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 36),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 14, color: c.ink3),
+                    const SizedBox(width: 6),
+                    Text(
+                      tr('seat_legend.title'),
+                      style: UgamText.caption.copyWith(color: c.ink2),
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(
+                      _open
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      size: 16,
+                      color: c.ink3,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_open) ...[
+            const SizedBox(height: 4),
+            UgamSeatChartLegend(c: c),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 enum _LegendSwatch {
   dashed,
   filled,

@@ -4,13 +4,14 @@ import 'collection.dart';
 import 'expense.dart';
 import 'income_entry.dart';
 import 'passenger.dart';
+import 'passenger_group.dart';
 import 'seat_assignment.dart';
 
 /// The full bus chart a tour handler sees: every bus on the tour plus every
 /// passenger, so the handler can render an occupancy-aware seat grid.
 ///
 /// Produced by the `handler_tour_manifest` RPC, which returns a single json
-/// object `{buses: [...], passengers: [...], collections: [...],
+/// object `{buses: [...], passengers: [...], groups: [...], collections: [...],
 /// expenses: [...], incomes: [...]}`. Only the tour handler is authorized to
 /// receive it (see [CustomerRequestsStore.isRequestHandler]).
 class HandlerManifest {
@@ -32,6 +33,9 @@ class HandlerManifest {
   /// ground.
   final List<Attendance> attendance;
 
+  /// Agent-defined cross-booking groups for this tour (labels + stable colours).
+  final List<PassengerGroup> groups;
+
   const HandlerManifest({
     this.buses = const [],
     this.passengers = const [],
@@ -39,6 +43,7 @@ class HandlerManifest {
     this.expenses = const [],
     this.incomes = const [],
     this.attendance = const [],
+    this.groups = const [],
   });
 
   factory HandlerManifest.fromJson(Map<String, dynamic> json) {
@@ -49,6 +54,7 @@ class HandlerManifest {
       expenses: _parseExpenses(json['expenses']),
       incomes: _parseIncomes(json['incomes']),
       attendance: _parseAttendance(json['attendance']),
+      groups: _parseGroups(json['groups']),
     );
   }
 
@@ -98,6 +104,26 @@ class HandlerManifest {
         .whereType<Map>()
         .map((m) => Attendance.fromMap(Map<String, dynamic>.from(m)))
         .toList();
+  }
+
+  static List<PassengerGroup> _parseGroups(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((m) => PassengerGroup.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+  }
+
+  /// The agent's label for [groupId], or null when unknown / ungrouped.
+  String? groupLabel(String? groupId) {
+    if (groupId == null || groupId.isEmpty) return null;
+    for (final g in groups) {
+      if (g.id == groupId) {
+        final label = g.label.trim();
+        return label.isEmpty ? null : label;
+      }
+    }
+    return null;
   }
 
   /// The passenger occupying [seatId] on bus [busId], or null if the seat is

@@ -41,7 +41,7 @@ class UgamPersonRow extends StatelessWidget {
     final i = initials?.trim();
     if (i != null && i.isNotEmpty) return i;
     final n = name.trim();
-    return n.isEmpty ? '?' : n[0].toUpperCase();
+    return n.isEmpty ? '?' : n.characters.first.toUpperCase();
   }
 
   @override

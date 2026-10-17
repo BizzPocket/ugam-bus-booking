@@ -23,7 +23,11 @@ class UgamSelectorItem {
 /// The active pill is **tonal** (accentFill + accent ink + hairline accent
 /// border), never solid champagne — solid gold stays reserved for the one
 /// focal CTA per screen (the accent-rationing law).
-class UgamSelectorPills extends StatelessWidget {
+///
+/// The selected pill is scrolled into view on first build and whenever
+/// [currentIndex] changes — a tour picked from elsewhere (dashboard deep link,
+/// last-used tour) used to sit selected but off-screen past the right edge.
+class UgamSelectorPills extends StatefulWidget {
   final List<UgamSelectorItem> items;
   final int currentIndex;
   final ValueChanged<int> onChanged;
@@ -38,8 +42,57 @@ class UgamSelectorPills extends StatelessWidget {
   });
 
   @override
+  State<UgamSelectorPills> createState() => _UgamSelectorPillsState();
+}
+
+class _UgamSelectorPillsState extends State<UgamSelectorPills> {
+  final _keys = <int, GlobalKey>{};
+
+  GlobalKey _keyFor(int i) => _keys.putIfAbsent(i, GlobalKey.new);
+
+  @override
+  void initState() {
+    super.initState();
+    _revealSelected(animate: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant UgamSelectorPills old) {
+    super.didUpdateWidget(old);
+    if (old.currentIndex != widget.currentIndex ||
+        old.items.length != widget.items.length) {
+      _revealSelected(animate: true);
+    }
+  }
+
+  void _revealSelected({required bool animate}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final i = widget.currentIndex;
+      if (i < 0 || i >= widget.items.length) return;
+      final ctx = _keys[i]?.currentContext;
+      if (ctx == null) return;
+      final ro = ctx.findRenderObject();
+      final scrollable = Scrollable.maybeOf(ctx);
+      if (ro == null || scrollable == null) return;
+      // Only THIS strip's own horizontal scrollable — never the page's
+      // vertical one, which `Scrollable.ensureVisible` would also move.
+      scrollable.position.ensureVisible(
+        ro,
+        alignment: 0.5,
+        duration: animate ? UgamMotion.tab : Duration.zero,
+        curve: UgamMotion.easeOut,
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
+    final items = widget.items;
+    final currentIndex = widget.currentIndex;
+    final onChanged = widget.onChanged;
+    final padding = widget.padding;
 
     return SizedBox(
       // Interactive strip: every pill is a tap target, so this routes through
@@ -55,6 +108,7 @@ class UgamSelectorPills extends StatelessWidget {
           final item = items[i];
           final active = i == currentIndex;
           return GestureDetector(
+            key: _keyFor(i),
             behavior: HitTestBehavior.opaque,
             onTap: () {
               HapticFeedback.selectionClick();

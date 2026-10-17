@@ -9,6 +9,7 @@ import '../../design/group_color.dart';
 import '../../design/ugam.dart';
 import '../../models/collection.dart';
 import '../../models/passenger.dart';
+import '../../models/payment_claim.dart';
 import '../../services/sync_service.dart';
 import '../../utils/app_snackbar.dart';
 import '../../utils/formatters.dart';
@@ -27,6 +28,12 @@ class HandlerCollectSheet extends StatefulWidget {
   final String seatId;
   final double due;
   final Collection? existing;
+
+  /// The rider's UPI advance claims on this tour (pending and confirmed), so
+  /// the sheet can say what they already paid online before the handler asks
+  /// for the fare. Empty when there are none.
+  final List<PaymentClaim> claims;
+
   final Future<void> Function(
     double received,
     double returned,
@@ -41,6 +48,7 @@ class HandlerCollectSheet extends StatefulWidget {
     required this.seatId,
     required this.due,
     required this.existing,
+    this.claims = const [],
     required this.onSave,
   });
 
@@ -146,7 +154,7 @@ class _HandlerCollectSheetState extends State<HandlerCollectSheet> {
                 ),
                 child: Text(
                   passenger.name.trim().isNotEmpty
-                      ? passenger.name.trim()[0].toUpperCase()
+                      ? passenger.name.trim().characters.first.toUpperCase()
                       : '?',
                   style: UgamText.titleL.copyWith(color: c.accent),
                 ),
@@ -258,6 +266,15 @@ class _HandlerCollectSheetState extends State<HandlerCollectSheet> {
               },
             ),
           ],
+          // ── UPI advances the rider already sent ──
+          // Named here, before the cash fields, because this is the moment
+          // the handler decides how much to ask for. A pending claim is the
+          // rider's word (the agent verifies it against the bank later); a
+          // confirmed one is money the agent already holds.
+          for (final claim in widget.claims) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            _ClaimLine(claim: claim, c: c),
+          ],
           const SizedBox(height: UgamSpacing.lg),
           UgamInput(
             label: tr('handler_chart.field_received'),
@@ -268,25 +285,70 @@ class _HandlerCollectSheetState extends State<HandlerCollectSheet> {
             ],
             onChanged: (_) => setState(() {}),
           ),
+          // The common case — the rider hands over exactly the fare — in one
+          // tap instead of typing four digits on a moving bus. Hidden once the
+          // field already reads the full fare, so it never offers a no-op.
+          if (due > Collection.kMoneyEpsilon &&
+              (_parse(_receivedCtrl) - due).abs() > Collection.kMoneyEpsilon) ...[
+            const SizedBox(height: UgamSpacing.sm),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: UgamButton(
+                key: const ValueKey('collect-paid-in-full'),
+                label: tr(
+                  'handler_chart.paid_in_full',
+                  namedArgs: {'amount': Formatters.formatMoneyInr(due)},
+                ),
+                icon: Icons.done_all_rounded,
+                kind: UgamButtonKind.goodTonal,
+                onPressed: () => setState(() {
+                  _receivedCtrl.text = due.toStringAsFixed(0);
+                  _receivedCtrl.selection = TextSelection.collapsed(
+                    offset: _receivedCtrl.text.length,
+                  );
+                }),
+              ),
+            ),
+          ],
           const SizedBox(height: UgamSpacing.md),
-          UgamInput(
-            label: tr('handler_chart.field_returned'),
-            controller: _returnedCtrl,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-            ],
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          UgamInput(
-            label: tr('handler_chart.field_collected_by'),
-            controller: _collectedByCtrl,
-          ),
-          const SizedBox(height: UgamSpacing.md),
-          UgamInput(
-            label: tr('handler_chart.field_note'),
-            controller: _noteCtrl,
+          // Returned / collected-by / note are the rare paths, so they fold
+          // away rather than standing as three always-open empty fields between
+          // the amount and Save. A re-opened row that already carries any of
+          // them opens unfolded, so nothing saved is ever hidden.
+          UgamExpander(
+            key: const ValueKey('collect-more-details'),
+            title: tr('handler_chart.collect_more_details'),
+            icon: Icons.tune_rounded,
+            initiallyExpanded:
+                _returnedCtrl.text.isNotEmpty ||
+                _collectedByCtrl.text.isNotEmpty ||
+                _noteCtrl.text.isNotEmpty,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                UgamInput(
+                  label: tr('handler_chart.field_returned'),
+                  controller: _returnedCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                UgamInput(
+                  label: tr('handler_chart.field_collected_by'),
+                  controller: _collectedByCtrl,
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                UgamInput(
+                  label: tr('handler_chart.field_note'),
+                  controller: _noteCtrl,
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: UgamSpacing.lg),
           // ── Live balance pill ──
@@ -320,8 +382,10 @@ class _HandlerCollectSheetState extends State<HandlerCollectSheet> {
                           'amount': Formatters.formatMoneyInr(-balance),
                         },
                       ),
-                      c.danger,
-                      c.dangerFill,
+                      // Neutral, not danger: a part-payment is the normal
+                      // state of a fare mid-trip, not an error.
+                      c.ink,
+                      c.cardElev,
                     )
                   : (tr('handler_chart.balance_settled'), c.good, c.goodFill);
               // Smooth the color/text transitions as the amount field changes;
@@ -353,6 +417,62 @@ class _HandlerCollectSheetState extends State<HandlerCollectSheet> {
             loading: _saving,
             onPressed: _saving ? null : _save,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One UPI claim on the collect sheet: verified reads as settled money (good
+/// tone), unverified as the rider's claim (warm tone), with the UPI reference
+/// when the rider gave one so the agent can be asked to match it.
+class _ClaimLine extends StatelessWidget {
+  final PaymentClaim claim;
+  final UgamColorSet c;
+
+  const _ClaimLine({required this.claim, required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    final confirmed = claim.isConfirmed;
+    final amount = Formatters.formatMoneyInr(claim.amountRupees);
+    final ref = (claim.upiRef ?? '').trim();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: UgamSpacing.md,
+        vertical: UgamSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: confirmed ? c.goodFill : c.warmFill,
+        borderRadius: BorderRadius.circular(UgamRadius.row),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            confirmed
+                ? tr(
+                    'handler_chart.upi_claim_confirmed',
+                    namedArgs: {'amount': amount},
+                  )
+                : tr(
+                    'handler_chart.upi_claim_pending',
+                    namedArgs: {'amount': amount},
+                  ),
+            style: UgamText.caption.copyWith(
+              color: confirmed ? c.good : c.warm,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (ref.isNotEmpty)
+            Text(
+              tr('handler_chart.upi_claim_ref', namedArgs: {'ref': ref}),
+              style: UgamText.tabular(
+                UgamText.micro.copyWith(color: c.ink2),
+              ),
+            ),
         ],
       ),
     );
