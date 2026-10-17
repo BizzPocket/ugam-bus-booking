@@ -25,6 +25,26 @@ class CustomerMoreScreen extends StatelessWidget {
     final c = UgamColors.of(context);
     final activeLanguage = I18nConfig.labelFor(context.locale);
 
+    // Every menu row sits alone on its own plain card.
+    Widget moreCard({
+      required IconData icon,
+      required UgamStatVariant tone,
+      required String title,
+      required String subtitle,
+      required VoidCallback onTap,
+    }) =>
+        UgamCard.plain(
+          padding: EdgeInsets.zero,
+          child: _MoreRow(
+            c: c,
+            icon: icon,
+            tone: tone,
+            title: title,
+            subtitle: subtitle,
+            onTap: onTap,
+          ),
+        );
+
     return UgamScaffold(
       // No bottomNavigationBar and no dock on the customer surface, so nothing
       // else consumes the nav-bar inset — SafeArea must keep its bottom edge or
@@ -66,16 +86,12 @@ class CustomerMoreScreen extends StatelessWidget {
                     c: c,
                     label: tr('customer_more.section_preferences'),
                   ),
-                  UgamCard.plain(
-                    padding: EdgeInsets.zero,
-                    child: _MoreRow(
-                      c: c,
-                      icon: Icons.translate_rounded,
-                      tone: UgamStatVariant.accent,
-                      title: tr('customer_more.language'),
-                      subtitle: activeLanguage,
-                      onTap: () => LanguagePickerSheet.show(context),
-                    ),
+                  moreCard(
+                    icon: Icons.translate_rounded,
+                    tone: UgamStatVariant.accent,
+                    title: tr('customer_more.language'),
+                    subtitle: activeLanguage,
+                    onTap: () => LanguagePickerSheet.show(context),
                   ),
                   const SizedBox(height: UgamSpacing.lg),
 
@@ -84,40 +100,28 @@ class CustomerMoreScreen extends StatelessWidget {
                     c: c,
                     label: tr('customer_more.section_about_legal'),
                   ),
-                  UgamCard.plain(
-                    padding: EdgeInsets.zero,
-                    child: _MoreRow(
-                      c: c,
-                      icon: Icons.info_outline_rounded,
-                      tone: UgamStatVariant.neutral,
-                      title: tr('customer_more.about'),
-                      subtitle: tr('customer_more.about_subtitle'),
-                      onTap: () => _openDoc(LegalContent.about),
-                    ),
+                  moreCard(
+                    icon: Icons.info_outline_rounded,
+                    tone: UgamStatVariant.neutral,
+                    title: tr('customer_more.about'),
+                    subtitle: tr('customer_more.about_subtitle'),
+                    onTap: () => _openDoc(LegalContent.about),
                   ),
                   const SizedBox(height: UgamSpacing.sm),
-                  UgamCard.plain(
-                    padding: EdgeInsets.zero,
-                    child: _MoreRow(
-                      c: c,
-                      icon: Icons.shield_outlined,
-                      tone: UgamStatVariant.neutral,
-                      title: tr('customer_more.privacy'),
-                      subtitle: tr('customer_more.privacy_subtitle'),
-                      onTap: () => _openDoc(LegalContent.privacy),
-                    ),
+                  moreCard(
+                    icon: Icons.shield_outlined,
+                    tone: UgamStatVariant.neutral,
+                    title: tr('customer_more.privacy'),
+                    subtitle: tr('customer_more.privacy_subtitle'),
+                    onTap: () => _openDoc(LegalContent.privacy),
                   ),
                   const SizedBox(height: UgamSpacing.sm),
-                  UgamCard.plain(
-                    padding: EdgeInsets.zero,
-                    child: _MoreRow(
-                      c: c,
-                      icon: Icons.description_outlined,
-                      tone: UgamStatVariant.neutral,
-                      title: tr('customer_more.terms'),
-                      subtitle: tr('customer_more.terms_subtitle'),
-                      onTap: () => _openDoc(LegalContent.terms),
-                    ),
+                  moreCard(
+                    icon: Icons.description_outlined,
+                    tone: UgamStatVariant.neutral,
+                    title: tr('customer_more.terms'),
+                    subtitle: tr('customer_more.terms_subtitle'),
+                    onTap: () => _openDoc(LegalContent.terms),
                   ),
                 ],
               ),

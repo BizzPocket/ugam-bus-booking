@@ -455,21 +455,9 @@ class _TicketCard extends StatelessWidget {
           // was worth making. Their job is the first thing on the card now.
           if (handlerRequestId != null) ...[
             const SizedBox(height: UgamSpacing.lg),
-            UgamCTA(
-              label: tr('find_seat.manage_as_handler'),
-              leadingIcon: Icons.manage_accounts_rounded,
-              onPressed: () => Get.to(
-                () => HandlerShell(
-                  requestId: handlerRequestId!,
-                  tourStatus: ticket.status,
-                ),
-                transition: Transition.cupertino,
-              ),
-            ),
-            const SizedBox(height: UgamSpacing.xs),
-            Text(
-              tr('find_seat.handler_hint'),
-              style: UgamText.micro.copyWith(color: c.ink3),
+            _ManageAsHandler(
+              requestId: handlerRequestId!,
+              tourStatus: ticket.status,
             ),
           ],
           for (final bus in ticket.buses) ...[
@@ -515,24 +503,42 @@ class _HandlerEntryCard extends StatelessWidget {
             style: UgamText.caption.copyWith(color: c.ink2),
           ),
           const SizedBox(height: UgamSpacing.lg),
-          UgamCTA(
-            label: tr('find_seat.manage_as_handler'),
-            leadingIcon: Icons.manage_accounts_rounded,
-            onPressed: () => Get.to(
-              () => HandlerShell(
-                requestId: ref.requestId,
-                tourStatus: ref.status,
-              ),
-              transition: Transition.cupertino,
-            ),
-          ),
-          const SizedBox(height: UgamSpacing.xs),
-          Text(
-            tr('find_seat.handler_hint'),
-            style: UgamText.micro.copyWith(color: c.ink3),
-          ),
+          _ManageAsHandler(requestId: ref.requestId, tourStatus: ref.status),
         ],
       ),
+    );
+  }
+}
+
+/// "Manage as handler" CTA + its hint line, opening the full handler chart.
+/// Shared by [_TicketCard] (seated handler) and [_HandlerEntryCard].
+class _ManageAsHandler extends StatelessWidget {
+  final String requestId;
+  final String tourStatus;
+
+  const _ManageAsHandler({required this.requestId, required this.tourStatus});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        UgamCTA(
+          label: tr('find_seat.manage_as_handler'),
+          leadingIcon: Icons.manage_accounts_rounded,
+          onPressed: () => Get.to(
+            () => HandlerShell(requestId: requestId, tourStatus: tourStatus),
+            transition: Transition.cupertino,
+          ),
+        ),
+        const SizedBox(height: UgamSpacing.xs),
+        Text(
+          tr('find_seat.handler_hint'),
+          style: UgamText.micro.copyWith(color: c.ink3),
+        ),
+      ],
     );
   }
 }
