@@ -80,35 +80,21 @@ class HandlerPhaseBanner extends StatelessWidget {
 
   /// Phase colour. Settling is the only one that shouts: it is the state where
   /// the handler is personally holding the agent's money.
-  Color _tone(UgamColorSet c) {
-    switch (phase) {
-      case HandlerPhase.boardingGo:
-      case HandlerPhase.boardingRet:
-        return c.accent;
-      case HandlerPhase.enRouteGo:
-      case HandlerPhase.enRouteRet:
-        return c.ink2;
-      case HandlerPhase.settling:
-        return c.warm;
-      case HandlerPhase.closed:
-        return c.good;
-    }
-  }
+  Color _tone(UgamColorSet c) => switch (phase) {
+    HandlerPhase.boardingGo || HandlerPhase.boardingRet => c.accent,
+    HandlerPhase.enRouteGo || HandlerPhase.enRouteRet => c.ink2,
+    HandlerPhase.settling => c.warm,
+    HandlerPhase.closed => c.good,
+  };
 
-  IconData get _icon {
-    switch (phase) {
-      case HandlerPhase.boardingGo:
-      case HandlerPhase.boardingRet:
-        return Icons.how_to_reg_rounded;
-      case HandlerPhase.enRouteGo:
-      case HandlerPhase.enRouteRet:
-        return Icons.directions_bus_filled_rounded;
-      case HandlerPhase.settling:
-        return Icons.account_balance_wallet_rounded;
-      case HandlerPhase.closed:
-        return Icons.check_circle_rounded;
-    }
-  }
+  IconData get _icon => switch (phase) {
+    HandlerPhase.boardingGo || HandlerPhase.boardingRet =>
+      Icons.how_to_reg_rounded,
+    HandlerPhase.enRouteGo || HandlerPhase.enRouteRet =>
+      Icons.directions_bus_filled_rounded,
+    HandlerPhase.settling => Icons.account_balance_wallet_rounded,
+    HandlerPhase.closed => Icons.check_circle_rounded,
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -231,15 +217,10 @@ class HandlerPhaseBanner extends StatelessWidget {
     ],
   );
 
-  IconData _milestoneIcon(HandlerMilestone m) {
-    switch (m) {
-      case HandlerMilestone.departGo:
-      case HandlerMilestone.departRet:
-        return Icons.play_arrow_rounded;
-      case HandlerMilestone.arriveGo:
-        return Icons.flag_rounded;
-      case HandlerMilestone.endTrip:
-        return Icons.done_all_rounded;
-    }
-  }
+  IconData _milestoneIcon(HandlerMilestone m) => switch (m) {
+    HandlerMilestone.departGo || HandlerMilestone.departRet =>
+      Icons.play_arrow_rounded,
+    HandlerMilestone.arriveGo => Icons.flag_rounded,
+    HandlerMilestone.endTrip => Icons.done_all_rounded,
+  };
 }
