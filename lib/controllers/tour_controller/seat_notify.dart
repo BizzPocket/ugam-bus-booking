@@ -153,27 +153,15 @@ mixin _TourSeatNotify on _TourPassengers {
   ) async {
     final ids = passengerIds.toSet();
     if (ids.isEmpty) return;
-    final changed = <Passenger>[];
-    await _write(
-      optimistic: () {
-        for (final id in ids) {
-          Passenger? updated;
-          _updatePassengerLocal(tourId, id, (p) {
-            updated = p.copyWith(seatsNotifiedSig: p.seatSignature);
-            return updated!;
-          });
-          if (updated != null) changed.add(updated!);
-        }
-      },
-      persist: () async {
-        for (final p in changed) {
-          await _sync.smartUpdate(
-            table: 'passengers',
-            entityId: p.id,
-            data: p.toMap(),
-          );
-        }
-      },
+    await _writePassengerEdits(
+      tourId,
+      [
+        for (final id in ids)
+          (
+            id: id,
+            update: (p) => p.copyWith(seatsNotifiedSig: p.seatSignature),
+          ),
+      ],
       failure: tr('errors.save_seat_assignment'),
     );
   }

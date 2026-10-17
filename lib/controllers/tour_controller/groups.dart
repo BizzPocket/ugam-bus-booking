@@ -115,26 +115,15 @@ mixin _TourGroups on _TourBuses {
     String tourId,
     String passengerId,
     String? groupId,
-  ) async {
-    Passenger? updated;
-    await _write(
+  ) async =>
       // copyWith uses `??`, so it can't clear group_id back to null. Build the
       // updated passenger explicitly to allow an explicit null (ungroup).
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = _passengerWithGroup(p, groupId);
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
-      },
-      failure: tr('errors.update_group'),
-    );
-  }
+      _writePassenger(
+        tourId,
+        passengerId,
+        (p) => _passengerWithGroup(p, groupId),
+        failure: tr('errors.update_group'),
+      );
 
   /// Delete a group: first clears `group_id` on every member (locally and on
   /// the server) so no passenger row dangles a reference to a deleted group,

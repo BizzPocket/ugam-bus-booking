@@ -164,4 +164,66 @@ abstract class _TourControllerBase extends GetxController {
       return t.copyWith(passengers: list);
     });
   }
+
+  /// The common one-row passenger write: apply [transform] to [passengerId]
+  /// locally through [_write], then persist the resulting row's `toMap()`.
+  /// Nothing is sent when the passenger could not be resolved locally (the
+  /// transform never ran).
+  Future<void> _writePassenger(
+    String tourId,
+    String passengerId,
+    Passenger Function(Passenger) transform, {
+    required String failure,
+  }) async {
+    Passenger? updated;
+    await _write(
+      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
+        updated = transform(p);
+        return updated!;
+      }),
+      persist: () async {
+        if (updated == null) return;
+        await _sync.smartUpdate(
+          table: 'passengers',
+          entityId: passengerId,
+          data: updated!.toMap(),
+        );
+      },
+      failure: failure,
+    );
+  }
+
+  /// The multi-row variant of [_writePassenger]: every edit is applied locally
+  /// in order inside ONE [_write], then each passenger that resolved is
+  /// persisted sequentially, in the same order. Returns those passengers.
+  Future<List<Passenger>> _writePassengerEdits(
+    String tourId,
+    List<({String id, Passenger Function(Passenger) update})> edits, {
+    required String failure,
+  }) async {
+    final changed = <Passenger>[];
+    await _write(
+      optimistic: () {
+        for (final e in edits) {
+          Passenger? updated;
+          _updatePassengerLocal(tourId, e.id, (cur) {
+            updated = e.update(cur);
+            return updated!;
+          });
+          if (updated != null) changed.add(updated!);
+        }
+      },
+      persist: () async {
+        for (final p in changed) {
+          await _sync.smartUpdate(
+            table: 'passengers',
+            entityId: p.id,
+            data: p.toMap(),
+          );
+        }
+      },
+      failure: failure,
+    );
+    return changed;
+  }
 }

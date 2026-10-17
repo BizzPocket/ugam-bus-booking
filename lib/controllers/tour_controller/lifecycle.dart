@@ -189,28 +189,17 @@ mixin _TourLifecycle on _TourHydration {
     await _captureSeatSnapshot(tourId, SnapshotLeg.outbound,
         overwriteIfExists: true);
 
-    final changed = <Passenger>[];
-    await _write(
-      optimistic: () {
-        for (final p in tour.passengers) {
-          if (p.tripType != TripType.outboundOnly || p.journeyDone) continue;
-          Passenger? updated;
-          _updatePassengerLocal(tourId, p.id, (cur) {
-            updated = cur.copyWith(assignedSeats: const [], journeyDone: true);
-            return updated!;
-          });
-          if (updated != null) changed.add(updated!);
-        }
-      },
-      persist: () async {
-        for (final p in changed) {
-          await _sync.smartUpdate(
-            table: 'passengers',
-            entityId: p.id,
-            data: p.toMap(),
-          );
-        }
-      },
+    final changed = await _writePassengerEdits(
+      tourId,
+      [
+        for (final p in tour.passengers)
+          if (p.tripType == TripType.outboundOnly && !p.journeyDone)
+            (
+              id: p.id,
+              update: (cur) =>
+                  cur.copyWith(assignedSeats: const [], journeyDone: true),
+            ),
+      ],
       failure: tr('errors.save_passenger'),
     );
     return changed.length;

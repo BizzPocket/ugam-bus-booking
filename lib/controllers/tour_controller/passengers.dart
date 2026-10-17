@@ -238,24 +238,12 @@ mixin _TourPassengers on _TourLifecycle {
     String tourId,
     String passengerId,
     PaymentStatus status,
-  ) async {
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = p.copyWith(paymentStatus: status);
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
-      },
-      failure: tr('errors.update_payment'),
-    );
-  }
+  ) async => _writePassenger(
+        tourId,
+        passengerId,
+        (p) => p.copyWith(paymentStatus: status),
+        failure: tr('errors.update_payment'),
+      );
 
   /// Toggles a passenger's waitlist flag. Moving onto the waitlist
   /// also clears any seat assignments — they should not hold seats
@@ -264,29 +252,17 @@ mixin _TourPassengers on _TourLifecycle {
     String tourId,
     String passengerId,
     bool waitlisted,
-  ) async {
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = p.copyWith(
+  ) async => _writePassenger(
+        tourId,
+        passengerId,
+        (p) => p.copyWith(
           isWaitlisted: waitlisted,
           assignedSeats: waitlisted
               ? const <SeatAssignment>[]
               : p.assignedSeats,
-        );
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
-      },
-      failure: tr('errors.update_waitlist'),
-    );
-  }
+        ),
+        failure: tr('errors.update_waitlist'),
+      );
 
   /// Confirm (or un-confirm) a request: a confirmed passenger is eligible for
   /// seat allotment and moves to the Confirmed list. Confirming also clears any
@@ -295,28 +271,16 @@ mixin _TourPassengers on _TourLifecycle {
     String tourId,
     String passengerId,
     bool confirmed,
-  ) async {
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = p.copyWith(
+  ) async => _writePassenger(
+        tourId,
+        passengerId,
+        (p) => p.copyWith(
           isConfirmed: confirmed,
           // A confirmed passenger leaves the waitlist.
           isWaitlisted: confirmed ? false : p.isWaitlisted,
-        );
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
-      },
-      failure: tr('errors.update_confirmed'),
-    );
-  }
+        ),
+        failure: tr('errors.update_confirmed'),
+      );
 
   // Priority
 
@@ -326,26 +290,14 @@ mixin _TourPassengers on _TourLifecycle {
     String tourId,
     String passengerId,
     bool approved,
-  ) async {
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = p.copyWith(
+  ) async => _writePassenger(
+        tourId,
+        passengerId,
+        (p) => p.copyWith(
           priorityStatus: approved
               ? PriorityStatus.approved
               : PriorityStatus.none,
-        );
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
-      },
-      failure: tr('errors.update_priority'),
-    );
-  }
+        ),
+        failure: tr('errors.update_priority'),
+      );
 }

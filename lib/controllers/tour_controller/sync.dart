@@ -340,14 +340,7 @@ mixin _TourSync on _TourGroups {
         // it was never re-fetched. That is the intermittent "no seat plan" on a
         // bus that had rendered a moment earlier: not a fetch failure, a race
         // between a background prefetch and a foreground refresh.
-        final liveById = {for (final b in raw[idx].buses) b.id: b};
-        final withLayouts = [
-          for (final b in buses)
-            if (liveById[b.id]?.layout case final live?)
-              b.copyWith(layout: live)
-            else
-              b,
-        ];
+        //
         // The flag and the data must agree, always.
         //
         // `layoutsLoadedFor` — which decides "skeleton" vs "no seat plan" on
@@ -361,11 +354,7 @@ mixin _TourSync on _TourGroups {
         // grid to fetch (it was wiped — `recoverBusLayoutFor` repairs it), and
         // dropping its mark would send the chart back to a skeleton that can
         // never resolve, and re-ask on every single refresh forever.
-        for (final b in withLayouts) {
-          if (b.layout == null && !_layoutKnownNullBusIds.contains(b.id)) {
-            _layoutFetchedBusIds.remove(b.id);
-          }
-        }
+        final withLayouts = _mergeLiveLayouts(buses, raw[idx].buses);
         raw[idx] = raw[idx].copyWith(
           passengers: passengers,
           buses: withLayouts,

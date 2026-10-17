@@ -24,47 +24,30 @@ mixin _TourSeatSwaps on _TourSeating {
         .toList();
     if (movers.isEmpty) return;
 
-    final changed = <Passenger>[];
-    await _write(
-      optimistic: () {
-        for (final m in movers) {
-          Passenger? updated;
-          _updatePassengerLocal(tourId, m.id, (p) {
-            final berths = p.assignedSeats
-                .where((a) => a.busId == busId && a.seatId == fromSeatId)
-                .length;
-            if (berths == 0) {
-              updated = p;
-              return p;
-            }
-            final next = p.assignedSeats
-                .where((a) => !(a.busId == busId && a.seatId == fromSeatId))
-                .toList();
-            for (var i = 0; i < berths; i++) {
-              next.add(SeatAssignment(busId: busId, seatId: toSeatId));
-            }
-            // Re-stamp per-seat legs: moving the pair keeps each occupant's leg
-            // multiset, only the seatId changes.
-            final stamped = resolveAssignmentLegs(
-              requestLines: p.requestLines,
-              assigned: next,
-              cellTypeAt: _cellTypeLookup(tour),
-            );
-            updated = p.copyWith(assignedSeats: stamped);
-            return updated!;
-          });
-          if (updated != null) changed.add(updated!);
-        }
-      },
-      persist: () async {
-        for (final p in changed) {
-          await _sync.smartUpdate(
-            table: 'passengers',
-            entityId: p.id,
-            data: p.toMap(),
-          );
-        }
-      },
+    Passenger move(Passenger p) {
+      final berths = p.assignedSeats
+          .where((a) => a.busId == busId && a.seatId == fromSeatId)
+          .length;
+      if (berths == 0) return p;
+      final next = p.assignedSeats
+          .where((a) => !(a.busId == busId && a.seatId == fromSeatId))
+          .toList();
+      for (var i = 0; i < berths; i++) {
+        next.add(SeatAssignment(busId: busId, seatId: toSeatId));
+      }
+      // Re-stamp per-seat legs: moving the pair keeps each occupant's leg
+      // multiset, only the seatId changes.
+      final stamped = resolveAssignmentLegs(
+        requestLines: p.requestLines,
+        assigned: next,
+        cellTypeAt: _cellTypeLookup(tour),
+      );
+      return p.copyWith(assignedSeats: stamped);
+    }
+
+    await _writePassengerEdits(
+      tourId,
+      [for (final m in movers) (id: m.id, update: move)],
       failure: tr('errors.move_seat'),
     );
   }
@@ -94,54 +77,37 @@ mixin _TourSeatSwaps on _TourSeating {
         .toList();
     if (affected.isEmpty) return;
 
-    final changed = <Passenger>[];
-    await _write(
-      optimistic: () {
-        for (final m in affected) {
-          Passenger? updated;
-          _updatePassengerLocal(tourId, m.id, (p) {
-            final onA = p.assignedSeats
-                .where((a) => a.busId == busId && a.seatId == seatAId)
-                .length;
-            final onB = p.assignedSeats
-                .where((a) => a.busId == busId && a.seatId == seatBId)
-                .length;
-            if (onA == 0 && onB == 0) {
-              updated = p;
-              return p;
-            }
-            final next = p.assignedSeats
-                .where((a) => !(a.busId == busId &&
-                    (a.seatId == seatAId || a.seatId == seatBId)))
-                .toList();
-            for (var i = 0; i < onA; i++) {
-              next.add(SeatAssignment(busId: busId, seatId: seatBId));
-            }
-            for (var i = 0; i < onB; i++) {
-              next.add(SeatAssignment(busId: busId, seatId: seatAId));
-            }
-            // Re-stamp per-seat legs: a contents swap keeps each occupant's leg
-            // multiset, only the seatIds change.
-            final stamped = resolveAssignmentLegs(
-              requestLines: p.requestLines,
-              assigned: next,
-              cellTypeAt: _cellTypeLookup(tour),
-            );
-            updated = p.copyWith(assignedSeats: stamped);
-            return updated!;
-          });
-          if (updated != null) changed.add(updated!);
-        }
-      },
-      persist: () async {
-        for (final p in changed) {
-          await _sync.smartUpdate(
-            table: 'passengers',
-            entityId: p.id,
-            data: p.toMap(),
-          );
-        }
-      },
+    Passenger exchange(Passenger p) {
+      final onA = p.assignedSeats
+          .where((a) => a.busId == busId && a.seatId == seatAId)
+          .length;
+      final onB = p.assignedSeats
+          .where((a) => a.busId == busId && a.seatId == seatBId)
+          .length;
+      if (onA == 0 && onB == 0) return p;
+      final next = p.assignedSeats
+          .where((a) => !(a.busId == busId &&
+              (a.seatId == seatAId || a.seatId == seatBId)))
+          .toList();
+      for (var i = 0; i < onA; i++) {
+        next.add(SeatAssignment(busId: busId, seatId: seatBId));
+      }
+      for (var i = 0; i < onB; i++) {
+        next.add(SeatAssignment(busId: busId, seatId: seatAId));
+      }
+      // Re-stamp per-seat legs: a contents swap keeps each occupant's leg
+      // multiset, only the seatIds change.
+      final stamped = resolveAssignmentLegs(
+        requestLines: p.requestLines,
+        assigned: next,
+        cellTypeAt: _cellTypeLookup(tour),
+      );
+      return p.copyWith(assignedSeats: stamped);
+    }
+
+    await _writePassengerEdits(
+      tourId,
+      [for (final m in affected) (id: m.id, update: exchange)],
       failure: tr('errors.move_seat'),
     );
   }

@@ -102,20 +102,10 @@ mixin _TourSeating on _TourSeatNotify {
             cellTypeAt: _cellTypeLookup(tourForLegs),
           )
         : assignments;
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = p.copyWith(assignedSeats: stamped);
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
-      },
+    await _writePassenger(
+      tourId,
+      passengerId,
+      (p) => p.copyWith(assignedSeats: stamped),
       failure: tr('errors.save_seat_assignment'),
     );
 
@@ -142,10 +132,7 @@ mixin _TourSeating on _TourSeatNotify {
     // turn left the per-tour Lock CTA permanently disabled (it gated on
     // `status == assigning`). Now seating progress is reflected in the
     // lifecycle and the lock gate.
-    final tour = getTour(tourId);
-    if (tour != null && tour.status == TourStatus.busBooked) {
-      await updateStatus(tourId, TourStatus.assigning);
-    }
+    await _advanceToAssigning(tourId);
     // A seat placed from the chart on a not-yet-confirmed rider IS the
     // confirmation: flip the flag + fire the WhatsApp greeting, matching the
     // Requests "Confirm" button (which otherwise never runs on this path).
@@ -226,41 +213,20 @@ mixin _TourSeating on _TourSeatNotify {
     // Apply every moved member LOCALLY in one pass (one repaint), REPLACING the
     // member's entire assignedSeats — so any berths they held on the OLD bus are
     // dropped, not merged.
-    _updateTourLocal(tourId, (t) {
-      final list = t.passengers.map((p) {
-        final ns = plan[p.id];
-        return ns == null ? p : p.copyWith(assignedSeats: ns);
-      }).toList();
-      return t.copyWith(passengers: list);
-    });
+    _applySeatMapLocal(tourId, plan);
 
     try {
-      try {
-        await _sync.applySeatAssignments(
-          tourId: tourId,
-          assignments: [
-            for (final entry in plan.entries)
-              {
-                'id': entry.key,
-                'assigned_seats': entry.value
-                    .map((s) => s.toMap())
-                    .toList(),
-              },
-          ],
-        );
-      } on RpcUnavailableException {
-        // Migration 011 not deployed yet — fall back to per-passenger writes.
-        final updated = getTour(tourId);
-        for (final id in plan.keys) {
-          final p = updated?.passengers.firstWhereOrNull((x) => x.id == id);
-          if (p == null) continue;
-          await _sync.smartUpdate(
-            table: 'passengers',
-            entityId: id,
-            data: p.toMap(),
-          );
-        }
-      }
+      await _persistSeatPlan(
+        tourId,
+        [
+          for (final entry in plan.entries)
+            {
+              'id': entry.key,
+              'assigned_seats': entry.value.map((s) => s.toMap()).toList(),
+            },
+        ],
+        plan.keys,
+      );
     } catch (e) {
       await refreshTours();
       AppSnackBar.error(
@@ -272,10 +238,7 @@ mixin _TourSeating on _TourSeatNotify {
 
     // A group move is a real seat placement: advance the lifecycle the same way
     // assignSeats / fillTour do, so the Lock CTA unlocks.
-    final t = getTour(tourId);
-    if (t != null && t.status == TourStatus.busBooked) {
-      await updateStatus(tourId, TourStatus.assigning);
-    }
+    await _advanceToAssigning(tourId);
     // A group move can seat a previously-unseated sibling: confirm + notify any
     // moved rider who was never confirmed, same as a single-seat placement.
     await _confirmAndNotifyOnSeat(tourId, plan.keys);
@@ -332,48 +295,23 @@ mixin _TourSeating on _TourSeatNotify {
     // persist the WHOLE plan in a single atomic transaction (DI-2). If the
     // server write fails it's all-or-nothing, so we just snap back to server
     // truth and ask the agent to re-generate — never a half-applied plan.
-    final changeMap = {
+    _applySeatMapLocal(tourId, {
       for (final c in changes) c.passengerId: c.newAssignedSeats,
-    };
-    _updateTourLocal(tourId, (t) {
-      final list = t.passengers.map((p) {
-        final ns = changeMap[p.id];
-        return ns == null ? p : p.copyWith(assignedSeats: ns);
-      }).toList();
-      return t.copyWith(passengers: list);
     });
 
     try {
-      try {
-        await _sync.applySeatAssignments(
-          tourId: tourId,
-          assignments: [
-            for (final c in changes)
-              {
-                'id': c.passengerId,
-                'assigned_seats': c.newAssignedSeats
-                    .map((s) => s.toMap())
-                    .toList(),
-              },
-          ],
-        );
-      } on RpcUnavailableException {
-        // Migration 011 not deployed yet — fall back to per-passenger writes,
-        // but STOP on the first failure so we never leave a half-applied plan
-        // (DI-2). Refresh then surfaces server truth.
-        final updated = getTour(tourId);
-        for (final c in changes) {
-          final p = updated?.passengers.firstWhereOrNull(
-            (x) => x.id == c.passengerId,
-          );
-          if (p == null) continue;
-          await _sync.smartUpdate(
-            table: 'passengers',
-            entityId: c.passengerId,
-            data: p.toMap(),
-          );
-        }
-      }
+      await _persistSeatPlan(
+        tourId,
+        [
+          for (final c in changes)
+            {
+              'id': c.passengerId,
+              'assigned_seats':
+                  c.newAssignedSeats.map((s) => s.toMap()).toList(),
+            },
+        ],
+        changes.map((c) => c.passengerId),
+      );
     } catch (e) {
       await refreshTours();
       AppSnackBar.error(
@@ -385,10 +323,7 @@ mixin _TourSeating on _TourSeatNotify {
 
     // First placement moves the tour into the "assigning" phase (once), which
     // unlocks the per-tour Lock CTA. Mirrors the single-seat assignSeats path.
-    final t = getTour(tourId);
-    if (t != null && t.status == TourStatus.busBooked) {
-      await updateStatus(tourId, TourStatus.assigning);
-    }
+    await _advanceToAssigning(tourId);
 
     // Any rider auto-fill just SEATED who was never confirmed is confirmed +
     // notified now — the same implicit confirmation as a manual chart placement.
@@ -417,20 +352,10 @@ mixin _TourSeating on _TourSeatNotify {
   /// of a free-then-place transfer — carries it across and re-prices it.
   Future<void> unassignSeats(String tourId, String passengerId) async {
     final vacating = _busIdsHeldBy(tourId, passengerId);
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
-        updated = p.copyWith(assignedSeats: []);
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
-      },
+    await _writePassenger(
+      tourId,
+      passengerId,
+      (p) => p.copyWith(assignedSeats: []),
       failure: tr('errors.clear_seat_assignment'),
     );
     _rememberVacated(tourId, passengerId, vacating);
@@ -450,31 +375,19 @@ mixin _TourSeating on _TourSeatNotify {
     final tour = getTour(tourId);
     if (tour == null) return;
 
-    final changed = <Passenger>[];
-    await _write(
-      optimistic: () {
-        for (final p in tour.passengers) {
-          if (!p.assignedSeats.any((a) => a.busId == busId)) continue;
-          final remaining = p.assignedSeats
-              .where((a) => a.busId != busId)
-              .toList();
-          Passenger? updated;
-          _updatePassengerLocal(tourId, p.id, (cur) {
-            updated = cur.copyWith(assignedSeats: remaining);
-            return updated!;
-          });
-          if (updated != null) changed.add(updated!);
-        }
-      },
-      persist: () async {
-        for (final p in changed) {
-          await _sync.smartUpdate(
-            table: 'passengers',
-            entityId: p.id,
-            data: p.toMap(),
-          );
-        }
-      },
+    final changed = await _writePassengerEdits(
+      tourId,
+      [
+        for (final p in tour.passengers)
+          if (p.assignedSeats.any((a) => a.busId == busId))
+            (
+              id: p.id,
+              update: (cur) => cur.copyWith(
+                assignedSeats:
+                    p.assignedSeats.where((a) => a.busId != busId).toList(),
+              ),
+            ),
+      ],
       failure: tr('errors.clear_bus'),
     );
     for (final p in changed) {
@@ -514,9 +427,10 @@ mixin _TourSeating on _TourSeatNotify {
     final type = cell?.seatType;
     final pos = cell?.position;
 
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
+    await _writePassenger(
+      tourId,
+      passengerId,
+      (p) {
         final newAssigned = p.assignedSeats
             .where((a) => !(a.busId == busId && a.seatId == seatId))
             .toList();
@@ -542,18 +456,9 @@ mixin _TourSeating on _TourSeatNotify {
           }
         }
 
-        updated = p.copyWith(
+        return p.copyWith(
           assignedSeats: newAssigned,
           requestLines: newRequest,
-        );
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
         );
       },
       failure: tr('errors.cancel_seat'),
@@ -589,9 +494,10 @@ mixin _TourSeating on _TourSeatNotify {
       '${sourceSeatIds.length}',
     );
     final tour = getTour(tourId);
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
+    await _writePassenger(
+      tourId,
+      passengerId,
+      (p) {
         final next =
             p.assignedSeats
                 .where(
@@ -610,16 +516,7 @@ mixin _TourSeating on _TourSeatNotify {
                 assigned: next,
                 cellTypeAt: _cellTypeLookup(tour),
               );
-        updated = p.copyWith(assignedSeats: stamped);
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
+        return p.copyWith(assignedSeats: stamped);
       },
       failure: tr('errors.consolidate_double'),
     );
@@ -726,9 +623,10 @@ mixin _TourSeating on _TourSeatNotify {
     }
 
     final tour = getTour(tourId);
-    Passenger? updated;
-    await _write(
-      optimistic: () => _updatePassengerLocal(tourId, passengerId, (p) {
+    await _writePassenger(
+      tourId,
+      passengerId,
+      (p) {
         // Count how many berths this passenger holds on the source cell.
         // 2 happens when they own a whole-double; 1 in every other case.
         // We replicate that count onto the target so a whole-double move
@@ -737,10 +635,7 @@ mixin _TourSeating on _TourSeatNotify {
         final held = p.assignedSeats
             .where((a) => a.busId == busId && a.seatId == fromSeatId)
             .length;
-        if (held == 0) {
-          updated = p;
-          return p;
-        }
+        if (held == 0) return p;
         final moveCount = berths == null
             ? held
             : (berths < held ? berths : held);
@@ -763,16 +658,7 @@ mixin _TourSeating on _TourSeatNotify {
                 assigned: next,
                 cellTypeAt: _cellTypeLookup(tour),
               );
-        updated = p.copyWith(assignedSeats: stamped);
-        return updated!;
-      }),
-      persist: () async {
-        if (updated == null) return;
-        await _sync.smartUpdate(
-          table: 'passengers',
-          entityId: passengerId,
-          data: updated!.toMap(),
-        );
+        return p.copyWith(assignedSeats: stamped);
       },
       failure: tr('errors.move_seat'),
     );
@@ -848,5 +734,61 @@ mixin _TourSeating on _TourSeatNotify {
 
     // Split when the new placement lands on any bus a sibling is NOT on.
     return newBusIds.any((b) => !siblingBusIds.contains(b));
+  }
+
+  // ── Shared placement plumbing (assignSeats / moveGroupToBus / fillTour) ──
+
+  /// A real seat placement moves a `busBooked` tour into `assigning` (once),
+  /// which is what unlocks the per-tour Lock CTA.
+  Future<void> _advanceToAssigning(String tourId) async {
+    final t = getTour(tourId);
+    if (t != null && t.status == TourStatus.busBooked) {
+      await updateStatus(tourId, TourStatus.assigning);
+    }
+  }
+
+  /// Apply a whole seat plan LOCALLY in one pass (one repaint), REPLACING each
+  /// listed passenger's entire assignedSeats; everyone else is untouched.
+  void _applySeatMapLocal(
+    String tourId,
+    Map<String, List<SeatAssignment>> seats,
+  ) {
+    _updateTourLocal(tourId, (t) {
+      final list = t.passengers.map((p) {
+        final ns = seats[p.id];
+        return ns == null ? p : p.copyWith(assignedSeats: ns);
+      }).toList();
+      return t.copyWith(passengers: list);
+    });
+  }
+
+  /// Persist a whole seat plan in one atomic `applySeatAssignments` call.
+  ///
+  /// Migration 011 not deployed yet ([RpcUnavailableException]) — fall back to
+  /// per-passenger writes of the LOCAL rows for [passengerIds], in order, but
+  /// STOP on the first failure (it propagates) so we never leave a
+  /// half-applied plan (DI-2). The caller's refresh then surfaces server truth.
+  Future<void> _persistSeatPlan(
+    String tourId,
+    List<Map<String, dynamic>> assignments,
+    Iterable<String> passengerIds,
+  ) async {
+    try {
+      await _sync.applySeatAssignments(
+        tourId: tourId,
+        assignments: assignments,
+      );
+    } on RpcUnavailableException {
+      final updated = getTour(tourId);
+      for (final id in passengerIds) {
+        final p = updated?.passengers.firstWhereOrNull((x) => x.id == id);
+        if (p == null) continue;
+        await _sync.smartUpdate(
+          table: 'passengers',
+          entityId: id,
+          data: p.toMap(),
+        );
+      }
+    }
   }
 }

@@ -75,25 +75,14 @@ mixin _TourHydration on _TourDiskCache {
     // the layout-fetched mark survived, so `need` stayed empty, the grid was
     // never re-requested, and the chart declared "no seat plan" on a bus that
     // has one. Same race, same fix, as the cold-start merge in [_loadTours].
-    final liveById = {for (final b in raw[idx].buses) b.id: b};
-    final withLayouts = [
-      for (final b in buses)
-        if (liveById[b.id]?.layout case final live?)
-          b.copyWith(layout: live)
-        else
-          b,
-    ];
+    //
     // The flag and the data must agree here too. A bus that leaves this merge
     // WITHOUT a grid, and which the server never answered `layout: null` for, is
     // not resolved — and a latched mark next to a null grid is now worse than a
     // wrong label: `charts_screen` offers "Restore seat map" on it, which
     // rebuilds a grid from the surviving seat ids and writes it over the live
     // one. Dropping the mark costs one cheap id+jsonb request instead.
-    for (final b in withLayouts) {
-      if (b.layout == null && !_layoutKnownNullBusIds.contains(b.id)) {
-        _layoutFetchedBusIds.remove(b.id);
-      }
-    }
+    final withLayouts = _mergeLiveLayouts(buses, raw[idx].buses);
 
     raw[idx] = raw[idx].copyWith(
       passengers: passengers,
@@ -110,6 +99,28 @@ mixin _TourHydration on _TourDiskCache {
     // Chart / capacity screens usually open next — pull layouts immediately
     // for this one tour rather than waiting on the background prefetch queue.
     await ensureBusLayoutsForTour(tourId);
+  }
+
+  /// Re-attach the grids already held in [live] onto [fresh] bus rows (which
+  /// never carry the layout jsonb), then drop the layout-fetched mark of every
+  /// merged bus left WITHOUT a grid — unless the server itself answered
+  /// `layout: null` for it. Shared by the cold-start merge in [_loadTours] and
+  /// [_hydrateTour]; see the call sites for the races this closes.
+  List<Bus> _mergeLiveLayouts(List<Bus> fresh, List<Bus> live) {
+    final liveById = {for (final b in live) b.id: b};
+    final withLayouts = [
+      for (final b in fresh)
+        if (liveById[b.id]?.layout case final live?)
+          b.copyWith(layout: live)
+        else
+          b,
+    ];
+    for (final b in withLayouts) {
+      if (b.layout == null && !_layoutKnownNullBusIds.contains(b.id)) {
+        _layoutFetchedBusIds.remove(b.id);
+      }
+    }
+    return withLayouts;
   }
 
   /// Ensures every bus on [tourId] has had its `layout` jsonb fetched (or

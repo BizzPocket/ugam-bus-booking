@@ -274,13 +274,21 @@ mixin _TourBuses on _TourSeatSwaps {
   }
 
   // Bus Management
-  Future<void> addBus(String tourId, Bus bus) async {
+
+  /// True (after telling the operator why) when [tourId]'s status no longer
+  /// allows the seat layout to change. An unknown tour is never blocked.
+  bool _layoutEditBlocked(String tourId) {
     final tourGate = getTour(tourId);
     if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
       AppSnackBar.info(tr('manage_buses.layout_locked_body'),
           title: tr('manage_buses.layout_locked_title'));
-      return;
+      return true;
     }
+    return false;
+  }
+
+  Future<void> addBus(String tourId, Bus bus) async {
+    if (_layoutEditBlocked(tourId)) return;
     final boundBus = bus.copyWith(tourId: tourId);
     final busData = {
       ...boundBus.toMap(),
@@ -332,14 +340,7 @@ mixin _TourBuses on _TourSeatSwaps {
     // grid this save, so gate on that instead: a re-layout after lock still
     // stops (the notified chart must not silently change shape), and a plain
     // detail edit goes through.
-    if (layoutChanged) {
-      final tourGate = getTour(tourId);
-      if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
-        AppSnackBar.info(tr('manage_buses.layout_locked_body'),
-            title: tr('manage_buses.layout_locked_title'));
-        return;
-      }
-    }
+    if (layoutChanged && _layoutEditBlocked(tourId)) return;
     await _write(
       optimistic: () => _updateTourLocal(
         tourId,
@@ -357,12 +358,7 @@ mixin _TourBuses on _TourSeatSwaps {
   }
 
   Future<void> removeBus(String tourId, String busId) async {
-    final tourGate = getTour(tourId);
-    if (tourGate != null && !tourGate.status.allowsLayoutEdit) {
-      AppSnackBar.info(tr('manage_buses.layout_locked_body'),
-          title: tr('manage_buses.layout_locked_title'));
-      return;
-    }
+    if (_layoutEditBlocked(tourId)) return;
     await _write(
       optimistic: () => _updateTourLocal(
         tourId,
