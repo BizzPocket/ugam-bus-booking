@@ -49,6 +49,19 @@ class _TourMoneyTabState extends State<TourMoneyTab> {
       final money = Get.find<MoneyController>();
       // Touch obs so Obx rebuilds when load finishes.
       final _ = money.collections.length + money.expenses.length;
+      // The controller holds ONE tour's rows at a time, and this tab's load
+      // only starts post-frame — until it does, `tourSummary()` describes
+      // whichever tour was loaded last (e.g. the dashboard hero's). Never
+      // paint that under this tour's name; show the placeholder instead, as
+      // the money board does. `isLoading` is read first so this Obx re-runs
+      // when the load starts and lands (`loadedTourId` itself is not Rx).
+      final loading = money.isLoading.value;
+      if (money.loadedTourId != tour.id ||
+          (loading && !money.loadedOnce.value)) {
+        return const SliverToBoxAdapter(
+          child: UgamSkeleton(height: 184, radius: UgamRadius.card),
+        );
+      }
       final summary = money.tourSummary();
 
       return SliverList(
@@ -112,7 +125,9 @@ class _TourMoneyTabState extends State<TourMoneyTab> {
                                 style:
                                     UgamText.titleS.copyWith(color: c.ink)),
                             Text(
-                              tr('tour_detail.vitals_riders_other', namedArgs: {
+                              // A leg-aware BERTH count, not a head count —
+                              // "riders" mislabelled it.
+                              tr('tour_detail.seats_count', namedArgs: {
                                 'n': '${tour.occupiedBerthsFor(bus.id)}',
                               }),
                               style:

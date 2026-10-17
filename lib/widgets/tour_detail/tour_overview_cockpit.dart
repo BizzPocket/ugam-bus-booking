@@ -82,12 +82,19 @@ class TourOverviewVitals extends StatelessWidget {
 
     String moneyDueLabel = '—';
     String moneySub = '';
+    // The money controller holds ONE tour's rows at a time (often the
+    // dashboard hero's). Only read its summary when that tour is THIS one —
+    // otherwise another trip's money would show here; '—' is the honest
+    // "not loaded" state (same guard as the dashboard trip hero).
     if (Get.isRegistered<MoneyController>()) {
-      final summary = Get.find<MoneyController>().tourSummary();
-      moneyDueLabel = Formatters.formatMoneyInr(summary.totalToCollect);
-      moneySub = tr('tour_detail.vitals_collected', namedArgs: {
-        'amount': Formatters.formatMoneyInr(summary.totalCollected),
-      });
+      final money = Get.find<MoneyController>();
+      if (money.loadedTourId == tour.id) {
+        final summary = money.tourSummary();
+        moneyDueLabel = Formatters.formatMoneyInr(summary.totalToCollect);
+        moneySub = tr('tour_detail.vitals_collected', namedArgs: {
+          'amount': Formatters.formatMoneyInr(summary.totalCollected),
+        });
+      }
     }
 
     return Column(
