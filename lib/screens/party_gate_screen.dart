@@ -324,40 +324,17 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
           runSpacing: UgamSpacing.sm,
           children: [
             for (var n = 0; n <= _people; n++)
-              UgamTappable(
-                // The selection click below IS this control's haptic; the
-                // wrapper's default lightImpact would stack a second buzz on
-                // every tap.
-                haptic: false,
-                pressedScale: 0.93,
+              _countChip(
+                c,
+                n: n,
+                selected: value == n,
+                width: box,
+                height: box,
+                textStyle: UgamText.body,
                 onTap: () {
                   HapticFeedback.selectionClick();
                   onChanged(n);
                 },
-                child: AnimatedContainer(
-                  duration: UgamMotion.tab,
-                  curve: UgamMotion.easeOut,
-                  width: box,
-                  height: box,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: value == n ? c.accentFill : c.cardElev,
-                    borderRadius: BorderRadius.circular(UgamRadius.chip),
-                    border: Border.all(
-                      color: value == n
-                          ? c.accent.withValues(alpha: 0.32)
-                          : c.border,
-                    ),
-                  ),
-                  child: Text(
-                    '$n',
-                    style: UgamText.tabular(
-                      UgamText.body.copyWith(
-                        color: value == n ? c.accent : c.ink2,
-                      ),
-                    ),
-                  ),
-                ),
               ),
           ],
         ),
@@ -374,9 +351,13 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
       runSpacing: UgamSpacing.sm,
       children: [
         for (var n = 1; n <= PartyGateScreen.maxPeople; n++)
-          UgamTappable(
-            haptic: false,
-            pressedScale: 0.93,
+          _countChip(
+            c,
+            n: n,
+            selected: _people == n,
+            width: w,
+            height: h,
+            textStyle: UgamText.titleS,
             onTap: () {
               HapticFeedback.selectionClick();
               // Re-zero the split: a breakdown of four people is nonsense the
@@ -387,31 +368,48 @@ class _PartyGateScreenState extends State<PartyGateScreen> {
                 _resetSplit();
               });
             },
-            child: AnimatedContainer(
-              duration: UgamMotion.tab,
-              curve: UgamMotion.easeOut,
-              width: w,
-              height: h,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: _people == n ? c.accentFill : c.cardElev,
-                borderRadius: BorderRadius.circular(UgamRadius.chip),
-                border: Border.all(
-                  color:
-                      _people == n ? c.accent.withValues(alpha: 0.32) : c.border,
-                ),
-              ),
-              child: Text(
-                '$n',
-                style: UgamText.tabular(
-                  UgamText.titleS.copyWith(
-                    color: _people == n ? c.accent : c.ink2,
-                  ),
-                ),
-              ),
-            ),
           ),
       ],
+    );
+  }
+
+  /// One tappable number box — the party-size chips and the split rows share
+  /// it, differing only in size and type scale.
+  Widget _countChip(
+    UgamColorSet c, {
+    required int n,
+    required bool selected,
+    required double width,
+    required double height,
+    required TextStyle textStyle,
+    required VoidCallback onTap,
+  }) {
+    return UgamTappable(
+      // The caller's selection click IS this control's haptic; the wrapper's
+      // default lightImpact would stack a second buzz on every tap.
+      haptic: false,
+      pressedScale: 0.93,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: UgamMotion.tab,
+        curve: UgamMotion.easeOut,
+        width: width,
+        height: height,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? c.accentFill : c.cardElev,
+          borderRadius: BorderRadius.circular(UgamRadius.chip),
+          border: Border.all(
+            color: selected ? c.accent.withValues(alpha: 0.32) : c.border,
+          ),
+        ),
+        child: Text(
+          '$n',
+          style: UgamText.tabular(
+            textStyle.copyWith(color: selected ? c.accent : c.ink2),
+          ),
+        ),
+      ),
     );
   }
 }
