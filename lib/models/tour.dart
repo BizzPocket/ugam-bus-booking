@@ -451,6 +451,11 @@ class Tour {
     List<Passenger>? passengers,
     List<PassengerGroup>? groups,
     DateTime? updatedAt,
+    // `??` can't null a field — these let an edit clear an optional value.
+    bool clearDepartureTime = false,
+    bool clearReturnDate = false,
+    bool clearReturnTime = false,
+    bool clearDescription = false,
   }) {
     return Tour(
       id: id,
@@ -458,11 +463,12 @@ class Tour {
       fromCity: fromCity ?? this.fromCity,
       toCity: toCity ?? this.toCity,
       departureDate: departureDate ?? this.departureDate,
-      departureTime: departureTime ?? this.departureTime,
-      returnDate: returnDate ?? this.returnDate,
-      returnTime: returnTime ?? this.returnTime,
+      departureTime:
+          clearDepartureTime ? null : departureTime ?? this.departureTime,
+      returnDate: clearReturnDate ? null : returnDate ?? this.returnDate,
+      returnTime: clearReturnTime ? null : returnTime ?? this.returnTime,
       pricePerSeat: pricePerSeat ?? this.pricePerSeat,
-      description: description ?? this.description,
+      description: clearDescription ? null : description ?? this.description,
       status: status ?? this.status,
       ownerId: ownerId ?? this.ownerId,
       busId: busId ?? this.busId,

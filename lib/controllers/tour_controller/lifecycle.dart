@@ -83,25 +83,23 @@ mixin _TourLifecycle on _TourHydration {
   }) async {
     await _updateTour(
       tourId,
-      (t) => Tour(
-        id: t.id,
+      // copyWith, never a full-constructor rebuild: a hand-rolled Tour(...)
+      // silently nulled every field it forgot (owner, bookingMode, advance,
+      // UPI payee, broadcast, groups…) — locally AND in the persisted row.
+      (t) => t.copyWith(
         title: title,
         fromCity: fromCity,
         toCity: toCity,
         departureDate: departureDate,
         departureTime: departureTime,
+        clearDepartureTime: departureTime == null,
         returnDate: returnDate,
+        clearReturnDate: returnDate == null,
         returnTime: returnTime,
+        clearReturnTime: returnTime == null,
         pricePerSeat: pricePerSeat,
         description: description,
-        status: t.status,
-        handlerId: t.handlerId,
-        createdBy: t.createdBy,
-        isPublic: t.isPublic,
-        buses: t.buses,
-        passengers: t.passengers,
-        createdAt: t.createdAt,
-        updatedAt: DateTime.now(),
+        clearDescription: description == null,
       ),
     );
   }

@@ -405,12 +405,16 @@ class Bus {
     List<PriceBand>? priceBands,
     String? notes,
     BusLayout? layout,
+    // `??` can't null a field — set this to drop the bus's handler pointer.
+    bool clearHandlerPassengerId = false,
   }) {
     return Bus(
       id: id,
       ownerId: ownerId ?? this.ownerId,
       tourId: tourId ?? this.tourId,
-      handlerPassengerId: handlerPassengerId ?? this.handlerPassengerId,
+      handlerPassengerId: clearHandlerPassengerId
+          ? null
+          : handlerPassengerId ?? this.handlerPassengerId,
       name: name ?? this.name,
       busNumber: busNumber ?? this.busNumber,
       driverName: driverName ?? this.driverName,
