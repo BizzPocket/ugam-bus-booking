@@ -16,6 +16,7 @@ import '../utils/formatters.dart';
 import '../utils/request_pricing.dart';
 import '../utils/upi_uri.dart';
 import '../utils/waitlist_pairing.dart';
+import 'band_picker_dialog.dart' show bandRowsLabel;
 
 /// Collect from a waitlisted one-leg rider: pair them, price them, send the QR,
 /// and confirm once the money is in.
@@ -469,13 +470,7 @@ class _BandRow extends StatelessWidget {
             const SizedBox(width: UgamSpacing.sm),
             Expanded(
               child: Text(
-                option.band.fromRow == option.band.toRow
-                    ? tr('band_picker.row_one',
-                        namedArgs: {'row': '${option.band.fromRow + 1}'})
-                    : tr('band_picker.rows', namedArgs: {
-                        'from': '${option.band.fromRow + 1}',
-                        'to': '${option.band.toRow + 1}',
-                      }),
+                bandRowsLabel(option),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: UgamText.caption.copyWith(color: c.ink2),
