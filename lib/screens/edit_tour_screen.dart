@@ -14,6 +14,9 @@ import '../utils/formatters.dart';
 import '../utils/time_format.dart';
 import '../widgets/booking_settings_sheet.dart';
 
+part 'edit_tour/edit_tour_widgets.dart';
+part 'edit_tour/tour_actions.dart';
+
 class EditTourScreen extends StatefulWidget {
   final String tourId;
   const EditTourScreen({super.key, required this.tourId});
@@ -80,61 +83,59 @@ class _EditTourScreenState extends State<EditTourScreen> {
     _returnDate = _origReturn;
     _returnTime = _origReturnTime;
 
-    _titleCtrl.addListener(_onFieldChanged);
-    _fromCtrl.addListener(_onFieldChanged);
-    _toCtrl.addListener(_onFieldChanged);
-    _priceCtrl.addListener(_onFieldChanged);
-    _descCtrl.addListener(_onFieldChanged);
+    for (final ctrl in _fieldCtrls) {
+      ctrl.addListener(_onFieldChanged);
+    }
   }
+
+  /// Every text field's controller — listened to for dirty/validation state.
+  List<TextEditingController> get _fieldCtrls =>
+      [_titleCtrl, _fromCtrl, _toCtrl, _priceCtrl, _descCtrl];
+
+  /// Pass-through so the `part`-file extensions can rebuild this State.
+  void _update(VoidCallback fn) => setState(fn);
 
   void _onFieldChanged() {
     _fieldDebounce?.cancel();
     _fieldDebounce = Timer(const Duration(milliseconds: 90), () {
-      if (mounted) {
-        setState(() {
-          // Clear a field's validation error once it has content again.
-          if (_titleError != null && _titleCtrl.text.trim().isNotEmpty) {
-            _titleError = null;
-          }
-          if (_fromError != null && _fromCtrl.text.trim().isNotEmpty) {
-            _fromError = null;
-          }
-          if (_toError != null && _toCtrl.text.trim().isNotEmpty) {
-            _toError = null;
-          }
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        // Clear a field's validation error once it has content again.
+        if (_titleError != null && _titleCtrl.text.trim().isNotEmpty) {
+          _titleError = null;
+        }
+        if (_fromError != null && _fromCtrl.text.trim().isNotEmpty) {
+          _fromError = null;
+        }
+        if (_toError != null && _toCtrl.text.trim().isNotEmpty) {
+          _toError = null;
+        }
+      });
     });
   }
 
   @override
   void dispose() {
-    _titleCtrl.removeListener(_onFieldChanged);
-    _fromCtrl.removeListener(_onFieldChanged);
-    _toCtrl.removeListener(_onFieldChanged);
-    _priceCtrl.removeListener(_onFieldChanged);
-    _descCtrl.removeListener(_onFieldChanged);
+    for (final ctrl in _fieldCtrls) {
+      ctrl.removeListener(_onFieldChanged);
+    }
     _fieldDebounce?.cancel();
-    _titleCtrl.dispose();
-    _fromCtrl.dispose();
-    _toCtrl.dispose();
-    _priceCtrl.dispose();
-    _descCtrl.dispose();
+    for (final ctrl in _fieldCtrls) {
+      ctrl.dispose();
+    }
     super.dispose();
   }
 
-  bool get _isDirty {
-    if (_titleCtrl.text != _origTitle) return true;
-    if (_fromCtrl.text != _origFrom) return true;
-    if (_toCtrl.text != _origTo) return true;
-    if (_priceCtrl.text != _origPrice) return true;
-    if (_descCtrl.text != _origDesc) return true;
-    if (_departureDate != _origDeparture) return true;
-    if (_departureTime != _origDepartureTime) return true;
-    if (_returnDate != _origReturn) return true;
-    if (_returnTime != _origReturnTime) return true;
-    return false;
-  }
+  bool get _isDirty =>
+      _titleCtrl.text != _origTitle ||
+      _fromCtrl.text != _origFrom ||
+      _toCtrl.text != _origTo ||
+      _priceCtrl.text != _origPrice ||
+      _descCtrl.text != _origDesc ||
+      _departureDate != _origDeparture ||
+      _departureTime != _origDepartureTime ||
+      _returnDate != _origReturn ||
+      _returnTime != _origReturnTime;
 
   /// Leave the screen, asking first when there is unsaved work.
   ///
@@ -205,20 +206,19 @@ class _EditTourScreenState extends State<EditTourScreen> {
       firstDate: first,
       lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
     );
-    if (picked != null) {
-      setState(() {
-        if (isReturn) {
-          _returnDate = picked;
-        } else {
-          _departureDate = picked;
-          _dateError = null;
-          if (_returnDate != null && _returnDate!.isBefore(picked)) {
-            _returnDate = null;
-            _returnTime = null;
-          }
+    if (picked == null) return;
+    setState(() {
+      if (isReturn) {
+        _returnDate = picked;
+      } else {
+        _departureDate = picked;
+        _dateError = null;
+        if (_returnDate != null && _returnDate!.isBefore(picked)) {
+          _returnDate = null;
+          _returnTime = null;
         }
-      });
-    }
+      }
+    });
   }
 
   Future<void> _pickTime(bool isReturn) async {
@@ -227,15 +227,14 @@ class _EditTourScreenState extends State<EditTourScreen> {
       context: context,
       initialTime: current ?? const TimeOfDay(hour: 9, minute: 0),
     );
-    if (picked != null) {
-      setState(() {
-        if (isReturn) {
-          _returnTime = picked;
-        } else {
-          _departureTime = picked;
-        }
-      });
-    }
+    if (picked == null) return;
+    setState(() {
+      if (isReturn) {
+        _returnTime = picked;
+      } else {
+        _departureTime = picked;
+      }
+    });
   }
 
   Future<void> _save() async {
@@ -289,197 +288,6 @@ class _EditTourScreenState extends State<EditTourScreen> {
     }
   }
 
-  /// One-tap "apply this price sheet to all buses". Lets the agent pick a
-  /// source bus, then copies its pricing — base price, the three per-type
-  /// overrides, the rear zone, and the flexible price bands — onto every OTHER
-  /// bus on this tour. Per-bus edits stay possible afterwards; this is just a
-  /// fast way to make one bus the template for the rest.
-  Future<void> _applyPriceSheet() async {
-    final ctrl = Get.find<TourController>();
-    final tour = ctrl.getTour(widget.tourId);
-    if (tour == null) return;
-    final buses = tour.buses;
-    if (buses.length < 2) {
-      AppSnackBar.warning(tr('edit_tour.price_sheet.need_two_buses'));
-      return;
-    }
-
-    final source = await UgamSheet.show<Bus>(
-      context,
-      title: tr('edit_tour.price_sheet.sheet_title'),
-      builder: (sheetCtx) {
-        final sc = UgamColors.of(sheetCtx);
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              // Was `body` pulled down to 13 — a size that exists nowhere on
-              // the ladder. `caption` (12) is the step below body and is what
-              // the rest of the app uses for sheet explainers.
-              tr('edit_tour.price_sheet.sheet_body'),
-              style: UgamText.caption.copyWith(color: sc.ink2, height: 1.5),
-            ),
-            const SizedBox(height: UgamSpacing.lg),
-            for (final b in buses) ...[
-              UgamCard.plain(
-                onTap: () => Navigator.of(sheetCtx).pop(b),
-                elev: true,
-                padding: const EdgeInsets.all(UgamSpacing.md),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            b.name,
-                            // `bodyStrong` is already 14; the override was a
-                            // no-op reading as an intentional off-ladder size.
-                            style: UgamText.bodyStrong.copyWith(color: sc.ink),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _priceSummary(b),
-                            style: UgamText.caption.copyWith(color: sc.ink2),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: UgamSpacing.sm),
-                    Icon(Icons.chevron_right_rounded, color: sc.ink3),
-                  ],
-                ),
-              ),
-              const SizedBox(height: UgamSpacing.sm),
-            ],
-          ],
-        );
-      },
-    );
-
-    if (source == null || !mounted) return;
-
-    final targets = buses.where((b) => b.id != source.id).toList();
-    final confirmed = await UgamDialog.confirm(
-      context,
-      title: tr('edit_tour.price_sheet.confirm_title'),
-      message: tr(
-        targets.length == 1
-            ? 'edit_tour.price_sheet.confirm_body_one'
-            : 'edit_tour.price_sheet.confirm_body_other',
-        namedArgs: {'name': source.name, 'count': '${targets.length}'},
-      ),
-      confirmLabel: tr('edit_tour.price_sheet.confirm_copy'),
-    );
-    if (!confirmed || !mounted) return;
-
-    setState(() => _saving = true);
-    try {
-      for (final t in targets) {
-        final updated = t.copyWith(
-          pricePerSeat: source.pricePerSeat,
-          singleSofaPrice: source.singleSofaPrice,
-          doubleSofaPrice: source.doubleSofaPrice,
-          seaterPrice: source.seaterPrice,
-          rearRows: source.rearRows,
-          rearPrice: source.rearPrice,
-          priceBands: List<PriceBand>.from(source.priceBands),
-        );
-        // Pricing-only copy — the seat grid is not part of this edit.
-        await ctrl.updateBus(widget.tourId, updated, layoutChanged: false);
-      }
-      if (!mounted) return;
-      AppSnackBar.success(
-        tr(
-          targets.length == 1
-              ? 'edit_tour.price_sheet.copied_one'
-              : 'edit_tour.price_sheet.copied_other',
-          namedArgs: {'name': source.name, 'count': '${targets.length}'},
-        ),
-      );
-    } catch (_) {
-      if (mounted) AppSnackBar.error(tr('edit_tour.price_sheet.copy_failed'));
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  /// Short price summary for a bus row in the source picker.
-  String _priceSummary(Bus b) {
-    final parts = <String>[
-      tr(
-        'edit_tour.price_sheet.per_seat',
-        namedArgs: {'price': b.pricePerSeat.toStringAsFixed(0)},
-      ),
-    ];
-    final bands = b.priceBands.length + (b.rearRows > 0 ? 1 : 0);
-    if (bands > 0) {
-      parts.add(
-        tr(
-          bands == 1
-              ? 'edit_tour.price_sheet.band_count_one'
-              : 'edit_tour.price_sheet.band_count_other',
-          namedArgs: {'count': '$bands'},
-        ),
-      );
-    }
-    return parts.join(' · ');
-  }
-
-  Future<void> _confirmAndDelete() async {
-    final tour = Get.find<TourController>().getTour(widget.tourId);
-    if (tour == null) return;
-
-    final pCount = tour.passengers.length;
-    final bCount = tour.buses.length;
-    final detailParts = <String>[
-      '"${tour.title}"',
-      if (pCount > 0)
-        tr(
-          pCount == 1
-              ? 'edit_tour.delete.passengers_one'
-              : 'edit_tour.delete.passengers_other',
-          namedArgs: {'count': '$pCount'},
-        ),
-      if (bCount > 0)
-        tr(
-          bCount == 1
-              ? 'edit_tour.delete.buses_unlinked_one'
-              : 'edit_tour.delete.buses_unlinked_other',
-          namedArgs: {'count': '$bCount'},
-        ),
-    ];
-    final detail = detailParts.join(' · ');
-
-    final confirmed = await UgamDialog.confirm(
-      context,
-      title: tr('edit_tour.delete.title'),
-      message: tr('edit_tour.delete.message', namedArgs: {'detail': detail}),
-      confirmLabel: tr('app.action.delete'),
-      destructive: true,
-      confirmIcon: Icons.delete_outline_rounded,
-    );
-    if (!confirmed || !mounted) return;
-
-    setState(() => _saving = true);
-    try {
-      await Get.find<TourController>().deleteTour(widget.tourId);
-      if (!mounted) return;
-      AppSnackBar.success(
-        tr('edit_tour.delete.deleted', namedArgs: {'title': tour.title}),
-      );
-      // Pop the NESTED tab stack back to the tab root (tour list). The just-
-      // deleted tour's Edit + Detail screens both drop away. A root-level
-      // Get.until ran on the root navigator (already at its first route) → a
-      // no-op that left the deleted tour's screens stranded on screen.
-      Navigator.of(context).popUntil((route) => route.isFirst);
-    } catch (_) {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
@@ -502,6 +310,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
   }
 
   Widget _form(UgamColorSet c, Tour tour, bool dirty) {
+    final descLen = _descCtrl.text.characters.length;
     return UgamScaffold(
       body: SafeArea(
         child: Column(
@@ -703,8 +512,7 @@ class _EditTourScreenState extends State<EditTourScreen> {
                     // cap was invisible: typing simply stopped, with nothing on
                     // screen saying why. Shown from 80% so it appears before it
                     // starts mattering, and turns danger-inked at the ceiling.
-                    if (_descCtrl.text.characters.length >=
-                        _descMaxLength * 0.8) ...[
+                    if (descLen >= _descMaxLength * 0.8) ...[
                       const SizedBox(height: UgamSpacing.xs),
                       Align(
                         alignment: Alignment.centerRight,
@@ -712,14 +520,13 @@ class _EditTourScreenState extends State<EditTourScreen> {
                           tr(
                             'edit_tour.desc_counter',
                             namedArgs: {
-                              'count': '${_descCtrl.text.characters.length}',
+                              'count': '$descLen',
                               'max': '$_descMaxLength',
                             },
                           ),
                           style: UgamText.tabular(
                             UgamText.caption.copyWith(
-                              color: _descCtrl.text.characters.length >=
-                                      _descMaxLength
+                              color: descLen >= _descMaxLength
                                   ? c.danger
                                   : c.ink3,
                             ),
@@ -799,292 +606,6 @@ class _EditTourScreenState extends State<EditTourScreen> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// The circle between the From and To city fields.
-///
-/// Was `accentFill` + `accent` in both orientations. A direction glyph is
-/// decoration, not a selection or an ownership state, so per the accent rule it
-/// carries no brand hue — and this screen was spending copper on it three times
-/// over (here, and on both preview pills) while the actual amber signal, the
-/// focused field ring, had to compete with all of it.
-class _RouteArrow extends StatelessWidget {
-  final UgamColorSet c;
-  final bool vertical;
-
-  const _RouteArrow({required this.c, required this.vertical});
-
-  @override
-  Widget build(BuildContext context) {
-    final d = UgamScale.px(context, 30);
-    return Container(
-      width: d,
-      height: d,
-      decoration: BoxDecoration(color: c.cardElev, shape: BoxShape.circle),
-      alignment: Alignment.center,
-      child: Icon(
-        vertical ? Icons.arrow_downward_rounded : Icons.arrow_forward_rounded,
-        size: UgamScale.px(context, 14),
-        color: c.ink2,
-      ),
-    );
-  }
-}
-
-/// One-tap entry into the "apply this price sheet to all buses" flow. Only
-/// shown when the tour has two or more buses (nothing to copy with one).
-class _ApplyPriceSheetCard extends StatelessWidget {
-  final UgamColorSet c;
-  final VoidCallback? onTap;
-
-  const _ApplyPriceSheetCard({required this.c, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    return UgamCard.plain(
-      onTap: onTap,
-      elev: true,
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      child: Row(
-        children: [
-          Container(
-            // Decorative medallion — scales with the device, never a tap box
-            // of its own (the whole card is the target).
-            width: UgamScale.px(context, 38),
-            height: UgamScale.px(context, 38),
-            decoration: BoxDecoration(
-              // Neutral, not accentFill: copying a price sheet is an action,
-              // not something the agent owns, and this screen already spends
-              // its one amber on the focused field.
-              color: c.cardElev,
-              borderRadius: BorderRadius.circular(UgamRadius.stat),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.content_copy_rounded,
-              size: UgamScale.px(context, 18),
-              color: enabled ? c.ink2 : c.ink3,
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr('edit_tour.price_sheet.card_title'),
-                  // `bodyStrong` IS 14 — the override was a no-op that made
-                  // this look like a deliberate off-ladder size.
-                  style: UgamText.bodyStrong.copyWith(color: c.ink),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  tr('edit_tour.price_sheet.card_subtitle'),
-                  style: UgamText.caption.copyWith(color: c.ink2),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.sm),
-          Icon(Icons.chevron_right_rounded, color: c.ink3),
-        ],
-      ),
-    );
-  }
-}
-
-class _TourPreviewCard extends StatelessWidget {
-  final UgamColorSet c;
-  final String title;
-  final String fromCity;
-  final String toCity;
-  final DateTime? departureDate;
-  final String price;
-
-  const _TourPreviewCard({
-    required this.c,
-    required this.title,
-    required this.fromCity,
-    required this.toCity,
-    required this.departureDate,
-    required this.price,
-  });
-
-  /// Route-initials monogram for the graphite backdrop, e.g. "S→M".
-  String? _routeLabel() {
-    final f = fromCity.trim();
-    final t = toCity.trim();
-    if (f.isEmpty || t.isEmpty) return null;
-    return '${f.characters.first.toUpperCase()}→${t.characters.first.toUpperCase()}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final shownTitle = title.isNotEmpty ? title : tr('edit_tour.preview.untitled');
-    final from = fromCity.isNotEmpty ? fromCity : tr('edit_tour.hint_from_city');
-    final to = toCity.isNotEmpty ? toCity : tr('edit_tour.hint_to_city');
-    final route = '$from → $to';
-    final dateText = departureDate != null
-        ? Formatters.formatDateMedium(
-            departureDate!,
-            locale: context.locale.languageCode,
-          )
-        : tr('edit_tour.preview.pick_date');
-    final setPriceLabel = tr('edit_tour.preview.set_price');
-    final priceText = () {
-      final n = double.tryParse(price);
-      if (n == null || n <= 0) return setPriceLabel;
-      return tr(
-        'edit_tour.preview.per_seat',
-        namedArgs: {'price': n.toStringAsFixed(0)},
-      );
-    }();
-
-    return UgamCard.plain(
-      padding: const EdgeInsets.all(UgamSpacing.md),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(UgamRadius.photo),
-            child: SizedBox(
-              // Decorative thumbnail — scales down with the device so it does
-              // not eat a fixed 64pt of a 375pt-wide card.
-              width: UgamScale.px(context, 64),
-              height: UgamScale.px(context, 64),
-              child: UgamBusBackdrop(
-                seed: 'preview-${fromCity}_$toCity',
-                label: _routeLabel(),
-              ),
-            ),
-          ),
-          const SizedBox(width: UgamSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  children: [
-                    UgamReqChip(label: tr('edit_tour.preview.eyebrow')),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        tr('edit_tour.preview.as_customer'),
-                        style: UgamText.caption.copyWith(color: c.ink3),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  shownTitle,
-                  style: UgamText.titleM.copyWith(
-                    color: title.isNotEmpty ? c.ink : c.ink3,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  route,
-                  style: UgamText.caption.copyWith(
-                    color: (fromCity.isNotEmpty && toCity.isNotEmpty)
-                        ? c.ink2
-                        : c.ink3,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: UgamSpacing.sm),
-                Wrap(
-                  // 6 is off-ladder (xs=4, sm=8) but is the pill gutter the
-                  // rest of this card already uses; see the reported gap.
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    _PreviewPill(
-                      c: c,
-                      icon: Icons.calendar_today_rounded,
-                      label: dateText,
-                      muted: departureDate == null,
-                    ),
-                    _PreviewPill(
-                      c: c,
-                      icon: Icons.currency_rupee_rounded,
-                      label: priceText,
-                      muted: priceText == setPriceLabel,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A single fact in the customer-preview card: the departure date, the fare.
-///
-/// `muted` means "not set yet". That distinction used to be carried by copper
-/// vs grey — two amber pills side by side on a screen whose amber is supposed
-/// to mean "this is yours". It is carried by INK now (set = `ink`, unset =
-/// `ink3`) on one shared neutral fill, which reads the same in both themes and
-/// leaves the accent to the focused field.
-class _PreviewPill extends StatelessWidget {
-  final UgamColorSet c;
-  final IconData icon;
-  final String label;
-  final bool muted;
-
-  const _PreviewPill({
-    required this.c,
-    required this.icon,
-    required this.label,
-    required this.muted,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final ink = muted ? c.ink3 : c.ink;
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: UgamSpacing.sm,
-        vertical: UgamSpacing.xs,
-      ),
-      decoration: BoxDecoration(
-        color: c.cardElev,
-        borderRadius: BorderRadius.circular(UgamRadius.chip),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: UgamScale.px(context, 12), color: ink),
-          const SizedBox(width: UgamSpacing.xs),
-          Flexible(
-            child: Text(
-              label,
-              // Was `caption` forced down to 11 — an off-ladder size invented
-              // for this one pill. `caption` (12) with the weight bumped says
-              // the same thing on the scale the rest of the app uses.
-              style: UgamText.tabular(
-                UgamText.caption.copyWith(
-                  color: ink,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
       ),
     );
   }
