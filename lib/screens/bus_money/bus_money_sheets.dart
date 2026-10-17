@@ -17,6 +17,10 @@ extension _BusMoneySheets on _BusMoneyScreenState {
           : tr('bus_money.edit_expense'),
       builder: (sheetCtx) {
         return _MoneyEntrySheetBody<ExpenseCategory>(
+          // Every category, busOwner included: this is the ADMIN's sheet and
+          // the admin pays the owner's rent, so an advance to the Malik is
+          // logged here (it reduces what is still owed on the Malik card).
+          // Handler surfaces never see rent.
           categories: ExpenseCategory.values,
           categoryLabel: (cat) => cat.displayName,
           detailsTitleKey: 'bus_money.expense_details',
