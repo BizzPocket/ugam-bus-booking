@@ -55,11 +55,6 @@ class CrowdLocationShare {
   @visibleForTesting
   static Future<List<BusShareCandidate>> Function(String phone)? debugResolve;
 
-  /// Runs on every cold start, before the splash routes anywhere.
-  ///
-  /// If this phone already has location permission, it returns immediately.
-  /// Otherwise it discloses and asks, and does not return until the person
-  /// has answered. The rest of the app waits on that answer.
   static BuildContext? _sheetContext(BuildContext context) {
     final root = Get.key.currentContext;
     if (root != null && root.mounted) return root;
@@ -67,11 +62,15 @@ class CrowdLocationShare {
     return null;
   }
 
+  /// Runs on every cold start, before the splash routes anywhere.
+  ///
+  /// If this phone already has location permission, it returns immediately.
+  /// Otherwise it discloses and asks, and does not return until the person
+  /// has answered. The rest of the app waits on that answer.
   static Future<TrackingStatus> ensurePermission(BuildContext context) async {
     try {
       final state = await _readStatus();
-      if (state == TrackingStatus.live ||
-          state == TrackingStatus.foregroundOnly) {
+      if (_grants(state)) {
         _markLaunch(state);
         return state;
       }
@@ -105,6 +104,10 @@ class CrowdLocationShare {
     launchStatus = state;
     permissionGateDone = true;
   }
+
+  /// A state in which this phone may stream its location.
+  static bool _grants(TrackingStatus state) =>
+      state == TrackingStatus.live || state == TrackingStatus.foregroundOnly;
 
   static Future<TrackingStatus> _readStatus() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -161,8 +164,7 @@ class CrowdLocationShare {
       // whose GPS switch was off at launch, or that granted permission in
       // system settings since, must start sharing now without a relaunch.
       var state = await _readStatus();
-      if (state != TrackingStatus.live &&
-          state != TrackingStatus.foregroundOnly) {
+      if (!_grants(state)) {
         if (permissionGateDone) {
           // The launch gate already asked this run: never prompt twice. A
           // denial stands until the next open, or the tracking card's Allow.
@@ -180,8 +182,7 @@ class CrowdLocationShare {
         return;
       }
       _settled = true;
-      if (state != TrackingStatus.live &&
-          state != TrackingStatus.foregroundOnly) {
+      if (!_grants(state)) {
         tracker.status.value = state;
         return;
       }
@@ -235,16 +236,8 @@ class CrowdLocationShare {
     BuildContext context, {
     bool alwaysDisclose = false,
   }) async {
-    var serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    var permission = await Geolocator.checkPermission();
-    var state = resolveTrackingStatus(
-      serviceEnabled: serviceEnabled,
-      permission: permission,
-    );
-    if (state == TrackingStatus.live ||
-        state == TrackingStatus.foregroundOnly) {
-      return state;
-    }
+    final state = await _readStatus();
+    if (_grants(state)) return state;
 
     final needsSheet = alwaysDisclose || state == TrackingStatus.denied;
     if (needsSheet) {
@@ -263,11 +256,11 @@ class CrowdLocationShare {
       return state;
     }
 
-    permission = await Geolocator.requestPermission();
+    var permission = await Geolocator.requestPermission();
     if (permission == LocationPermission.whileInUse && Platform.isAndroid) {
       permission = await Geolocator.requestPermission();
     }
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     return resolveTrackingStatus(
       serviceEnabled: serviceEnabled,
       permission: permission,
