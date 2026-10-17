@@ -56,14 +56,8 @@ class WhatsAppOutbound {
   Future<WaSendResult> sendSeatConfirmed({
     required Tour tour,
     required Passenger passenger,
-  }) async {
-    final message = WaMessage(
-      to: WhatsAppCloudService.graphPhone(passenger.phone),
-      template: WhatsAppCloudConfig.seatConfirmedTemplate,
-      bodyParams: [_param(passenger.name), _param(tour.title)],
-    );
-    return _cloud.send([message], passengerIds: [passenger.id]);
-  }
+  }) =>
+      _sendGreeting(WhatsAppCloudConfig.seatConfirmedTemplate, tour, passenger);
 
   /// PRE-LOCK greeting fired by the Confirm action on the Requests screen. Uses
   /// the same `seat_allocation` template — BODY {{1}} = passenger name,
@@ -71,10 +65,18 @@ class WhatsAppOutbound {
   Future<WaSendResult> sendConfirmed({
     required Tour tour,
     required Passenger passenger,
-  }) async {
+  }) =>
+      _sendGreeting(WhatsAppCloudConfig.confirmTemplate, tour, passenger);
+
+  /// One pre-lock greeting: BODY {{1}} = passenger name, {{2}} = tour title.
+  Future<WaSendResult> _sendGreeting(
+    String template,
+    Tour tour,
+    Passenger passenger,
+  ) async {
     final message = WaMessage(
       to: WhatsAppCloudService.graphPhone(passenger.phone),
-      template: WhatsAppCloudConfig.confirmTemplate,
+      template: template,
       bodyParams: [_param(passenger.name), _param(tour.title)],
     );
     return _cloud.send([message], passengerIds: [passenger.id]);
@@ -176,21 +178,14 @@ class WhatsAppOutbound {
           '${chartFailures.map((f) => f.error).toSet().toList()}');
     }
 
+    // Every recipient is either a message or a chart failure, so an empty
+    // [list] means every one of them failed locally.
     if (list.isEmpty) {
-      return WaSendResult(
-        sent: 0,
-        failed: chartFailures.length,
-        results: chartFailures,
-      );
+      return _withLocalFailures(WaSendResult.empty, chartFailures);
     }
 
     final res = await _cloud.send(list, passengerIds: listIds);
-    if (chartFailures.isEmpty) return res;
-    return WaSendResult(
-      sent: res.sent,
-      failed: res.failed + chartFailures.length,
-      results: [...res.results, ...chartFailures],
-    );
+    return _withLocalFailures(res, chartFailures);
   }
 
   /// Builds ONE passenger's `seat_allotment` message — renders + uploads their
@@ -224,10 +219,9 @@ class WhatsAppOutbound {
     // Departure date is the tour date; time + place come from the passenger's
     // bus, falling back to the tour-level chart footer (mirrors what the chart
     // image footer prints).
-    final timeLabel = _param(formatHhMm(bus?.departureTime) ??
-        (footer.departureTime.trim().isNotEmpty
-            ? footer.departureTime.trim()
-            : ''));
+    final timeLabel = _param(
+      formatHhMm(bus?.departureTime) ?? footer.departureTime.trim(),
+    );
     final place = _param(
       (bus?.boardingPoint.trim().isNotEmpty ?? false)
           ? bus!.boardingPoint.trim()
@@ -243,13 +237,15 @@ class WhatsAppOutbound {
         : tour.passengers.where((hp) => hp.id == handlerId).toList();
     final handler = handlerMatch.isNotEmpty ? handlerMatch.first : tour.handler;
     final handlerPhone = displayPhone(handler?.phone) ?? '';
-    final handlerContact = _param(
-      handler == null
-          ? ''
-          : (handlerPhone.isNotEmpty
-              ? '${handler.displayName} – $handlerPhone'
-              : handler.displayName),
-    );
+    final String contactLine;
+    if (handler == null) {
+      contactLine = '';
+    } else if (handlerPhone.isEmpty) {
+      contactLine = handler.displayName;
+    } else {
+      contactLine = '${handler.displayName} – $handlerPhone';
+    }
+    final handlerContact = _param(contactLine);
 
     String? chartUrl;
     try {
@@ -366,14 +362,6 @@ class WhatsAppOutbound {
   @visibleForTesting
   static String paramValue(String s) => _param(s);
 
-  /// Per-bus free-text announcement (F4 — ADMIN path). The signed-in agent
-  /// types one [messageText] and it goes to every passenger seated on [busId]
-  /// (anyone holding a seat assignment on that bus, either leg). Builds one
-  /// `busMessageTemplate` message per recipient — body var {{1}} = the typed
-  /// text — and routes the batch through the same `quick-action` Edge Function
-  /// the other sends use. Never throws on a per-recipient failure; inspect
-  /// [WaSendResult]. (The HANDLER path goes through the dedicated `bus-message`
-  /// function instead — see WhatsAppCloudService.sendBusMessageAsHandler.)
   /// The Graph-formatted phone numbers a [busId] announcement should reach:
   /// every rider holding a seat on that bus, DE-DUPLICATED BY PHONE and in a
   /// stable roster order.
@@ -414,6 +402,14 @@ class WhatsAppOutbound {
             p,
       ];
 
+  /// Per-bus free-text announcement (F4 — ADMIN path). The signed-in agent
+  /// types one [messageText] and it goes to every passenger seated on [busId]
+  /// (anyone holding a seat assignment on that bus, either leg). Builds one
+  /// `busMessageTemplate` message per recipient — body var {{1}} = the typed
+  /// text — and routes the batch through the same `quick-action` Edge Function
+  /// the other sends use. Never throws on a per-recipient failure; inspect
+  /// [WaSendResult]. (The HANDLER path goes through the dedicated `bus-message`
+  /// function instead — see WhatsAppCloudService.sendBusMessageAsHandler.)
   Future<WaSendResult> sendBusMessage({
     required Tour tour,
     required String busId,
@@ -505,12 +501,7 @@ class WhatsAppOutbound {
     final phones = busMessageRecipients(tour, busId);
     if (phones.isEmpty) {
       debugPrint('[WA] sendBusMessage early-return: no recipient on bus $busId');
-      if (unreachable.isEmpty) return WaSendResult.empty;
-      return WaSendResult(
-        sent: 0,
-        failed: unreachable.length,
-        results: unreachable,
-      );
+      return _withLocalFailures(WaSendResult.empty, unreachable);
     }
 
     final messages = phones
@@ -528,12 +519,7 @@ class WhatsAppOutbound {
         '${messages.length} msg(s), ${unreachable.length} unreachable '
         '-> ${messages.map((m) => m.to).toList()}');
     final res = await _cloud.send(messages);
-    if (unreachable.isEmpty) return res;
-    return WaSendResult(
-      sent: res.sent,
-      failed: res.failed + unreachable.length,
-      results: [...res.results, ...unreachable],
-    );
+    return _withLocalFailures(res, unreachable);
   }
 
   /// Sends a single "request cancelled" utility notification to [passenger].
@@ -542,15 +528,8 @@ class WhatsAppOutbound {
   Future<WaSendResult> sendRequestCancelled({
     required Tour tour,
     required Passenger passenger,
-  }) {
-    return _cloud.send([
-      WaMessage(
-        to: WhatsAppCloudService.graphPhone(passenger.phone),
-        template: WhatsAppCloudConfig.busMessageTemplate,
-        bodyParams: [_requestCancelledText(tour, passenger)],
-      ),
-    ]);
-  }
+  }) =>
+      sendRequestCancelledBatch(tour: tour, passengers: [passenger]);
 
   /// Batch variant of [sendRequestCancelled] for bulk declines.
   Future<WaSendResult> sendRequestCancelledBatch({
@@ -574,4 +553,19 @@ class WhatsAppOutbound {
         '${tour.title} (${tour.fromCity} → ${tour.toCity}) has been cancelled '
         'by admin. Please contact support/admin for details.';
   }
+}
+
+/// [res] with the recipients that failed LOCALLY (before reaching Meta) folded
+/// in as failures, so the summary the agent reads adds up to the roster.
+/// Unchanged when there are none.
+WaSendResult _withLocalFailures(
+  WaSendResult res,
+  List<WaRecipientResult> local,
+) {
+  if (local.isEmpty) return res;
+  return WaSendResult(
+    sent: res.sent,
+    failed: res.failed + local.length,
+    results: [...res.results, ...local],
+  );
 }
