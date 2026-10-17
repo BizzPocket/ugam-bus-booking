@@ -74,15 +74,9 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
       final upcoming = _upcoming(tourCtrl.tours);
       if (upcoming.isEmpty) return _emptyHero(context, c);
 
-      var tour = upcoming.first;
-      if (_selectedId != null) {
-        for (final t in upcoming) {
-          if (t.id == _selectedId) {
-            tour = t;
-            break;
-          }
-        }
-      }
+      final tour =
+          upcoming.where((t) => t.id == _selectedId).firstOrNull ??
+              upcoming.first;
       _ensureMoney(tour.id);
       // Layouts deferred on 2G cold start — warm the hero tour so the seat
       // meter upgrades from the legacy approximation to the precise grid.
@@ -108,7 +102,7 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
       tour.departureDate,
       locale: context.locale.languageCode,
     );
-    final blocker = _topAction(context, tour, cap);
+    final blocker = _topAction(tour, cap);
     final isReturn = tour.isReturnPhase;
     final pnl = _isPnlMode(tour);
     final m = money.loadedTourId == tour.id ? money.tourSummary() : null;
@@ -379,7 +373,7 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
   /// The single most-urgent action label for the hero line, derived from the
   /// same priority order as [DashboardScreen]'s attention list. `urgent` marks
   /// whether it's a live blocker (accent-eligible) vs an on-track affirmation.
-  _HeroAction _topAction(BuildContext context, Tour tour, TourCapacity cap) {
+  _HeroAction _topAction(Tour tour, TourCapacity cap) {
     final money = Get.find<MoneyController>();
     if (money.loadedTourId == tour.id) {
       final m = money.tourSummary();

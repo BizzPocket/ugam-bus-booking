@@ -76,6 +76,9 @@ class TourOverviewVitals extends StatelessWidget {
     // Requests banner and manage buses.
     final meter = Get.find<TourController>().seatMeterFor(tour);
     final free = meter.free;
+    // Each vital opens the tab that owns its number, when the host can switch.
+    VoidCallback? goTab(int i) =>
+        onSwitchTab == null ? null : () => onSwitchTab!(i);
 
     String moneyDueLabel = '—';
     String moneySub = '';
@@ -101,7 +104,7 @@ class TourOverviewVitals extends StatelessWidget {
                 value: '$pending',
                 accent: pending > 0,
                 sub: null,
-                onTap: onSwitchTab == null ? null : () => onSwitchTab!(1),
+                onTap: goTab(1),
               ),
             ),
             const SizedBox(width: UgamSpacing.sm),
@@ -112,7 +115,7 @@ class TourOverviewVitals extends StatelessWidget {
                 value: moneyDueLabel,
                 accent: false,
                 sub: moneySub.isEmpty ? null : moneySub,
-                onTap: onSwitchTab == null ? null : () => onSwitchTab!(3),
+                onTap: goTab(3),
               ),
             ),
           ],
@@ -132,7 +135,7 @@ class TourOverviewVitals extends StatelessWidget {
                         'seated': '$seated',
                         'open': '$seatedOpen',
                       }),
-                onTap: onSwitchTab == null ? null : () => onSwitchTab!(1),
+                onTap: goTab(1),
               ),
             ),
             const SizedBox(width: UgamSpacing.sm),
@@ -150,7 +153,7 @@ class TourOverviewVitals extends StatelessWidget {
                         'buses': '${tour.buses.length}',
                         'free': '$free',
                       }),
-                onTap: onSwitchTab == null ? null : () => onSwitchTab!(2),
+                onTap: goTab(2),
               ),
             ),
           ],
