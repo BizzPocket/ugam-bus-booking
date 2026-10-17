@@ -191,6 +191,10 @@ class CollectionReconciler {
 
     // Re-price every row that is attached to a live seat, including the ones
     // that never moved — a same-bus band edit re-prices them too.
+    // The row as it was BEFORE this plan touched it (same id).
+    Collection? originalOf(String id) =>
+        rows.firstWhereOrNull((o) => o.id == id);
+
     final updates = <Collection>[];
     var totalDue = 0.0;
     for (final r in [...matched, ...placed]) {
@@ -201,7 +205,7 @@ class CollectionReconciler {
       final priced = (due - r.amountDue).abs() > Collection.kMoneyEpsilon
           ? r.copyWith(amountDue: due)
           : r;
-      final original = rows.firstWhereOrNull((o) => o.id == priced.id);
+      final original = originalOf(priced.id);
       final changed =
           original == null ||
           original.busId != priced.busId ||
@@ -221,7 +225,7 @@ class CollectionReconciler {
     // reprice that leaves a collect/return gap. Same-band seat shuffle that
     // stays square stays silent.
     final dueRepriced = updates.any((u) {
-      final original = rows.firstWhereOrNull((o) => o.id == u.id);
+      final original = originalOf(u.id);
       if (original == null) return false;
       return (original.amountDue - u.amountDue).abs() > Collection.kMoneyEpsilon;
     });
@@ -229,32 +233,29 @@ class CollectionReconciler {
         !isSquare && (rehomedFromBus.isNotEmpty || dueRepriced);
     if (!shouldReport) return (updates: updates, delta: null);
 
+    // Each bus once, in first-seen order; its name only while the bus exists.
+    void addBus(List<String> ids, List<String> names, String id) {
+      if (ids.contains(id)) return;
+      ids.add(id);
+      final n = busById[id]?.name;
+      if (n != null) names.add(n);
+    }
+
     final toBusNames = <String>[];
     final toBusIds = <String>[];
     for (final s in seats) {
-      if (!toBusIds.contains(s.busId)) {
-        toBusIds.add(s.busId);
-        final n = busById[s.busId]?.name;
-        if (n != null) toBusNames.add(n);
-      }
+      addBus(toBusIds, toBusNames, s.busId);
     }
     final fromBusIds = <String>[];
     final fromBusNames = <String>[];
     if (rehomedFromBus.isNotEmpty) {
       for (final id in rehomedFromBus) {
-        fromBusIds.add(id);
-        final n = busById[id]?.name;
-        if (n != null) fromBusNames.add(n);
+        addBus(fromBusIds, fromBusNames, id);
       }
     } else {
       // Same-bus band change: origin is the bus(es) the updated rows sat on.
       for (final u in updates) {
-        final original = rows.firstWhereOrNull((o) => o.id == u.id);
-        final id = original?.busId ?? u.busId;
-        if (fromBusIds.contains(id)) continue;
-        fromBusIds.add(id);
-        final n = busById[id]?.name;
-        if (n != null) fromBusNames.add(n);
+        addBus(fromBusIds, fromBusNames, (originalOf(u.id) ?? u).busId);
       }
     }
 

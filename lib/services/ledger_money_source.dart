@@ -61,13 +61,7 @@ class LedgerMoneySource {
       for (final row in rows) {
         final tid = row['tour_id'] as String?;
         if (tid == null || tid.isEmpty) continue;
-        final v = row['online_minor'];
-        final minor = v is int
-            ? v
-            : v is num
-                ? v.round()
-                : int.tryParse('$v') ?? 0;
-        out[tid] = minorToRupees(minor);
+        out[tid] = minorToRupees(_minorOf(row['online_minor']));
       }
       return out;
     } catch (_) {
@@ -131,18 +125,14 @@ class LedgerMoneySource {
         .select('bus_id, category, amount')
         .inFilter('category', const ['fuel', 'driver', 'busOwner'])
         .isFilter('deleted_at', null);
-    return [
-      for (final r in (raw as List)) Map<String, dynamic>.from(r as Map),
-    ];
+    return _rowsOf(raw);
   }
 
   Future<List<Map<String, dynamic>>> _queryTourSummary() async {
     final raw = await _supabase.client
         .from('finance_tour_summary')
         .select('tour_id, online_minor');
-    return [
-      for (final r in (raw as List)) Map<String, dynamic>.from(r as Map),
-    ];
+    return _rowsOf(raw);
   }
 
   /// passengerId → owes in rupees (positive = still due, negative = change due).
@@ -154,13 +144,7 @@ class LedgerMoneySource {
     for (final row in rows) {
       final pid = row['passenger_id'] as String?;
       if (pid == null || pid.isEmpty) continue;
-      final v = row['owes_minor'];
-      final minor = v is int
-          ? v
-          : v is num
-              ? v.round()
-              : int.tryParse('$v') ?? 0;
-      out[pid] = minorToRupees(minor);
+      out[pid] = minorToRupees(_minorOf(row['owes_minor']));
     }
     return out;
   }
@@ -175,9 +159,7 @@ class LedgerMoneySource {
       q = q.eq('tour_id', tourId);
     }
     final raw = await q;
-    return [
-      for (final r in (raw as List)) Map<String, dynamic>.from(r as Map),
-    ];
+    return _rowsOf(raw);
   }
 
   Future<List<Map<String, dynamic>>> _queryRiderBalances(String tourId) async {
@@ -185,8 +167,19 @@ class LedgerMoneySource {
         .from('finance_rider_balance')
         .select('tour_id, passenger_id, owes_minor')
         .eq('tour_id', tourId);
-    return [
-      for (final r in (raw as List)) Map<String, dynamic>.from(r as Map),
-    ];
+    return _rowsOf(raw);
   }
+
+  /// A PostgREST select result as plain row maps.
+  static List<Map<String, dynamic>> _rowsOf(dynamic raw) => [
+        for (final r in (raw as List)) Map<String, dynamic>.from(r as Map),
+      ];
+
+  /// A ledger `*_minor` column as integer paise: int as-is, any other number
+  /// rounded, anything else parsed (0 when unparseable).
+  static int _minorOf(dynamic v) => v is int
+      ? v
+      : v is num
+          ? v.round()
+          : int.tryParse('$v') ?? 0;
 }
