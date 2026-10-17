@@ -225,24 +225,21 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   Bus? _selectedBus(Tour tour) {
     if (tour.buses.isEmpty) return null;
     final id = _selectedBusId;
-    if (id != null) {
-      final match = tour.buses.where((b) => b.id == id).toList();
-      if (match.isNotEmpty) return match.first;
-    }
-    return tour.buses.first;
+    final match =
+        id == null ? null : tour.buses.where((b) => b.id == id).firstOrNull;
+    return match ?? tour.buses.first;
   }
 
   Passenger? _selectedPassenger(Tour tour) {
     if (tour.passengers.isEmpty) return null;
     final id = _selectedPassengerId;
     if (id != null) {
-      final match = tour.passengers.where((p) => p.id == id).toList();
-      if (match.isNotEmpty) return match.first;
+      final match = tour.passengers.where((p) => p.id == id).firstOrNull;
+      if (match != null) return match;
     }
     // Default to the first un- or partially-assigned passenger.
-    final partial = tour.passengers.where((p) => !p.isFullyAssigned).toList();
-    if (partial.isNotEmpty) return partial.first;
-    return tour.passengers.first;
+    return tour.passengers.where((p) => !p.isFullyAssigned).firstOrNull ??
+        tour.passengers.first;
   }
 
   /// Selects [passengerId] and, when that passenger already holds a seat,
