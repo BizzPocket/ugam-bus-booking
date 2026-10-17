@@ -74,11 +74,12 @@ extension _BoardSheetActions on _BoardScreenState {
       seatId: seatId,
       onCollect: _money == null
           ? null
-          : (amount) => _collect(
+          : (amount, rider) => _collect(
               tour: tour,
               bus: bus,
               seatId: seatId,
               riders: riders,
+              selected: rider,
               amount: amount,
             ),
       // Without this the sheet's "move or swap" falls back to the LEGACY auto
@@ -165,33 +166,28 @@ extension _BoardSheetActions on _BoardScreenState {
 
   // ── Money (spec §8) ─────────────────────────────────────────
 
-  /// Records [amount] against whoever on this berth is owed it, and hands back
-  /// the undo.
+  /// Records [amount] against [selected] — the occupant the sheet was showing —
+  /// and hands back the undo.
   ///
-  /// **Why the rider is resolved by amount.** `PassengerSheet.onCollect` reports
-  /// the figure it collected but not WHICH of a shared berth's occupants it
-  /// collected from — the sheet keeps that selection privately. On a solo berth
-  /// (every berth on almost every bus) there is nothing to resolve. On a shared
-  /// one the rider whose outstanding balance equals the amount is the one the
-  /// sheet was showing. Reported upstream: the sheet should pass the occupant.
+  /// The rider comes from the sheet, never guessed. Matching on "whose balance
+  /// equals the amount" credited the WRONG person whenever both riders on a
+  /// shared sofa owed the same fare. A rider not on this berth (stale sheet)
+  /// throws, so the sheet reports a failed write instead of a fake success.
   Future<PassengerSheetUndo?> _collect({
     required Tour tour,
     required Bus bus,
     required String seatId,
     required List<Passenger> riders,
+    required Passenger? selected,
     required double amount,
   }) async {
     final money = _money;
     if (money == null || riders.isEmpty) return null;
 
-    final rider = riders.length == 1
-        ? riders.first
-        : riders.firstWhereOrNull((p) {
-            final due = bus.amountDueForSeat(p, seatId);
-            final held = money.collectionFor(p, bus.id, seatId)?.netCollected ?? 0;
-            return (due - held - amount).abs() <= Collection.kMoneyEpsilon;
-          }) ??
-              riders.first;
+    final rider = resolveBoardCollectRider(riders, selected);
+    if (rider == null) {
+      throw StateError('collect: rider is not on berth $seatId');
+    }
 
     final existing = money.collectionFor(rider, bus.id, seatId);
     final saved = buildCollectionToSave(
@@ -234,4 +230,18 @@ extension _BoardSheetActions on _BoardScreenState {
           : money.upsertCollection(existing),
     );
   }
+}
+
+/// Which of a berth's [riders] a Board collect is credited to: the occupant
+/// the sheet had [selected], matched by id against the live roster. A solo
+/// berth with no selection resolves to its one rider; anything else (a
+/// selection no longer on this berth) is null — never a guess.
+Passenger? resolveBoardCollectRider(
+  List<Passenger> riders,
+  Passenger? selected,
+) {
+  if (selected != null) {
+    return riders.firstWhereOrNull((p) => p.id == selected.id);
+  }
+  return riders.length == 1 ? riders.first : null;
 }

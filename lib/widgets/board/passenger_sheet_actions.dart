@@ -49,9 +49,12 @@ extension _PassengerSheetActions on _PassengerSheetState {
     );
     if (!ok || !mounted) return;
 
+    // The occupant is captured with the amount: on a shared sofa the two
+    // riders can owe the SAME figure, and only the sheet knows whose it is.
+    final rider = _occ.passenger;
     await _write(
       BoardAction.collect,
-      () => collect(amount),
+      () => collect(amount, rider),
       fallback: tr(
         'passenger_sheet.collected_toast',
         namedArgs: {
@@ -85,8 +88,10 @@ extension _PassengerSheetActions on _PassengerSheetState {
     );
     if (!ok || !mounted) return;
 
+    // No action: handing back change is not the money lens's Collect, so the
+    // sheet pops without a result and the aisle walk stays on this berth.
     await _write(
-      BoardAction.collect,
+      null,
       () => give(amount),
       fallback: tr(
         'passenger_sheet.returned_toast',
@@ -189,9 +194,10 @@ extension _PassengerSheetActions on _PassengerSheetState {
   }
 
   /// The one path every mutation goes through: run it, buzz, close the sheet so
-  /// the Board can auto-advance the aisle walk, and raise the undo.
+  /// the Board can auto-advance the aisle walk, and raise the undo. A null
+  /// [action] closes the sheet with no result, so the walk does not advance.
   Future<void> _write(
-    BoardAction action,
+    BoardAction? action,
     PassengerSheetWrite body, {
     required String fallback,
   }) async {
@@ -220,7 +226,9 @@ extension _PassengerSheetActions on _PassengerSheetState {
 
     HapticFeedback.lightImpact();
     navigator.maybePop(
-      PassengerSheetResult(action: action, completed: true),
+      action == null
+          ? null
+          : PassengerSheetResult(action: action, completed: true),
     );
     BoardUndoToast.show(
       overlay,

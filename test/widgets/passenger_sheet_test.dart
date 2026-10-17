@@ -115,7 +115,8 @@ PassengerSheet _sheet({
   BoardBerth? berth,
   Passenger? passenger,
   List<PassengerSheetOccupant>? occupants,
-  Future<PassengerSheetUndo?> Function(double amount)? onCollect,
+  Future<PassengerSheetUndo?> Function(double amount, Passenger? rider)?
+  onCollect,
   Future<PassengerSheetUndo?> Function(bool boarded)? onCheckIn,
   Future<PassengerSheetUndo?> Function(double amount)? onReturnChange,
 }) => PassengerSheet(
@@ -168,7 +169,7 @@ void main() {
           _host(
             _sheet(
               lens: lens,
-              onCollect: (_) async => null,
+              onCollect: (_, _) async => null,
               onCheckIn: (_) async => null,
             ),
           ),
@@ -220,7 +221,7 @@ void main() {
           _sheet(
             lens: const MoneyLens(),
             berth: _berth(fare: 1200, paid: 1200),
-            onCollect: (_) async => null,
+            onCollect: (_, _) async => null,
           ),
         ),
       );
@@ -237,7 +238,7 @@ void main() {
     testWidgets('name, berth code and type, leg, payment, phone, '
         'pickup, group and fare are all on screen', (tester) async {
       await tester.pumpWidget(
-        _host(_sheet(lens: const OccupancyLens(), onCollect: (_) async => null)),
+        _host(_sheet(lens: const OccupancyLens(), onCollect: (_, _) async => null)),
       );
       await tester.pump();
 
@@ -440,7 +441,7 @@ void main() {
         _host(
           _sheet(
             lens: const MoneyLens(),
-            onCollect: (amount) async {
+            onCollect: (amount, _) async {
               collected++;
               return null;
             },
@@ -464,7 +465,7 @@ void main() {
         _host(
           _sheet(
             lens: const MoneyLens(),
-            onCollect: (amount) async {
+            onCollect: (amount, _) async {
               collected++;
               return null;
             },
@@ -491,7 +492,7 @@ void main() {
         _host(
           _sheet(
             lens: const MoneyLens(),
-            onCollect: (amount) async {
+            onCollect: (amount, _) async {
               collectedAmount = amount;
               return PassengerSheetUndo(
                 message: 'Collected ₹550 from Priti Patel',
@@ -616,6 +617,98 @@ void main() {
       // Move needs the controller too, so it is present but inert.
       expect(find.text('board_lens.action_move'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('money goes to the right person', () {
+    testWidgets('a shared sofa collects from the SELECTED occupant even when '
+        'both owe the same figure', (tester) async {
+      Passenger? creditedTo;
+      await tester.pumpWidget(
+        _host(
+          _sheet(
+            lens: const MoneyLens(),
+            occupants: [
+              PassengerSheetOccupant(
+                berth: _berth(code: 'DS1', fare: 900, paid: 0),
+                passenger: _passenger(id: 'go', name: 'Asha'),
+              ),
+              PassengerSheetOccupant(
+                berth: _berth(code: 'DS1', fare: 900, paid: 0),
+                passenger: _passenger(
+                  id: 'ret',
+                  name: 'Bina',
+                  phone: '9000000001',
+                ),
+              ),
+            ],
+            onCollect: (amount, rider) async {
+              creditedTo = rider;
+              return null;
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Bina').last);
+      await tester.pumpAndSettle();
+      await tester.tap(_primaryLabel('board_lens.action_collect'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('passenger_sheet.confirm_collect_action'));
+      await tester.pumpAndSettle();
+
+      expect(creditedTo?.id, 'ret');
+      await _letToastExpire(tester);
+    });
+
+    testWidgets('returning change closes the sheet WITHOUT a Collect result, '
+        'so the money walk does not auto-advance', (tester) async {
+      PassengerSheetResult? result;
+      var closed = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(brightness: Brightness.dark),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Center(
+                child: ElevatedButton(
+                  onPressed: () async {
+                    result = await PassengerSheet.show(
+                      context,
+                      occupants: [
+                        PassengerSheetOccupant(
+                          berth: _berth(fare: 1000, paid: 1200),
+                          passenger: _passenger(),
+                        ),
+                      ],
+                      lens: const MoneyLens(),
+                      tourId: 't1',
+                      busId: 'b1',
+                      busName: 'Bus 1',
+                      seatId: 'DL3',
+                      onReturnChange: (_) async => null,
+                    );
+                    closed = true;
+                  },
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await _tapRow(tester, find.text('passenger_sheet.action_return_change'));
+      await tester.tap(find.text('passenger_sheet.confirm_return_action'));
+      await tester.pumpAndSettle();
+
+      expect(closed, isTrue);
+      expect(find.byType(PassengerSheet), findsNothing);
+      expect(result?.action, isNot(BoardAction.collect));
+      await _letToastExpire(tester);
     });
   });
 
