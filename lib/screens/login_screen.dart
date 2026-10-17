@@ -143,92 +143,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 const SizedBox(height: UgamSpacing.xl),
-                                // Brand block — centred logo (on a soft copper
-                                // halo), Sora wordmark, and tagline. The radial
-                                // glow is the signature futuristic flourish,
-                                // echoing the dashboard passenger hero.
-                                //
-                                // The `double.infinity` width is load-bearing:
-                                // this column's intrinsic width is the 188pt
-                                // halo, and under the parent's
-                                // CrossAxisAlignment.start that pinned the
-                                // whole brand block to the left edge while the
-                                // full-width phone field sat beneath it. It
-                                // has to claim the row before its own
-                                // `center` can mean anything.
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      // Decorative brand block -> px(), never
-                                      // tap(). All four numbers scale together
-                                      // so the halo keeps its proportion to the
-                                      // mark instead of towering over text
-                                      // textScaler already shrank.
-                                      SizedBox(
-                                        height: UgamScale.px(context, 132),
-                                        child: Stack(
-                                          alignment: Alignment.center,
-                                          clipBehavior: Clip.none,
-                                          children: [
-                                            Container(
-                                              width:
-                                                  UgamScale.px(context, 188),
-                                              height:
-                                                  UgamScale.px(context, 188),
-                                              decoration: BoxDecoration(
-                                                shape: BoxShape.circle,
-                                                gradient: RadialGradient(
-                                                  colors: [
-                                                    c.glow,
-                                                    c.glow
-                                                        .withValues(alpha: 0),
-                                                  ],
-                                                  stops: const [0.0, 0.7],
-                                                ),
-                                              ),
-                                            ),
-                                            UgamLogo(
-                                              size: UgamScale.px(context, 64),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(height: UgamSpacing.lg),
-                                      // Wraps rather than ellipsising: the
-                                      // wordmark is Latin in every locale
-                                      // today, but at the 1.3x text scale
-                                      // app.dart permits a hero step is one
-                                      // long word away from clipping.
-                                      Text(
-                                        tr('login.brand_name'),
-                                        textAlign: TextAlign.center,
-                                        style: UgamText.hero.copyWith(
-                                          color: c.ink,
-                                          // Tracking is a Latin wordmark
-                                          // device; on Gujarati/Hindi it pulls
-                                          // the matras off their consonants.
-                                          letterSpacing:
-                                              Localizations.localeOf(
-                                                    context,
-                                                  ).languageCode ==
-                                                  'en'
-                                              ? 2.0
-                                              : 0,
-                                        ),
-                                      ),
-                                      const SizedBox(height: UgamSpacing.sm),
-                                      Text(
-                                        tr('login.tagline'),
-                                        textAlign: TextAlign.center,
-                                        style: UgamText.body
-                                            .copyWith(color: c.ink2),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                                _LoginBrand(c: c),
                                 const SizedBox(height: UgamSpacing.huge),
                                 UgamPhoneInput(
                                   controller: controller.phoneController,
@@ -374,6 +289,79 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Brand block — centred logo (on a soft copper halo), Sora wordmark, and
+/// tagline. The radial glow is the signature futuristic flourish, echoing the
+/// dashboard passenger hero.
+///
+/// The `double.infinity` width is load-bearing: this column's intrinsic width
+/// is the 188pt halo, and under the parent's CrossAxisAlignment.start that
+/// pinned the whole brand block to the left edge while the full-width phone
+/// field sat beneath it. It has to claim the row before its own `center` can
+/// mean anything.
+class _LoginBrand extends StatelessWidget {
+  final UgamColorSet c;
+  const _LoginBrand({required this.c});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Decorative brand block -> px(), never tap(). All four numbers
+          // scale together so the halo keeps its proportion to the mark
+          // instead of towering over text textScaler already shrank.
+          SizedBox(
+            height: UgamScale.px(context, 132),
+            child: Stack(
+              alignment: Alignment.center,
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: UgamScale.px(context, 188),
+                  height: UgamScale.px(context, 188),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [c.glow, c.glow.withValues(alpha: 0)],
+                      stops: const [0.0, 0.7],
+                    ),
+                  ),
+                ),
+                UgamLogo(size: UgamScale.px(context, 64)),
+              ],
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.lg),
+          // Wraps rather than ellipsising: the wordmark is Latin in every
+          // locale today, but at the 1.3x text scale app.dart permits a hero
+          // step is one long word away from clipping.
+          Text(
+            tr('login.brand_name'),
+            textAlign: TextAlign.center,
+            style: UgamText.hero.copyWith(
+              color: c.ink,
+              // Tracking is a Latin wordmark device; on Gujarati/Hindi it
+              // pulls the matras off their consonants.
+              letterSpacing:
+                  Localizations.localeOf(context).languageCode == 'en'
+                      ? 2.0
+                      : 0,
+            ),
+          ),
+          const SizedBox(height: UgamSpacing.sm),
+          Text(
+            tr('login.tagline'),
+            textAlign: TextAlign.center,
+            style: UgamText.body.copyWith(color: c.ink2),
+          ),
+        ],
       ),
     );
   }
