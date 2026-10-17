@@ -118,12 +118,16 @@ enum BoardEmptyAction {
   createGroup;
 
   String get label => switch (this) {
-    BoardEmptyAction.createSeatPlan => tr('board_empty.action_create_seat_plan'),
+    BoardEmptyAction.createSeatPlan =>
+      tr('board_empty.action_create_seat_plan'),
     BoardEmptyAction.placeRiders => tr('board_empty.action_place_riders'),
     BoardEmptyAction.setFares => tr('board_empty.action_set_fares'),
-    BoardEmptyAction.reviewCollection => tr('board_empty.action_review_collection'),
-    BoardEmptyAction.previewExpected => tr('board_empty.action_preview_expected'),
-    BoardEmptyAction.addPickupPoints => tr('board_empty.action_add_pickup_points'),
+    BoardEmptyAction.reviewCollection =>
+      tr('board_empty.action_review_collection'),
+    BoardEmptyAction.previewExpected =>
+      tr('board_empty.action_preview_expected'),
+    BoardEmptyAction.addPickupPoints =>
+      tr('board_empty.action_add_pickup_points'),
     BoardEmptyAction.createGroup => tr('board_empty.action_create_group'),
   };
 
