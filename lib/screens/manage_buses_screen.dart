@@ -19,6 +19,8 @@ import '../utils/tour_capacity.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
 
+part 'manage_buses/manage_buses_list_item.dart';
+part 'manage_buses/manage_buses_sheet_tiles.dart';
 
 /// List of buses attached to a tour. Topbar + photo-anchored bus cards
 /// (matching the image-5 list pattern) + sticky bottom CTA to add a new bus.
@@ -35,6 +37,12 @@ class ManageBusesScreen extends StatelessWidget {
   TourController get _tourCtrl => Get.find<TourController>();
 
   bool _layoutEditable(Tour tour) => tour.status.allowsLayoutEdit;
+
+  /// Plain MaterialPageRoute push — the one transition every destination off
+  /// this screen uses.
+  void _push(BuildContext context, Widget screen) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (context) => screen));
+  }
 
   /// Opens a sheet with the per-bus actions: edit, call the driver, delete.
   void _openBusMenu(BuildContext context, Tour tour, Bus bus) {
@@ -65,12 +73,7 @@ class ManageBusesScreen extends StatelessWidget {
               label: tr('manage_buses.menu_edit'),
               onTap: () {
                 Navigator.of(ctx).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        AddBusScreen(tourId: tourId, existing: bus),
-                  ),
-                );
+                _push(context, AddBusScreen(tourId: tourId, existing: bus));
               },
             ),
             // Duplicate: open the add wizard seeded from this bus as a template
@@ -84,11 +87,9 @@ class ManageBusesScreen extends StatelessWidget {
                 label: tr('manage_buses.menu_duplicate'),
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          AddBusScreen(tourId: tourId, templateBus: bus),
-                    ),
+                  _push(
+                    context,
+                    AddBusScreen(tourId: tourId, templateBus: bus),
                   );
                 },
               ),
@@ -169,16 +170,18 @@ class ManageBusesScreen extends StatelessWidget {
 
     UgamSheet.show<void>(
       context,
-      title: tr('bus_handler.picker_title', namedArgs: {
-        'bus': bus.displayLabel,
-      }),
+      title: tr(
+        'bus_handler.picker_title',
+        namedArgs: {'bus': bus.displayLabel},
+      ),
       builder: (ctx) {
         final c = UgamColors.of(ctx);
         // Live bus so the current-handler highlight reflects the latest pick.
         final liveBus =
-            _tourCtrl.getTour(tour.id)?.buses.firstWhereOrNull(
-                  (b) => b.id == bus.id,
-                ) ??
+            _tourCtrl
+                .getTour(tour.id)
+                ?.buses
+                .firstWhereOrNull((b) => b.id == bus.id) ??
             bus;
         final currentId = liveBus.handlerPassengerId;
         return Column(
@@ -203,8 +206,10 @@ class ManageBusesScreen extends StatelessWidget {
                   if (isCurrent) return;
                   await _tourCtrl.setBusHandler(tour.id, bus.id, p.id);
                   AppSnackBar.success(
-                    tr('bus_handler.set_done',
-                        namedArgs: {'name': p.displayName}),
+                    tr(
+                      'bus_handler.set_done',
+                      namedArgs: {'name': p.displayName},
+                    ),
                   );
                 },
               );
@@ -233,9 +238,10 @@ class ManageBusesScreen extends StatelessWidget {
     final confirmed = await UgamDialog.confirm(
       context,
       title: tr('manage_buses.delete_title'),
-      message: tr('manage_buses.delete_body', namedArgs: {
-        'bus': bus.displayLabel,
-      }),
+      message: tr(
+        'manage_buses.delete_body',
+        namedArgs: {'bus': bus.displayLabel},
+      ),
       confirmLabel: tr('app.action.delete'),
       destructive: true,
       confirmIcon: Icons.delete_outline_rounded,
@@ -249,11 +255,8 @@ class ManageBusesScreen extends StatelessWidget {
     }
   }
 
-  void _openAddBus(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => AddBusScreen(tourId: tourId)),
-    );
-  }
+  void _openAddBus(BuildContext context) =>
+      _push(context, AddBusScreen(tourId: tourId));
 
   @override
   Widget build(BuildContext context) {
@@ -295,13 +298,18 @@ class ManageBusesScreen extends StatelessWidget {
             namedArgs: {'count': '${tour.buses.length}'},
           );
           final seatsLabel = totalCapacity > 0
-              ? tr('manage_buses.subtitle_seats_free', namedArgs: {
-                  'free': '${cap.free}',
-                  'capacity': '$totalCapacity',
-                })
+              ? tr(
+                  'manage_buses.subtitle_seats_free',
+                  namedArgs: {
+                    'free': '${cap.free}',
+                    'capacity': '$totalCapacity',
+                  },
+                )
               : null;
-          final summaryLine =
-              [busesLabel, seatsLabel].whereType<String>().join('  ·  ');
+          final summaryLine = [
+            busesLabel,
+            seatsLabel,
+          ].whereType<String>().join('  ·  ');
 
           return Column(
             children: [
@@ -373,13 +381,9 @@ class ManageBusesScreen extends StatelessWidget {
                             bus: bus,
                             busCap: cap.byBus[bus.id],
                             handlerName: handler?.displayName,
-                            onOpen: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (context) => BusStatusScreen(
-                                  tourId: tourId,
-                                  busId: bus.id,
-                                ),
-                              ),
+                            onOpen: () => _push(
+                              context,
+                              BusStatusScreen(tourId: tourId, busId: bus.id),
                             ),
                             onMore: () => _openBusMenu(ctx, tour, bus),
                             onHandler: () => _openHandlerPicker(ctx, tour, bus),
@@ -431,432 +435,6 @@ class ManageBusesScreen extends StatelessWidget {
     return UgamEmpty(
       icon: Icons.search_off_rounded,
       title: tr('manage_buses.tour_not_found'),
-    );
-  }
-}
-
-/// First-load placeholder shaped like the bus list it becomes, instead of a
-/// centred spinner that pops.
-class _BusListSkeleton extends StatelessWidget {
-  const _BusListSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(
-        UgamSpacing.gutter,
-        0,
-        UgamSpacing.gutter,
-        UgamSpacing.lg,
-      ),
-      children: [
-        for (var i = 0; i < 3; i++) ...[
-          const UgamSkeleton(height: 176, radius: UgamRadius.card),
-          const SizedBox(height: UgamSpacing.md),
-        ],
-      ],
-    );
-  }
-}
-
-class _BusListItem extends StatelessWidget {
-  final UgamColorSet c;
-  final Bus bus;
-
-  /// This bus's leg-aware capacity slice from the tour engine snapshot
-  /// (`cap.byBus[bus.id]`). Null when the bus isn't in the plan (no layout
-  /// yet) — the meter is simply skipped in that case.
-  final BusCapacity? busCap;
-
-  /// Display name of this bus's handler, or null when none is assigned yet.
-  final String? handlerName;
-  final VoidCallback onOpen;
-  final VoidCallback onMore;
-
-  /// Opens the per-bus handler picker (tapping the handler row).
-  final VoidCallback onHandler;
-
-  const _BusListItem({
-    required this.c,
-    required this.bus,
-    required this.busCap,
-    required this.handlerName,
-    required this.onOpen,
-    required this.onMore,
-    required this.onHandler,
-  });
-
-  /// Driver name only (line 1 of the meta stack). Phone is no longer crammed
-  /// here — it lives in the bus action sheet ("Call driver"). Empty when unset.
-  String get _driverLine => bus.driverName.trim();
-
-  /// This bus's own boarding place + departure time joined by a middot,
-  /// skipping blanks so an unset half never renders as a lone "·". Per-bus
-  /// values override the tour-level / chart-footer departure; empty when both
-  /// are unset. This is line 2 of the meta stack.
-  String get _departureLine => [bus.boardingPoint, formatHhMm(bus.departureTime)]
-      .where((s) => s != null && s.trim().isNotEmpty)
-      .join(' · ');
-
-  @override
-  Widget build(BuildContext context) {
-    return UgamCard.media(
-      onTap: onOpen,
-      elev: true,
-      child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // No thumbnail: buses carry no photo, so the 76pt slot only ever
-            // painted an empty generated backdrop beside the name.
-            Row(
-              children: [
-                const SizedBox(width: UgamSpacing.xs),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        bus.displayLabel,
-                        style: UgamText.titleS.copyWith(color: c.ink),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      // Line 1: driver name (emphasised). Line 2: boarding +
-                      // departure (muted). Phone is no longer crammed here — it
-                      // moved into the bus action sheet ("Call driver").
-                      if (_driverLine.isNotEmpty) ...[
-                        const SizedBox(height: UgamSpacing.xs),
-                        Text(
-                          _driverLine,
-                          style: UgamText.bodyStrong.copyWith(color: c.ink),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                      if (_departureLine.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          _departureLine,
-                          style: UgamText.caption.copyWith(color: c.ink2),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                      if (bus.isAC) ...[
-                        const SizedBox(height: UgamSpacing.sm),
-                        UgamReqChip(label: tr('manage_buses.tag_ac')),
-                      ],
-                    ],
-                  ),
-                ),
-                UgamIconButton(
-                  icon: Icons.more_vert_rounded,
-                  onTap: onMore,
-                  semanticLabel: tr('manage_buses.menu_more'),
-                ),
-              ],
-            ),
-            // Leg-aware occupancy: the shared two-leg meter ("Go x/n · Ret
-            // y/n" + free count over a single thin bar). Replaces the old
-            // merged $assigned/$cap + percentage bar, which hid which leg was
-            // fuller and could leak a fractional seatLoad. Skipped when the bus
-            // has no engine slice yet (no layout).
-            if (busCap != null && busCap!.capacity > 0) ...[
-              const SizedBox(height: UgamSpacing.md),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.sm),
-                child: UgamCapacityMeter.bus(busCap!),
-              ),
-              const SizedBox(height: UgamSpacing.xs),
-            ],
-            const SizedBox(height: UgamSpacing.sm),
-            _HandlerRow(c: c, handlerName: handlerName, onTap: onHandler),
-          ],
-        ),
-    );
-  }
-}
-
-/// Per-bus handler chip inside a bus card. Shows the current handler's name
-/// (with a badge) or a "Set handler" prompt; tapping opens the picker.
-class _HandlerRow extends StatelessWidget {
-  final UgamColorSet c;
-  final String? handlerName;
-  final VoidCallback onTap;
-
-  const _HandlerRow({
-    required this.c,
-    required this.handlerName,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hasHandler = handlerName != null && handlerName!.trim().isNotEmpty;
-    // No handler yet: the action is "set one" — a content-width TONAL button,
-    // not a full-width slab. Once set, a quiet neutral row names the handler.
-    if (!hasHandler) {
-      return Align(
-        alignment: AlignmentDirectional.centerStart,
-        child: IntrinsicWidth(
-          child: UgamButton(
-            label: tr('bus_handler.set_cta'),
-            icon: Icons.badge_outlined,
-            kind: UgamButtonKind.tonal,
-            onPressed: onTap,
-          ),
-        ),
-      );
-    }
-    return UgamTappable(
-      onTap: onTap,
-      semanticLabel: hasHandler
-          ? tr('bus_handler.row_current', namedArgs: {'name': handlerName!})
-          : tr('bus_handler.row_empty'),
-      child: Container(
-        // Was ~32pt tall (sm padding around a 12pt caption) on a row that is
-        // the only way into the handler picker.
-        constraints: BoxConstraints(minHeight: UgamScale.tap(context, 44)),
-        padding: const EdgeInsets.symmetric(
-          horizontal: UgamSpacing.md,
-          vertical: UgamSpacing.sm,
-        ),
-        // No hand-rolled border on the neutral state — depth comes from a
-        // recessed fill (base card tone, sunk into the elevated bus card)
-        // instead of a hairline. The set state keeps the copper accent tint:
-        // an assigned handler is an ownership marker, which is exactly what
-        // the accent is rationed for.
-        // Neutral recessed row in BOTH states. The set state used to paint a
-        // full-width copper slab per bus — two buses, two accent slabs on a
-        // screen whose one accent belongs to its CTA. The badge glyph in
-        // accent ink is the ownership marker now; the row itself stays quiet.
-        decoration: BoxDecoration(
-          color: c.card,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.badge_outlined,
-              size: 16,
-              color: hasHandler ? c.accent : c.ink3,
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            Expanded(
-              child: Text(
-                hasHandler
-                    ? tr('bus_handler.row_current',
-                        namedArgs: {'name': handlerName!})
-                    : tr('bus_handler.row_empty'),
-                style: UgamText.caption.copyWith(
-                  color: hasHandler ? c.ink : c.ink2,
-                  fontWeight: hasHandler ? FontWeight.w700 : FontWeight.w500,
-                ),
-                // Two lines: "Handler: <Gujarati name>" is the longest string
-                // on the card and a single line ellipsised the name away.
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.sm),
-            Icon(Icons.chevron_right_rounded, size: 16, color: c.ink3),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A row in the per-bus handler picker — a seated passenger with a check tick
-/// when they already handle this bus.
-class _HandlerPickTile extends StatelessWidget {
-  final UgamColorSet c;
-  final Passenger passenger;
-  final bool isCurrent;
-  final VoidCallback onTap;
-
-  const _HandlerPickTile({
-    required this.c,
-    required this.passenger,
-    required this.isCurrent,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final avatar = UgamScale.px(context, 36);
-    return UgamTappable(
-      onTap: onTap,
-      semanticLabel: passenger.displayName,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: UgamSpacing.sm),
-        constraints: BoxConstraints(minHeight: UgamScale.tap(context, 56)),
-        padding: const EdgeInsets.all(UgamSpacing.md),
-        decoration: BoxDecoration(
-          color: c.cardElev,
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-          border: isCurrent ? Border.all(color: c.accent, width: 1.5) : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: avatar,
-              height: avatar,
-              decoration: BoxDecoration(
-                color: isCurrent ? c.accent : c.card,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                passenger.displayName.isNotEmpty
-                    ? passenger.displayName.characters.first.toUpperCase()
-                    : '?',
-                style: UgamText.bodyStrong.copyWith(
-                  color: isCurrent ? c.onAccent : c.ink,
-                ),
-              ),
-            ),
-            const SizedBox(width: UgamSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 2 lines before ellipsis — app-wide name rule, see
-                  // UgamRequestRow.
-                  Text(
-                    passenger.displayName,
-                    style: UgamText.bodyStrong.copyWith(color: c.ink),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (passenger.phone.isNotEmpty)
-                    Text(
-                      passenger.phone,
-                      style: UgamText.caption.copyWith(color: c.ink2),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                ],
-              ),
-            ),
-            if (isCurrent) ...[
-              const SizedBox(width: UgamSpacing.sm),
-              Icon(Icons.check_circle_rounded, size: 20, color: c.accent),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BusMenuTile extends StatelessWidget {
-  final UgamColorSet c;
-  final IconData icon;
-  final String label;
-
-  /// Optional muted second line under the label (e.g. the driver's phone
-  /// number on the "Call driver" tile, or what deleting actually costs).
-  final String? subtitle;
-  final bool danger;
-  final VoidCallback onTap;
-
-  const _BusMenuTile({
-    required this.c,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.subtitle,
-    this.danger = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final fg = danger ? c.danger : c.ink;
-    // InkWell (ripple + 48dp tap target) replaces the raw GestureDetector;
-    // selection haptic on tap for native feel.
-    //
-    // The destructive tile's fill rides an [Ink] ABOVE the InkWell rather than
-    // a Container below it: a decorated child paints over the Material the
-    // splash lands on, which would have left the one tile that most needs to
-    // acknowledge the finger as the only tile with no visible press at all.
-    return Material(
-      color: Colors.transparent,
-      child: Ink(
-        // A destructive entry carries its own tonal danger surface, so it is
-        // recognisable before the label is read. `warmFill` (rose) on the old
-        // medallion said "a lady is seated here", not "this destroys data".
-        decoration: danger
-            ? BoxDecoration(
-                color: c.dangerFill,
-                borderRadius: BorderRadius.circular(UgamRadius.row),
-                border: Border.all(color: c.danger.withValues(alpha: 0.28)),
-              )
-            : null,
-        child: InkWell(
-          onTap: () {
-            HapticFeedback.selectionClick();
-            onTap();
-          },
-          borderRadius: BorderRadius.circular(UgamRadius.row),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: UgamScale.tap(context, 56)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                vertical: UgamSpacing.md,
-                horizontal: UgamSpacing.md,
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: UgamScale.px(context, 36),
-                    height: UgamScale.px(context, 36),
-                    decoration: BoxDecoration(
-                      color: danger
-                          ? c.danger.withValues(alpha: 0.14)
-                          : c.cardElev,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(icon, size: 18, color: fg),
-                  ),
-                  const SizedBox(width: UgamSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          label,
-                          style: UgamText.bodyStrong.copyWith(color: fg),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (subtitle != null &&
-                            subtitle!.trim().isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          // Wraps rather than truncating: the delete tile's
-                          // subtitle is a full Gujarati sentence and it is the
-                          // line that says what the tap costs.
-                          Text(
-                            subtitle!,
-                            style: UgamText.caption.copyWith(color: c.ink2),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: UgamSpacing.sm),
-                  Icon(Icons.chevron_right_rounded, size: 18, color: c.ink3),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
