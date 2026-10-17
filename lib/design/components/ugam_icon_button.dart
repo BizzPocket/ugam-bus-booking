@@ -163,26 +163,13 @@ class _UgamIconButtonState extends State<UgamIconButton>
     final c = UgamColors.of(context);
     final disabled = widget.onTap == null;
 
-    final Color bg;
-    final Color fg;
-    switch (widget.tone) {
-      case UgamIconButtonTone.danger:
-        bg = c.danger.withValues(alpha: 0.14);
-        fg = disabled ? c.ink3 : c.danger;
-        break;
-      case UgamIconButtonTone.accent:
-        bg = c.accentFill;
-        fg = disabled ? c.ink3 : c.accent;
-        break;
-      case UgamIconButtonTone.good:
-        bg = c.goodFill;
-        fg = disabled ? c.ink3 : c.good;
-        break;
-      case UgamIconButtonTone.neutral:
-        bg = c.cardElev;
-        fg = disabled ? c.ink3 : c.ink;
-        break;
-    }
+    final (Color bg, Color toneInk) = switch (widget.tone) {
+      UgamIconButtonTone.danger => (c.danger.withValues(alpha: 0.14), c.danger),
+      UgamIconButtonTone.accent => (c.accentFill, c.accent),
+      UgamIconButtonTone.good => (c.goodFill, c.good),
+      UgamIconButtonTone.neutral => (c.cardElev, c.ink),
+    };
+    final Color fg = disabled ? c.ink3 : toneInk;
 
     final Color ink = disabled ? fg : (widget.inkOverride ?? fg);
     final Color restFill = widget.fillOverride ?? bg;

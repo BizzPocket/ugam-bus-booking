@@ -114,24 +114,19 @@ class _BerthGlyph extends StatelessWidget {
       );
 
   @override
-  Widget build(BuildContext context) {
-    switch (type) {
-      case SeatType.singleSofa:
-        return _bar(15);
-      case SeatType.doubleSofa:
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [_bar(7), const SizedBox(width: 3), _bar(7)],
-        );
-      case SeatType.seater:
-        return Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(2.5),
+  Widget build(BuildContext context) => switch (type) {
+        SeatType.singleSofa => _bar(15),
+        SeatType.doubleSofa => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [_bar(7), const SizedBox(width: 3), _bar(7)],
           ),
-        );
-    }
-  }
+        SeatType.seater => Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2.5),
+            ),
+          ),
+      };
 }

@@ -75,16 +75,12 @@ class UgamSwipeAction extends StatelessWidget {
     // Arm each direction independently: the right action needs [rightIcon],
     // the destructive left swipe needs a delete handler. Anything else would
     // let the user fling a row off a list that still holds it.
-    final DismissDirection direction;
-    if (rightIcon != null && _handlesDelete) {
-      direction = DismissDirection.horizontal;
-    } else if (rightIcon != null) {
-      direction = DismissDirection.startToEnd;
-    } else if (_handlesDelete) {
-      direction = DismissDirection.endToStart;
-    } else {
-      direction = DismissDirection.none;
-    }
+    final direction = switch ((rightIcon != null, _handlesDelete)) {
+      (true, true) => DismissDirection.horizontal,
+      (true, false) => DismissDirection.startToEnd,
+      (false, true) => DismissDirection.endToStart,
+      (false, false) => DismissDirection.none,
+    };
 
     return Dismissible(
       key: key!,

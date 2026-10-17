@@ -12,18 +12,12 @@ import '../tokens.dart';
 /// with the group / priority ring. Shared by every chart that paints a money
 /// dot (handler, manual seat assignment, charts, bus status).
 extension SeatMoneyStateColor on SeatMoneyState {
-  Color dotColor(UgamColorSet c) {
-    switch (this) {
-      case SeatMoneyState.paid:
-        return c.good;
-      case SeatMoneyState.owing:
-        return c.danger;
-      case SeatMoneyState.returnDue:
-        return c.warm;
-      case SeatMoneyState.uncollected:
-        return c.ink3;
-    }
-  }
+  Color dotColor(UgamColorSet c) => switch (this) {
+        SeatMoneyState.paid => c.good,
+        SeatMoneyState.owing => c.danger,
+        SeatMoneyState.returnDue => c.warm,
+        SeatMoneyState.uncollected => c.ink3,
+      };
 }
 
 /// The canonical seat-chart legend, shared by every occupancy screen so the
@@ -193,20 +187,31 @@ class _LegendItem extends StatelessWidget {
     required this.c,
   });
 
+  /// The one-way leg swatch (GO / RET): a tinted fill with a solid border in
+  /// the same leg tint.
+  static Widget _legTile(Color tint) => Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          color: tint.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(color: tint, width: 1.6),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
-    Widget dot;
-    switch (swatch) {
-      case _LegendSwatch.dashed:
-        dot = CustomPaint(
+    final Widget dot = switch (swatch) {
+      _LegendSwatch.dashed =>
+        CustomPaint(
           painter: _DashedBorderPainter(
             color: c.ink3.withValues(alpha: 0.7),
             radius: 3,
           ),
           child: const SizedBox(width: 12, height: 12),
-        );
-      case _LegendSwatch.filled:
-        dot = Container(
+        ),
+      _LegendSwatch.filled =>
+        Container(
           width: 12,
           height: 12,
           decoration: BoxDecoration(
@@ -214,11 +219,11 @@ class _LegendItem extends StatelessWidget {
             borderRadius: BorderRadius.circular(3),
             border: Border.all(color: c.border),
           ),
-        );
-      case _LegendSwatch.familyBar:
+        ),
+      _LegendSwatch.familyBar =>
         // A mini flat tile with a colour bar down the left edge — same colour =
         // same booking, so families read as clusters on the chart.
-        dot = Container(
+        Container(
           width: 15,
           height: 12,
           clipBehavior: Clip.antiAlias,
@@ -232,12 +237,12 @@ class _LegendItem extends StatelessWidget {
               Container(width: 3.5, color: const Color(0xFF3FB0A0)),
             ],
           ),
-        );
-      case _LegendSwatch.priorityDot:
+        ),
+      _LegendSwatch.priorityDot =>
         // Matches the tile's copper priority dot.
-        dot = _Dot(color: c.warm, size: 11);
-      case _LegendSwatch.held:
-        dot = Container(
+        _Dot(color: c.warm, size: 11),
+      _LegendSwatch.held =>
+        Container(
           width: 12,
           height: 12,
           decoration: BoxDecoration(
@@ -247,29 +252,11 @@ class _LegendItem extends StatelessWidget {
           ),
           alignment: Alignment.center,
           child: Icon(Icons.lock_outline_rounded, size: 8, color: c.ink3),
-        );
-      case _LegendSwatch.go:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: kOneWayTint.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: kOneWayTint, width: 1.6),
-          ),
-        );
-      case _LegendSwatch.ret:
-        dot = Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: kReturnTint.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: kReturnTint, width: 1.6),
-          ),
-        );
-      case _LegendSwatch.halfFare:
-        dot = Container(
+        ),
+      _LegendSwatch.go => _legTile(kOneWayTint),
+      _LegendSwatch.ret => _legTile(kReturnTint),
+      _LegendSwatch.halfFare =>
+        Container(
           width: 16,
           height: 12,
           alignment: Alignment.center,
@@ -289,12 +276,12 @@ class _LegendItem extends StatelessWidget {
               fontWeight: FontWeight.w900,
             ),
           ),
-        );
-      case _LegendSwatch.paidDot:
-        dot = _Dot(color: c.good, size: 12);
-      case _LegendSwatch.owingDot:
-        dot = _Dot(color: c.danger, size: 12);
-    }
+        ),
+      _LegendSwatch.paidDot =>
+        _Dot(color: c.good, size: 12),
+      _LegendSwatch.owingDot =>
+        _Dot(color: c.danger, size: 12),
+    };
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
