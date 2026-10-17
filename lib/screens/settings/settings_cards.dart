@@ -78,7 +78,7 @@ class _FinanceCardState extends State<_FinanceCard> {
           children: [
             // Was a one-off 44/21/r13 medallion — the only one in the whole
             // cluster that missed the canonical 40/20/r12 spec.
-            _RowIcon(
+            SettingsRowIcon(
               icon: failed ? Icons.cloud_off_rounded : Icons.insights_rounded,
               background: failed ? c.dangerFill : c.accentFill,
               foreground: failed ? c.danger : c.accent,
@@ -199,7 +199,7 @@ class _AccountCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _GroupCard(
+    return SettingsGroupCard(
       children: [
         _AccountRow(
           c: c,
@@ -229,7 +229,7 @@ class _AccountRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return ConstrainedBox(
       constraints: BoxConstraints(
-        minHeight: UgamScale.tap(context, _rowMinHeight),
+        minHeight: UgamScale.tap(context, kSettingsRowMinHeight),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(
@@ -238,7 +238,11 @@ class _AccountRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            _RowIcon(icon: icon, background: c.card, foreground: c.ink2),
+            SettingsRowIcon(
+              icon: icon,
+              background: c.card,
+              foreground: c.ink2,
+            ),
             const SizedBox(width: UgamSpacing.md),
             Expanded(
               child: Column(

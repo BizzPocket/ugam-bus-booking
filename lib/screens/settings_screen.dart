@@ -13,6 +13,7 @@ import '../controllers/theme_controller.dart';
 import '../design/ugam.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/language_picker_sheet.dart';
+import '../widgets/settings_row_kit.dart';
 import 'account_details_screen.dart';
 import 'finance_screen.dart';
 import 'legal_document_screen.dart';
@@ -22,18 +23,6 @@ import 'whatsapp_settings_screen.dart';
 
 part 'settings/settings_cards.dart';
 part 'settings/settings_rows.dart';
-
-/// ── Canonical settings-row geometry ────────────────────────────────────────
-/// The settings cluster (this screen + Account Details, Notifications,
-/// WhatsApp) was built across several passes and drifted: 38 vs 40 px icon
-/// tiles, 18 vs 20 px glyphs, corner radius 11 vs 12 vs 14, and two different
-/// row paddings. These four numbers are the agreed spec, and the same block is
-/// copied at the top of `notifications_settings_screen.dart`. Change both
-/// together, or promote them to a shared widget.
-const double _rowIconBox = 40;
-const double _rowIconGlyph = 20;
-const double _rowIconRadius = 12;
-const double _rowMinHeight = 64;
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -104,13 +93,13 @@ class SettingsScreen extends StatelessWidget {
                       color: c.ink2,
                     ),
                     const SizedBox(height: UgamSpacing.sm),
-                    _GroupCard(
+                    SettingsGroupCard(
                       children: [BiometricToggle(authCtrl: authCtrl)],
                     ),
                     const SizedBox(height: UgamSpacing.xl),
                     UgamSectionLabel(tr('settings.title'), color: c.ink2),
                     const SizedBox(height: UgamSpacing.sm),
-                    _GroupCard(
+                    SettingsGroupCard(
                       children: [
                         _SettingsRow(
                           c: c,
@@ -119,7 +108,7 @@ class SettingsScreen extends StatelessWidget {
                           subtitle: tr('settings.account_details_subtitle'),
                           onTap: () => _push(context, const AccountDetailsScreen()),
                         ),
-                        _Divider(c: c),
+                        SettingsRowDivider(c: c),
                         _SettingsRow(
                           c: c,
                           icon: Icons.notifications_none_rounded,
@@ -128,7 +117,7 @@ class SettingsScreen extends StatelessWidget {
                           onTap: () =>
                               _push(context, const NotificationsSettingsScreen()),
                         ),
-                        _Divider(c: c),
+                        SettingsRowDivider(c: c),
                         _SettingsRow(
                           c: c,
                           icon: Icons.place_outlined,
@@ -136,7 +125,7 @@ class SettingsScreen extends StatelessWidget {
                           subtitle: tr('pickup.settings_subtitle'),
                           onTap: () => _push(context, const PickupLocationsScreen()),
                         ),
-                        _Divider(c: c),
+                        SettingsRowDivider(c: c),
                         _SettingsRow(
                           c: c,
                           icon: Icons.chat_outlined,
@@ -144,7 +133,7 @@ class SettingsScreen extends StatelessWidget {
                           subtitle: tr('settings.whatsapp_subtitle'),
                           onTap: () => _push(context, const WhatsAppSettingsScreen()),
                         ),
-                        _Divider(c: c),
+                        SettingsRowDivider(c: c),
                         _SettingsRow(
                           c: c,
                           icon: Icons.language_rounded,
@@ -164,7 +153,7 @@ class SettingsScreen extends StatelessWidget {
                       color: c.ink2,
                     ),
                     const SizedBox(height: UgamSpacing.sm),
-                    _GroupCard(
+                    SettingsGroupCard(
                       children: [
                         _SettingsRow(
                           c: c,
@@ -173,7 +162,7 @@ class SettingsScreen extends StatelessWidget {
                           subtitle: tr('customer_more.about_subtitle'),
                           onTap: () => _openDoc(context, LegalContent.about),
                         ),
-                        _Divider(c: c),
+                        SettingsRowDivider(c: c),
                         _SettingsRow(
                           c: c,
                           icon: Icons.shield_outlined,
@@ -181,7 +170,7 @@ class SettingsScreen extends StatelessWidget {
                           subtitle: tr('customer_more.privacy_subtitle'),
                           onTap: () => _openDoc(context, LegalContent.privacy),
                         ),
-                        _Divider(c: c),
+                        SettingsRowDivider(c: c),
                         _SettingsRow(
                           c: c,
                           icon: Icons.description_outlined,
@@ -341,7 +330,7 @@ class _BiometricToggleState extends State<BiometricToggle> {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    return _SecurityToggleRow(
+    return SettingsToggleRow(
       c: c,
       icon: Icons.fingerprint_rounded,
       title: tr('settings.biometric_title'),
