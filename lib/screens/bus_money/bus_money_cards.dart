@@ -205,10 +205,15 @@ class _DetachedCashCard extends StatelessWidget {
   }
 }
 
-/// The auto bus-owner rent shown at the top of the expense ledger. It mirrors
-/// [_ExpenseRow] styling but is derived from [Bus.busPrice] (the single source
-/// of truth, already folded into expensesTotal) — so it is non-deletable and
-/// not editable.
+/// True when expense [e] is listed as a line of [_BusMalikSettlementCard]
+/// instead of as its own ledger row: diesel and owner payments on a pakku-bhadu
+/// (rent-includes-fuel) bus.
+///
+/// Driver pay is deliberately NOT folded: it shows as a Malik deduction AND
+/// keeps its own row so it stays tappable/deletable. That is display only —
+/// the money is counted once: [BusExpenseRollup.fromLedger] takes diesel +
+/// driver + advances OUT of the on-top ground total and only uses them to
+/// reduce what the owner is still owed (pakku rent = whole bus cost).
 bool _rollupExpenseInMalikCard(Expense e, BusMoneySummary s) {
   if (!s.rentIncludesFuel) return false;
   return e.category.isFuel || e.category.isOwnerPayment;

@@ -190,7 +190,9 @@ mixin _TourBuses on _TourSeatSwaps {
     await _write(
       optimistic: () => _updateTourLocal(tourId, (t) {
         final nextBuses = t.buses
-            .map((b) => b.id == busId ? _busWithHandler(b, null) : b)
+            .map((b) => b.id == busId
+                ? b.copyWith(clearHandlerPassengerId: true)
+                : b)
             .toList();
         final nextPassengers = t.passengers.map((p) {
           if (p.id == removedHandlerId && !stillHandlesOther && p.isHandler) {
@@ -234,42 +236,6 @@ mixin _TourBuses on _TourSeatSwaps {
         }
       },
       failure: tr('errors.remove_handler'),
-    );
-  }
-
-  /// Rebuild [Bus] with an explicit (possibly null) handler passenger id.
-  /// Needed because [Bus.copyWith] uses `??`, so it can't clear
-  /// `handlerPassengerId` back to null when a bus's handler is removed. Every
-  /// other field is preserved verbatim.
-  Bus _busWithHandler(Bus b, String? handlerPassengerId) {
-    return Bus(
-      id: b.id,
-      ownerId: b.ownerId,
-      tourId: b.tourId,
-      handlerPassengerId: handlerPassengerId,
-      name: b.name,
-      busNumber: b.busNumber,
-      driverName: b.driverName,
-      driverPhone: b.driverPhone,
-      ownerName: b.ownerName,
-      ownerPhone: b.ownerPhone,
-      isAC: b.isAC,
-      busType: b.busType,
-      totalSeatsLegacy: b.totalSeatsLegacy,
-      pricePerSeat: b.pricePerSeat,
-      busPrice: b.busPrice,
-      boardingPoint: b.boardingPoint,
-      departureTime: b.departureTime,
-      singleSofaPrice: b.singleSofaPrice,
-      doubleSofaPrice: b.doubleSofaPrice,
-      seaterPrice: b.seaterPrice,
-      rearRows: b.rearRows,
-      rearPrice: b.rearPrice,
-      priceBands: b.priceBands,
-      notes: b.notes,
-      layout: b.layout,
-      createdAt: b.createdAt,
-      updatedAt: DateTime.now(),
     );
   }
 

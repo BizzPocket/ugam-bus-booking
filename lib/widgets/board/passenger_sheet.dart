@@ -165,8 +165,11 @@ class PassengerSheet extends StatefulWidget {
   /// from [BoardBerth.code], which is what is printed on the coach.
   final String seatId;
 
-  /// Takes [amount] in rupees and records it. Confirmed first, always.
-  final Future<PassengerSheetUndo?> Function(double amount)? onCollect;
+  /// Takes [amount] in rupees and records it against `rider` — the occupant
+  /// the sheet is showing, which on a shared sofa is the one the agent picked.
+  /// Confirmed first, always.
+  final Future<PassengerSheetUndo?> Function(double amount, Passenger? rider)?
+  onCollect;
 
   /// Hands [amount] of over-collected cash back. Confirmed first, always.
   final Future<PassengerSheetUndo?> Function(double amount)? onReturnChange;
@@ -224,7 +227,8 @@ class PassengerSheet extends StatefulWidget {
     required String busId,
     required String busName,
     required String seatId,
-    Future<PassengerSheetUndo?> Function(double amount)? onCollect,
+    Future<PassengerSheetUndo?> Function(double amount, Passenger? rider)?
+    onCollect,
     Future<PassengerSheetUndo?> Function(double amount)? onReturnChange,
     Future<PassengerSheetUndo?> Function(bool boarded)? onCheckIn,
     PassengerSheetWrite? onFree,

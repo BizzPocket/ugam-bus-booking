@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get/get.dart';
+import 'package:occubusbooking/controllers/user_controller.dart';
 import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/collection.dart';
 import 'package:occubusbooking/models/passenger.dart';
@@ -61,6 +63,13 @@ Passenger _rider(
   ],
   tripType: leg,
 );
+
+/// The agent's contacts directory, without Appwrite.
+class _Contacts extends UserController {
+  @override
+  String displayName(String phone, String fallback) =>
+      phone == '+919999999999' ? 'Asha Masi' : fallback;
+}
 
 Collection _row({
   required String passengerId,
@@ -548,5 +557,29 @@ void main() {
     expect(plan.updates, hasLength(1));
     expect(plan.updates.single.amountDue, 3000);
     expect(plan.deltas.single.toCollect, 1500);
+  });
+
+  test('the move-money notice names the rider by their saved contact name',
+      () {
+    Get.put<UserController>(_Contacts());
+    addTearDown(Get.reset);
+    final p = _rider(
+      'p1',
+      seats: const [SeatAssignment(busId: 'bus2', seatId: 'bus2_A')],
+    ).copyWith(name: 'asha p', phone: '+919999999999');
+    final plan = CollectionReconciler.plan(
+      tour: _tour(buses: [bus1, bus2], passengers: [p]),
+      passengerIds: const ['p1'],
+      collections: [
+        _row(
+          passengerId: 'p1',
+          busId: 'bus1',
+          seatId: 'bus1_B',
+          due: 1500,
+          received: 1500,
+        ),
+      ],
+    );
+    expect(plan.deltas.single.passengerName, 'Asha Masi');
   });
 }

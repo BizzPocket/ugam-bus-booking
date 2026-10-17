@@ -190,6 +190,10 @@ mixin _MoneyWrites on _MoneyLoad {
       );
 
   // ── Handovers ─────────────────────────────────────────────
+  // `invalidatesFinance: false` is deliberate: a handover only moves cash
+  // from the handler's pocket to the admin. FinanceController reads revenue,
+  // expenses and income per trip, none of which a handover changes, so there
+  // is nothing stale to mark.
 
   /// Records a new handover or, when [h] carries an existing id, updates it —
   /// so a logged handover can be corrected after the fact (mirrors

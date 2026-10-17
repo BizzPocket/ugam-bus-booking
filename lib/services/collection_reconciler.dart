@@ -4,6 +4,7 @@ import '../models/bus_details.dart';
 import '../models/collection.dart';
 import '../models/passenger.dart';
 import '../models/tour.dart';
+import '../utils/passenger_display.dart';
 
 /// One passenger's money position after their seats moved.
 ///
@@ -263,7 +264,8 @@ class CollectionReconciler {
       updates: updates,
       delta: SeatMoveMoneyDelta(
         passengerId: passenger.id,
-        passengerName: passenger.name,
+        // The agent's saved contact name, like every other surface.
+        passengerName: passenger.displayName,
         paid: paid,
         due: totalDue,
         fromBusNames: fromBusNames,
