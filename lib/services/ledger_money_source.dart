@@ -136,6 +136,10 @@ class LedgerMoneySource {
   }
 
   /// passengerId → owes in rupees (positive = still due, negative = change due).
+  ///
+  /// THROWS on a read failure, like [fetchBusRollups] — deliberately not
+  /// fail-soft like the Finance helpers above: an empty map here would read
+  /// as "nobody owes anything", a silent wrong answer about money.
   Future<Map<String, double>> fetchRiderOwesRupees(String tourId) async {
     final rows = debugFetchRiderRows != null
         ? await debugFetchRiderRows!(tourId)
