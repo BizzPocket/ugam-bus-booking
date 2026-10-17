@@ -21,6 +21,7 @@ import '../utils/formatters.dart';
 import '../widgets/customer_seat_layout_sheet.dart';
 import 'customer_booking_request_screen.dart';
 import 'handler/handler_shell.dart';
+import 'customer_format.dart';
 
 part 'customer_my_requests/request_row.dart';
 part 'customer_my_requests/action_bar.dart';

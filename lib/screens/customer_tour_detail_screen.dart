@@ -15,6 +15,7 @@ import '../utils/time_format.dart';
 import '../utils/tour_public_summary.dart';
 import 'customer_booking_request_screen.dart';
 import 'party_gate_screen.dart';
+import 'customer_format.dart';
 
 /// Public-facing tour detail — the page that has to sell the trip.
 ///
@@ -313,11 +314,11 @@ class _Header extends StatelessWidget {
                     ? child
                     : UgamBusBackdrop(
                         seed: tour.id,
-                        label: _routeInitials(tour.fromCity, tour.toCity),
+                        label: customerRouteInitials(tour.fromCity, tour.toCity),
                       ),
                 errorBuilder: (_, _, _) => UgamBusBackdrop(
                   seed: tour.id,
-                  label: _routeInitials(tour.fromCity, tour.toCity),
+                  label: customerRouteInitials(tour.fromCity, tour.toCity),
                 ),
               ),
               // Scrim only where the chrome sits — enough to keep the back and
@@ -1218,41 +1219,8 @@ class _BusCardSkeleton extends StatelessWidget {
   }
 }
 
-/// Localized 3-letter month abbreviation, shared across customer screens.
-String _monthShort(int month) {
-  const keys = [
-    'app.month.short.jan',
-    'app.month.short.feb',
-    'app.month.short.mar',
-    'app.month.short.apr',
-    'app.month.short.may',
-    'app.month.short.jun',
-    'app.month.short.jul',
-    'app.month.short.aug',
-    'app.month.short.sep',
-    'app.month.short.oct',
-    'app.month.short.nov',
-    'app.month.short.dec',
-  ];
-  return tr(keys[month - 1]);
-}
-
 String _formatLongDate(DateTime d) =>
-    '${d.day} ${_monthShort(d.month)} ${d.year}';
-
-/// Route monogram for the backdrop fallback, e.g. "S→M" from "Surat"/"Mumbai".
-/// Empty when neither city is set, so the backdrop shows just the bus motif.
-String _routeInitials(String from, String to) {
-  String first(String s) {
-    final t = s.trim();
-    return t.isEmpty ? '' : t.characters.first.toUpperCase();
-  }
-
-  final f = first(from);
-  final t = first(to);
-  if (f.isEmpty && t.isEmpty) return '';
-  return '$f→$t';
-}
+    '${d.day} ${customerMonthShort(d.month)} ${d.year}';
 
 /// Whole CALENDAR DAYS until departure; negative once it is behind us.
 ///

@@ -23,6 +23,7 @@ import '../utils/round_trip_combine.dart';
 import '../utils/time_format.dart';
 import '../utils/tour_public_summary.dart';
 import '../widgets/booking_capture_form.dart';
+import 'customer_format.dart';
 
 /// Customer-side seat request form — image-5 fidelity.
 ///
@@ -734,20 +735,6 @@ class _CustomerBookingRequestScreenState
 
 // ─── TRIP BRIEF CARD ──────────────────────────────────────────────────
 
-/// Route monogram for the bus backdrop, e.g. "S→M" from "Surat"/"Mumbai".
-/// Empty when neither city is set so the backdrop shows just the bus motif.
-String _routeInitials(String from, String to) {
-  String first(String s) {
-    final t = s.trim();
-    return t.isEmpty ? '' : t.characters.first.toUpperCase();
-  }
-
-  final f = first(from);
-  final t = first(to);
-  if (f.isEmpty && t.isEmpty) return '';
-  return '$f→$t';
-}
-
 /// One fact in the brief's strip: a micro label, the value, and an optional
 /// quieter detail beneath it (the departure time under the departure date).
 class _TripFact {
@@ -815,7 +802,7 @@ class _TripBriefCard extends StatelessWidget {
                   height: thumb,
                   child: UgamBusBackdrop(
                     seed: tour.id,
-                    label: _routeInitials(tour.fromCity, tour.toCity),
+                    label: customerRouteInitials(tour.fromCity, tour.toCity),
                   ),
                 ),
               ),

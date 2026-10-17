@@ -279,24 +279,6 @@ class _DateBlock extends StatelessWidget {
 
   const _DateBlock({required this.date, required this.c});
 
-  /// Three-letter month in the reader's language (`app.month.short.*`, the
-  /// same keys the tour detail uses). The hard-coded English array printed
-  /// "OCT" on a Gujarati screen.
-  static const _monthKeys = [
-    'app.month.short.jan',
-    'app.month.short.feb',
-    'app.month.short.mar',
-    'app.month.short.apr',
-    'app.month.short.may',
-    'app.month.short.jun',
-    'app.month.short.jul',
-    'app.month.short.aug',
-    'app.month.short.sep',
-    'app.month.short.oct',
-    'app.month.short.nov',
-    'app.month.short.dec',
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -312,7 +294,8 @@ class _DateBlock extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            tr(_monthKeys[date.month - 1]),
+            // Three-letter month in the reader's language (`app.month.short.*`).
+            customerMonthShort(date.month),
             style: UgamText.micro.copyWith(color: c.ink3),
             maxLines: 1,
           ),
