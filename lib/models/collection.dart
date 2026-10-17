@@ -1,4 +1,5 @@
 import 'package:uuid/uuid.dart';
+import '../utils/json_coerce.dart';
 
 /// Money collected from a single passenger on a specific bus/tour.
 ///
@@ -120,15 +121,9 @@ class Collection {
       amountRefunded: (map['amount_refunded'] as num?)?.toDouble() ?? 0,
       note: map['note'] as String?,
       collectedBy: map['collected_by'] as String?,
-      createdAt: _parseDate(map['created_at']),
-      updatedAt: _parseDate(map['updated_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
+      updatedAt: coerceDateTimeOrNow(map['updated_at']),
     );
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   Collection copyWith({

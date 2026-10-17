@@ -1,3 +1,5 @@
+import '../utils/json_coerce.dart';
+
 /// Direction of a message in a WhatsApp thread. `'in'` = from the customer,
 /// `'out'` = the agent's reply.
 enum WaDirection { inbound, outbound }
@@ -61,7 +63,7 @@ class WaMessage {
             ? (map['msg_type'] as String).trim()
             : 'text',
         status: map['status'] as String?,
-        createdAt: _parseDate(map['created_at']) ?? DateTime.now(),
+        createdAt: coerceDateTime(map['created_at']) ?? DateTime.now(),
         // Read defensively: these columns arrive only once 059 is applied, and
         // a build that reaches a database without them must still show the
         // thread rather than throw on every row.
@@ -140,11 +142,5 @@ class WaMessage {
     if (v is int) return v;
     if (v is num) return v.toInt();
     return int.tryParse(v.toString());
-  }
-
-  static DateTime? _parseDate(dynamic v) {
-    if (v == null) return null;
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString());
   }
 }

@@ -7,6 +7,7 @@ import 'bus_details.dart';
 import 'passenger.dart';
 import 'passenger_group.dart';
 import 'trip_type.dart';
+import '../utils/json_coerce.dart';
 
 /// A tour planned and managed by the agent.
 ///
@@ -378,11 +379,11 @@ class Tour {
       fromCity: (map['from_city'] ?? '').toString(),
       toCity: (map['to_city'] ?? '').toString(),
       departureDate: map['departure_date'] != null
-          ? _parseDate(map['departure_date'])
+          ? coerceDateTimeOrNow(map['departure_date'])
           : DateTime.now(),
       departureTime: _parseTime(map['departure_time']),
       returnDate: map['return_date'] != null
-          ? _parseDate(map['return_date'])
+          ? coerceDateTimeOrNow(map['return_date'])
           : null,
       returnTime: _parseTime(map['return_time']),
       pricePerSeat: (map['price_per_seat'] as num?)?.toDouble() ?? 0.0,
@@ -405,15 +406,9 @@ class Tour {
       buses: buses,
       passengers: passengers,
       groups: groups,
-      createdAt: _parseDate(map['created_at']),
-      updatedAt: _parseDate(map['updated_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
+      updatedAt: coerceDateTimeOrNow(map['updated_at']),
     );
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   /// Normalises a stored time to 'HH:mm'. Accepts Postgres `time` values

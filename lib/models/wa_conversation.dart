@@ -1,3 +1,5 @@
+import '../utils/json_coerce.dart';
+
 /// One customer WhatsApp thread in the two-way inbox (migration 033,
 /// `wa_conversations`). There is exactly one row per customer phone number.
 ///
@@ -34,9 +36,9 @@ class WaConversation {
             ? null
             : (map['customer_name'] as String).trim(),
         lastMessageAt:
-            _parseDate(map['last_message_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
+            coerceDateTime(map['last_message_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
         lastMessagePreview: map['last_message_preview'] as String?,
-        lastInboundAt: _parseDate(map['last_inbound_at']),
+        lastInboundAt: coerceDateTime(map['last_inbound_at']),
         unreadCount: (map['unread_count'] as num?)?.toInt() ?? 0,
       );
 
@@ -70,11 +72,5 @@ class WaConversation {
     }
     if (digits.length == 10) return digits;
     return raw;
-  }
-
-  static DateTime? _parseDate(dynamic v) {
-    if (v == null) return null;
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString());
   }
 }

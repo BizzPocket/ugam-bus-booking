@@ -1,4 +1,5 @@
 import 'package:uuid/uuid.dart';
+import '../utils/json_coerce.dart';
 
 /// A named group of passengers (separate bookings) that must ride the SAME bus.
 ///
@@ -41,14 +42,8 @@ class PassengerGroup {
       tourId: (map['tour_id'] ?? '').toString(),
       label: (map['label'] ?? '').toString(),
       colorIndex: (map['color_index'] as num?)?.toInt() ?? 0,
-      createdAt: _parseDate(map['created_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
     );
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   PassengerGroup copyWith({String? label, int? colorIndex}) {

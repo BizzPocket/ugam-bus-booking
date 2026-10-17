@@ -78,3 +78,18 @@ List<Map<String, dynamic>> coerceMapList(dynamic v) {
   }
   return out;
 }
+
+/// Coerces [v] to a `DateTime?`.
+///
+/// A real [DateTime] passes through; anything else is stringified and run
+/// through [DateTime.tryParse]. Null or unparseable input yields null.
+DateTime? coerceDateTime(dynamic v) {
+  if (v == null) return null;
+  if (v is DateTime) return v;
+  return DateTime.tryParse(v.toString());
+}
+
+/// [coerceDateTime], falling back to `DateTime.now()` for null or
+/// unparseable input — the timestamp-column default every model `fromMap`
+/// shares (`created_at`, `updated_at`, `marked_at`, …).
+DateTime coerceDateTimeOrNow(dynamic v) => coerceDateTime(v) ?? DateTime.now();

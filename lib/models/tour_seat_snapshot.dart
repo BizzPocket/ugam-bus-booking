@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../utils/json_coerce.dart';
 
 /// Which leg of the trip a seat chart belongs to.
 ///
@@ -144,7 +145,7 @@ class TourSeatSnapshot {
       buses: rawBuses
           .map((e) => SnapshotBus.fromMap(Map<String, dynamic>.from(e as Map)))
           .toList(),
-      capturedAt: _parseDate(row['captured_at']),
+      capturedAt: coerceDateTimeOrNow(row['captured_at']),
     );
   }
 
@@ -159,11 +160,5 @@ class TourSeatSnapshot {
       },
       'captured_at': capturedAt.toIso8601String(),
     };
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 }
