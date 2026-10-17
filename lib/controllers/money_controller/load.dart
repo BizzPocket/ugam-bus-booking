@@ -110,13 +110,22 @@ mixin _MoneyLoad on _MoneySettlement {
   void _clearLedgerCache() {
     _ledgerReady = false;
     _ledgerByBus.clear();
+    _ledgerOnline = null;
   }
 
   /// Returns false when the ledger views could not be read.
   Future<bool> _loadLedgerForTour(String tourId) async {
     try {
-      final rollups = await _ledgerSource.fetchBusRollups(tourId);
+      // The online read fails soft to null (rule 2 then applies), so it can
+      // never fail the rollup read it rides alongside.
+      final reads = await Future.wait([
+        _ledgerSource.fetchBusRollups(tourId),
+        _ledgerSource.fetchLedgerOnlineByTour(tourId: tourId),
+      ]);
+      final rollups = reads[0] as List<LedgerBusRollup>;
+      final online = reads[1] as Map<String, double>?;
       if (_loadedTourId != tourId) return false;
+      _ledgerOnline = online == null ? null : (online[tourId] ?? 0);
       _ledgerByBus
         ..clear()
         ..addEntries([

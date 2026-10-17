@@ -4,6 +4,7 @@ import 'expense.dart';
 import 'income_entry.dart';
 import 'bus_handover.dart';
 import 'passenger.dart';
+import 'trip_pnl.dart';
 
 /// How logged expenses roll into bus bhadu / Malik settlement and P&L.
 ///
@@ -178,7 +179,15 @@ class BusExpenseRollup {
 /// derived getters in the UI. No Flutter/GetX dependencies.
 class BusMoneySummary {
   final String busId;
+
+  /// Handler CASH on this bus ([Collection.netCash] / the ledger's
+  /// `cash.handler`). Drives the handover, so it never includes [online].
   final double collected;
+
+  /// UPI money paid against this bus's collection rows
+  /// ([Collection.amountOnline]) — received by the organiser, never held by
+  /// the handler. Counted in [pnl]'s received, never in the handover.
+  final double online;
 
   /// Total fares BILLED to passengers seated on this bus (what they owe for
   /// their seats, whether collected yet or not). The accrual revenue — drives
@@ -219,6 +228,7 @@ class BusMoneySummary {
     required this.handedOver,
     required this.toReturnTotal,
     required this.toCollectTotal,
+    this.online = 0,
     this.revenueBilled = 0,
     this.income = 0,
     this.busRent = 0,
@@ -252,14 +262,24 @@ class BusMoneySummary {
 
   double get outstandingHandover => expectedHandover - handedOver;
 
-  /// TRUE profit/loss: income (A) − total expenses (B).
-  double get netBilled => revenueBilled + income - expensesTotal;
+  /// This bus's two profit figures — see [TripPnl], the one formula.
+  TripPnl get pnl => TripPnl(
+        billed: revenueBilled,
+        cash: collected,
+        online: online,
+        income: income,
+        costs: expensesTotal,
+      );
 
-  /// CASH profit/loss so far.
-  double get netCollected => collected + income - expensesTotal;
+  /// Trip profit (billed basis) — [TripPnl.tripProfit].
+  double get netBilled => pnl.tripProfit;
+
+  /// Cash so far (cash + online received) — [TripPnl.cashSoFar].
+  double get netCollected => pnl.cashSoFar;
 
   BusMoneySummary copyWith({
     double? collected,
+    double? online,
     double? revenueBilled,
     double? expensesTotal,
     double? handedOver,
@@ -278,6 +298,7 @@ class BusMoneySummary {
     return BusMoneySummary(
       busId: busId,
       collected: collected ?? this.collected,
+      online: online ?? this.online,
       revenueBilled: revenueBilled ?? this.revenueBilled,
       expensesTotal: expensesTotal ?? this.expensesTotal,
       handedOver: handedOver ?? this.handedOver,
@@ -347,6 +368,7 @@ class BusMoneySummary {
     return BusMoneySummary(
       busId: busId,
       collected: busCollections.fold(0.0, (sum, c) => sum + c.netCash),
+      online: busCollections.fold(0.0, (sum, c) => sum + c.amountOnline),
       detachedCash: detachedCash,
       income: busIncomes.fold(0.0, (sum, i) => sum + i.amount),
       busRent: busRent,
@@ -373,6 +395,7 @@ class HandlerMoneySummary {
   final List<String> busIds;
   final double revenueBilled;
   final double collected;
+  final double online;
   final double expensesTotal;
   final double handedOver;
   final double toCollectTotal;
@@ -393,14 +416,23 @@ class HandlerMoneySummary {
     required this.handedOver,
     required this.toCollectTotal,
     required this.toReturnTotal,
+    this.online = 0,
     this.income = 0,
     this.busRent = 0,
     this.detachedCash = 0,
     this.groundExpensesSum = 0,
   });
 
-  double get netBilled => revenueBilled + income - expensesTotal;
-  double get netCollected => collected + income - expensesTotal;
+  /// This handler's buses' two profit figures — see [TripPnl].
+  TripPnl get pnl => TripPnl(
+        billed: revenueBilled,
+        cash: collected,
+        online: online,
+        income: income,
+        costs: expensesTotal,
+      );
+  double get netBilled => pnl.tripProfit;
+  double get netCollected => pnl.cashSoFar;
   double get groundExpenses =>
       groundExpensesSum > 0 ? groundExpensesSum : expensesTotal - busRent;
   double get expectedHandover => collected + income - groundExpenses;
@@ -417,6 +449,7 @@ class HandlerMoneySummary {
       detachedCash: detachedCash,
       revenueBilled: buses.fold(0.0, (s, b) => s + b.revenueBilled),
       collected: buses.fold(0.0, (s, b) => s + b.collected),
+      online: buses.fold(0.0, (s, b) => s + b.online),
       income: buses.fold(0.0, (s, b) => s + b.income),
       busRent: buses.fold(0.0, (s, b) => s + b.busRent),
       groundExpensesSum: buses.fold(0.0, (s, b) => s + b.groundExpenses),
@@ -430,7 +463,15 @@ class HandlerMoneySummary {
 
 /// Aggregated money figures across an entire tour (all buses).
 class TourMoneySummary {
+  /// Handler CASH across the trip — drives the handover; excludes [totalOnline].
   final double totalCollected;
+
+  /// UPI money the organiser received for this trip (the ledger's
+  /// `bank.gateway`, or Σ [Collection.amountOnline] where that view is not
+  /// deployed — see [LedgerMoneySource.fetchOnlineForTour]). Tour-level: a
+  /// waitlisted rider's advance belongs to no bus, so this can exceed the sum
+  /// of the per-bus [BusMoneySummary.online].
+  final double totalOnline;
   final double totalRevenueBilled;
   final double totalExpenses;
   final double totalHandedOver;
@@ -465,6 +506,7 @@ class TourMoneySummary {
     required this.totalHandedOver,
     required this.totalToReturn,
     required this.totalToCollect,
+    this.totalOnline = 0,
     this.totalRevenueBilled = 0,
     this.totalIncome = 0,
     this.totalBusRent = 0,
@@ -476,8 +518,21 @@ class TourMoneySummary {
     this.groundExpensesTotal,
   });
 
-  double get totalNet => totalCollected + totalIncome - totalExpenses;
-  double get totalNetBilled => totalRevenueBilled + totalIncome - totalExpenses;
+  /// The trip's two profit figures — see [TripPnl], the one formula every
+  /// money surface (and [FinanceController]'s row for this trip) reads.
+  TripPnl get pnl => TripPnl(
+        billed: totalRevenueBilled,
+        cash: totalCollected,
+        online: totalOnline,
+        income: totalIncome,
+        costs: totalExpenses,
+      );
+
+  /// Cash so far — [TripPnl.cashSoFar] (cash + online received).
+  double get totalNet => pnl.cashSoFar;
+
+  /// Trip profit — [TripPnl.tripProfit] (billed basis).
+  double get totalNetBilled => pnl.tripProfit;
   double get totalGroundExpenses =>
       groundExpensesTotal ?? totalExpenses - totalBusRent;
   double get totalExpectedHandover =>
@@ -498,6 +553,7 @@ class TourMoneySummary {
     Set<String>? knownBusIds,
     int busesMissingRent = 0,
     double? totalExpensesOverride,
+    double? onlineTotal,
   }) {
     double orphanExpenses = 0;
     double orphanCollected = 0;
@@ -523,6 +579,9 @@ class TourMoneySummary {
       orphanIncome: orphanIncome,
       busesMissingRent: busesMissingRent,
       totalCollected: collections.fold(0.0, (sum, c) => sum + c.netCash),
+      totalOnline:
+          onlineTotal ??
+          collections.fold(0.0, (sum, c) => sum + c.amountOnline),
       totalDetachedCash: detachedCashTotal,
       totalIncome: incomes.fold(0.0, (sum, i) => sum + i.amount),
       totalBusRent: busRentsTotal,

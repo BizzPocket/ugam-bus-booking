@@ -22,8 +22,8 @@ class _TourFinanceRow extends StatelessWidget {
     // Same distinction as the headline, one row down: a trip with no entries at
     // all is not a break-even trip. They used to share one dash-in-a-grey-box
     // thumbnail, which is exactly what read as an unloaded placeholder.
-    final untouched = tf.revenue == 0 && tf.income == 0 && tf.expenses == 0;
-    final zero = !untouched && tf.net.round() == 0;
+    final untouched = tf.pnl.isEmpty;
+    final zero = !untouched && tf.tripProfit.round() == 0;
 
     final (
       IconData rowIcon,
@@ -49,13 +49,13 @@ class _TourFinanceRow extends StatelessWidget {
         : tr('finance.row_state_running');
     final meta = '${_dateLabel(context, tf.date)} · $busLabel · $stateLabel';
 
-    // Margin is net over GROSS income (passenger fares + extra income), so
-    // cabin/gallery cash isn't ignored in the percentage.
-    final grossIn = tf.revenue + tf.income;
+    // Margin is trip profit over GROSS billed income (fares billed + extra
+    // income) — the same basis as the figure it sits beside.
+    final grossIn = tf.billed + tf.income;
     final marginPct = grossIn > 0
         ? tr(
             'finance.margin_pct',
-            namedArgs: {'n': '${(tf.net / grossIn * 100).round()}'},
+            namedArgs: {'n': '${(tf.tripProfit / grossIn * 100).round()}'},
           )
         : null;
 
@@ -132,29 +132,34 @@ class _TourFinanceRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: UgamSpacing.sm),
-          // Net big, revenue small beneath — the trip's bottom line and the
-          // gross it came from, stacked on the right. Both are tabular, so the
-          // rupee digits line up down the column of rows.
+          // Trip profit big, cash so far small beneath — the SAME two figures,
+          // under the same names, that this trip's dashboard hero, money board
+          // and Trip P&L print. Both are tabular, so the rupee digits line up
+          // down the column of rows.
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                untouched ? _noFigure : _signedInr(tf.net),
+                untouched ? _noFigure : _signedInr(tf.tripProfit),
                 style: UgamText.tabular(
                   UgamText.numLg.copyWith(color: netColor),
                 ),
               ),
               const SizedBox(height: 2),
-              Text(
-                untouched
-                    ? tr('finance.row_no_money')
-                    : tr(
-                        'finance.row_revenue_value',
-                        namedArgs: {'n': _inr(tf.revenue)},
-                      ),
-                style: UgamText.tabular(UgamText.micro.copyWith(color: c.ink3)),
-              ),
+              if (untouched)
+                Text(
+                  tr('finance.row_no_money'),
+                  style:
+                      UgamText.tabular(UgamText.micro.copyWith(color: c.ink3)),
+                )
+              else
+                CashSoFarLine(
+                  value: tf.cashSoFar,
+                  format: _signedInr,
+                  textAlign: TextAlign.end,
+                  dense: true,
+                ),
             ],
           ),
         ],

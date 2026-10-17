@@ -312,19 +312,26 @@ class _TourRollupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    // The whole tour rollup collapses into ONE hero: NET is the big figure;
-    // the six component lines hide behind the chevron (progressive disclosure).
-    final net = summary.totalNet;
+    // The whole tour rollup collapses into ONE hero: the trip profit (billed
+    // basis) is the big figure and "cash so far" the caption — the same two
+    // numbers, under the same names, as every other money surface. It used to
+    // headline the CASH net here while the trip's P&L headlined the billed one.
+    // The component lines hide behind the chevron (progressive disclosure).
+    final net = summary.totalNetBilled;
     final netTone = net < -0.005 ? c.warm : c.good;
     return UgamHeroStat(
       label: tr('bus_money.tour_totals'),
       value: Formatters.formatMoneyInr(net),
       tone: netTone,
-      // Was "Across the whole tour", which restated the "Tour totals" label
-      // directly above it. The scarce caption line buys more as the basis: this
-      // net is CASH, and the trip's own P&L headlines the BILLED one.
-      secondary: tr('money.basis_cash'),
+      secondary: tr(
+        'trip_pnl.cash_so_far_value',
+        namedArgs: {'n': Formatters.formatMoneyInr(summary.totalNet)},
+      ),
       breakdown: [
+        HeroStatLine(
+          tr('trip_pnl.revenue'),
+          Formatters.formatMoneyInr(summary.totalRevenueBilled),
+        ),
         HeroStatLine(
           tr('bus_money.rollup_total_collected'),
           Formatters.formatMoneyInr(summary.totalCollected),

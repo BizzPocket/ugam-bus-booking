@@ -92,8 +92,12 @@ class _TripTotalCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: UgamSpacing.lg),
+          // The trip's second figure ([TripPnl.cashSoFar]) — named exactly as
+          // on the dashboard, the money board and the Finance row. It used to
+          // read "Cash collected" while printing a NET, which is how a cash
+          // net came to look like a contradiction of the headline above.
           _NetLine(
-            label: tr('trip_pnl.cash_collected'),
+            label: tr('trip_pnl.cash_so_far'),
             value: total.totalNet,
             c: c,
           ),
@@ -281,7 +285,7 @@ class _PnlCard extends StatelessWidget {
               ),
               Expanded(
                 child: _MiniStat(
-                  label: tr('trip_pnl.cash_net'),
+                  label: tr('trip_pnl.cash_so_far'),
                   value: Formatters.formatMoneyInr(netCollected),
                   tone: netCollected >= 0 ? c.ink2 : c.danger,
                   c: c,

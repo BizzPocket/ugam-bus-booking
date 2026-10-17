@@ -413,6 +413,10 @@ class _PnlEntryCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    // The trip's second figure — the same "cash so far" the
+                    // Trip P&L behind this tap and the trip's Finance row show.
+                    const SizedBox(height: 2),
+                    CashSoFarLine(value: summary.totalNet),
                     // "Per bus & per handler" describes what a tap reveals —
                     // useful when the figure is calm, but it is the first thing
                     // to go once something is wrong with the number itself. The

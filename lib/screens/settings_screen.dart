@@ -12,6 +12,7 @@ import '../controllers/finance_controller.dart';
 import '../controllers/theme_controller.dart';
 import '../design/ugam.dart';
 import '../utils/app_snackbar.dart';
+import '../widgets/cash_so_far_line.dart';
 import '../widgets/language_picker_sheet.dart';
 import '../widgets/settings_row_kit.dart';
 import 'account_details_screen.dart';

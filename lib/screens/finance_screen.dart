@@ -8,6 +8,7 @@ import '../design/ugam.dart';
 import '../models/tour_finance.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
+import '../widgets/cash_so_far_line.dart';
 import '../widgets/money_loading_skeleton.dart';
 import 'create_tour_screen.dart';
 import 'tour_detail_screen.dart';
@@ -202,11 +203,9 @@ class _FinanceScreenState extends State<FinanceScreen> {
           _finance.financesFor(FinancePeriod.allTime).isNotEmpty;
       return anyEver ? _ReportState.periodEmpty : _ReportState.noTrips;
     }
-    if (t.revenue == 0 && t.income == 0 && t.expenses == 0) {
-      return _ReportState.noMoney;
-    }
-    if (t.net.round() == 0) return _ReportState.breakEven;
-    return t.net > 0 ? _ReportState.profit : _ReportState.loss;
+    if (t.pnl.isEmpty) return _ReportState.noMoney;
+    if (t.tripProfit.round() == 0) return _ReportState.breakEven;
+    return t.tripProfit > 0 ? _ReportState.profit : _ReportState.loss;
   }
 
   @override

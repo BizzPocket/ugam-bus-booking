@@ -40,7 +40,9 @@ class PnlConfidence {
   factory PnlConfidence.of(TourMoneySummary summary, TourStatus status) {
     // Same 0.005 epsilon the rest of the money layer compares rupees with, so
     // a rounding crumb never counts as "cash has been collected".
-    final nothingCollected = summary.totalCollected.abs() <= 0.005;
+    // Received, not just handler cash: a trip prepaid entirely by UPI has real
+    // money in hand and must not be labelled a projection.
+    final nothingCollected = summary.pnl.received.abs() <= 0.005;
     return PnlConfidence(
       isProjected: status.isActive && nothingCollected,
       costsIncomplete: summary.hasUnrecordedRent,

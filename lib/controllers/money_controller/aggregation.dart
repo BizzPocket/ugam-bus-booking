@@ -215,6 +215,7 @@ mixin _MoneyAggregation on _MoneyControllerBase {
 
       return TourMoneySummary(
         totalCollected: buses.fold(0.0, (s, b) => s + b.collected),
+        totalOnline: _tourOnline(),
         totalRevenueBilled: buses.fold(0.0, (s, b) => s + b.revenueBilled),
         totalExpenses: buses.fold(0.0, (s, b) => s + b.expensesTotal),
         totalHandedOver: buses.fold(0.0, (s, b) => s + b.handedOver),
@@ -260,6 +261,7 @@ mixin _MoneyAggregation on _MoneyControllerBase {
       expenses: expenses.toList(),
       handovers: handovers.toList(),
       incomes: incomes.toList(),
+      onlineTotal: _tourOnline(),
       totalExpensesOverride: expensesFromBuses,
       // Only claim to know the fleet when we actually resolved one. An empty
       // busById here means the tour/controller wasn't resolvable, NOT that the
@@ -288,6 +290,15 @@ mixin _MoneyAggregation on _MoneyControllerBase {
       ),
     );
   }
+
+  /// The trip's online (UPI) take — the ledger's tour-level figure when its
+  /// view could be read, else Σ [Collection.amountOnline] over the held rows.
+  /// Exactly [LedgerMoneySource.fetchOnlineByTourRupees]'s rule, so this trip's
+  /// "cash so far" matches its Finance row. Never part of [totalCollected]
+  /// (handler cash), so it is counted once.
+  double _tourOnline() =>
+      _ledgerOnline ??
+      collections.fold(0.0, (sum, c) => sum + c.amountOnline);
 
   /// Cash from payers that [isStillSeated] rejects — the shared engine behind
   /// [BusMoneySummary.detachedCash] at the handler and tour levels, where the

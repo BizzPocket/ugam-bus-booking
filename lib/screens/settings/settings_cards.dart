@@ -56,7 +56,11 @@ class _FinanceCardState extends State<_FinanceCard> {
       // card sat on "Loading…" forever with no way to retry, which is what the
       // whole finance entry point looked like when the read failed.
       final failed = _finance.loadFailed.value && !loaded;
-      final net = loaded ? _finance.lifetimeNet : 0.0;
+      // Both lifetime figures — Σ of every Finance row's trip profit (the
+      // headline, billed basis) and cash so far — so this card agrees with the
+      // report it opens and with each trip's own P&L.
+      final pnl = loaded ? _finance.lifetimePnl : null;
+      final net = pnl?.tripProfit ?? 0.0;
       final profit = net >= 0;
       final netColor = failed
           ? c.danger
@@ -113,6 +117,13 @@ class _FinanceCardState extends State<_FinanceCard> {
                       _fmtSignedInr(net),
                       style: UgamText.numLg.copyWith(color: netColor),
                     ),
+                  if (!failed && pnl != null) ...[
+                    const SizedBox(height: 2),
+                    CashSoFarLine(
+                      value: pnl.cashSoFar,
+                      format: _fmtSignedInr,
+                    ),
+                  ],
                   const SizedBox(height: 2),
                   Text(
                     failed

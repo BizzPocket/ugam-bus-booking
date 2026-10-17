@@ -2,11 +2,11 @@ import 'dart:developer' as dev;
 
 import 'package:get/get.dart';
 
-import '../models/bus_details.dart';
 import '../models/ledger_bus_rollup.dart';
 import '../models/money_summary.dart';
 import '../models/tour_finance.dart';
 import '../models/tour_status.dart';
+import '../models/trip_pnl.dart';
 import '../services/ledger_money_source.dart';
 import '../services/sync_service.dart';
 import 'tour_controller.dart';
@@ -51,10 +51,9 @@ class FinanceController extends GetxController {
       _rollupCount.value == 0 &&
       _tours.tours.any((t) => t.buses.isNotEmpty);
 
-  // Net cash collected and total expenses, keyed by tour id.
-  final Map<String, double> _revenueByTour = {};
-  final Map<String, double> _expensesByTour = {};
-  final Map<String, double> _incomeByTour = {};
+  /// Each tour's [TripPnl], keyed by tour id — built from the same ledger lines
+  /// and the same per-bus rules [MoneyController.tourSummary] uses.
+  final Map<String, TripPnl> _pnlByTour = {};
 
   /// Bus count per tour for tours whose roster is NOT in memory (cold start
   /// skips completed tours' relations — see `coldStartHydrationScope`). Seeded
@@ -109,9 +108,7 @@ class FinanceController extends GetxController {
     isLoading.value = true;
     loadFailed.value = false;
     try {
-      final revenue = <String, double>{};
-      final expenses = <String, double>{};
-      final income = <String, double>{};
+      final pnl = <String, TripPnl>{};
 
       final rollups = await _ledgerSource.fetchAllBusRollups();
       if (gen != _loadGeneration) return;
@@ -121,40 +118,50 @@ class FinanceController extends GetxController {
       // the money board for the very same trip.
       final absorbable = await _ledgerSource.fetchRentAbsorbableByBus();
       if (gen != _loadGeneration) return;
-      final busesById = <String, Bus>{
+      // Rent + pakku flag for buses whose roster is NOT in memory (archived
+      // trips) — so they are costed exactly as their board will cost them.
+      final terms = await _ledgerSource.fetchBusRentTerms();
+      if (gen != _loadGeneration) return;
+      final busesById = <String, ({double busPrice, bool rentIncludesFuel})>{
+        ...terms,
         for (final t in _tours.tours)
-          for (final b in t.buses) b.id: b,
+          for (final b in t.buses)
+            b.id: (busPrice: b.busPrice, rentIncludesFuel: b.rentIncludesFuel),
       };
       for (final r in rollups) {
         final tid = r.tourId;
         if (tid.isEmpty) continue;
-        revenue[tid] = (revenue[tid] ?? 0) + r.collected;
-        expenses[tid] =
-            (expenses[tid] ?? 0) + _busExpenses(r, busesById, absorbable);
-        income[tid] = (income[tid] ?? 0) + r.income;
+        // Billed = the ledger's `revenue.fare` — the SAME figure the trip's own
+        // board reads ([MoneyController.summaryForBus] → `rollup.billed`).
+        // Finance used to have no billed figure at all, so its headline was
+        // the cash net while every per-trip surface headlined the billed one.
+        pnl[tid] = (pnl[tid] ?? TripPnl.zero) +
+            TripPnl(
+              billed: r.billed,
+              cash: r.collected,
+              income: r.income,
+              costs: _busExpenses(r, busesById, absorbable),
+            );
       }
 
       // Online (bank.gateway) money belongs to no bus, so it never appears in
       // a per-bus rollup — finance_bus_summary filters `bus_id is not null`.
       // Without this, a trip whose riders all paid by UPI shows zero revenue
       // against real rent and prints a loss. No double count: 069 puts a rupee
-      // on cash.handler OR bank.gateway, never both.
+      // on cash.handler OR bank.gateway, never both, and `collected` above is
+      // cash.handler only.
       final onlineByTour = await _ledgerSource.fetchOnlineByTourRupees();
       if (gen != _loadGeneration) return;
       onlineByTour.forEach((tid, online) {
         if (online == 0) return;
-        revenue[tid] = (revenue[tid] ?? 0) + online;
+        pnl[tid] = (pnl[tid] ?? TripPnl.zero).copyWith(
+          online: (pnl[tid]?.online ?? 0) + online,
+        );
       });
 
-      _revenueByTour
+      _pnlByTour
         ..clear()
-        ..addAll(revenue);
-      _expensesByTour
-        ..clear()
-        ..addAll(expenses);
-      _incomeByTour
-        ..clear()
-        ..addAll(income);
+        ..addAll(pnl);
       // Every bus that carries rent or money has a rollup row, so its distinct
       // bus ids are a correct floor for an archived tour's bus count before the
       // exact count below lands.
@@ -187,11 +194,12 @@ class FinanceController extends GetxController {
   /// ([BusExpenseRollup.fromLedger]): on a pakku-bhadu bus diesel, driver and
   /// owner advances sit INSIDE the rent; everything else is on top. Rent and
   /// the pakku flag come from the in-memory bus when the roster is loaded
-  /// (exactly as the board reads them), else the ledger's rent and the
-  /// column's default (true).
+  /// (exactly as the board reads them), else the bus row's own terms
+  /// ([LedgerMoneySource.fetchBusRentTerms]), else — a bus the trip no longer
+  /// lists, as on the board — the ledger's rent and the column default (true).
   static double _busExpenses(
     LedgerBusRollup r,
-    Map<String, Bus> busesById,
+    Map<String, ({double busPrice, bool rentIncludesFuel})> busesById,
     Map<String, ({double fuel, double driver, double ownerAdvance})> absorbable,
   ) {
     final bid = r.busId;
@@ -250,9 +258,7 @@ class FinanceController extends GetxController {
       if (completedOnly && tour.status != TourStatus.completed) continue;
       final tf = TourFinance.from(
         tour,
-        _revenueByTour[tour.id] ?? 0,
-        _expensesByTour[tour.id] ?? 0,
-        income: _incomeByTour[tour.id] ?? 0,
+        _pnlByTour[tour.id] ?? TripPnl.zero,
         busCount: _busCountByTour[tour.id],
       );
       if (!_inPeriod(tf.date, period, now)) continue;
@@ -265,10 +271,12 @@ class FinanceController extends GetxController {
   FinanceTotals totalsFor(FinancePeriod period, {bool completedOnly = false}) =>
       FinanceTotals.from(financesFor(period, completedOnly: completedOnly));
 
-  double get lifetimeNet => totalsFor(FinancePeriod.allTime).net;
+  /// Every trip ever, both figures — the Settings lifetime card.
+  TripPnl get lifetimePnl => totalsFor(FinancePeriod.allTime).pnl;
 
-  double get lifetimeRealisedNet =>
-      totalsFor(FinancePeriod.allTime, completedOnly: true).net;
+  /// Completed trips only, both figures.
+  TripPnl get lifetimeRealisedPnl =>
+      totalsFor(FinancePeriod.allTime, completedOnly: true).pnl;
 
   bool _inPeriod(DateTime date, FinancePeriod period, DateTime now) =>
       switch (period) {

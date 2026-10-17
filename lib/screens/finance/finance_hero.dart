@@ -23,7 +23,9 @@ class _HeroCard extends StatelessWidget {
 
     // A dash, not ₹0. Break-even keeps ink (a real zero); profit/loss keep
     // their semantic colour.
-    final value = hasFigures ? _signedInr(totals.net) : _noFigure;
+    // Headline = Σ of the rows' trip profit (billed basis), the same figure
+    // each trip's own P&L headlines; "cash so far" rides beneath it.
+    final value = hasFigures ? _signedInr(totals.tripProfit) : _noFigure;
     final netColor = switch (state) {
       _ReportState.profit => c.good,
       _ReportState.loss => c.danger,
@@ -119,6 +121,10 @@ class _HeroCard extends StatelessWidget {
             value,
             style: UgamText.tabular(UgamText.numXl.copyWith(color: netColor)),
           ),
+          if (hasFigures) ...[
+            const SizedBox(height: 2),
+            CashSoFarLine(value: totals.cashSoFar, format: _signedInr),
+          ],
           // Everything below the headline is an ANSWER about money that moved.
           // With no figures there is no proportion to draw, no legend to read
           // and no accounting basis to disclaim — an empty grey bar over three
@@ -127,7 +133,7 @@ class _HeroCard extends StatelessWidget {
           if (hasFigures) ...[
             const SizedBox(height: UgamSpacing.md),
             _MarginBar(
-              revenue: totals.revenue + totals.income,
+              revenue: totals.billed + totals.income,
               expenses: totals.expenses,
               c: c,
             ),
@@ -137,9 +143,12 @@ class _HeroCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
+                  // Billed revenue — the term the headline is built from, and
+                  // what "Revenue" means on the Trip P&L. Cash received is the
+                  // "cash so far" line above.
                   child: _HeroMetric(
-                    label: tr('finance.revenue'),
-                    value: _inr(totals.revenue),
+                    label: tr('trip_pnl.revenue'),
+                    value: _inr(totals.billed),
                     color: c.ink,
                     dot: c.good,
                     c: c,
@@ -166,13 +175,12 @@ class _HeroCard extends StatelessWidget {
                 ),
               ],
             ),
-            // This report is CASH basis (FinanceController sums `collected`),
-            // while a trip's own P&L headlines the BILLED net. Both are right;
-            // comparing them without knowing which is which is what makes the
-            // app look like it cannot add up. Naming the basis costs one line.
+            // The headline is BILLED basis, like every trip's own P&L (it used
+            // to be cash here and billed there, under the same word "profit").
+            // Naming the basis costs one line.
             const SizedBox(height: UgamSpacing.sm),
             Text(
-              tr('money.basis_cash'),
+              tr('money.basis_billed'),
               style: UgamText.micro.copyWith(color: c.ink3),
             ),
           ],
@@ -310,14 +318,14 @@ class _StatTriple extends StatelessWidget {
         label: tr('finance.stat_avg'),
         value: totals.tourCount == 0
             ? _noFigure
-            : _compactSigned(totals.avgNet),
+            : _compactSigned(totals.avgTripProfit),
       ),
       (
         icon: Icons.workspace_premium_rounded,
         label: tr('finance.stat_best'),
         value: totals.best == null
             ? _noFigure
-            : _compactSigned(totals.best!.net),
+            : _compactSigned(totals.best!.tripProfit),
       ),
     ];
 

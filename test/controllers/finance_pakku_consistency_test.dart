@@ -121,9 +121,10 @@ void main() {
     expect(trip.totalNet, 10400);
 
     expect(row.expenses, 40600, reason: 'Finance must not stack diesel/driver');
-    expect(row.net, 10400);
-    expect(row.net, trip.totalNet, reason: 'Finance == Trip P&L / board');
-    expect(row.net, bus.netCollected);
+    expect(row.cashSoFar, 10400);
+    expect(row.cashSoFar, trip.totalNet, reason: 'Finance == Trip P&L / board');
+    expect(row.cashSoFar, bus.netCollected);
+    expect(row.tripProfit, trip.totalNetBilled);
   });
 }
 

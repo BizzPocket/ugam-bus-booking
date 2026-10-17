@@ -49,24 +49,74 @@ class LedgerMoneySource {
   /// Safe to add to the per-bus `collected` figure: 069's single-post rule puts
   /// a rupee on `cash.handler` OR `bank.gateway`, never both.
   ///
+  /// ONE rule for "how much arrived online", shared by [FinanceController]
+  /// (every tour) and [MoneyController] (the loaded tour) so the two can never
+  /// print different "cash so far" figures for the same trip:
+  ///
+  ///  1. the ledger's `finance_tour_summary.online_minor` (076) when that view
+  ///     is deployed — it also sees a waitlisted rider's advance, which has no
+  ///     collection row;
+  ///  2. otherwise Σ `collections.amount_online` — the online slice of every
+  ///     live collection row, which is exactly what `confirm_payment_claim`
+  ///     writes and what 062 books to `bank.gateway`.
+  ///
   /// Fails soft — an empty map, never an exception. The P&L showing slightly
-  /// low is bad; the whole Finance screen failing to load is worse, and this
-  /// view may not exist yet on a database where 076 has not been applied.
+  /// low is bad; the whole Finance screen failing to load is worse.
   Future<Map<String, double>> fetchOnlineByTourRupees() async {
+    final ledger = await fetchLedgerOnlineByTour();
+    if (ledger != null) return ledger;
     try {
-      final rows = debugFetchTourRows != null
-          ? await debugFetchTourRows!()
-          : await _queryTourSummary();
+      final rows = debugFetchOnlineCollectionRows != null
+          ? await debugFetchOnlineCollectionRows!()
+          : await _queryOnlineCollections();
       final out = <String, double>{};
       for (final row in rows) {
         final tid = row['tour_id'] as String?;
         if (tid == null || tid.isEmpty) continue;
-        out[tid] = minorToRupees(_minorOf(row['online_minor']));
+        final raw = row['amount_online'];
+        final amount =
+            raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0;
+        out[tid] = (out[tid] ?? 0) + amount;
       }
       return out;
     } catch (_) {
       return const {};
     }
+  }
+
+  /// Rule 1 of [fetchOnlineByTourRupees] alone: tourId → online rupees from
+  /// `finance_tour_summary`, or NULL when that view cannot be read (076 not
+  /// deployed) — the caller then applies rule 2 itself. [tourId] narrows the
+  /// read to one trip.
+  Future<Map<String, double>?> fetchLedgerOnlineByTour({String? tourId}) async {
+    try {
+      final rows = debugFetchTourRows != null
+          ? await debugFetchTourRows!()
+          : await _queryTourSummary(tourId: tourId);
+      final out = <String, double>{};
+      for (final row in rows) {
+        final tid = row['tour_id'] as String?;
+        if (tid == null || tid.isEmpty) continue;
+        if (tourId != null && tid != tourId) continue;
+        out[tid] = minorToRupees(_minorOf(row['online_minor']));
+      }
+      return out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Test inject for rule 2 of [fetchOnlineByTourRupees]: raw
+  /// `tour_id, amount_online` collection rows.
+  Future<List<Map<String, dynamic>>> Function()? debugFetchOnlineCollectionRows;
+
+  Future<List<Map<String, dynamic>>> _queryOnlineCollections() async {
+    final raw = await _supabase.client
+        .from('collections')
+        .select('tour_id, amount_online')
+        .gt('amount_online', 0)
+        .isFilter('deleted_at', null);
+    return _rowsOf(raw);
   }
 
   /// Test inject for [fetchRentAbsorbableByBus]: raw `bus_id, category, amount`
@@ -119,6 +169,53 @@ class LedgerMoneySource {
     }
   }
 
+  /// Test inject for [fetchBusRentTerms]: raw
+  /// `id, bus_price, rent_includes_fuel` bus rows.
+  Future<List<Map<String, dynamic>>> Function()? debugFetchBusTermRows;
+
+  /// busId → the bus's rent and pakku-bhadu flag, for every LIVE bus the
+  /// owner can see — what [FinanceController] needs to cost a bus exactly as
+  /// the trip's own board does when that trip's roster is NOT in memory (cold
+  /// start skips completed tours' relations). Without it an archived trip with
+  /// a non-pakku bus (`rent_includes_fuel = false`) was costed as pakku and
+  /// its Finance row disagreed with the board the moment the trip was opened.
+  ///
+  /// Soft-deleted buses are left out on purpose: the board treats a bus the
+  /// tour no longer lists as an orphan (ledger rent, default flag), and so
+  /// must Finance.
+  ///
+  /// Fails soft — an empty map (Finance then falls back to the ledger's rent
+  /// and the column default).
+  Future<Map<String, ({double busPrice, bool rentIncludesFuel})>>
+      fetchBusRentTerms() async {
+    try {
+      final rows = debugFetchBusTermRows != null
+          ? await debugFetchBusTermRows!()
+          : await _queryBusTerms();
+      final out = <String, ({double busPrice, bool rentIncludesFuel})>{};
+      for (final row in rows) {
+        final id = row['id'] as String?;
+        if (id == null || id.isEmpty) continue;
+        final raw = row['bus_price'];
+        out[id] = (
+          busPrice: raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0,
+          rentIncludesFuel: row['rent_includes_fuel'] as bool? ?? true,
+        );
+      }
+      return out;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _queryBusTerms() async {
+    final raw = await _supabase.client
+        .from('buses')
+        .select('id, bus_price, rent_includes_fuel')
+        .isFilter('deleted_at', null);
+    return _rowsOf(raw);
+  }
+
   Future<List<Map<String, dynamic>>> _queryAbsorbableExpenses() async {
     final raw = await _supabase.client
         .from('expenses')
@@ -128,10 +225,12 @@ class LedgerMoneySource {
     return _rowsOf(raw);
   }
 
-  Future<List<Map<String, dynamic>>> _queryTourSummary() async {
-    final raw = await _supabase.client
+  Future<List<Map<String, dynamic>>> _queryTourSummary({String? tourId}) async {
+    var q = _supabase.client
         .from('finance_tour_summary')
         .select('tour_id, online_minor');
+    if (tourId != null) q = q.eq('tour_id', tourId);
+    final raw = await q;
     return _rowsOf(raw);
   }
 

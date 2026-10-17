@@ -41,6 +41,13 @@ abstract class _MoneyControllerBase extends GetxController {
   bool _ledgerReady = false;
   final Map<String, LedgerBusRollup> _ledgerByBus = {};
 
+  /// The loaded tour's online (UPI) take from the ledger's
+  /// `finance_tour_summary`, or null when that view cannot be read — the
+  /// summaries then sum the held rows' [Collection.amountOnline]. The SAME
+  /// two-step rule [FinanceController] applies
+  /// ([LedgerMoneySource.fetchOnlineByTourRupees]).
+  double? _ledgerOnline;
+
   /// Which tour the lists currently hold data for. Used to scope cache
   /// keys and to know what to refetch on refresh.
   String? _loadedTourId;

@@ -3,6 +3,7 @@ import 'package:occubusbooking/models/bus_details.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/models/tour_finance.dart';
 import 'package:occubusbooking/models/tour_status.dart';
+import 'package:occubusbooking/models/trip_pnl.dart';
 
 Tour _tour({List<Bus> buses = const []}) => Tour(
       id: 't1',
@@ -19,21 +20,20 @@ void main() {
   test(
       'an archived tour with no roster in memory uses the fetched bus count, '
       'not "0 buses"', () {
-    final tf = TourFinance.from(_tour(), 0, 0, busCount: 3);
+    final tf = TourFinance.from(_tour(), TripPnl.zero, busCount: 3);
     expect(tf.buses, 3);
   });
 
   test('a loaded roster always wins over the fetched count', () {
     final tf = TourFinance.from(
       _tour(buses: [Bus(id: 'b1', name: 'A', busType: 'Sleeper')]),
-      0,
-      0,
+      TripPnl.zero,
       busCount: 5,
     );
     expect(tf.buses, 1);
   });
 
   test('no roster and no count is still 0', () {
-    expect(TourFinance.from(_tour(), 0, 0).buses, 0);
+    expect(TourFinance.from(_tour(), TripPnl.zero).buses, 0);
   });
 }

@@ -106,10 +106,10 @@ class _TotalsCapsule extends StatelessWidget {
                   const SizedBox(width: UgamSpacing.sm),
                   Expanded(
                     child: _CapsulePill(
-                      // "NET (CASH)", not "NET": the P&L card higher up this
-                      // same screen headlines the BILLED net. The pill is too
-                      // small for a caption, so the basis rides in the label.
-                      label: tr('tour_money_board.net_cash'),
+                      // "Cash so far", not "Net": the P&L card higher up this
+                      // same screen headlines the trip profit (billed). Same
+                      // name and number as that card's second line.
+                      label: tr('trip_pnl.cash_so_far'),
                       value: Formatters.formatMoneyInr(summary.totalNet),
                       c: c,
                     ),

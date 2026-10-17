@@ -15,6 +15,7 @@ import '../../screens/trip_pnl_screen.dart';
 import '../../utils/formatters.dart';
 import '../../utils/passenger_display.dart';
 import '../../utils/tour_capacity.dart';
+import '../cash_so_far_line.dart';
 
 /// Dashboard hero — "both, stacked". A tour picker, then one card that reads
 /// top-to-bottom: route · phase / the single most-urgent action (the only
@@ -275,8 +276,9 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
         : tr('trip_pnl.net_loss');
   }
 
-  /// Inline P&L: revenue / costs (/ income) and the net profit or loss — the
-  /// same `totalNetBilled` basis as the full Trip P&L screen, so they agree.
+  /// Inline P&L: revenue / costs (/ income), the trip profit (billed) and the
+  /// cash so far beneath it — the same [TripPnl] pair the Trip P&L screen, the
+  /// money board and Finance print, so they agree.
   Widget _pnlBreakdown(UgamColorSet c, TourMoneySummary? m, Tour tour) {
     if (m == null) {
       // Money still loading — hold the three P&L lines' shape with a skeleton
@@ -347,6 +349,13 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
               ),
             ),
           ],
+        ),
+        // The second of the trip's two figures ([TripPnl.cashSoFar]) — the
+        // same number the money board, the Trip P&L and Finance print for it.
+        const SizedBox(height: UgamSpacing.xs),
+        Align(
+          alignment: Alignment.centerRight,
+          child: CashSoFarLine(value: m.totalNet),
         ),
       ],
     );

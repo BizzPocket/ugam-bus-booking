@@ -2923,8 +2923,8 @@
     "period_month": "This month",
     "period_year": "This year",
     "period_all": "All time",
-    "net_profit": "Net profit",
-    "net_loss": "Net loss",
+    "net_profit": "Trip profit",
+    "net_loss": "Trip loss",
     "from_tours_one": "from {n} tour",
     "from_tours_other": "from {n} tours",
     "revenue": "Cash collected",
@@ -2989,8 +2989,8 @@
   "trip_pnl": {
     "eyebrow": "Money",
     "title": "Profit & Loss",
-    "net_profit": "Net profit",
-    "net_loss": "Net loss",
+    "net_profit": "Trip profit",
+    "net_loss": "Trip loss",
     "true_billed": "Billed (true)",
     "cash_collected": "Cash collected",
     "revenue": "Revenue",
@@ -3015,7 +3015,9 @@
     "projected_note": "The trip hasn't earned anything yet — this is what the seat chart is worth, not money made.",
     "rent_missing_one": "1 bus has no rent recorded, so this is overstated",
     "rent_missing_many": "{n} buses have no rent recorded, so this is overstated",
-    "rent_not_set": "Rent not set"
+    "rent_not_set": "Rent not set",
+    "cash_so_far": "Cash so far",
+    "cash_so_far_value": "Cash so far {n}"
   },
   "seat_move_money": {
     "title": "Fare changed with the seat",

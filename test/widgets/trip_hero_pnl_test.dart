@@ -142,7 +142,7 @@ void main() {
     await _pump(tester, tour: _tour(bus2Rent: 48000));
 
     expect(find.text('Projected net'), findsOneWidget);
-    expect(find.text('Net profit'), findsNothing);
+    expect(find.text('Trip profit'), findsNothing);
   });
 
   testWidgets('inline P&L warns when a bus has no rent recorded',
