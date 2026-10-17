@@ -458,7 +458,7 @@ class Passenger {
           ? DateTime.tryParse(map['cancel_requested_at'].toString())
           : null,
       seatsNotifiedSig: coerceString(map['seats_notified_sig']),
-      createdAt: _parseDate(map['created_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
     );
   }
 
@@ -497,12 +497,6 @@ class Passenger {
           .toList();
     }
     return [];
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   Passenger copyWith({

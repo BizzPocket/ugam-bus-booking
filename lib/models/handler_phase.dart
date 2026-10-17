@@ -47,22 +47,14 @@ enum HandlerPhase {
   bool get isReturnSide =>
       this == HandlerPhase.boardingRet || this == HandlerPhase.enRouteRet;
 
-  String get label {
-    switch (this) {
-      case HandlerPhase.boardingGo:
-        return tr('handler_phase.boarding_go');
-      case HandlerPhase.enRouteGo:
-        return tr('handler_phase.en_route_go');
-      case HandlerPhase.boardingRet:
-        return tr('handler_phase.boarding_ret');
-      case HandlerPhase.enRouteRet:
-        return tr('handler_phase.en_route_ret');
-      case HandlerPhase.settling:
-        return tr('handler_phase.settling');
-      case HandlerPhase.closed:
-        return tr('handler_phase.closed');
-    }
-  }
+  String get label => switch (this) {
+        HandlerPhase.boardingGo => tr('handler_phase.boarding_go'),
+        HandlerPhase.enRouteGo => tr('handler_phase.en_route_go'),
+        HandlerPhase.boardingRet => tr('handler_phase.boarding_ret'),
+        HandlerPhase.enRouteRet => tr('handler_phase.en_route_ret'),
+        HandlerPhase.settling => tr('handler_phase.settling'),
+        HandlerPhase.closed => tr('handler_phase.closed'),
+      };
 }
 
 /// The four timestamps the handler themselves stamps on a bus, from
@@ -154,33 +146,21 @@ enum HandlerMilestone {
   /// "Trip finished" — stamps `completed_at`.
   endTrip;
 
-  String get label {
-    switch (this) {
-      case HandlerMilestone.departGo:
-        return tr('handler_phase.milestone_depart_go');
-      case HandlerMilestone.arriveGo:
-        return tr('handler_phase.milestone_arrive_go');
-      case HandlerMilestone.departRet:
-        return tr('handler_phase.milestone_depart_ret');
-      case HandlerMilestone.endTrip:
-        return tr('handler_phase.milestone_end_trip');
-    }
-  }
+  String get label => switch (this) {
+        HandlerMilestone.departGo => tr('handler_phase.milestone_depart_go'),
+        HandlerMilestone.arriveGo => tr('handler_phase.milestone_arrive_go'),
+        HandlerMilestone.departRet => tr('handler_phase.milestone_depart_ret'),
+        HandlerMilestone.endTrip => tr('handler_phase.milestone_end_trip'),
+      };
 
   /// Confirm-dialog body — every one of these is hard to walk back, so none of
   /// them fire straight off the tap.
-  String get confirmBody {
-    switch (this) {
-      case HandlerMilestone.departGo:
-        return tr('handler_phase.confirm_depart_go');
-      case HandlerMilestone.arriveGo:
-        return tr('handler_phase.confirm_arrive_go');
-      case HandlerMilestone.departRet:
-        return tr('handler_phase.confirm_depart_ret');
-      case HandlerMilestone.endTrip:
-        return tr('handler_phase.confirm_end_trip');
-    }
-  }
+  String get confirmBody => switch (this) {
+        HandlerMilestone.departGo => tr('handler_phase.confirm_depart_go'),
+        HandlerMilestone.arriveGo => tr('handler_phase.confirm_arrive_go'),
+        HandlerMilestone.departRet => tr('handler_phase.confirm_depart_ret'),
+        HandlerMilestone.endTrip => tr('handler_phase.confirm_end_trip'),
+      };
 }
 
 /// Resolves the phase for one bus from state that already exists server-side.

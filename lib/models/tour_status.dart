@@ -22,56 +22,32 @@ enum TourStatus {
   locked, // All seats assigned, notifications sent
   completed; // Trip done
 
-  String get displayName {
-    switch (this) {
-      case TourStatus.planning:
-        return tr('enums.tour_status.planning');
-      case TourStatus.collecting:
-        return tr('enums.tour_status.collecting');
-      case TourStatus.busBooked:
-        return tr('enums.tour_status.bus_booked');
-      case TourStatus.assigning:
-        return tr('enums.tour_status.assigning');
-      case TourStatus.locked:
-        return tr('enums.tour_status.locked');
-      case TourStatus.completed:
-        return tr('enums.tour_status.completed');
-    }
-  }
+  String get displayName => switch (this) {
+        TourStatus.planning => tr('enums.tour_status.planning'),
+        TourStatus.collecting => tr('enums.tour_status.collecting'),
+        TourStatus.busBooked => tr('enums.tour_status.bus_booked'),
+        TourStatus.assigning => tr('enums.tour_status.assigning'),
+        TourStatus.locked => tr('enums.tour_status.locked'),
+        TourStatus.completed => tr('enums.tour_status.completed'),
+      };
 
-  String get description {
-    switch (this) {
-      case TourStatus.planning:
-        return tr('enums.tour_status.planning_desc');
-      case TourStatus.collecting:
-        return tr('enums.tour_status.collecting_desc');
-      case TourStatus.busBooked:
-        return tr('enums.tour_status.bus_booked_desc');
-      case TourStatus.assigning:
-        return tr('enums.tour_status.assigning_desc');
-      case TourStatus.locked:
-        return tr('enums.tour_status.locked_desc');
-      case TourStatus.completed:
-        return tr('enums.tour_status.completed_desc');
-    }
-  }
+  String get description => switch (this) {
+        TourStatus.planning => tr('enums.tour_status.planning_desc'),
+        TourStatus.collecting => tr('enums.tour_status.collecting_desc'),
+        TourStatus.busBooked => tr('enums.tour_status.bus_booked_desc'),
+        TourStatus.assigning => tr('enums.tour_status.assigning_desc'),
+        TourStatus.locked => tr('enums.tour_status.locked_desc'),
+        TourStatus.completed => tr('enums.tour_status.completed_desc'),
+      };
 
-  int get stepIndex {
-    switch (this) {
-      case TourStatus.planning:
-        return 0;
-      case TourStatus.collecting:
-        return 1;
-      case TourStatus.busBooked:
-        return 2;
-      case TourStatus.assigning:
-        return 3;
-      case TourStatus.locked:
-        return 4;
-      case TourStatus.completed:
-        return 5;
-    }
-  }
+  int get stepIndex => switch (this) {
+        TourStatus.planning => 0,
+        TourStatus.collecting => 1,
+        TourStatus.busBooked => 2,
+        TourStatus.assigning => 3,
+        TourStatus.locked => 4,
+        TourStatus.completed => 5,
+      };
 
   static const int totalSteps = 6;
 

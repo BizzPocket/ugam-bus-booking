@@ -7,16 +7,11 @@ enum AgeGroup {
   adult,
   senior;
 
-  String get displayName {
-    switch (this) {
-      case AgeGroup.child:
-        return tr('enums.age_group.child');
-      case AgeGroup.adult:
-        return tr('enums.age_group.adult');
-      case AgeGroup.senior:
-        return tr('enums.age_group.senior');
-    }
-  }
+  String get displayName => switch (this) {
+        AgeGroup.child => tr('enums.age_group.child'),
+        AgeGroup.adult => tr('enums.age_group.adult'),
+        AgeGroup.senior => tr('enums.age_group.senior'),
+      };
 
   static AgeGroup fromString(String? value) {
     if (value == null) return AgeGroup.adult;

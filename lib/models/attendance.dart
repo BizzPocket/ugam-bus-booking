@@ -1,4 +1,5 @@
 import 'package:uuid/uuid.dart';
+import '../utils/json_coerce.dart';
 
 /// Which leg of a tour an attendance mark belongs to.
 enum AttendanceLeg {
@@ -71,15 +72,9 @@ class Attendance {
       leg: AttendanceLeg.fromString(map['leg'] as String?),
       present: map['present'] as bool? ?? true,
       markedBy: map['marked_by'] as String?,
-      markedAt: _parseDate(map['marked_at']),
-      createdAt: _parseDate(map['created_at']),
+      markedAt: coerceDateTimeOrNow(map['marked_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
     );
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   Attendance copyWith({bool? present, String? markedBy}) {

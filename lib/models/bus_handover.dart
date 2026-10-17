@@ -1,4 +1,5 @@
 import 'package:uuid/uuid.dart';
+import '../utils/json_coerce.dart';
 
 /// Record of cash handed over by a bus handler to the admin.
 ///
@@ -71,15 +72,9 @@ class BusHandover {
       source: (map['source'] as String?)?.isNotEmpty == true
           ? map['source'] as String
           : 'admin',
-      settledAt: _parseDate(map['settled_at']),
-      createdAt: _parseDate(map['created_at']),
+      settledAt: coerceDateTimeOrNow(map['settled_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
     );
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   BusHandover copyWith({

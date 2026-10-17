@@ -21,20 +21,13 @@ enum HandlerReportKind {
 
   other;
 
-  String get displayName {
-    switch (this) {
-      case HandlerReportKind.breakdown:
-        return tr('enums.handler_report_kind.breakdown');
-      case HandlerReportKind.delay:
-        return tr('enums.handler_report_kind.delay');
-      case HandlerReportKind.passenger:
-        return tr('enums.handler_report_kind.passenger');
-      case HandlerReportKind.seat:
-        return tr('enums.handler_report_kind.seat');
-      case HandlerReportKind.other:
-        return tr('enums.handler_report_kind.other');
-    }
-  }
+  String get displayName => switch (this) {
+        HandlerReportKind.breakdown => tr('enums.handler_report_kind.breakdown'),
+        HandlerReportKind.delay => tr('enums.handler_report_kind.delay'),
+        HandlerReportKind.passenger => tr('enums.handler_report_kind.passenger'),
+        HandlerReportKind.seat => tr('enums.handler_report_kind.seat'),
+        HandlerReportKind.other => tr('enums.handler_report_kind.other'),
+      };
 
   /// Breakdown and seat problems block the trip; the rest are informational.
   /// Drives the tone of the admin-side alert strip and whether the push is

@@ -20,23 +20,15 @@ enum BookingMode {
   /// and a CHECK constraint rejects anything else.
   String get storageKey => name;
 
-  String get displayName {
-    switch (this) {
-      case BookingMode.request:
-        return tr('enums.booking_mode.request');
-      case BookingMode.chart:
-        return tr('enums.booking_mode.chart');
-    }
-  }
+  String get displayName => switch (this) {
+        BookingMode.request => tr('enums.booking_mode.request'),
+        BookingMode.chart => tr('enums.booking_mode.chart'),
+      };
 
-  String get description {
-    switch (this) {
-      case BookingMode.request:
-        return tr('enums.booking_mode.request_desc');
-      case BookingMode.chart:
-        return tr('enums.booking_mode.chart_desc');
-    }
-  }
+  String get description => switch (this) {
+        BookingMode.request => tr('enums.booking_mode.request_desc'),
+        BookingMode.chart => tr('enums.booking_mode.chart_desc'),
+      };
 
   /// True when customers pick their own seats off the chart.
   bool get isChart => this == BookingMode.chart;

@@ -47,27 +47,17 @@ class RequestLine {
   String get shortLabel =>
       '${seatIdPrefix(seatType, position)}×$qty$_shortLegMarker';
 
-  String get _legSuffix {
-    switch (leg) {
-      case TripType.outboundOnly:
-        return ' • GO';
-      case TripType.returnOnly:
-        return ' • RET';
-      case TripType.roundTrip:
-        return '';
-    }
-  }
+  String get _legSuffix => switch (leg) {
+        TripType.outboundOnly => ' • GO',
+        TripType.returnOnly => ' • RET',
+        TripType.roundTrip => '',
+      };
 
-  String get _shortLegMarker {
-    switch (leg) {
-      case TripType.outboundOnly:
-        return '·GO';
-      case TripType.returnOnly:
-        return '·RET';
-      case TripType.roundTrip:
-        return '';
-    }
-  }
+  String get _shortLegMarker => switch (leg) {
+        TripType.outboundOnly => '·GO',
+        TripType.returnOnly => '·RET',
+        TripType.roundTrip => '',
+      };
 
   Map<String, dynamic> toMap() {
     return {

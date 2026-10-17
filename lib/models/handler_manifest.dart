@@ -48,69 +48,27 @@ class HandlerManifest {
 
   factory HandlerManifest.fromJson(Map<String, dynamic> json) {
     return HandlerManifest(
-      buses: _parseBuses(json['buses']),
-      passengers: _parsePassengers(json['passengers']),
-      collections: _parseCollections(json['collections']),
-      expenses: _parseExpenses(json['expenses']),
-      incomes: _parseIncomes(json['incomes']),
-      attendance: _parseAttendance(json['attendance']),
-      groups: _parseGroups(json['groups']),
+      buses: _parseList(json['buses'], Bus.fromMap),
+      passengers: _parseList(json['passengers'], Passenger.fromMap),
+      collections: _parseList(json['collections'], Collection.fromMap),
+      expenses: _parseList(json['expenses'], Expense.fromMap),
+      incomes: _parseList(json['incomes'], IncomeEntry.fromMap),
+      attendance: _parseList(json['attendance'], Attendance.fromMap),
+      groups: _parseList(json['groups'], PassengerGroup.fromMap),
     );
   }
 
-  static List<Bus> _parseBuses(dynamic value) {
-    if (value is! List) return const [];
+  /// Parses one json array of the manifest: non-list input reads as empty
+  /// (unmodifiable, like the `const []` it replaces), non-map elements are
+  /// dropped.
+  static List<T> _parseList<T>(
+    dynamic value,
+    T Function(Map<String, dynamic>) fromMap,
+  ) {
+    if (value is! List) return List<T>.unmodifiable(const []);
     return value
         .whereType<Map>()
-        .map((m) => Bus.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-  }
-
-  static List<Passenger> _parsePassengers(dynamic value) {
-    if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((m) => Passenger.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-  }
-
-  static List<Collection> _parseCollections(dynamic value) {
-    if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((m) => Collection.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-  }
-
-  static List<Expense> _parseExpenses(dynamic value) {
-    if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((m) => Expense.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-  }
-
-  static List<IncomeEntry> _parseIncomes(dynamic value) {
-    if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((m) => IncomeEntry.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-  }
-
-  static List<Attendance> _parseAttendance(dynamic value) {
-    if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((m) => Attendance.fromMap(Map<String, dynamic>.from(m)))
-        .toList();
-  }
-
-  static List<PassengerGroup> _parseGroups(dynamic value) {
-    if (value is! List) return const [];
-    return value
-        .whereType<Map>()
-        .map((m) => PassengerGroup.fromMap(Map<String, dynamic>.from(m)))
+        .map((m) => fromMap(Map<String, dynamic>.from(m)))
         .toList();
   }
 

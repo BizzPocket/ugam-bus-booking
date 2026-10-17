@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:uuid/uuid.dart';
+import '../utils/json_coerce.dart';
 
 /// Category of a tour/bus income entry.
 enum IncomeCategory {
@@ -7,16 +8,11 @@ enum IncomeCategory {
   gallery,
   other;
 
-  String get displayName {
-    switch (this) {
-      case IncomeCategory.cabin:
-        return tr('enums.income_category.cabin');
-      case IncomeCategory.gallery:
-        return tr('enums.income_category.gallery');
-      case IncomeCategory.other:
-        return tr('enums.income_category.other');
-    }
-  }
+  String get displayName => switch (this) {
+        IncomeCategory.cabin => tr('enums.income_category.cabin'),
+        IncomeCategory.gallery => tr('enums.income_category.gallery'),
+        IncomeCategory.other => tr('enums.income_category.other'),
+      };
 
   /// Parse from stored string; unknown values fall back to [other].
   static IncomeCategory fromString(String? value) {
@@ -82,15 +78,9 @@ class IncomeEntry {
       amount: (map['amount'] as num?)?.toDouble() ?? 0,
       receivedBy: map['received_by'] as String?,
       note: map['note'] as String?,
-      createdAt: _parseDate(map['created_at']),
-      updatedAt: _parseDate(map['updated_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
+      updatedAt: coerceDateTimeOrNow(map['updated_at']),
     );
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   IncomeEntry copyWith({

@@ -66,20 +66,14 @@ class SeatGridPlacement {
 
   /// The cell at (row, column) for a lane column, or null for the aisle column.
   /// Use [BusLayout.balconyPair] for the aisle on balcony rows (caller handles).
-  static SeatCell? cellFor(BusLayout layout, int row, ChartColumn column) {
-    switch (column) {
-      case ChartColumn.singleUpper:
-        return layout.cellAt(row, SeatGridCols.singleUpper);
-      case ChartColumn.singleLower:
-        return layout.cellAt(row, SeatGridCols.singleLower);
-      case ChartColumn.doubleUpper:
-        return layout.cellAt(row, SeatGridCols.doubleUpper);
-      case ChartColumn.doubleLower:
-        return layout.cellAt(row, SeatGridCols.doubleLower);
-      case ChartColumn.aisle:
-        return null;
-    }
-  }
+  static SeatCell? cellFor(BusLayout layout, int row, ChartColumn column) =>
+      switch (column) {
+        ChartColumn.singleUpper => layout.cellAt(row, SeatGridCols.singleUpper),
+        ChartColumn.singleLower => layout.cellAt(row, SeatGridCols.singleLower),
+        ChartColumn.doubleUpper => layout.cellAt(row, SeatGridCols.doubleUpper),
+        ChartColumn.doubleLower => layout.cellAt(row, SeatGridCols.doubleLower),
+        ChartColumn.aisle => null,
+      };
 }
 
 /// A passenger occupying a seat, as shown in the chart cell.

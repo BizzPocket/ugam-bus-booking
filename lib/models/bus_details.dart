@@ -5,6 +5,7 @@ import 'seat_layout.dart';
 import 'seat_type.dart';
 import 'passenger.dart';
 import 'trip_type.dart';
+import '../utils/json_coerce.dart';
 
 /// A named, flexible price band covering a contiguous range of rows.
 ///
@@ -328,8 +329,8 @@ class Bus {
       priceBands: _parsePriceBands(map['price_bands']),
       notes: map['notes'] as String?,
       layout: _parseLayout(map['layout']),
-      createdAt: _parseDate(map['created_at']),
-      updatedAt: _parseDate(map['updated_at']),
+      createdAt: coerceDateTimeOrNow(map['created_at']),
+      updatedAt: coerceDateTimeOrNow(map['updated_at']),
     );
   }
 
@@ -376,12 +377,6 @@ class Bus {
       return BusLayout.fromMap(Map<String, dynamic>.from(value));
     }
     return null;
-  }
-
-  static DateTime _parseDate(dynamic v) {
-    if (v == null) return DateTime.now();
-    if (v is DateTime) return v;
-    return DateTime.tryParse(v.toString()) ?? DateTime.now();
   }
 
   Bus copyWith({
