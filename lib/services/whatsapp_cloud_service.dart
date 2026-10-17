@@ -286,6 +286,17 @@ class WhatsAppCloudService {
       // so the passenger for result i is the one at chunk position i.
       final chunkIds = addressedIds.sublist(start, stop);
       String? idAt(int i) => i < chunkIds.length ? chunkIds[i] : null;
+      // Records every recipient of this chunk as failed for [error].
+      void failChunk(String error) {
+        failed += chunk.length;
+        results.addAll(chunk.asMap().entries.map((e) => WaRecipientResult(
+              to: e.value.to,
+              ok: false,
+              error: error,
+              passengerId: idAt(e.key),
+            )));
+      }
+
       final body = {'messages': chunk.map((m) => m.toJson()).toList()};
       try {
         debugPrint('[WA] invoke "${WhatsAppCloudConfig.functionName}" '
@@ -317,21 +328,14 @@ class WhatsAppCloudService {
           if (chunkResults.isEmpty &&
               topLevelError != null &&
               topLevelError.trim().isNotEmpty) {
-            failed += chunk.length;
-            results.addAll(chunk.asMap().entries.map((e) => WaRecipientResult(
-                  to: e.value.to,
-                  ok: false,
-                  error: topLevelError,
-                  passengerId: idAt(e.key),
-                )));
+            failChunk(topLevelError);
             continue;
           }
 
           results.addAll(chunkResults);
-          sent += (data['sent'] as num?)?.toInt() ??
-              chunkResults.where((r) => r.ok).length;
-          failed += (data['failed'] as num?)?.toInt() ??
-              chunkResults.where((r) => !r.ok).length;
+          final tally = _tally(data, chunkResults);
+          sent += tally.sent;
+          failed += tally.failed;
         } else {
           // Neither a Map nor a throw: the reply shape is not one we understand
           // (an HTML error page, a bare string, null). Previously this fell
@@ -340,27 +344,14 @@ class WhatsAppCloudService {
           // came to be reported as "no recipients". Record it as a failure of
           // every recipient in the chunk, carrying what we did receive.
           debugPrint('[WA] unexpected reply shape: ${data.runtimeType} / $data');
-          failed += chunk.length;
-          results.addAll(chunk.asMap().entries.map((e) => WaRecipientResult(
-                to: e.value.to,
-                ok: false,
-                error: 'Unexpected response from WhatsApp sender '
-                    '(HTTP ${res.status})',
-                passengerId: idAt(e.key),
-              )));
+          failChunk(
+            'Unexpected response from WhatsApp sender (HTTP ${res.status})',
+          );
         }
       } catch (err) {
         debugPrint('[WA] invoke FAILED: $err');
         if (start == 0) rethrow;
-        failed += chunk.length;
-        results.addAll(chunk.asMap().entries.map(
-              (entry) => WaRecipientResult(
-                to: entry.value.to,
-                ok: false,
-                error: err.toString(),
-                passengerId: idAt(entry.key),
-              ),
-            ));
+        failChunk(err.toString());
       }
     }
     return WaSendResult(
@@ -417,12 +408,26 @@ class WhatsAppCloudService {
         .whereType<Map>()
         .map((r) => WaRecipientResult.fromMap(Map<String, dynamic>.from(r)))
         .toList();
-    final sent = (data['sent'] as num?)?.toInt() ??
-        results.where((r) => r.ok).length;
-    final failed = (data['failed'] as num?)?.toInt() ??
-        results.where((r) => !r.ok).length;
-    return WaSendResult(sent: sent, failed: failed, results: results);
+    final tally = _tally(data, results);
+    return WaSendResult(
+      sent: tally.sent,
+      failed: tally.failed,
+      results: results,
+    );
   }
+
+  /// The server's own `sent` / `failed` counts, falling back to counting the
+  /// per-recipient [results] when a count is missing.
+  static ({int sent, int failed}) _tally(
+    Map<dynamic, dynamic> data,
+    List<WaRecipientResult> results,
+  ) =>
+      (
+        sent: (data['sent'] as num?)?.toInt() ??
+            results.where((r) => r.ok).length,
+        failed: (data['failed'] as num?)?.toInt() ??
+            results.where((r) => !r.ok).length,
+      );
 
   /// Pulls the human-readable reason out of a failed Edge Function reply. The
   /// `bus-message` function reports failures as `{ "error": "<reason>" }` in the
@@ -475,11 +480,7 @@ class WhatsAppCloudService {
     required String contentType,
     int ttlSeconds = _signedUrlTtlSeconds,
   }) async {
-    await _client.storage.from(bucket).uploadBinary(
-          path,
-          bytes,
-          fileOptions: FileOptions(contentType: contentType, upsert: true),
-        );
+    await _upsert(bucket, path, bytes, contentType);
     return _client.storage.from(bucket).createSignedUrl(path, ttlSeconds);
   }
 
@@ -493,11 +494,21 @@ class WhatsAppCloudService {
     required Uint8List bytes,
     required String contentType,
   }) async {
+    await _upsert(bucket, path, bytes, contentType);
+    return _client.storage.from(bucket).getPublicUrl(path);
+  }
+
+  /// Upserts [bytes] at [bucket]/[path] so re-sends reuse the path.
+  Future<void> _upsert(
+    String bucket,
+    String path,
+    Uint8List bytes,
+    String contentType,
+  ) async {
     await _client.storage.from(bucket).uploadBinary(
           path,
           bytes,
           fileOptions: FileOptions(contentType: contentType, upsert: true),
         );
-    return _client.storage.from(bucket).getPublicUrl(path);
   }
 }
