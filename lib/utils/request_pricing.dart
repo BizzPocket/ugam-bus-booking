@@ -47,15 +47,6 @@ int requestChargePaise(Iterable<RequestLine> lines) =>
 bool isWaitlistLine(RequestLine line) =>
     line.band == null || line.leg.isOneWay;
 
-/// True when any part of this request has to be paid before it is submitted.
-bool requestNeedsPayment(Iterable<RequestLine> lines) =>
-    requestChargePaise(lines) > 0;
-
-/// True when EVERY line joins the waiting list — the CTA says "Join waiting
-/// list" rather than "Pay".
-bool requestIsAllWaitlist(Iterable<RequestLine> lines) =>
-    lines.isNotEmpty && lines.every(isWaitlistLine);
-
 /// What the ORGANISER quotes a waitlisted rider, once they have picked which
 /// band to seat them in.
 ///

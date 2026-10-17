@@ -173,29 +173,3 @@ SeatMoneyState seatMoneyStateOf(Iterable<SeatMoneyState> riderStates) {
   }
   return SeatMoneyState.uncollected;
 }
-
-/// The seat-level money state for EVERY occupied seat on a chart, keyed by
-/// seatId. For each seat it aggregates across all riders via
-/// [seatMoneyStateOf]; empty seats are omitted (no dot). [occupantsBySeat] is
-/// the per-seat rider list (one entry per distinct rider) and [collectionFor]
-/// resolves a rider's collection for a seat — the single computation every
-/// chart that paints a money dot shares.
-Map<String, SeatMoneyState> seatMoneyStatesForChart({
-  required Bus bus,
-  required Map<String, List<Passenger>> occupantsBySeat,
-  required Collection? Function(String passengerId, String seatId) collectionFor,
-}) {
-  final out = <String, SeatMoneyState>{};
-  for (final entry in occupantsBySeat.entries) {
-    if (entry.value.isEmpty) continue;
-    out[entry.key] = seatMoneyStateOf(
-      entry.value.map(
-        (p) => riderMoneyStateOf(
-          bus.amountDueForSeat(p, entry.key),
-          collectionFor(p.id, entry.key),
-        ),
-      ),
-    );
-  }
-  return out;
-}

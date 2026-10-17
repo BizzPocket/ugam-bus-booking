@@ -75,8 +75,11 @@ class CrowdLocationShare {
         _markLaunch(state);
         return state;
       }
+      // _sheetContext re-checks mounted itself and falls back to the root
+      // navigator, so a context that unmounted during the await is handled.
+      // ignore: use_build_context_synchronously
       final ctx = _sheetContext(context);
-      if (ctx == null) {
+      if (ctx == null || !ctx.mounted) {
         _markLaunch(state);
         return state;
       }

@@ -1,4 +1,3 @@
-import '../models/bus_details.dart';
 import '../models/passenger.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
@@ -128,16 +127,3 @@ List<NeedsAttentionItem> buildNeedsAttention(Tour tour, {int max = 4}) {
 }
 
 enum ActivityEventCategory { system, seats, buses, money, requests }
-
-ActivityEventCategory categorizeActivityTitle(String titleKey) {
-  // titleKey is the tr() key suffix or English event type marker we tag locally.
-  if (titleKey.contains('seat')) return ActivityEventCategory.seats;
-  if (titleKey.contains('bus')) return ActivityEventCategory.buses;
-  if (titleKey.contains('money') || titleKey.contains('pay')) {
-    return ActivityEventCategory.money;
-  }
-  if (titleKey.contains('request')) return ActivityEventCategory.requests;
-  return ActivityEventCategory.system;
-}
-
-bool busHasDriver(Bus bus) => bus.driverName.trim().isNotEmpty;

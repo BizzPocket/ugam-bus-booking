@@ -102,13 +102,3 @@ String waFailureAppendix(WaSendResult result) {
   final summary = waFailureSummary(result);
   return summary.isEmpty ? '' : '\n\n$summary';
 }
-
-/// The single most important thing to say when there is only room for one
-/// line — the largest failure group's cause and fix. Empty when nothing failed.
-String waPrimaryFailure(WaSendResult result) {
-  final groups = waFailureGroups(result);
-  if (groups.isEmpty) return '';
-  final g = groups.first;
-  final detail = g.rawDetail;
-  return '${g.causeText} ${g.fixText}${detail.isEmpty ? '' : ' ($detail)'}';
-}

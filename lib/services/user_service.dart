@@ -1,4 +1,3 @@
-import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -88,12 +87,5 @@ class UserService {
       if (e.code == '23505') return null;
       rethrow;
     }
-  }
-}
-
-class UserServiceBinding extends Bindings {
-  @override
-  void dependencies() {
-    Get.lazyPut<UserService>(() => UserService(), fenix: true);
   }
 }

@@ -2,8 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:occubusbooking/services/biometric_credential_store.dart';
 
 class _FakeAuth implements BiometricAuthenticator {
-  _FakeAuth({this.available = true, this.willPass = true});
-  bool available;
+  _FakeAuth({this.willPass = true});
+  bool available = true;
   bool willPass;
   int calls = 0;
   @override

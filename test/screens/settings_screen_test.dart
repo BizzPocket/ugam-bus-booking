@@ -6,8 +6,8 @@ import 'package:occubusbooking/services/biometric_credential_store.dart';
 import 'package:occubusbooking/screens/settings_screen.dart';
 
 class _FakeStore extends BiometricCredentialStore {
-  _FakeStore({this.available = true, this.enrolled = false});
-  bool available;
+  _FakeStore({this.enrolled = false});
+  bool available = true;
   bool enrolled;
   @override
   Future<bool> isAvailable() async => available;

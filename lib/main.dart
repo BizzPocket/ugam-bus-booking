@@ -122,7 +122,7 @@ class _BootstrapState extends State<_Bootstrap> {
       AppInfo.load(),
       Supabase.initialize(
         url: SupabaseConfig.url,
-        anonKey: SupabaseConfig.anonKey,
+        publishableKey: SupabaseConfig.anonKey,
         // Without this every PostgREST read, RPC and storage call awaits a
         // socket with no deadline. On a 2G link that is not "slow" — it is a
         // spinner that never resolves, invisible to the error reporter because

@@ -51,7 +51,7 @@ dependencies:
   google_fonts: ^8.0.2
 
   # Supabase backend
-  supabase_flutter: ^2.8.0
+  supabase_flutter: ^2.17.0
   # Already present transitively via supabase_flutter; declared directly so we
   # can hand Supabase.initialize a timeout-wrapping BaseClient. Pure Dart — no
   # native code, so it adds nothing to the build.

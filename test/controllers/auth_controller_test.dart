@@ -32,8 +32,8 @@ class _RecordingAuth extends AdminAuthService {
 }
 
 class _FakeStore extends BiometricCredentialStore {
-  _FakeStore({this.available = true, this.pass = true, this.enrolled});
-  bool available;
+  _FakeStore({this.pass = true, this.enrolled});
+  bool available = true;
   bool pass;
   ({String phone, String password})? enrolled;
   @override
