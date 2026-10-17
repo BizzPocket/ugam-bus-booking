@@ -7,6 +7,16 @@ import '../design/ugam.dart';
 import '../utils/band_options.dart';
 import '../utils/formatters.dart';
 
+/// "Row 3" / "Rows 1–4" for [option]'s band. Rows are 0-based in the layout
+/// and 1-based to a human counting them from the front of the coach.
+String bandRowsLabel(BandOption option) {
+  final from = option.band.fromRow + 1;
+  final to = option.band.toRow + 1;
+  return from == to
+      ? tr('band_picker.row_one', namedArgs: {'row': '$from'})
+      : tr('band_picker.rows', namedArgs: {'from': '$from', 'to': '$to'});
+}
+
 /// What the customer chose: a band, and how many units of the seat type.
 class BandPick {
   final BandOption option;
@@ -162,16 +172,6 @@ class _BandRow extends StatelessWidget {
     required this.onTap,
   });
 
-  /// Rows are 0-based in the layout and 1-based to a human counting them from
-  /// the front of the coach.
-  String get _rowsLabel {
-    final from = option.band.fromRow + 1;
-    final to = option.band.toRow + 1;
-    return from == to
-        ? tr('band_picker.row_one', namedArgs: {'row': '$from'})
-        : tr('band_picker.rows', namedArgs: {'from': '$from', 'to': '$to'});
-  }
-
   /// The authored label, shown only when it adds something. Blank labels and
   /// the synthesized standard option fall back to a generic word.
   String? get _labelChip {
@@ -184,6 +184,7 @@ class _BandRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
     final chip = _labelChip;
+    final rowsLabel = bandRowsLabel(option);
     final gone = option.soldOut;
     final ink = gone ? c.ink3 : (selected ? c.accent : c.ink);
 
@@ -234,7 +235,7 @@ class _BandRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    chip == null ? _rowsLabel : '$_rowsLabel · $chip',
+                    chip == null ? rowsLabel : '$rowsLabel · $chip',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: UgamText.caption.copyWith(color: c.ink2),
