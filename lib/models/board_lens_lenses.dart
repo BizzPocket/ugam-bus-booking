@@ -11,20 +11,13 @@ enum BoardLensId {
   group,
   boarding;
 
-  String get label {
-    switch (this) {
-      case BoardLensId.occupancy:
-        return tr('board_lens.name_occupancy');
-      case BoardLensId.money:
-        return tr('board_lens.name_money');
-      case BoardLensId.pickup:
-        return tr('board_lens.name_pickup');
-      case BoardLensId.group:
-        return tr('board_lens.name_group');
-      case BoardLensId.boarding:
-        return tr('board_lens.name_boarding');
-    }
-  }
+  String get label => switch (this) {
+        BoardLensId.occupancy => tr('board_lens.name_occupancy'),
+        BoardLensId.money => tr('board_lens.name_money'),
+        BoardLensId.pickup => tr('board_lens.name_pickup'),
+        BoardLensId.group => tr('board_lens.name_group'),
+        BoardLensId.boarding => tr('board_lens.name_boarding'),
+      };
 }
 
 /// The lenses wired to real data in this build wave (spec §15 steps 1 and 3).
@@ -46,20 +39,13 @@ abstract class BoardLens {
   factory BoardLens.of(
     BoardLensId id, {
     BoardTintScale tints = BoardTintScale.empty,
-  }) {
-    switch (id) {
-      case BoardLensId.occupancy:
-        return const OccupancyLens();
-      case BoardLensId.money:
-        return const MoneyLens();
-      case BoardLensId.pickup:
-        return PickupLens(tints);
-      case BoardLensId.group:
-        return GroupLens(tints);
-      case BoardLensId.boarding:
-        return const BoardingLens();
-    }
-  }
+  }) => switch (id) {
+        BoardLensId.occupancy => const OccupancyLens(),
+        BoardLensId.money => const MoneyLens(),
+        BoardLensId.pickup => PickupLens(tints),
+        BoardLensId.group => GroupLens(tints),
+        BoardLensId.boarding => const BoardingLens(),
+      };
 
   BoardLensId get id;
 
@@ -211,18 +197,12 @@ class OccupancyLens extends BoardLens {
   bool needsAction(BoardBerth berth) => berth.isVacant;
 
   @override
-  String stateLabel(BoardBerth berth) {
-    switch (berth.occupancy) {
-      case BerthOccupancy.blocked:
-        return tr('board_lens.state_blocked');
-      case BerthOccupancy.vacant:
-        return tr('board_lens.state_empty');
-      case BerthOccupancy.ladies:
-        return tr('board_lens.state_ladies');
-      case BerthOccupancy.occupied:
-        return tr('board_lens.state_occupied');
-    }
-  }
+  String stateLabel(BoardBerth berth) => switch (berth.occupancy) {
+        BerthOccupancy.blocked => tr('board_lens.state_blocked'),
+        BerthOccupancy.vacant => tr('board_lens.state_empty'),
+        BerthOccupancy.ladies => tr('board_lens.state_ladies'),
+        BerthOccupancy.occupied => tr('board_lens.state_occupied'),
+      };
 }
 
 /// પૈસા — what is still owed. The lens a handler walks the aisle with.

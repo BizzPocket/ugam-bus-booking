@@ -11,22 +11,14 @@ enum ExpenseCategory {
   busOwner,
   other;
 
-  String get displayName {
-    switch (this) {
-      case ExpenseCategory.driver:
-        return tr('enums.expense_category.driver');
-      case ExpenseCategory.fuel:
-        return tr('enums.expense_category.fuel');
-      case ExpenseCategory.food:
-        return tr('enums.expense_category.food');
-      case ExpenseCategory.toll:
-        return tr('enums.expense_category.toll');
-      case ExpenseCategory.busOwner:
-        return tr('enums.expense_category.busOwner');
-      case ExpenseCategory.other:
-        return tr('enums.expense_category.other');
-    }
-  }
+  String get displayName => switch (this) {
+        ExpenseCategory.driver => tr('enums.expense_category.driver'),
+        ExpenseCategory.fuel => tr('enums.expense_category.fuel'),
+        ExpenseCategory.food => tr('enums.expense_category.food'),
+        ExpenseCategory.toll => tr('enums.expense_category.toll'),
+        ExpenseCategory.busOwner => tr('enums.expense_category.busOwner'),
+        ExpenseCategory.other => tr('enums.expense_category.other'),
+      };
 
   /// Parse from stored string; unknown values fall back to [other].
   static ExpenseCategory fromString(String? value) {

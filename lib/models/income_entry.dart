@@ -8,16 +8,11 @@ enum IncomeCategory {
   gallery,
   other;
 
-  String get displayName {
-    switch (this) {
-      case IncomeCategory.cabin:
-        return tr('enums.income_category.cabin');
-      case IncomeCategory.gallery:
-        return tr('enums.income_category.gallery');
-      case IncomeCategory.other:
-        return tr('enums.income_category.other');
-    }
-  }
+  String get displayName => switch (this) {
+        IncomeCategory.cabin => tr('enums.income_category.cabin'),
+        IncomeCategory.gallery => tr('enums.income_category.gallery'),
+        IncomeCategory.other => tr('enums.income_category.other'),
+      };
 
   /// Parse from stored string; unknown values fall back to [other].
   static IncomeCategory fromString(String? value) {

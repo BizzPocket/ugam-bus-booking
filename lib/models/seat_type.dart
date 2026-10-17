@@ -9,16 +9,11 @@ enum SeatType {
   doubleSofa,
   seater;
 
-  String get displayName {
-    switch (this) {
-      case SeatType.singleSofa:
-        return tr('enums.seat_type.single_sofa');
-      case SeatType.doubleSofa:
-        return tr('enums.seat_type.double_sofa');
-      case SeatType.seater:
-        return tr('enums.seat_type.seater');
-    }
-  }
+  String get displayName => switch (this) {
+        SeatType.singleSofa => tr('enums.seat_type.single_sofa'),
+        SeatType.doubleSofa => tr('enums.seat_type.double_sofa'),
+        SeatType.seater => tr('enums.seat_type.seater'),
+      };
 
   /// Physical berths one unit of this seat type occupies: a Double Sofa is an
   /// upper+lower PAIR (2 berths), every other type is a single berth (1). This
@@ -43,23 +38,15 @@ enum SeatPosition {
   upper,
   lower;
 
-  String get suffix {
-    switch (this) {
-      case SeatPosition.upper:
-        return 'U';
-      case SeatPosition.lower:
-        return 'L';
-    }
-  }
+  String get suffix => switch (this) {
+        SeatPosition.upper => 'U',
+        SeatPosition.lower => 'L',
+      };
 
-  String get displayName {
-    switch (this) {
-      case SeatPosition.upper:
-        return tr('enums.seat_position.upper');
-      case SeatPosition.lower:
-        return tr('enums.seat_position.lower');
-    }
-  }
+  String get displayName => switch (this) {
+        SeatPosition.upper => tr('enums.seat_position.upper'),
+        SeatPosition.lower => tr('enums.seat_position.lower'),
+      };
 
   static SeatPosition? fromString(String? value) {
     if (value == null) return null;
@@ -77,16 +64,11 @@ enum SeatPosition {
 /// - DoubleSofa + Upper → "DU"
 /// - DoubleSofa + Lower → "DL"
 /// - Seater + null → "ST"  (uses "ST" to avoid collision with SingleSofa "S*")
-String seatIdPrefix(SeatType type, SeatPosition? position) {
-  switch (type) {
-    case SeatType.singleSofa:
-      return 'S${position?.suffix ?? 'L'}';
-    case SeatType.doubleSofa:
-      return 'D${position?.suffix ?? 'L'}';
-    case SeatType.seater:
-      return 'ST';
-  }
-}
+String seatIdPrefix(SeatType type, SeatPosition? position) => switch (type) {
+      SeatType.singleSofa => 'S${position?.suffix ?? 'L'}',
+      SeatType.doubleSofa => 'D${position?.suffix ?? 'L'}',
+      SeatType.seater => 'ST',
+    };
 
 /// Human-readable label like "Double Sofa Lower" or "Seater".
 String seatTypeLabel(SeatType type, SeatPosition? position) {

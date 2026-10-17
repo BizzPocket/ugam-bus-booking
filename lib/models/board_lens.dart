@@ -289,18 +289,12 @@ enum BoardAction {
   move,
   checkIn;
 
-  String get label {
-    switch (this) {
-      case BoardAction.call:
-        return tr('board_lens.action_call');
-      case BoardAction.collect:
-        return tr('board_lens.action_collect');
-      case BoardAction.move:
-        return tr('board_lens.action_move');
-      case BoardAction.checkIn:
-        return tr('board_lens.action_check_in');
-    }
-  }
+  String get label => switch (this) {
+        BoardAction.call => tr('board_lens.action_call'),
+        BoardAction.collect => tr('board_lens.action_collect'),
+        BoardAction.move => tr('board_lens.action_move'),
+        BoardAction.checkIn => tr('board_lens.action_check_in'),
+      };
 }
 
 /// Which number the sticky summary strip pins at the top (spec §3). The strip

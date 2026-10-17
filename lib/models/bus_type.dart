@@ -10,16 +10,11 @@ enum BusType {
   seater,
   mixed;
 
-  String get displayName {
-    switch (this) {
-      case BusType.sleeper:
-        return tr('enums.bus_type.sleeper');
-      case BusType.seater:
-        return tr('enums.bus_type.seater');
-      case BusType.mixed:
-        return tr('enums.bus_type.mixed');
-    }
-  }
+  String get displayName => switch (this) {
+        BusType.sleeper => tr('enums.bus_type.sleeper'),
+        BusType.seater => tr('enums.bus_type.seater'),
+        BusType.mixed => tr('enums.bus_type.mixed'),
+      };
 
   /// Whether this bus has an upper deck.
   bool get hasUpperDeck => this != BusType.seater;

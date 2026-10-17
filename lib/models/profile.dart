@@ -3,16 +3,11 @@ import 'package:easy_localization/easy_localization.dart';
 enum UserRole { admin, handler, passenger }
 
 extension UserRoleExtension on UserRole {
-  String get displayName {
-    switch (this) {
-      case UserRole.admin:
-        return tr('enums.user_role.admin');
-      case UserRole.handler:
-        return tr('enums.user_role.handler');
-      case UserRole.passenger:
-        return tr('enums.user_role.passenger');
-    }
-  }
+  String get displayName => switch (this) {
+        UserRole.admin => tr('enums.user_role.admin'),
+        UserRole.handler => tr('enums.user_role.handler'),
+        UserRole.passenger => tr('enums.user_role.passenger'),
+      };
 }
 
 class Profile {

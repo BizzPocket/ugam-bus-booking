@@ -14,18 +14,12 @@ enum PriorityStatus {
   bool get isApproved => this == PriorityStatus.approved;
   bool get isPending => this == PriorityStatus.requested;
 
-  String get displayName {
-    switch (this) {
-      case PriorityStatus.none:
-        return tr('enums.priority.none');
-      case PriorityStatus.requested:
-        return tr('enums.priority.requested');
-      case PriorityStatus.approved:
-        return tr('enums.priority.approved');
-      case PriorityStatus.declined:
-        return tr('enums.priority.declined');
-    }
-  }
+  String get displayName => switch (this) {
+        PriorityStatus.none => tr('enums.priority.none'),
+        PriorityStatus.requested => tr('enums.priority.requested'),
+        PriorityStatus.approved => tr('enums.priority.approved'),
+        PriorityStatus.declined => tr('enums.priority.declined'),
+      };
 
   static PriorityStatus fromString(String? value) {
     if (value == null) return PriorityStatus.none;
