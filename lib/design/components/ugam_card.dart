@@ -61,19 +61,18 @@ class UgamCard extends StatefulWidget {
 
 class _UgamCardState extends State<UgamCard>
     with SingleTickerProviderStateMixin {
-  // Built eagerly in initState (not via a `late final` field initializer) so
-  // the AnimationController is always created while this element is active.
-  // A non-tappable card never touches _ctrl during build; deferring creation
-  // to a lazy initializer would otherwise run it inside dispose() — when the
-  // element is deactivated — and the controller's TickerMode ancestor lookup
-  // then throws "Looking up a deactivated widget's ancestor is unsafe".
-  late final AnimationController _ctrl;
-  late final Animation<double> _scale;
+  // Created only for a TAPPABLE card (PERF: most cards on a roster/money
+  // screen are display-only, and each used to allocate a controller + ticker
+  // it never ran). Still created while the element is ACTIVE — in initState, or
+  // in didUpdateWidget the first time an onTap arrives — never lazily from
+  // build/dispose: a lazy initializer would run inside dispose() on a
+  // deactivated element and the TickerMode ancestor lookup would throw.
+  AnimationController? _ctrl;
+  Animation<double>? _scale;
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
+  void _ensureCtrl() {
+    if (_ctrl != null) return;
+    final ctrl = AnimationController(
       vsync: this,
       duration: UgamMotion.tapOut,
       reverseDuration: UgamMotion.tapIn,
@@ -81,31 +80,44 @@ class _UgamCardState extends State<UgamCard>
       upperBound: 1,
       value: 1,
     );
+    _ctrl = ctrl;
     _scale = Tween<double>(begin: 0.97, end: 1)
         .chain(CurveTween(curve: UgamMotion.easeOut))
-        .animate(_ctrl);
+        .animate(ctrl);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.onTap != null) _ensureCtrl();
+  }
+
+  @override
+  void didUpdateWidget(covariant UgamCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.onTap != null) _ensureCtrl();
   }
 
   @override
   void dispose() {
-    _ctrl.dispose();
+    _ctrl?.dispose();
     super.dispose();
   }
 
   void _down(_) {
     if (widget.onTap == null) return;
-    _ctrl.reverse();
+    _ctrl?.reverse();
     HapticFeedback.lightImpact();
   }
 
   void _up(_) {
     if (widget.onTap == null) return;
-    _ctrl.forward();
+    _ctrl?.forward();
   }
 
   void _cancel() {
     if (widget.onTap == null) return;
-    _ctrl.forward();
+    _ctrl?.forward();
   }
 
   @override
@@ -150,7 +162,7 @@ class _UgamCardState extends State<UgamCard>
       onTapUp: _up,
       onTapCancel: _cancel,
       behavior: HitTestBehavior.opaque,
-      child: ScaleTransition(scale: _scale, child: surface),
+      child: ScaleTransition(scale: _scale!, child: surface),
     );
   }
 }
