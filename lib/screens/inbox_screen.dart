@@ -58,6 +58,12 @@ class InboxScreen extends StatelessWidget {
                 }
 
                 final conversations = ctrl.conversations;
+                // A stream that failed with nothing held is "couldn't load",
+                // not "no one has written" — never send the agent to the
+                // WhatsApp settings over a dropped connection.
+                if (conversations.isEmpty && ctrl.loadFailed.value) {
+                  return UgamEmpty.error(onRetry: ctrl.retry);
+                }
                 if (conversations.isEmpty) {
                   return UgamEmpty(
                     icon: Icons.forum_outlined,

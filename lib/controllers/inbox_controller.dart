@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get/get.dart';
 
 import '../models/wa_conversation.dart';
 import '../models/wa_message.dart';
+import '../services/sync_service.dart';
 import '../services/whatsapp_inbox_service.dart';
 
 /// Owns the admin's live WhatsApp inbox: the list of conversations and the
@@ -33,23 +36,71 @@ class InboxController extends GetxController {
   final RxInt _totalUnread = 0.obs;
   RxInt get totalUnread => _totalUnread;
 
+  /// True when the conversation stream errored and has not delivered a list
+  /// since. With nothing held this is a "couldn't load" state with Retry —
+  /// NOT an empty inbox, which would send the agent off to check WhatsApp
+  /// settings on a perfectly wired number.
+  final RxBool loadFailed = false.obs;
+
   StreamSubscription<List<WaConversation>>? _sub;
+  Worker? _onlineWorker;
+  Timer? _resubscribeTimer;
+  int _failures = 0;
+
+  /// Backoff for the automatic re-subscribe after a stream error. Bounded so a
+  /// dead link costs one attempt a minute, not a tight loop on the radio.
+  @visibleForTesting
+  static Duration Function(int failures) resubscribeBackoff = (failures) =>
+      Duration(seconds: math.min(60, 5 * (1 << math.min(failures - 1, 4))));
 
   @override
   void onInit() {
     super.onInit();
+    _subscribe();
+    // Supabase's `.stream()` re-reads after a realtime REJOIN only if the
+    // channel had been joined once before. A stream whose very first read
+    // failed (opened offline, or on a link that dropped the request) never
+    // recovers on its own — so the edge back online re-subscribes, but only
+    // when the last attempt failed.
+    if (Get.isRegistered<SyncService>()) {
+      _onlineWorker = ever(Get.find<SyncService>().isOnline, (online) {
+        if (online && loadFailed.value) retry();
+      });
+    }
+  }
+
+  void _subscribe() {
+    _sub?.cancel();
     _sub = _service.watchConversations().listen(
       (rows) {
         conversations.assignAll(rows);
         _totalUnread.value = rows.fold(0, (sum, c) => sum + c.unreadCount);
         loading.value = false;
+        loadFailed.value = false;
+        _failures = 0;
+        _resubscribeTimer?.cancel();
       },
       onError: (_) {
         // Stream error (transient/offline): stop the spinner, keep the last
-        // known list. Realtime reconnects and re-emits on recovery.
+        // known list, flag the failure, and try again after a backoff.
         loading.value = false;
+        loadFailed.value = true;
+        _failures++;
+        _resubscribeTimer?.cancel();
+        _resubscribeTimer = Timer(resubscribeBackoff(_failures), () {
+          if (!isClosed && loadFailed.value) _subscribe();
+        });
       },
     );
+  }
+
+  /// Re-open the conversation stream now (the error state's Retry, or the
+  /// online edge). The held list stays on screen while it reconnects.
+  void retry() {
+    if (isClosed) return;
+    _resubscribeTimer?.cancel();
+    if (conversations.isEmpty) loading.value = true;
+    _subscribe();
   }
 
   /// Live message thread for one conversation (oldest first). The chat screen
@@ -75,6 +126,8 @@ class InboxController extends GetxController {
   void onClose() {
     _sub?.cancel();
     _sub = null;
+    _onlineWorker?.dispose();
+    _resubscribeTimer?.cancel();
     super.onClose();
   }
 }
