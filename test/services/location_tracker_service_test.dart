@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -285,6 +286,52 @@ void main() {
 
       await revived.flushNow();
       expect(fake.calls.first.length, 2);
+    });
+  });
+
+  group('bad network', () {
+    test('start() does not wait on the backlog upload before returning',
+        () async {
+      // The caller opens the GPS stream only after start() resolves; a dead
+      // zone upload must not keep the bus dark on the map.
+      await svc.debugAttach(requestId: 'r1', busId: 'b1');
+      await seed(3);
+      await svc.stop();
+
+      final hanging = Completer<Map<String, dynamic>>();
+      var calls = 0;
+      svc.pusher = (_, _, _) {
+        calls++;
+        return hanging.future;
+      };
+
+      await svc.start(requestId: 'r1', busId: 'b1')
+          .timeout(const Duration(seconds: 1));
+      expect(svc.status.value, TrackingStatus.live);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, 1, reason: 'the backlog still goes out, in the background');
+      hanging.complete({'accepted': 3, 'skipped': 0});
+    });
+
+    test('a flapping radio flushes ONCE after it settles, not per edge',
+        () async {
+      final original = LocationTrackerService.reconnectFlushDelay;
+      addTearDown(() => LocationTrackerService.reconnectFlushDelay = original);
+      LocationTrackerService.reconnectFlushDelay =
+          const Duration(milliseconds: 20);
+
+      final fake = FakePusher(accepted);
+      svc.pusher = fake.call;
+      await svc.debugAttach(requestId: 'r1', busId: 'b1');
+      await seed(2);
+
+      for (var i = 0; i < 5; i++) {
+        svc.onConnectivityRestored();
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(fake.calls, hasLength(1));
+      expect(svc.debugBufferLength, 0);
     });
   });
 }

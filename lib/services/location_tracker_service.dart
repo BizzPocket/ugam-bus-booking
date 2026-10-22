@@ -151,8 +151,12 @@ class LocationTrackerService extends GetxService {
   }) async {
     _asPassenger = false;
     await _attach(requestId: requestId, busId: busId, leg: leg);
-    // Anything buffered through a dead zone or a kill goes out immediately.
-    if (_buffer!.length > 0) await flushNow();
+    // Anything buffered through a dead zone or a kill goes out immediately —
+    // in the BACKGROUND. Every caller opens the GPS stream only after this
+    // resolves, and on 2G a 2000-fix backlog is several sequential uploads (or
+    // a 30 s timeout in a dead zone): awaiting it kept the bus dark on the map
+    // for exactly as long as the link was bad.
+    if (_buffer!.length > 0) unawaited(flushNow());
   }
 
   /// Same pipeline as [start], uploaded against the phone number of a seated
@@ -166,7 +170,7 @@ class LocationTrackerService extends GetxService {
     if (isSharing && _busId == busId) return;
     _asPassenger = true;
     await _attach(requestId: phone, busId: busId, leg: leg);
-    if (_buffer!.length > 0) await flushNow();
+    if (_buffer!.length > 0) unawaited(flushNow()); // see [start]
   }
 
   Future<void> stop() async {
@@ -224,14 +228,32 @@ class LocationTrackerService extends GetxService {
     _connSub?.cancel();
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
-      if (online) unawaited(flushNow());
+      if (online) onConnectivityRestored();
     });
+  }
+
+  Timer? _reconnectFlush;
+
+  /// Settle time after a radio-up edge before flushing. On a moving bus the
+  /// interface flaps up/down every few seconds at a cell edge; flushing on each
+  /// edge kept the radio awake re-trying a link that dropped again a second
+  /// later. One flush once it has stayed up briefly.
+  @visibleForTesting
+  static Duration reconnectFlushDelay = const Duration(seconds: 3);
+
+  /// The radio came back: flush once the link has settled (debounced).
+  @visibleForTesting
+  void onConnectivityRestored() {
+    _reconnectFlush?.cancel();
+    _reconnectFlush = Timer(reconnectFlushDelay, () => unawaited(flushNow()));
   }
 
   Future<void> stopStream() async {
     await _positionSub?.cancel();
     await _connSub?.cancel();
     _flushTimer?.cancel();
+    _reconnectFlush?.cancel();
+    _reconnectFlush = null;
     _positionSub = null;
     _connSub = null;
     _flushTimer = null;
@@ -314,6 +336,10 @@ class LocationTrackerService extends GetxService {
           }
           return;
         }
+
+        // Stopped (or re-attached elsewhere) while the slow upload was on the
+        // wire: this batch belongs to a buffer that no longer exists.
+        if (_buffer == null || !_attached) return;
 
         // RETURNED: the batch is spent, whatever it says.
         final error = result['error'] as String?;
