@@ -234,7 +234,10 @@ class _LegendItem extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Container(width: 3.5, color: const Color(0xFF3FB0A0)),
+              // The first group's real colour from the one generator the
+              // chart uses — a hard-coded teal sat beside the reserved GO
+              // one-way hue band and never followed palette changes.
+              Container(width: 3.5, color: groupColor(0)),
             ],
           ),
         ),

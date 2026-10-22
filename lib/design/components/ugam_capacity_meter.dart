@@ -187,7 +187,7 @@ class UgamCapacityMeter extends StatelessWidget {
     if (cap == 0) return _noPlanRow(c, label: label, barH: barH);
     final free = (cap - placed).clamp(0, cap);
     final full = free == 0;
-    final frac = cap == 0 ? 0.0 : (placed / cap).clamp(0.0, 1.0);
+    final frac = (placed / cap).clamp(0.0, 1.0); // cap > 0: returned above
     final count = Text(
       '$placed / $cap',
       style: UgamText.tabular(UgamText.bodyStrong.copyWith(color: c.ink)),
