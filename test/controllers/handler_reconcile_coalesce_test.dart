@@ -37,4 +37,32 @@ void main() {
     await pumpEventQueue();
     expect(reads, 2, reason: 'and then it goes quiet');
   });
+
+  test('signal back after a failed load re-reads; a healthy board does not',
+      () async {
+    var reads = 0;
+    var online = false;
+    final ctrl = HandlerController(
+      requestId: 'r1',
+      manifestReader: (_) async {
+        reads++;
+        if (!online) throw Exception('dead zone');
+        return const HandlerManifest();
+      },
+      scheduleReader: (_) async => const [],
+    );
+
+    await ctrl.load();
+    expect(ctrl.error.value, 'load');
+
+    online = true;
+    ctrl.reloadIfLastLoadFailed();
+    await pumpEventQueue();
+    expect(reads, 2);
+    expect(ctrl.error.value, isNull, reason: 'the error card heals itself');
+
+    ctrl.reloadIfLastLoadFailed();
+    await pumpEventQueue();
+    expect(reads, 2, reason: 'nothing failed, nothing to re-read');
+  });
 }

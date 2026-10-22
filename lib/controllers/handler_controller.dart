@@ -19,6 +19,7 @@ import '../models/passenger.dart';
 import '../models/passenger_group.dart';
 import '../models/payment_claim.dart';
 import '../services/customer_requests_store.dart';
+import '../services/sync_service.dart';
 import '../utils/boarding_stops.dart';
 import '../utils/collection_seat_resolver.dart';
 import '../utils/collection_write.dart';
@@ -437,6 +438,14 @@ class HandlerController extends GetxController {
   void onInit() {
     super.onInit();
     load();
+    // A bus drives out of a dead zone: re-read once signal returns, but only
+    // if the last load actually failed (the board otherwise refreshes after
+    // every write and on resume — no reason to churn it on every flap).
+    if (Get.isRegistered<SyncService>()) {
+      _onlineWorker = ever(Get.find<SyncService>().isOnline, (online) {
+        if (online) reloadIfLastLoadFailed();
+      });
+    }
     // Warm the global pickup list so boarding stops can be put in route order.
     // Registered lazily app-wide; absent under `flutter test`.
     if (Get.isRegistered<PickupController>()) {
@@ -472,6 +481,29 @@ class HandlerController extends GetxController {
 
   bool _reconcileInFlight = false;
   bool _reconcileQueued = false;
+
+  Worker? _onlineWorker;
+
+  /// The most recent [load] did not reach the server.
+  bool _lastLoadFailed = false;
+
+  /// Reconnect hook: re-read when the last load failed — the error card (never
+  /// loaded) gets a full load, a stale board a silent one.
+  @visibleForTesting
+  void reloadIfLastLoadFailed() {
+    if (isClosed || !_lastLoadFailed) return;
+    if (loadedOnce) {
+      reconcile();
+    } else {
+      unawaited(load());
+    }
+  }
+
+  @override
+  void onClose() {
+    _onlineWorker?.dispose();
+    super.onClose();
+  }
 
   Future<void> load({HandlerLoadKind kind = HandlerLoadKind.initial}) async {
     final token = ++_loadToken;
@@ -535,10 +567,12 @@ class HandlerController extends GetxController {
       };
       selectedBusId.value = _busIdAfterReload(fresh);
       loadedOnce = true;
+      _lastLoadFailed = false;
       error.value = null;
       loading.value = false;
     } catch (_) {
       if (token != _loadToken) return;
+      _lastLoadFailed = true;
       // Only COMMIT fetched rows when the load genuinely succeeded. Nothing
       // above ran, so a failure inherently keeps the last-known rows; what must
       // NOT happen is flipping to the error card and throwing away a screen
