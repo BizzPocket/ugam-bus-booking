@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as dev;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import '../models/profile.dart';
 import '../services/admin_auth_service.dart';
 import '../services/biometric_credential_store.dart';
 import '../services/push_service.dart';
+import '../services/sync_service.dart';
 import '../services/tour_cache_store.dart';
 import '../utils/app_snackbar.dart';
 import 'tour_controller.dart';
@@ -151,9 +153,8 @@ class AuthController extends GetxController {
     // tours, so the customer sees "no tours". Such a session can survive a
     // failed/offline sign-out, or (on Android) an Auto-Backup restore after
     // an uninstall/reinstall — both reported in the field.
-    final isPersistedAdmin = phone != null &&
-        phone.isNotEmpty &&
-        roleName == UserRole.admin.name;
+    final isPersistedAdmin =
+        phone != null && phone.isNotEmpty && roleName == UserRole.admin.name;
 
     if (!isPersistedAdmin) {
       await _removeSessionKeys(prefs);
@@ -184,40 +185,81 @@ class AuthController extends GetxController {
     // timeout on a dead link.
     if (!_prefsRestored.isCompleted) _prefsRestored.complete();
 
-    if (userRole.value == UserRole.admin && _client.auth.currentSession != null) {
-      try {
-        final admin = await adminAuth.findByPhone(phone);
-        if (admin != null) {
-          currentAdmin.value = admin;
-          // Re-arm push on cold start for an already-logged-in admin.
-          if (admin.pushEnabled) {
-            // ignore: unawaited_futures
-            PushService.instance.register();
-          }
-          if (Get.isRegistered<UserController>()) {
-            // ignore: unawaited_futures
-            Get.find<UserController>().ensureLoadedForCurrentAdmin();
-          }
-          if (Get.isRegistered<CustomerMemoryController>()) {
-            // Same deferral as CustomerMemoryController.onInit — don't race
-            // the tour cold-start wave on cellular.
-            Future<void>.delayed(const Duration(milliseconds: 2200), () {
-              if (!Get.isRegistered<CustomerMemoryController>()) return;
-              Get.find<CustomerMemoryController>().load();
-            });
-          }
-          // COLD START: TourController is lazyPut, so it usually is not
-          // registered yet — [_reloadToursWhenReady] waits for the home shell
-          // to mount it, then re-fetches with the confirmed admin owner scope.
-          // (TourController also awaits [whenRestored] before its own first
-          // load; this path covers login/role flips and a missed first paint.)
-          _reloadTours();
-        }
-      } catch (_) {
-        // Offline or transient — admin will hydrate on next online action.
-      }
+    if (userRole.value == UserRole.admin &&
+        _client.auth.currentSession != null) {
+      await _lookupRestoredAdmin(phone);
     }
   }
+
+  Worker? _adminLookupRetry;
+
+  /// Resolves the restored admin's row ([currentAdmin]) and re-arms everything
+  /// that hangs off it.
+  ///
+  /// On an offline / 2G cold start the lookup fails, and nothing used to try it
+  /// again for the whole session: the admin browsed with no `currentAdmin`, so
+  /// the tour list ran without its owner filter, the disk cache refused every
+  /// save, push was never re-armed and customer memory never loaded — long
+  /// after the signal came back. A failed lookup now retries once on the next
+  /// online edge (and keeps doing so until one lands).
+  Future<void> _lookupRestoredAdmin(String phone) async {
+    if (isClosed || _adminLookupInFlight) return;
+    _adminLookupInFlight = true;
+    try {
+      final admin = await adminAuth.findByPhone(phone);
+      _adminLookupRetry?.dispose();
+      _adminLookupRetry = null;
+      // Logged out (or a different admin signed in) while it was on the wire.
+      if (!isLoggedIn.value || !isAdmin || userPhone.value != phone) return;
+      if (admin != null) {
+        currentAdmin.value = admin;
+        // Re-arm push on cold start for an already-logged-in admin.
+        if (admin.pushEnabled) {
+          // ignore: unawaited_futures
+          PushService.instance.register();
+        }
+        if (Get.isRegistered<UserController>()) {
+          // ignore: unawaited_futures
+          Get.find<UserController>().ensureLoadedForCurrentAdmin();
+        }
+        if (Get.isRegistered<CustomerMemoryController>()) {
+          // Same deferral as CustomerMemoryController.onInit — don't race
+          // the tour cold-start wave on cellular.
+          Future<void>.delayed(const Duration(milliseconds: 2200), () {
+            if (!Get.isRegistered<CustomerMemoryController>()) return;
+            Get.find<CustomerMemoryController>().load();
+          });
+        }
+        // COLD START: TourController is lazyPut, so it usually is not
+        // registered yet — [_reloadToursWhenReady] waits for the home shell
+        // to mount it, then re-fetches with the confirmed admin owner scope.
+        // (TourController also awaits [whenRestored] before its own first
+        // load; this path covers login/role flips and a missed first paint.)
+        _reloadTours();
+      }
+    } catch (_) {
+      // Offline or transient — retry when the connection comes back.
+      if (_adminLookupRetry == null && Get.isRegistered<SyncService>()) {
+        _adminLookupRetry = ever(Get.find<SyncService>().isOnline, (online) {
+          // Still the same signed-in admin, and not resolved meanwhile (a
+          // fresh login sets currentAdmin itself).
+          if (!online || currentAdmin.value != null || !isAdmin) return;
+          if (!isLoggedIn.value || userPhone.value != phone) return;
+          // ignore: unawaited_futures
+          _lookupRestoredAdmin(phone);
+        });
+      }
+    } finally {
+      _adminLookupInFlight = false;
+    }
+  }
+
+  bool _adminLookupInFlight = false;
+
+  /// Test hook: run the restored-admin lookup for [phone] as cold start does.
+  @visibleForTesting
+  Future<void> debugLookupRestoredAdmin(String phone) =>
+      _lookupRestoredAdmin(phone);
 
   /// Best-effort local sign-out so a non-admin device browses as `anon`.
   /// `SignOutScope.local` clears the persisted session without a network
@@ -538,10 +580,32 @@ class AuthController extends GetxController {
   Future<void> logout() async {
     // Drop this device's push token BEFORE signing out — the unregister RPC is
     // scoped by auth.uid(), so it needs the live Supabase session.
-    await PushService.instance.unregister();
-    await adminAuth.signOut();
+    //
+    // Both network steps are BOUNDED and best-effort. Logging out has to work
+    // on a bus with no signal: unregister used to wait on FCM's getToken plus a
+    // 30 s RPC, and a signOut whose server call failed THREW — after gotrue had
+    // already dropped the local session — so `clearSessionLocally` never ran
+    // and the app was left half signed out, still holding the admin's prefs
+    // and cached roster.
+    await runBoundedLogoutStep(PushService.instance.unregister);
+    await runBoundedLogoutStep(adminAuth.signOut);
     await clearSessionLocally();
     Get.offAllNamed('/splash');
+  }
+
+  /// How long one network step of [logout] may hold the user on a dead link.
+  @visibleForTesting
+  static Duration logoutStepTimeout = const Duration(seconds: 6);
+
+  /// Runs one network step of [logout]: never throws, never waits longer than
+  /// [logoutStepTimeout]. The local half of logout must always run after it.
+  @visibleForTesting
+  static Future<void> runBoundedLogoutStep(Future<void> Function() step) async {
+    try {
+      await step().timeout(logoutStepTimeout);
+    } catch (e) {
+      dev.log('logout step skipped: $e', name: 'AuthController');
+    }
   }
 
   /// Clears the persisted prefs, the offline tour cache, and the in-memory
@@ -600,6 +664,7 @@ class AuthController extends GetxController {
   void onClose() {
     phoneController.dispose();
     passwordController.dispose();
+    _adminLookupRetry?.dispose();
     super.onClose();
   }
 }
