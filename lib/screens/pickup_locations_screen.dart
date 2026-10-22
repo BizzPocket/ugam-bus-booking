@@ -112,12 +112,16 @@ class _PickupLocationsScreenState extends State<PickupLocationsScreen> {
             maxLength: 6,
           ),
           const SizedBox(height: UgamSpacing.md),
-          UgamInput(
-            controller: _editNameField,
-            label: tr('pickup.form_label'),
-            hint: tr('pickup.rename_hint'),
-            autofocus: true,
-            onSubmitted: (_) => Navigator.of(context).pop(true),
+          // Builder: pop with a context INSIDE the dialog route — the screen's
+          // context resolves the screen's navigator, not the dialog's.
+          Builder(
+            builder: (fieldCtx) => UgamInput(
+              controller: _editNameField,
+              label: tr('pickup.form_label'),
+              hint: tr('pickup.rename_hint'),
+              autofocus: true,
+              onSubmitted: (_) => Navigator.of(fieldCtx).pop(true),
+            ),
           ),
         ],
       ),
