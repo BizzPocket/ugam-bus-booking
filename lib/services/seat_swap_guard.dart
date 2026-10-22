@@ -8,6 +8,7 @@ import '../models/passenger.dart';
 import '../models/seat_layout.dart';
 import '../models/seat_type.dart';
 import '../models/tour.dart';
+import '../models/trip_type.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_leg_capacity.dart';
 
@@ -52,19 +53,21 @@ class SeatSwapGuard {
     if (pA == null || pB == null) return;
 
     // Seat A receives B's berths (B leaves seat B); seat B receives A's berths.
-    final bumpA = _overbookedOn(
+    final bumpA = overbookedOn(
       tour,
       busId: busAId,
       seatId: seatAId,
       incoming: pB,
+      incomingTrip: pB.legForSeat(seatBId, busId: busBId),
       incomingBerths: _berthsOn(pB, busBId, seatBId),
       leavingId: passengerAId,
     );
-    final bumpB = _overbookedOn(
+    final bumpB = overbookedOn(
       tour,
       busId: busBId,
       seatId: seatBId,
       incoming: pA,
+      incomingTrip: pA.legForSeat(seatAId, busId: busAId),
       incomingBerths: _berthsOn(pA, busAId, seatAId),
       leavingId: passengerBId,
     );
@@ -103,13 +106,20 @@ class SeatSwapGuard {
   }
 
   /// The occupants of [seatId]/[busId] who would be over-booked on a leg once
-  /// [incoming] (holding [incomingBerths] berths) lands there and [leavingId]
-  /// vacates. Empty when the swap is leg-legal.
-  static List<Passenger> _overbookedOn(
+  /// [incoming] (holding [incomingBerths] berths, travelling [incomingTrip])
+  /// lands there and [leavingId] vacates. Empty when the swap is leg-legal.
+  ///
+  /// [incomingTrip] is the leg the rider holds on the seat they are LEAVING
+  /// ([Passenger.legForSeat], the canonical per-seat leg) — not their coarse
+  /// [Passenger.effectiveTripType], which reads round-trip for a mixed-leg
+  /// party and so reported an overbook on a perfectly legal one-leg swap.
+  @visibleForTesting
+  static List<Passenger> overbookedOn(
     Tour tour, {
     required String busId,
     required String seatId,
     required Passenger incoming,
+    required TripType incomingTrip,
     required int incomingBerths,
     required String leavingId,
   }) {
@@ -131,7 +141,7 @@ class SeatSwapGuard {
             ),
     ];
     final over = legOverbookedOccupants(
-      incomingTrip: incoming.effectiveTripType,
+      incomingTrip: incomingTrip,
       incomingBerths: incomingBerths,
       cap: cap,
       remaining: remaining,

@@ -273,6 +273,7 @@ class SeatChartBookingService {
       return ChartHoldResult(
         ok: false,
         conflicts: _seatIds(map['conflicts']),
+        errorMessage: map['error']?.toString(),
       );
     } on PostgrestException catch (e) {
       return ChartHoldResult(ok: false, errorMessage: e.message);

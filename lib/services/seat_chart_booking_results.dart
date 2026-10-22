@@ -104,6 +104,9 @@ class ChartMultiClaimResult {
       return ChartMultiClaimResult(
         ok: false,
         conflicts: _parseConflicts(map['conflicts']),
+        // The server's refusal reason — dropping it left the customer with
+        // a generic failure and no idea why.
+        errorMessage: map['error']?.toString(),
       );
     }
     return ChartMultiClaimResult(
@@ -167,6 +170,9 @@ class ChartMultiHoldResult {
       return ChartMultiHoldResult(
         ok: false,
         conflicts: _parseConflicts(map['conflicts']),
+        // The server's refusal reason — dropping it left the customer with
+        // a generic failure and no idea why.
+        errorMessage: map['error']?.toString(),
       );
     }
     return ChartMultiHoldResult(

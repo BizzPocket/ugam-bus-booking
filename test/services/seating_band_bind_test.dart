@@ -134,4 +134,22 @@ void main() {
     expect(plan.forPassenger('3'), isEmpty);
     expect(plan.exceptions.any((e) => e.passengerId == '3'), isTrue);
   });
+
+  test('the full-band exception card names the band the rider paid for', () {
+    // The exception's RequestLine was rebuilt without `band`, so the "Needs
+    // your decision" card for a full-band rider lost which band they bought.
+    final b = bus();
+    final plan = SeatingEngine.propose(
+      buses: [b],
+      passengers: [
+        rider(id: '1', band: backBand),
+        rider(id: '2', band: backBand),
+        rider(id: '3', band: backBand),
+      ],
+    );
+
+    final ex = plan.exceptions.firstWhere((e) => e.passengerId == '3');
+    expect(ex.requestLine?.band, backBand);
+  });
 }
+

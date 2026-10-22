@@ -847,6 +847,8 @@ class SeatingEngine {
         position: line.position,
         qty: line.remaining,
         leg: line.leg,
+        // Keep the band the rider PAID for, so the decision card can say so.
+        band: line.band,
       );
       // STRANGER-SHARE: this line could ONLY be seated by sharing a Double Sofa
       // whose other berth an unrelated passenger already holds on an OVERLAPPING
