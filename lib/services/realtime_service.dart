@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as dev;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -42,6 +43,18 @@ class RealtimeService extends GetxService {
   final _controller = StreamController<DataChangedEvent>.broadcast();
   Stream<DataChangedEvent> get events => _controller.stream;
 
+  final _reconnects = StreamController<void>.broadcast();
+
+  /// Fires when the live channel RE-joins after a drop. Events committed while
+  /// it was down were never delivered, so consumers should refetch their slice
+  /// (debounced — a flapping link rejoins repeatedly).
+  Stream<void> get reconnects => _reconnects.stream;
+
+  @visibleForTesting
+  void notifyReconnected() {
+    if (!_reconnects.isClosed) _reconnects.add(null);
+  }
+
   SupabaseClient get _client => Supabase.instance.client;
 
   RealtimeChannel? _adminChannel;
@@ -72,6 +85,7 @@ class RealtimeService extends GetxService {
     _authSub?.cancel();
     _teardownAdminChannel();
     _controller.close();
+    _reconnects.close();
     super.onClose();
   }
 
@@ -116,12 +130,24 @@ class RealtimeService extends GetxService {
     wire(LiveTable.buses);
     wire(LiveTable.bookingRequests);
 
+    var wasSubscribed = false;
     channel.subscribe((status, error) {
       if (error != null) {
         dev.log(
           'channel status=$status err=$error',
           name: 'RealtimeService',
         );
+      }
+      // A SECOND `subscribed` on the same channel is a rejoin: the socket
+      // dropped (dead zone, radio handover) and realtime_client re-joined it
+      // with its own backoff. Every change committed in between was never
+      // delivered, and nothing else would notice — the connectivity flag often
+      // stays "mobile" throughout.
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        if (wasSubscribed && identical(_adminChannel, channel)) {
+          notifyReconnected();
+        }
+        wasSubscribed = true;
       }
     });
 
