@@ -2719,7 +2719,8 @@
     "duplicate": "Already exists — looks like a duplicate (e.g. the same bus number on this tour).",
     "dismiss_cancel": "Could not dismiss the cancellation request.",
     "save_income": "Could not save income. {e}",
-    "delete_income": "Could not delete income. {e}"
+    "delete_income": "Could not delete income. {e}",
+    "no_connection_try_again": "Couldn't reach the server. Check your connection and try again."
   },
   "enums": {
     "seat_type": {

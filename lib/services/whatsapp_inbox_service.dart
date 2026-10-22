@@ -79,16 +79,48 @@ class WhatsAppInboxService {
   /// Returns null when the object is gone or the caller isn't allowed to read
   /// it; the caller shows the "attachment unavailable" state rather than an
   /// error, because from the admin's point of view those are the same thing.
-  Future<String?> mediaUrl(String mediaPath) async {
+  Future<String?> mediaUrl(String mediaPath) {
     final cached = _signedUrlCache[mediaPath];
-    if (cached != null) return cached;
+    if (cached != null) return Future.value(cached);
+    // A failure is remembered briefly too. The bubble asks again on every
+    // rebuild, and a chat rebuilds on every realtime tick — on a dead link that
+    // was one doomed storage round-trip per attachment per tick, all queued on
+    // the same radio as the messages themselves.
+    final failedAt = _signedUrlFailedAt[mediaPath];
+    if (failedAt != null &&
+        DateTime.now().difference(failedAt) < _failureMemory) {
+      return Future.value(null);
+    }
+    // Concurrent bubbles for the same path share one request.
+    // Block body on purpose: `remove` returns the removed Future, and a
+    // whenComplete callback that returns a Future is AWAITED — this one would
+    // wait on itself forever.
+    return _signedUrlInFlight[mediaPath] ??=
+        _mintSignedUrl(mediaPath).whenComplete(() {
+      _signedUrlInFlight.remove(mediaPath);
+    });
+  }
+
+  /// How long a failed signed-URL mint is remembered before it is retried.
+  static const _failureMemory = Duration(seconds: 30);
+  final Map<String, DateTime> _signedUrlFailedAt = {};
+  final Map<String, Future<String?>> _signedUrlInFlight = {};
+
+  /// Test seam for the storage call; null uses Supabase storage.
+  Future<String> Function(String path)? debugCreateSignedUrl;
+
+  Future<String?> _mintSignedUrl(String mediaPath) async {
     try {
-      final url = await _client.storage
-          .from(_mediaBucket)
-          .createSignedUrl(mediaPath, _signedUrlTtl.inSeconds);
+      final url = debugCreateSignedUrl != null
+          ? await debugCreateSignedUrl!(mediaPath)
+          : await _client.storage
+              .from(_mediaBucket)
+              .createSignedUrl(mediaPath, _signedUrlTtl.inSeconds);
       _signedUrlCache[mediaPath] = url;
+      _signedUrlFailedAt.remove(mediaPath);
       return url;
     } catch (_) {
+      _signedUrlFailedAt[mediaPath] = DateTime.now();
       return null;
     }
   }

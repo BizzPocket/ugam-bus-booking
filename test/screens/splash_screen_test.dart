@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
 import 'package:occubusbooking/controllers/auth_controller.dart';
+import 'package:occubusbooking/models/profile.dart';
 import 'package:occubusbooking/routes/app_routes.dart';
 import 'package:occubusbooking/screens/splash_screen.dart';
 
@@ -18,6 +21,23 @@ class _FakeAuth extends AuthController {
 
   @override
   Future<void> get whenRestored => Future.value();
+
+  @override
+  Future<void> get whenPrefsRestored => Future.value();
+}
+
+/// A returning admin on 2G: prefs restored at once, but the network admin
+/// lookup behind [whenRestored] never answers.
+class _SlowLinkAdmin extends AuthController {
+  @override
+  // ignore: must_call_super
+  void onInit() {}
+
+  @override
+  Future<void> get whenRestored => Completer<void>().future;
+
+  @override
+  Future<void> get whenPrefsRestored => Future.value();
 }
 
 Widget _harness() => GetMaterialApp(
@@ -72,5 +92,33 @@ void main() {
     // timer is left pending at test end.
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'a returning admin on a link that never answers reaches Home after the '
+      'minimum hold, not after the 10 s restore timeout', (tester) async {
+    Get.put<AuthController>(
+      _SlowLinkAdmin()
+        ..isLoggedIn.value = true
+        ..userRole.value = UserRole.admin,
+    );
+    await tester.pumpWidget(GetMaterialApp(
+      theme: ThemeData(brightness: Brightness.dark),
+      // Home is '/', so the splash gets its own route rather than `home:`.
+      initialRoute: '/splash-test',
+      getPages: [
+        GetPage(name: '/splash-test', page: () => const SplashScreen()),
+        GetPage(name: AppRoutes.home, page: () => const Text('HOME')),
+        GetPage(name: AppRoutes.customerHome, page: () => const Text('CUST')),
+      ],
+    ));
+
+    // Bounded pumps, NOT pumpAndSettle: that would happily advance fake time
+    // past the 10 s timeout and pass for the wrong reason.
+    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('HOME'), findsOneWidget,
+        reason: 'the cached Home must not wait on the network admin lookup');
   });
 }

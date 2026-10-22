@@ -108,6 +108,7 @@ class TourController extends _TourControllerBase
   @override
   void onClose() {
     _realtimeSub?.cancel();
+    _reconnectSub?.cancel();
     _refreshDebounce?.cancel();
     _cacheSaveDebounce?.cancel();
     super.onClose();

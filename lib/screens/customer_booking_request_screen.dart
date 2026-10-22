@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -49,6 +51,26 @@ part 'customer_booking_request/brief_and_steps.dart';
 /// `duplicate` soft-warns (submit-anyway); `ok` proceeds silently.
 enum _PreflightResult { ok, tooFast, duplicate }
 
+/// The request id to RE-USE for a submit, or null to mint a fresh one.
+///
+/// Re-used only when the previous attempt failed AND carried exactly the same
+/// content ([signature]); a changed form is a different request.
+@visibleForTesting
+String? pendingRequestIdFor(
+  ({String id, String signature})? pending,
+  String signature,
+) =>
+    (pending != null && pending.signature == signature) ? pending.id : null;
+
+/// True when a RE-SENT submit failed only because the first attempt — which
+/// timed out on the phone — had in fact landed: our own request id is already
+/// the booking_requests primary key.
+@visibleForTesting
+bool isSubmitAlreadyLanded(PostgrestException e, {required bool isResend}) =>
+    isResend &&
+    e.code == '23505' &&
+    '${e.message} ${e.details ?? ''}'.contains('booking_requests_pkey');
+
 class CustomerBookingRequestScreen extends StatefulWidget {
   final Tour tour;
   final CustomerRequestEntry? existing;
@@ -90,6 +112,10 @@ class _CustomerBookingRequestScreenState
   /// `claimedPaise` on the local ticket.
   bool _paymentRecorded = false;
 
+  /// The request id of a submit that FAILED, kept with the exact content it
+  /// carried — see [pendingRequestIdFor].
+  ({String id, String signature})? _pendingRequest;
+
   @override
   void initState() {
     super.initState();
@@ -124,6 +150,9 @@ class _CustomerBookingRequestScreenState
   // ─── BUSINESS LOGIC — PRESERVED VERBATIM ───────────────────────────
 
   Future<void> _submit() async {
+    // `_saving` is only raised after the preflight awaits and dialogs below, so
+    // a second tap in that window would run a second submit.
+    if (_saving) return;
     // The shared form validates and surfaces inline field errors itself; it
     // returns null when invalid, so we early-return without touching the network.
     var data = _formKey.currentState?.collect();
@@ -319,19 +348,29 @@ class _CustomerBookingRequestScreenState
   /// and a miss means PostgREST never reached Postgres, so nothing was written.
   Future<void> _callSubmitRpc({
     required Map<String, dynamic> params,
+    bool isResend = false,
   }) async {
     try {
-      await Supabase.instance.client.rpc(
-        'submit_booking_request',
-        params: params,
-      );
+      try {
+        await Supabase.instance.client.rpc(
+          'submit_booking_request',
+          params: params,
+        );
+      } on PostgrestException catch (e) {
+        if (e.code != _kSchemaCacheMiss) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        await Supabase.instance.client.rpc(
+          'submit_booking_request',
+          params: params,
+        );
+      }
     } on PostgrestException catch (e) {
-      if (e.code != _kSchemaCacheMiss) rethrow;
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-      await Supabase.instance.client.rpc(
-        'submit_booking_request',
-        params: params,
-      );
+      // A re-send of a submit that timed out: the first one DID land, and the
+      // request id (booking_requests PK, minted by us) now exists. The RPC is
+      // one transaction, so nothing was duplicated — this is the success the
+      // customer never heard about, not a failure to show them.
+      if (isSubmitAlreadyLanded(e, isResend: isResend)) return;
+      rethrow;
     }
   }
 
@@ -344,7 +383,6 @@ class _CustomerBookingRequestScreenState
     final rawPhone = data.phone;
     final normalisedPhone = data.normalisedPhone;
     final note = data.note ?? '';
-    final requestId = const Uuid().v4();
     final requestLines = data.lines;
     final rawForm = <String, dynamic>{
       'double_sofa': data.doubleSofa,
@@ -352,6 +390,23 @@ class _CustomerBookingRequestScreenState
       'trip_type': data.tripType.storageKey,
       if (note.isNotEmpty) 'note': note,
     };
+    // On a 2G link a submit can LAND and still time out on the phone. A fresh
+    // id per tap turned the customer's retry into a second request — and a
+    // second "New booking request" push to the organiser. Re-sending the SAME
+    // content re-uses the id instead, which the RPC's primary key makes
+    // idempotent (see [_callSubmitRpc]).
+    final signature = jsonEncode({
+      'tour': widget.tour.id,
+      'phone': normalisedPhone,
+      'name': name,
+      'lines': requestLines.map((l) => l.toMap()).toList(),
+      'note': note,
+      'pickup': data.pickupLocationId,
+    });
+    final pending = pendingRequestIdFor(_pendingRequest, signature);
+    final isResend = pending != null;
+    final requestId = pending ?? const Uuid().v4();
+    _pendingRequest = (id: requestId, signature: signature);
 
     // Atomic create via a SECURITY DEFINER RPC: inserts a fresh passenger AND
     // its booking_requests audit row in ONE transaction, linking them by
@@ -383,7 +438,10 @@ class _CustomerBookingRequestScreenState
         'p_pickup_location_id': data.pickupLocationId,
         'p_pickup_location_name': data.pickupLocationName,
       },
+      isResend: isResend,
     );
+    // Landed: the next submit is a NEW request and gets a new id.
+    _pendingRequest = null;
 
     // What this request costs, decided from the bands the customer actually
     // chose. `cannotCollect` (the organiser set no VPA) deliberately behaves

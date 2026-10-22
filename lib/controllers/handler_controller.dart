@@ -19,6 +19,7 @@ import '../models/passenger.dart';
 import '../models/passenger_group.dart';
 import '../models/payment_claim.dart';
 import '../services/customer_requests_store.dart';
+import '../services/sync_service.dart';
 import '../utils/boarding_stops.dart';
 import '../utils/collection_seat_resolver.dart';
 import '../utils/collection_write.dart';
@@ -437,6 +438,14 @@ class HandlerController extends GetxController {
   void onInit() {
     super.onInit();
     load();
+    // A bus drives out of a dead zone: re-read once signal returns, but only
+    // if the last load actually failed (the board otherwise refreshes after
+    // every write and on resume — no reason to churn it on every flap).
+    if (Get.isRegistered<SyncService>()) {
+      _onlineWorker = ever(Get.find<SyncService>().isOnline, (online) {
+        if (online) reloadIfLastLoadFailed();
+      });
+    }
     // Warm the global pickup list so boarding stops can be put in route order.
     // Registered lazily app-wide; absent under `flutter test`.
     if (Get.isRegistered<PickupController>()) {
@@ -448,7 +457,53 @@ class HandlerController extends GetxController {
   /// resume: the optimistic local patch already made the UI feel instant, and
   /// this confirms it against the server rather than trusting the cache
   /// forever.
-  void reconcile() => unawaited(load(kind: HandlerLoadKind.silent));
+  ///
+  /// Coalesced: while one reconcile is on the wire, further calls queue ONE
+  /// follow-up instead of each starting a fresh seven-read load. "Board all"
+  /// at a six-rider stop used to fire six full reloads back to back over 2G —
+  /// every one but the last discarded by the load token after paying for it.
+  void reconcile() {
+    if (_reconcileInFlight) {
+      _reconcileQueued = true;
+      return;
+    }
+    _reconcileInFlight = true;
+    unawaited(
+      load(kind: HandlerLoadKind.silent).whenComplete(() {
+        _reconcileInFlight = false;
+        if (_reconcileQueued && !isClosed) {
+          _reconcileQueued = false;
+          reconcile();
+        }
+      }),
+    );
+  }
+
+  bool _reconcileInFlight = false;
+  bool _reconcileQueued = false;
+
+  Worker? _onlineWorker;
+
+  /// The most recent [load] did not reach the server.
+  bool _lastLoadFailed = false;
+
+  /// Reconnect hook: re-read when the last load failed — the error card (never
+  /// loaded) gets a full load, a stale board a silent one.
+  @visibleForTesting
+  void reloadIfLastLoadFailed() {
+    if (isClosed || !_lastLoadFailed) return;
+    if (loadedOnce) {
+      reconcile();
+    } else {
+      unawaited(load());
+    }
+  }
+
+  @override
+  void onClose() {
+    _onlineWorker?.dispose();
+    super.onClose();
+  }
 
   Future<void> load({HandlerLoadKind kind = HandlerLoadKind.initial}) async {
     final token = ++_loadToken;
@@ -458,24 +513,28 @@ class HandlerController extends GetxController {
     }
     try {
       final read = manifestReader ?? _store.handlerTourManifest;
-      final fresh = await read(requestId);
       // These ride alongside the manifest rather than inside it (its live body
       // has drifted from the files, so it is never rewritten). All best-effort:
       // a handler whose backend predates any of these RPCs still gets a working
       // board, just without that affordance.
-      final freshHandovers = await _safe(
-        () => _store.handlerBusHandovers(requestId),
-      );
-      final freshLegState = await _safe(
-        () => _store.handlerBusLegState(requestId),
-      );
-      final freshTrip = await _safe(
-        () => _store.handlerBusTripState(requestId),
-      );
-      final freshReports = await _safe(() => _store.handlerReports(requestId));
-      final freshClaims = await _safe(
-        () => _store.handlerPaymentClaims(requestId),
-      );
+      //
+      // Issued TOGETHER with the manifest. They only need the request id, and
+      // awaiting them one after another made a board load six serial round
+      // trips on the handler's phone — on a bus, on 2G, that is the difference
+      // between a few seconds and most of a minute. Each is [_safe], so none
+      // can fail unobserved if the manifest read throws first.
+      final manifestF = read(requestId);
+      final handoversF = _safe(() => _store.handlerBusHandovers(requestId));
+      final legStateF = _safe(() => _store.handlerBusLegState(requestId));
+      final tripF = _safe(() => _store.handlerBusTripState(requestId));
+      final reportsF = _safe(() => _store.handlerReports(requestId));
+      final claimsF = _safe(() => _store.handlerPaymentClaims(requestId));
+      final fresh = await manifestF;
+      final freshHandovers = await handoversF;
+      final freshLegState = await legStateF;
+      final freshTrip = await tripF;
+      final freshReports = await reportsF;
+      final freshClaims = await claimsF;
       final scheduleTourId = _tourIdOf(fresh);
       final freshSchedule = await _safe(
         () => (scheduleReader ?? _store.tourSchedule)(scheduleTourId),
@@ -508,10 +567,12 @@ class HandlerController extends GetxController {
       };
       selectedBusId.value = _busIdAfterReload(fresh);
       loadedOnce = true;
+      _lastLoadFailed = false;
       error.value = null;
       loading.value = false;
     } catch (_) {
       if (token != _loadToken) return;
+      _lastLoadFailed = true;
       // Only COMMIT fetched rows when the load genuinely succeeded. Nothing
       // above ran, so a failure inherently keeps the last-known rows; what must
       // NOT happen is flipping to the error card and throwing away a screen

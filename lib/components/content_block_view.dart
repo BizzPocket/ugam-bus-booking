@@ -202,6 +202,11 @@ class _Banner extends StatelessWidget {
                 child: Image.network(
                   block.imageUrl!,
                   fit: BoxFit.cover,
+                  // Decode at the width it is shown, never the source's: a
+                  // full-size banner decoded on an old 2 GB phone is tens of MB.
+                  cacheWidth: (MediaQuery.sizeOf(context).width *
+                          MediaQuery.devicePixelRatioOf(context))
+                      .round(),
                   // A dead image URL must degrade to nothing, not to a broken
                   // icon on the customer's first screen.
                   errorBuilder: (_, _, _) => const SizedBox.shrink(),

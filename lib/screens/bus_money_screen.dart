@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
+import 'package:uuid/uuid.dart';
 
 import '../controllers/money_controller.dart';
 import '../controllers/tour_controller.dart';

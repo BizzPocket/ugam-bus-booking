@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -125,6 +126,40 @@ void main() {
     // The bug this test exists for: app bar present, body empty.
     expect(find.text('SU1'), findsOneWidget);
     expect(find.text('DL1'), findsOneWidget);
+  });
+
+  testWidgets('a slow availability poll is never stacked by the next tick',
+      (tester) async {
+    // 2G: one poll outlasts the 20 s interval. Each tick used to fire another
+    // read onto the same weak radio.
+    var calls = 0;
+    final hung = Completer<Map<String, SeatAvailability>>();
+    await tester.pumpWidget(MaterialApp(
+      home: SeatSelectionScreen(
+        tour: chartTour(),
+        loadBuses: (_) async => [liveBus()],
+        loadAvailability: (_) {
+          calls++;
+          return calls == 1 ? Future.value(const {}) : hung.future;
+        },
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(calls, 1);
+
+    // Three poll intervals pass while the first poll is still on the wire.
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(seconds: 21));
+    }
+    expect(calls, 2, reason: 'one poll in flight at a time');
+
+    hung.complete(const {});
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 21));
+    expect(calls, 3, reason: 'polling resumes once the slow one lands');
+
+    // Unmount so the periodic timer is cancelled before the test ends.
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('an empty bus list shows the empty state, never a blank screen',

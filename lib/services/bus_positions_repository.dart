@@ -21,12 +21,31 @@ class BusPositionsRepository {
   RealtimeChannel? _channel;
   StreamController<BusPosition>? _controller;
 
-  Future<List<BusPosition>> fetchForTour(String tourId) async {
-    final rows = await _client
-        .from('bus_live_positions')
-        .select()
-        .eq('tour_id', tourId);
-    return (rows as List)
+  final Map<String, Future<List<BusPosition>>> _fetchesInFlight = {};
+
+  /// Test seam for the row read; null uses PostgREST.
+  Future<List<dynamic>> Function(String tourId)? debugFetchRows;
+
+  /// Current positions for [tourId].
+  ///
+  /// Concurrent callers share ONE request. The map polls on a fixed timer and
+  /// re-reads on every app resume; on 2G a single read can outlast the poll
+  /// interval, and each tick used to stack another request onto the same weak
+  /// radio — slowing the one that would have answered.
+  Future<List<BusPosition>> fetchForTour(String tourId) {
+    return _fetchesInFlight[tourId] ??= _fetchRows(tourId).whenComplete(() {
+      _fetchesInFlight.remove(tourId);
+    });
+  }
+
+  Future<List<BusPosition>> _fetchRows(String tourId) async {
+    final rows = debugFetchRows != null
+        ? await debugFetchRows!(tourId)
+        : await _client
+            .from('bus_live_positions')
+            .select()
+            .eq('tour_id', tourId);
+    return rows
         .map((r) => BusPosition.fromMap(Map<String, dynamic>.from(r as Map)))
         .toList(growable: false);
   }

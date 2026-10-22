@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:occubusbooking/services/sync_retry_policy.dart';
 import 'package:occubusbooking/services/sync_service.dart'
     show RpcUnavailableException, SyncService;
@@ -79,6 +80,29 @@ void main() {
           isTrue);
       expect(isRetryable(const HttpException('boom'), retryOnTimeout: true),
           isTrue);
+    });
+
+    test('a connection dropped mid-response (http ClientException) is '
+        'transient', () {
+      // What IOClient turns dart:io's "Connection closed before full header
+      // was received" into — the signature failure of a lossy 2G link.
+      expect(
+          isRetryable(
+              http.ClientException(
+                  'Connection closed before full header was received'),
+              retryOnTimeout: true),
+          isTrue);
+      expect(
+          isRetryable(http.ClientException('closed'), retryOnTimeout: false),
+          isTrue);
+    });
+
+    test('a dropped connection still never re-sends the non-idempotent swap',
+        () {
+      expect(
+          isPreSendConnectionError(
+              http.ClientException('Connection closed while receiving data')),
+          isFalse);
     });
 
     // X-4: an unknown exception type is terminal even when its message

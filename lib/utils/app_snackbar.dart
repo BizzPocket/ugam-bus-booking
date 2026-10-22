@@ -36,12 +36,18 @@ class AppSnackBar {
   static final GlobalKey<_ToastHostState> _hostKey =
       GlobalKey<_ToastHostState>();
 
+  /// Test hook: observes every toast request (message + tone), even when no
+  /// overlay is mounted. Null in the app.
+  @visibleForTesting
+  static void Function(String message, UgamSnackTone tone)? debugOnShow;
+
   static void _show({
     required String message,
     String? title,
     required UgamSnackTone tone,
     Duration duration = const Duration(seconds: 3),
   }) {
+    debugOnShow?.call(message, tone);
     final context = Get.overlayContext ?? Get.context;
     if (context == null) return;
     final overlay = Overlay.maybeOf(context, rootOverlay: true);

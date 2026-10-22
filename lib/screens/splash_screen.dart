@@ -95,7 +95,14 @@ class _SplashScreenState extends State<SplashScreen>
         // isLoggedIn/isAdmin are set before that network hop, so a logged-in
         // admin still lands on the admin home; the tour list re-fetches once
         // online). A finite fall-through always beats an infinite spinner.
-        auth.whenRestored.timeout(const Duration(seconds: 10)),
+        //
+        // Waits on the PREFS half of restore, not the network admin lookup.
+        // Everything routing reads (isLoggedIn / isAdmin) is set from prefs
+        // before that lookup, and Home paints the cached graph without it. On
+        // 2G the lookup alone took the full 10 s, so a returning admin stared
+        // at the splash on every launch for data they already had on disk.
+        // The lookup carries on behind Home (and retries on reconnect).
+        auth.whenPrefsRestored.timeout(const Duration(seconds: 10)),
         // Minimum hold. Raised from 450ms so the dawn-bloom entrance (900ms)
         // completes before we route — otherwise a returning admin, whose
         // session restores instantly, would see the animation cut a third of

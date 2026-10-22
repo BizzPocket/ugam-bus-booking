@@ -59,6 +59,61 @@ void main() {
     expect(jsonDecode(res.body), {'ok': true});
   });
 
+  test('a body that stalls AFTER the headers raises TimeoutException',
+      () async {
+    // Headers arrive, then the signal drops mid-body: the header deadline has
+    // already been met, so without an idle bound this read never ends.
+    TimeoutHttpClient.defaultTimeout = const Duration(milliseconds: 50);
+    final stalled = StreamController<List<int>>();
+    final client = TimeoutHttpClient(
+      MockClient.streaming(
+        (_, _) async => http.StreamedResponse(stalled.stream, 200),
+      ),
+    );
+    stalled.add(utf8.encode('[{"id":'));
+
+    await expectLater(
+      client.get(Uri.parse('https://example.test/rest/v1/passengers')),
+      throwsA(isA<TimeoutException>()),
+    );
+    await stalled.close();
+  });
+
+  test('a slow-but-progressing body is NOT killed by the idle bound',
+      () async {
+    TimeoutHttpClient.defaultTimeout = const Duration(milliseconds: 80);
+    Stream<List<int>> trickle() async* {
+      // Total ~200ms (longer than the timeout), but never idle for 80ms.
+      for (var i = 0; i < 5; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        yield utf8.encode('a');
+      }
+    }
+
+    final client = TimeoutHttpClient(
+      MockClient.streaming((_, _) async => http.StreamedResponse(trickle(), 200)),
+    );
+    final res = await client.get(Uri.parse('https://example.test/x'));
+    expect(res.body, 'aaaaa');
+  });
+
+  test('a large upload gets its transfer time on top of the deadline', () {
+    TimeoutHttpClient.defaultTimeout = const Duration(seconds: 30);
+    final small = http.Request('POST', Uri.parse('https://example.test/rpc'))
+      ..bodyBytes = List.filled(2000, 1);
+    expect(TimeoutHttpClient.deadlineFor(small), const Duration(seconds: 30));
+
+    // 300 kB on a 4 kB/s uplink is 75 s of pure transfer.
+    final image = http.Request('POST', Uri.parse('https://example.test/obj'))
+      ..bodyBytes = List.filled(300000, 1);
+    expect(TimeoutHttpClient.deadlineFor(image), const Duration(seconds: 105));
+
+    // ...but never unbounded.
+    final huge = http.Request('POST', Uri.parse('https://example.test/obj'))
+      ..bodyBytes = List.filled(5000000, 1);
+    expect(TimeoutHttpClient.deadlineFor(huge), const Duration(minutes: 3));
+  });
+
   group('remote tuning', () {
     test('a sane value is applied', () {
       TimeoutHttpClient.applyRemoteTimeout(45);

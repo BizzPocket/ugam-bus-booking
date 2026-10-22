@@ -1,5 +1,11 @@
 part of '../tour_controller.dart';
 
+/// How long a reconnect edge waits before [TourController] refetches. Long
+/// enough that a signal flapping on a moving bus (online → offline → online
+/// inside a second) collapses into ONE fetch instead of a fetch per edge.
+@visibleForTesting
+Duration tourReconnectRefreshDelay = const Duration(milliseconds: 1500);
+
 /// Server load pipeline, realtime apply, and the post-load sweeps.
 mixin _TourSync on _TourGroups {
   StreamSubscription<DataChangedEvent>? _realtimeSub;
@@ -37,12 +43,25 @@ mixin _TourSync on _TourGroups {
     }
   }
 
+  StreamSubscription<void>? _reconnectSub;
+
+  /// Loads of [_loadTours] currently running, whoever started them.
+  int _activeLoads = 0;
+
+  /// A background refresh was asked for while a load was already running.
+  bool _refreshQueued = false;
+
   void _subscribeToChanges() {
     // Refresh whenever we come back online — covers offline → online edges
     // where realtime might have missed events while the socket was down.
     ever(_sync.isOnline, (online) {
-      if (online) _scheduleRefresh();
+      if (online) scheduleReconnectRefresh();
     });
+    // The interface can stay "mobile" the whole time the bus drives through a
+    // dead zone, so isOnline never flips — but the realtime socket drops and
+    // rejoins, and every row change in between is lost. A rejoin is a
+    // reconnect as far as the data is concerned.
+    _reconnectSub = _realtime.reconnects.listen((_) => scheduleReconnectRefresh());
 
     // Live updates: apply each Postgres change directly to local state.
     // The previous implementation triggered a full debounced refetch
@@ -58,9 +77,36 @@ mixin _TourSync on _TourGroups {
   /// Coalesce bursts of realtime events into a single fetch — used by
   /// connectivity-recovery edges and as the safety net when an
   /// incremental apply can't resolve a parent row locally.
-  void _scheduleRefresh() {
+  void _scheduleRefresh({Duration delay = const Duration(milliseconds: 300)}) {
     _refreshDebounce?.cancel();
-    _refreshDebounce = Timer(const Duration(milliseconds: 300), _loadTours);
+    _refreshDebounce = Timer(delay, _coalescedRefresh);
+  }
+
+  /// A connectivity / realtime-rejoin edge: refetch once the link has settled.
+  @visibleForTesting
+  void scheduleReconnectRefresh() =>
+      _scheduleRefresh(delay: tourReconnectRefreshDelay);
+
+  /// Background refresh that never SUPERSEDES a load already in flight.
+  ///
+  /// [_loadTours] bumps the generation, which discards the results of any load
+  /// still running. That is right for a user's pull-to-refresh, and ruinous for
+  /// a flapping link: every reconnect edge restarted the fetch, so on a bad
+  /// enough connection no load ever got to land. Instead, a refresh asked for
+  /// mid-load is queued and runs exactly once after it.
+  Future<void> _coalescedRefresh() async {
+    if (_activeLoads > 0) {
+      _refreshQueued = true;
+      return;
+    }
+    await _loadTours();
+  }
+
+  void _afterLoad() {
+    if (_activeLoads > 0 || !_refreshQueued || isClosed) return;
+    _refreshQueued = false;
+    // ignore: unawaited_futures
+    _coalescedRefresh();
   }
 
   void _applyRealtimeEvent(DataChangedEvent event) {
@@ -233,6 +279,16 @@ mixin _TourSync on _TourGroups {
   }
 
   Future<void> _loadTours() async {
+    _activeLoads++;
+    try {
+      await _loadToursBody();
+    } finally {
+      _activeLoads--;
+      _afterLoad();
+    }
+  }
+
+  Future<void> _loadToursBody() async {
     final gen = ++_loadGeneration;
     isLoading.value = true;
     hasError.value = false;

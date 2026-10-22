@@ -138,12 +138,15 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
       _error = null;
     });
     try {
-      final buses = await (widget.loadBuses ?? _service.tourBuses)(
-        widget.tour.id,
-      );
-      final avail = await (widget.loadAvailability ?? _service.availability)(
-        widget.tour.id,
-      );
+      // Independent reads — issued together, so a 2G first paint waits one
+      // round trip instead of two back to back.
+      final busesF = (widget.loadBuses ?? _service.tourBuses)(widget.tour.id);
+      final availF =
+          (widget.loadAvailability ?? _service.availability)(widget.tour.id);
+      // Both are awaited even if one fails, so neither error goes unhandled.
+      await Future.wait<Object?>([busesF, availF], eagerError: false);
+      final buses = await busesF;
+      final avail = await availF;
       if (!mounted) return;
       setState(() {
         _buses = buses;
@@ -161,7 +164,13 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     }
   }
 
+  /// A poll is on the wire. On 2G one read can outlast the 20 s interval;
+  /// without this every tick stacked another request onto the same radio.
+  bool _polling = false;
+
   Future<void> _refreshAvailability() async {
+    if (_polling || _loading) return;
+    _polling = true;
     try {
       final avail = await (widget.loadAvailability ?? _service.availability)(
         widget.tour.id,
@@ -175,6 +184,8 @@ class _SeatSelectionScreenState extends State<SeatSelectionScreen> {
     } catch (_) {
       // A failed poll is not worth interrupting a selection for — the claim
       // re-validates server-side anyway.
+    } finally {
+      _polling = false;
     }
   }
 

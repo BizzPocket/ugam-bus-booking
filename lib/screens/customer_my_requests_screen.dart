@@ -50,6 +50,9 @@ enum _StatusFilter { all, pending, confirmed, cancelled }
 
 class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   final _store = CustomerRequestsStore();
+
+  /// A cancel / cancellation-request RPC is in flight — ignore further taps.
+  bool _cancelBusy = false;
   bool _loading = true;
   bool _refreshing = false;
 
@@ -532,8 +535,19 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       confirmIcon: Icons.close_rounded,
       destructive: true,
     );
-    if (ok != true) return;
-    final result = await _store.cancel(entry.id);
+    if (ok != true || _cancelBusy) return;
+    // Busy guard: on a slow link the first tap's RPC is still in flight, and a
+    // second one lands on an already-cancelled row → "blocked".
+    _cancelBusy = true;
+    final CustomerRequestEntry? result;
+    try {
+      result = await _store.cancel(entry.id);
+    } catch (_) {
+      if (mounted) AppSnackBar.error(tr('errors.no_connection_try_again'));
+      return;
+    } finally {
+      _cancelBusy = false;
+    }
     if (!mounted) return;
     if (result == null) {
       AppSnackBar.warning(tr('customer_my_requests.cancel_blocked'));
@@ -561,8 +575,17 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
       confirmIcon: Icons.event_seat_outlined,
       destructive: true,
     );
-    if (ok != true) return;
-    final result = await _store.requestCancellation(entry.id);
+    if (ok != true || _cancelBusy) return;
+    _cancelBusy = true;
+    final CustomerRequestEntry? result;
+    try {
+      result = await _store.requestCancellation(entry.id);
+    } catch (_) {
+      if (mounted) AppSnackBar.error(tr('errors.no_connection_try_again'));
+      return;
+    } finally {
+      _cancelBusy = false;
+    }
     if (!mounted) return;
     if (result == null) {
       AppSnackBar.warning(tr('customer_my_requests.request_cancel_blocked'));

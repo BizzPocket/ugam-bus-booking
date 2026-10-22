@@ -6,6 +6,10 @@ extension _BusMoneySheets on _BusMoneyScreenState {
     ExpenseCategory category = existing?.category ?? ExpenseCategory.other;
     final labelCtrl = TextEditingController(text: existing?.label ?? '');
     final paidByCtrl = TextEditingController(text: existing?.paidBy ?? '');
+    // ONE id per sheet, not per tap. On 2G a save can land and still time out;
+    // the agent's second tap then re-sends the same row (insert → update by
+    // id) instead of writing a duplicate expense into the books.
+    final newId = const Uuid().v4();
 
     // Numpad-first money entry: a giant tabular amount up top, category as a
     // pill rail above it, and the label + paid-by tucked behind a collapsed
@@ -39,6 +43,7 @@ extension _BusMoneySheets on _BusMoneyScreenState {
             await controller.upsertExpense(
               existing == null
                   ? Expense(
+                      id: newId,
                       tourId: widget.tour.id,
                       busId: widget.bus.id,
                       category: category,
@@ -69,6 +74,8 @@ extension _BusMoneySheets on _BusMoneyScreenState {
     final receivedByCtrl = TextEditingController(
       text: existing?.receivedBy ?? '',
     );
+    // One id per sheet — see [_openExpenseSheet].
+    final newId = const Uuid().v4();
 
     UgamSheet.show<void>(
       context,
@@ -93,6 +100,7 @@ extension _BusMoneySheets on _BusMoneyScreenState {
             await controller.upsertIncome(
               existing == null
                   ? IncomeEntry(
+                      id: newId,
                       tourId: widget.tour.id,
                       busId: widget.bus.id,
                       category: category,
@@ -127,6 +135,10 @@ extension _BusMoneySheets on _BusMoneyScreenState {
     final seed = existing?.handedOverAmount ?? (expected < 0 ? 0.0 : expected);
     final handedCtrl = TextEditingController(text: seed.round().toString());
     final noteCtrl = TextEditingController(text: existing?.note ?? '');
+    // One id per sheet — see [_openExpenseSheet]. A handover is money changing
+    // hands; a duplicate row says the handler gave the cash twice.
+    final newId = const Uuid().v4();
+    var saving = false;
 
     UgamSheet.show<void>(
       context,
@@ -134,55 +146,72 @@ extension _BusMoneySheets on _BusMoneyScreenState {
           ? tr('bus_money.record_handover')
           : tr('bus_money.edit_handover'),
       builder: (sheetCtx) {
-        return SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ReadOnlyLine(
-                label: tr('bus_money.field_expected'),
-                value: Formatters.formatMoneyInr(expected),
-              ),
-              const SizedBox(height: UgamSpacing.lg),
-              UgamInput(
-                label: tr('bus_money.field_handed_over'),
-                controller: handedCtrl,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) => SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ReadOnlyLine(
+                  label: tr('bus_money.field_expected'),
+                  value: Formatters.formatMoneyInr(expected),
                 ),
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                ],
-              ),
-              const SizedBox(height: UgamSpacing.md),
-              UgamInput(
-                label: tr('bus_money.field_note'),
-                controller: noteCtrl,
-              ),
-              const SizedBox(height: UgamSpacing.lg),
-              UgamCTA(
-                label: tr('bus_money.save_handover'),
-                onPressed: () async {
-                  final note = noteCtrl.text.trim();
-                  final handed = double.tryParse(handedCtrl.text.trim()) ?? 0;
-                  await controller.recordHandover(
-                    existing == null
-                        ? BusHandover(
-                            tourId: widget.tour.id,
-                            busId: widget.bus.id,
-                            expectedAmount: expected,
-                            handedOverAmount: handed,
-                            note: note.isEmpty ? null : note,
-                          )
-                        : existing.copyWith(
-                            handedOverAmount: handed,
-                            note: note.isEmpty ? null : note,
-                          ),
-                  );
-                  if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                },
-              ),
-            ],
+                const SizedBox(height: UgamSpacing.lg),
+                UgamInput(
+                  label: tr('bus_money.field_handed_over'),
+                  controller: handedCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                ),
+                const SizedBox(height: UgamSpacing.md),
+                UgamInput(
+                  label: tr('bus_money.field_note'),
+                  controller: noteCtrl,
+                ),
+                const SizedBox(height: UgamSpacing.lg),
+                UgamCTA(
+                  label: tr('bus_money.save_handover'),
+                  loading: saving,
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          final note = noteCtrl.text.trim();
+                          final handed =
+                              double.tryParse(handedCtrl.text.trim()) ?? 0;
+                          setSheetState(() => saving = true);
+                          try {
+                            await controller.recordHandover(
+                              existing == null
+                                  ? BusHandover(
+                                      id: newId,
+                                      tourId: widget.tour.id,
+                                      busId: widget.bus.id,
+                                      expectedAmount: expected,
+                                      handedOverAmount: handed,
+                                      note: note.isEmpty ? null : note,
+                                    )
+                                  : existing.copyWith(
+                                      handedOverAmount: handed,
+                                      note: note.isEmpty ? null : note,
+                                    ),
+                            );
+                          } catch (_) {
+                            // The controller has already toasted the reason; keep
+                            // the sheet open so the agent can retry the same row.
+                            if (sheetCtx.mounted) {
+                              setSheetState(() => saving = false);
+                            }
+                            return;
+                          }
+                          if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                        },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -239,6 +268,7 @@ class _MoneyEntrySheetBodyState<T> extends State<_MoneyEntrySheetBody<T>> {
   List<T> get _cats => widget.categories;
 
   late T _category = widget.initialCategory;
+  bool _saving = false;
   late final ValueNotifier<String> _value = ValueNotifier<String>(_seed());
 
   String _seed() {
@@ -318,9 +348,19 @@ class _MoneyEntrySheetBodyState<T> extends State<_MoneyEntrySheetBody<T>> {
               final amount = double.tryParse(v) ?? 0;
               return UgamCTA(
                 label: widget.confirmLabel,
-                onPressed: amount > 0
+                loading: _saving,
+                onPressed: amount > 0 && !_saving
                     ? () async {
-                        await widget.onConfirm(amount);
+                        // Busy guard: a second tap while a slow save is in
+                        // flight would re-send it.
+                        setState(() => _saving = true);
+                        try {
+                          await widget.onConfirm(amount);
+                        } catch (_) {
+                          // Toasted by the controller; stay open to retry.
+                          if (mounted) setState(() => _saving = false);
+                          return;
+                        }
                         if (context.mounted) Navigator.of(context).pop();
                       }
                     : null,
