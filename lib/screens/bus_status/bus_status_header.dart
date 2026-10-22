@@ -195,7 +195,6 @@ class _DriverHeroCard extends StatelessWidget {
               icon: Icons.phone_rounded,
               tint: c.accent,
               fill: c.accentFill,
-              enabled: hasPhone,
               onTap: () => PhoneDialer.call(phone),
             ),
             const SizedBox(width: 6),
@@ -203,7 +202,6 @@ class _DriverHeroCard extends StatelessWidget {
               icon: Icons.chat_rounded,
               tint: c.good,
               fill: c.goodFill,
-              enabled: hasPhone,
               onTap: () => _openWhatsApp(phone),
             ),
           ],
@@ -217,32 +215,31 @@ class _CircleAction extends StatelessWidget {
   final IconData icon;
   final Color tint;
   final Color fill;
-  final bool enabled;
   final VoidCallback onTap;
 
+  // No `enabled` flag: the only caller renders these behind `if (hasPhone)`,
+  // so a disabled state could never be reached.
   const _CircleAction({
     required this.icon,
     required this.tint,
     required this.fill,
-    required this.enabled,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final c = UgamColors.of(context);
     return GestureDetector(
-      onTap: enabled ? onTap : null,
+      onTap: onTap,
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: 42,
         height: 42,
         decoration: BoxDecoration(
-          color: enabled ? fill : c.card,
+          color: fill,
           shape: BoxShape.circle,
         ),
         alignment: Alignment.center,
-        child: Icon(icon, size: 18, color: enabled ? tint : c.ink3),
+        child: Icon(icon, size: 18, color: tint),
       ),
     );
   }

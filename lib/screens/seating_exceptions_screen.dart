@@ -17,12 +17,14 @@ part 'seating_exceptions/seating_exceptions_widgets.dart';
 
 /// SLICE 2 of the smart-seat UI: the short "needs your decision" list.
 ///
-/// Reads the cached plan's [SeatingException]s for one tour
-/// ([TourController.exceptionsForTour]) and renders them GROUPED by a
-/// friendly category derived from [SeatingExceptionType]:
+/// Reads one tour's [SeatingException]s from the engine's read-only proposal
+/// ([TourController.capacityFor] → `TourCapacity.decisions`, never a fillTour
+/// cache) and renders them GROUPED by a friendly category derived from
+/// [SeatingExceptionType]:
 ///
 ///   * priorityNoLowerBerth           → "Priority"
-///   * groupWontFit, brokenPair       → "Groups"
+///   * groupWontFit, brokenPair,
+///     sharedDoubleNeedsReview        → "Groups"
 ///   * seatTypeUnavailable            → "Seat type"
 ///   * overflowWaitlist               → "Waitlist"
 ///
@@ -43,8 +45,8 @@ part 'seating_exceptions/seating_exceptions_widgets.dart';
 ///
 /// All colour comes from [UgamColors.of] — nothing hardcoded — and the
 /// screen is dark-first per the locked design DNA. The list is reactive:
-/// an Obx on [TourController.lastPlanByTour] repaints whenever a fresh
-/// fillTour caches a new plan.
+/// an Obx over the tour re-derives the decisions whenever the roster or the
+/// buses change.
 class SeatingExceptionsScreen extends StatelessWidget {
   final String tourId;
 

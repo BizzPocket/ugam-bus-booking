@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
 import '../components/combined_seat_grid.dart';
+import '../components/seat_chart_tile.dart' show kSeatTileH, kSeatTileW;
 import '../controllers/tour_controller.dart';
 import '../design/ugam.dart';
 import '../models/bus_details.dart';
@@ -15,10 +16,11 @@ import '../utils/app_nav.dart';
 import '../utils/passenger_display.dart';
 import '../utils/seat_occupants.dart';
 
-/// Canonical history seat-tile size, matching the app's `kSeatTileW/H` so the
-/// read-only chart reads at the same scale as every live chart.
-const double _kSeatTileW = 60;
-const double _kSeatTileH = 60;
+/// History seat-tile size: the app's canonical `kSeatTileW/H` itself, so the
+/// read-only chart reads at the same scale as every live chart. (These were
+/// hard-coded 60×60 while claiming to match 68×74, so history drew smaller.)
+const double _kSeatTileW = kSeatTileW;
+const double _kSeatTileH = kSeatTileH;
 
 /// READ-ONLY seat chart for a PAST (completed) tour.
 ///

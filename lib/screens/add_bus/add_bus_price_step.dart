@@ -18,9 +18,10 @@ class _Step3Price extends StatefulWidget {
   final List<PriceBand> priceBands;
   final ValueChanged<List<PriceBand>> onBandsChanged;
 
-  /// The saved layout (edit mode). Null in add mode — the layout is only built
-  /// at save time there, so the band row range can't be clamped against a
-  /// concrete grid until then.
+  /// The layout the band row range clamps against: the saved one when editing
+  /// an unchanged bus, otherwise a preview built from the Step 2 inputs (add
+  /// mode included). Null only when no grid can be built — e.g. editing a
+  /// layout-less bus — which is when `rows_clamped_note` shows.
   final BusLayout? layout;
   final Tour? tour;
   final int totalSeats;
@@ -125,8 +126,8 @@ class _Step3PriceState extends State<_Step3Price> {
   int get totalSeats => widget.totalSeats;
   VoidCallback get onChanged => widget.onChanged;
 
-  /// Row count of the bus, when known (edit mode). Used to clamp the band row
-  /// range. Null in add mode.
+  /// Row count of the bus, when a layout is known (see [_Step3Price.layout]).
+  /// Used to clamp the band row range.
   int? get _rowCount => widget.layout?.rows;
 
   /// Format a derived rupee value the way the per-seat auto-fill does: whole
