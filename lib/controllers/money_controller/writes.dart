@@ -255,11 +255,13 @@ mixin _MoneyWrites on _MoneyLoad {
       }
       if (invalidatesFinance) _invalidateFinance();
     } catch (e) {
-      await refreshForTour(tourId);
+      // Toast FIRST: the snap-back reload is four money reads that can take
+      // most of a minute on 2G, and the failure used to wait behind it.
       AppSnackBar.error(
         tr(errorKey, namedArgs: {'e': '$e'}),
         title: tr('errors.save_failed'),
       );
+      await refreshForTour(tourId);
       rethrow;
     }
   }
@@ -283,11 +285,11 @@ mixin _MoneyWrites on _MoneyLoad {
       if (invalidatesFinance) _invalidateFinance();
     } catch (e) {
       final tourId = removed == null ? null : tourIdOf(removed);
-      await refreshForTour(tourId ?? _loadedTourId ?? '');
       AppSnackBar.error(
         tr(errorKey, namedArgs: {'e': '$e'}),
         title: tr('errors.delete_failed'),
       );
+      await refreshForTour(tourId ?? _loadedTourId ?? '');
       rethrow;
     }
   }

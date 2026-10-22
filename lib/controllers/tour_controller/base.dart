@@ -109,7 +109,6 @@ abstract class _TourControllerBase extends GetxController {
     try {
       await persist();
     } catch (e) {
-      await refreshTours();
       // A Postgres unique-violation (code 23505) — e.g. the same bus
       // registration twice on one tour — is an expected conflict, not a crash.
       // Show a clean, localized message instead of dumping the raw
@@ -117,10 +116,14 @@ abstract class _TourControllerBase extends GetxController {
       final raw = e.toString().toLowerCase();
       final isDuplicate =
           raw.contains('23505') || raw.contains('duplicate key');
+      // Tell the agent FIRST, then snap back. The refresh is a full tour
+      // reload — on 2G up to three ~28 s attempts — and the toast used to wait
+      // behind it, so a failed save looked like a save for a minute or more.
       AppSnackBar.error(
         isDuplicate ? tr('errors.duplicate') : '$failure $e',
         title: tr('errors.save_failed'),
       );
+      await refreshTours();
       rethrow;
     }
   }
