@@ -151,7 +151,7 @@ class SeatOccupantLabel extends StatelessWidget {
           LayoutBuilder(
             builder: (context, box) => nameText(
               nameStyle.copyWith(
-                fontSize: _wordFitFontSize(
+                fontSize: wordFitFontSize(
                   name,
                   // Measure what the Text will actually paint: the ambient
                   // DefaultTextStyle merged under ours (theme tracking etc.).
@@ -186,9 +186,27 @@ class SeatOccupantLabel extends StatelessWidget {
   }
 }
 
+final RegExp _whitespace = RegExp(r'\s+');
+
+/// PERF memo for [wordFitFontSize]. Every booked tile on every chart rebuild
+/// laid out one [TextPainter] per word of its occupant's name — up to ~150
+/// paragraph layouts per chart frame on a 74-berth sleeper. The result is a
+/// pure function of (name, style, scaler, width, locale), all value-equal
+/// types, so it is cached on exactly that key. Bounded: cleared wholesale once
+/// it holds [_kWordFitCacheMax] entries (a roster is a few hundred names).
+final Map<(String, TextStyle, TextScaler, double, Locale?), double>
+    _wordFitCache = {};
+const int _kWordFitCacheMax = 1024;
+bool _wordFitListening = false;
+
+/// Number of real (uncached) word measurements — test seam for the memo.
+@visibleForTesting
+int debugWordFitMeasureCount = 0;
+
 /// The largest font size (≤ the style's own, ≥ 80% of it) at which every
 /// space-separated word of [name] fits [maxWidth] on its own line.
-double _wordFitFontSize(
+@visibleForTesting
+double wordFitFontSize(
   String name,
   TextStyle style,
   TextScaler scaler,
@@ -197,8 +215,31 @@ double _wordFitFontSize(
 ) {
   final size = style.fontSize ?? 13;
   if (!maxWidth.isFinite || maxWidth <= 0) return size;
+  final key = (name, style, scaler, maxWidth, locale);
+  final hit = _wordFitCache[key];
+  if (hit != null) return hit;
+  if (!_wordFitListening) {
+    // Glyph metrics change when a font finishes loading — drop the memo then,
+    // the same event that clears Flutter's own paragraph caches.
+    _wordFitListening = true;
+    PaintingBinding.instance.systemFonts.addListener(_wordFitCache.clear);
+  }
+  if (_wordFitCache.length >= _kWordFitCacheMax) _wordFitCache.clear();
+  return _wordFitCache[key] =
+      _measureWordFit(name, style, scaler, maxWidth, locale, size);
+}
+
+double _measureWordFit(
+  String name,
+  TextStyle style,
+  TextScaler scaler,
+  double maxWidth,
+  Locale? locale,
+  double size,
+) {
+  debugWordFitMeasureCount++;
   var widest = 0.0;
-  for (final word in name.trim().split(RegExp(r'\s+'))) {
+  for (final word in name.trim().split(_whitespace)) {
     if (word.isEmpty) continue;
     final tp = TextPainter(
       text: TextSpan(text: word, style: style),

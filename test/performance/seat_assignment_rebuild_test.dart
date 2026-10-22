@@ -12,6 +12,7 @@ import 'package:occubusbooking/models/seat_layout.dart';
 import 'package:occubusbooking/models/seat_type.dart';
 import 'package:occubusbooking/models/tour.dart';
 import 'package:occubusbooking/screens/tour_seat_assignment_screen.dart';
+import 'package:occubusbooking/widgets/seat_occupant_label.dart';
 
 /// PERF pin: on a low-end phone the seat workbench must not repaint all ~37
 /// seat tiles for UI chrome that never touches the chart (opening/closing the
@@ -124,10 +125,17 @@ void main() {
               : p,
       ],
     );
+    final measuredBefore = debugWordFitMeasureCount;
     ctrl.tours[0] = updated;
     ctrl.tours.refresh();
     await tester.pumpAndSettle();
     final after = _tiles(tester);
+    // Only the ONE newly-seated name is measured; the 12 unchanged booked
+    // tiles reuse their cached word fit.
+    // ignore: avoid_print
+    print('PERF tour change: ${_rebuilt(before, after)}/${after.length} tiles '
+        'rebuilt, ${debugWordFitMeasureCount - measuredBefore} name measures');
+    expect(debugWordFitMeasureCount - measuredBefore, lessThanOrEqualTo(1));
     expect(_rebuilt(before, after), greaterThan(0));
     // The newly seated rider shows on the chart (memo invalidated).
     final seated = after.where(
