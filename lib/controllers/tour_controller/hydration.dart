@@ -48,12 +48,21 @@ mixin _TourHydration on _TourDiskCache {
   }
 
   Future<void> _hydrateTour(String tourId) async {
+    if (getTour(tourId) == null) return;
+
+    final rel = await _sync.fetchRelationsForTours([tourId]);
+
+    // Resolve the index AFTER the await, never before it. On a 2G link this
+    // request is in flight for seconds, and in that window a refresh can
+    // `assignAll` the list in a new order (same underlying List object), a
+    // realtime delete can drop a tour, or a new one can be appended. An index
+    // captured before the await then points at a DIFFERENT tour — and this
+    // roster gets written over it — or past the end of the list. Same rule
+    // [_loadTours] follows.
     // ignore: invalid_use_of_protected_member
     final raw = tours.value;
     final idx = raw.indexWhere((t) => t.id == tourId);
     if (idx < 0) return;
-
-    final rel = await _sync.fetchRelationsForTours([tourId]);
 
     // Mirror the cold-start read: a customer-cancelled passenger stays in the
     // DB for history but must never enter the active roster.

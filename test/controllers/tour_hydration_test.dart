@@ -165,6 +165,44 @@ void main() {
     expect(c2.getTour('archived')!.passengers, hasLength(1));
   });
 
+  test('a list reorder DURING the fetch writes the roster onto the right tour',
+      () async {
+    // The slow-link race: the relations request is in flight for seconds, and
+    // a refresh re-orders `tours` underneath it. The index must be resolved
+    // after the await, or the archived roster lands on the running tour.
+    sync.gate = Completer<void>();
+    final pending = ctrl.ensureTourHydrated('archived');
+    await Future<void>.delayed(Duration.zero);
+
+    ctrl.tours.assignAll([
+      _tour('new', TourStatus.assigning),
+      _tour('running', TourStatus.locked),
+      _tour('archived', TourStatus.completed),
+    ]);
+
+    sync.gate!.complete();
+    await pending;
+
+    expect(ctrl.getTour('archived')!.passengers, hasLength(1));
+    expect(ctrl.getTour('new')!.passengers, isEmpty,
+        reason: 'the tour now sitting at the old index must not inherit it');
+    expect(ctrl.getTour('running')!.passengers, isEmpty);
+  });
+
+  test('a tour removed DURING the fetch is a no-op, not a RangeError',
+      () async {
+    sync.gate = Completer<void>();
+    final pending = ctrl.ensureTourHydrated('running');
+    await Future<void>.delayed(Duration.zero);
+
+    ctrl.tours.assignAll([_tour('archived', TourStatus.completed)]);
+
+    sync.gate!.complete();
+    await pending;
+    expect(ctrl.tours, hasLength(1));
+    expect(ctrl.getTour('archived')!.passengers, isEmpty);
+  });
+
   test('hydrating an unknown tour id is a no-op, not a crash', () async {
     await ctrl.ensureTourHydrated('does-not-exist');
     expect(sync.calls, 0);
