@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/whatsapp_cloud_config.dart';
+import 'sync_retry_policy.dart' show isRetryable;
 import 'wa_error.dart';
 import 'wa_template_params.dart';
 
@@ -505,10 +506,52 @@ class WhatsAppCloudService {
     Uint8List bytes,
     String contentType,
   ) async {
-    await _client.storage.from(bucket).uploadBinary(
-          path,
-          bytes,
-          fileOptions: FileOptions(contentType: contentType, upsert: true),
-        );
+    // An upsert to a fixed path is idempotent, so a transport failure — the
+    // usual fate of a 200 kB chart image on a lossy 2G uplink — is retried
+    // once before the whole send is reported as failed. A storage refusal
+    // (StorageException: auth, size, policy) is never retried.
+    for (var attempt = 1;; attempt++) {
+      try {
+        await (debugUpload ?? _uploadBinary)(bucket, path, bytes, contentType);
+        return;
+      } catch (e) {
+        if (attempt >= 2 || !isRetryable(e, retryOnTimeout: true)) rethrow;
+        await Future<void>.delayed(uploadRetryDelay);
+      }
+    }
   }
+
+  Future<void> _uploadBinary(
+    String bucket,
+    String path,
+    Uint8List bytes,
+    String contentType,
+  ) =>
+      _client.storage.from(bucket).uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType, upsert: true),
+          );
+
+  /// Test seam for the storage upload; null uses Supabase storage.
+  @visibleForTesting
+  Future<void> Function(
+    String bucket,
+    String path,
+    Uint8List bytes,
+    String contentType,
+  )? debugUpload;
+
+  @visibleForTesting
+  static Duration uploadRetryDelay = const Duration(seconds: 1);
+
+  /// [_upsert], exposed for tests.
+  @visibleForTesting
+  Future<void> debugUpsert(
+    String bucket,
+    String path,
+    Uint8List bytes,
+    String contentType,
+  ) =>
+      _upsert(bucket, path, bytes, contentType);
 }
