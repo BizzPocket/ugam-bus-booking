@@ -188,7 +188,15 @@ class _MainShellState extends State<MainShell> {
                     // sizes correctly — but the placeholder doesn't
                     // observe any reactive state, so no rebuild churn.
                     _visitedTabs.contains(i)
-                        ? Navigator(
+                        // PERF: IndexedStack keeps hidden children's tickers
+                        // RUNNING (it uses Visibility.maintain with
+                        // maintainAnimation). Muting them stops a hidden tab's
+                        // shimmers / pulses / in-flight transitions from
+                        // driving a frame every vsync behind the visible tab.
+                        // Invisible by definition; they resume when shown.
+                        ? TickerMode(
+                            enabled: i == currentIndex,
+                            child: Navigator(
                             key: shell.navigatorKeys[i],
                             onGenerateRoute: (settings) {
                               return MaterialPageRoute(
@@ -196,6 +204,7 @@ class _MainShellState extends State<MainShell> {
                                 builder: (context) => _adminPages[i],
                               );
                             },
+                          ),
                           )
                         : const SizedBox.expand(),
                 ],

@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'fullscreen_chart_screen.dart';
 import '../components/combined_seat_grid.dart';
 import '../components/seat_chart_tile.dart';
+import '../components/seat_tile_memo.dart';
 import '../design/ugam.dart';
 import '../controllers/pickup_controller.dart';
 import '../controllers/tour_controller.dart';
@@ -226,8 +227,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   Bus? _selectedBus(Tour tour) {
     if (tour.buses.isEmpty) return null;
     final id = _selectedBusId;
-    final match =
-        id == null ? null : tour.buses.where((b) => b.id == id).firstOrNull;
+    final match = id == null
+        ? null
+        : tour.buses.where((b) => b.id == id).firstOrNull;
     return match ?? tour.buses.first;
   }
 
@@ -332,6 +334,70 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
     } finally {
       if (mounted) setState(() => _generatingChart = false);
     }
+  }
+
+  // ── Seat-grid widget memo (performance) ─────────────────────────────────
+  // The whole workbench lives in one Obx + this State's setState, so chrome
+  // that never touches the chart — opening/closing the dock, the "generating
+  // chart" flag — used to rebuild every seat tile (19-74 of them, each running
+  // resolveSeatRender). Returning the IDENTICAL [_SeatGrid] instance lets
+  // Flutter skip the whole subtree. The key is every input the grid (and the
+  // callbacks it holds) reads: the Tour/Bus INSTANCES (the controller replaces
+  // them on every change — models are immutable, and `==` on them is by id, so
+  // identity is compared), the active passenger, every drag/relocate field the
+  // highlight callbacks consult at call time, the viewport height, and the
+  // locale (tr() inside the grid holds no Localizations dependency).
+  /// Per-seat tile memo: when ONE seat changes, only that tile rebuilds.
+  final _tileMemo = SeatTileMemo();
+
+  /// Seat tap against the LIVE tour + selected bus (see [_SeatGrid.onTap]).
+  void _onLiveSeatTapped(SeatCell cell) {
+    final tour = _tour;
+    if (tour == null) return;
+    final bus = _selectedBus(tour);
+    if (bus == null) return;
+    _onSeatTapped(cell, bus, tour);
+  }
+
+  _SeatGrid? _gridMemo;
+  List<Object?>? _gridMemoKey;
+
+  Widget _memoSeatGrid({
+    required Tour tour,
+    required Bus bus,
+    required String? passengerId,
+    required double viewportHeight,
+    required _SeatGrid Function() build,
+  }) {
+    final key = <Object?>[
+      tour,
+      bus,
+      passengerId,
+      viewportHeight,
+      _dragActive,
+      _dragFromSeatId,
+      _pendingDragId,
+      _relocate,
+      Localizations.maybeLocaleOf(context),
+    ];
+    final prev = _gridMemoKey;
+    final memo = _gridMemo;
+    if (memo != null && prev != null && _sameGridKey(prev, key)) return memo;
+    final fresh = build();
+    _gridMemo = fresh;
+    _gridMemoKey = key;
+    return fresh;
+  }
+
+  static bool _sameGridKey(List<Object?> a, List<Object?> b) {
+    // Tour + Bus by identity (their == is id-only); the rest by value.
+    if (!identical(a[0], b[0]) || !identical(a[1], b[1])) return false;
+    if (!identical(a[7], b[7])) return false; // _relocate record instance
+    for (var i = 2; i < a.length; i++) {
+      if (i == 7) continue;
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   @override
@@ -472,8 +538,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                           bus.busNumber.trim(),
                           // Meta ink, never the accent: a plate identifies the
                           // vehicle, it does not mark anything as yours.
-                          style: UgamText.tabular(UgamText.caption)
-                              .copyWith(color: c.ink2),
+                          style: UgamText.tabular(
+                            UgamText.caption,
+                          ).copyWith(color: c.ink2),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -487,8 +554,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                     // it tracks the grid, not the engine plan.
                     Builder(
                       builder: (_) {
-                        final busCap =
-                            _ctrl.actualCapacityFor(tour).byBus[bus.id];
+                        final busCap = _ctrl
+                            .actualCapacityFor(tour)
+                            .byBus[bus.id];
                         if (busCap == null || busCap.capacity <= 0) {
                           return const SizedBox.shrink();
                         }
@@ -581,63 +649,77 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                _SeatGrid(
-                                  // The visible scroll-area height — the pinch-
-                                  // zoom box is bounded to it so the constrained
-                                  // InteractiveViewer has finite height inside
-                                  // this unbounded scroll view, and the chart
-                                  // fits in view with pinch for detail.
-                                  viewportHeight: constraints.maxHeight,
-                                  layout: bus.layout,
+                                _memoSeatGrid(
                                   tour: tour,
-                                  assignmentMap: assignmentMap,
-                                  currentPassengerId: passenger?.id,
-                                  onTap: (cell) =>
-                                      _onSeatTapped(cell, bus, tour),
-                                  busName: bus.name,
-                                  // Drag-to-move is always live now that the
-                                  // edit-flags mode is gone.
-                                  enableDrag: true,
-                                  dragActive: _dragActive,
-                                  canDragSeat: (cell) =>
-                                      _canDragSeat(tour, bus, cell),
-                                  dropHighlightFor: (cell) =>
-                                      _dropHighlightFor(tour, bus, cell),
-                                  dragLabelFor: (cell) =>
-                                      _dragLabelFor(tour, bus, cell),
-                                  onSeatDragStarted: (cell) => setState(() {
-                                    _dragFromSeatId = cell.seatId;
-                                    _dragActive = true;
-                                  }),
-                                  onSeatDragEnded: () => setState(() {
-                                    _dragFromSeatId = null;
-                                    _dragActive = false;
-                                  }),
-                                  onSeatDraggedToSeat: (fromSeatId, toSeatId) =>
-                                      _handleSeatDrop(
+                                  bus: bus,
+                                  passengerId: passenger?.id,
+                                  viewportHeight: constraints.maxHeight,
+                                  build: () => _SeatGrid(
+                                    // The visible scroll-area height — the pinch-
+                                    // zoom box is bounded to it so the constrained
+                                    // InteractiveViewer has finite height inside
+                                    // this unbounded scroll view, and the chart
+                                    // fits in view with pinch for detail.
+                                    viewportHeight: constraints.maxHeight,
+                                    layout: bus.layout,
+                                    tour: tour,
+                                    assignmentMap: assignmentMap,
+                                    currentPassengerId: passenger?.id,
+                                    // Resolved at TAP time, not captured:
+                                    // memoized tiles outlive this build, and
+                                    // must act on the live tour/bus.
+                                    onTap: _onLiveSeatTapped,
+                                    tileMemo: _tileMemo,
+                                    busName: bus.name,
+                                    // Drag-to-move is always live now that the
+                                    // edit-flags mode is gone.
+                                    enableDrag: true,
+                                    dragActive: _dragActive,
+                                    canDragSeat: (cell) =>
+                                        _canDragSeat(tour, bus, cell),
+                                    dropHighlightFor: (cell) =>
+                                        _dropHighlightFor(tour, bus, cell),
+                                    dragLabelFor: (cell) =>
+                                        _dragLabelFor(tour, bus, cell),
+                                    onSeatDragStarted: (cell) => setState(() {
+                                      _dragFromSeatId = cell.seatId;
+                                      _dragActive = true;
+                                    }),
+                                    onSeatDragEnded: () => setState(() {
+                                      _dragFromSeatId = null;
+                                      _dragActive = false;
+                                    }),
+                                    onSeatDraggedToSeat:
+                                        (fromSeatId, toSeatId) =>
+                                            _handleSeatDrop(
+                                              tour,
+                                              bus,
+                                              fromSeatId,
+                                              toSeatId,
+                                            ),
+                                    onPendingRiderDroppedToSeat:
+                                        (passengerId, seatId) =>
+                                            _handlePendingDropToSeat(
+                                              tour,
+                                              bus,
+                                              passengerId,
+                                              seatId,
+                                            ),
+                                    // Long-press an EMPTY seat → its Hold/Premium
+                                    // flag sheet. (Booked-seat long-press stays a
+                                    // drag; booked seats reach the flag sheet from
+                                    // the occupant tap menu instead.)
+                                    onSeatLongPressForFlags: (seatId) {
+                                      final cell = _findCell(
                                         tour,
-                                        bus,
-                                        fromSeatId,
-                                        toSeatId,
-                                      ),
-                                  onPendingRiderDroppedToSeat:
-                                      (passengerId, seatId) =>
-                                          _handlePendingDropToSeat(
-                                        tour,
-                                        bus,
-                                        passengerId,
+                                        bus.id,
                                         seatId,
-                                      ),
-                                  // Long-press an EMPTY seat → its Hold/Premium
-                                  // flag sheet. (Booked-seat long-press stays a
-                                  // drag; booked seats reach the flag sheet from
-                                  // the occupant tap menu instead.)
-                                  onSeatLongPressForFlags: (seatId) {
-                                    final cell = _findCell(tour, bus.id, seatId);
-                                    if (cell != null) {
-                                      _showSeatFlagsSheet(cell, bus);
-                                    }
-                                  },
+                                      );
+                                      if (cell != null) {
+                                        _showSeatFlagsSheet(cell, bus);
+                                      }
+                                    },
+                                  ),
                                 ),
                                 // Canonical seat-colour key — the same legend
                                 // every other role sees, so admins read
@@ -711,8 +793,6 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
 
     // Embedded: body only — the SeatsScreen shell owns the Scaffold/header.
     if (widget.embedded) return content;
-    return UgamScaffold(
-      body: SafeArea(bottom: false, child: content),
-    );
+    return UgamScaffold(body: SafeArea(bottom: false, child: content));
   }
 }

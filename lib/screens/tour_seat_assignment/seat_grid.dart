@@ -14,6 +14,9 @@ class _SeatGrid extends StatelessWidget {
   final ValueChanged<SeatCell> onTap;
   final String busName;
 
+  /// Owned by the screen state so it survives rebuilds; see [SeatTileMemo].
+  final SeatTileMemo tileMemo;
+
   // ── Drag-to-move hooks ────────────────────────────────────────────────────
   final bool enableDrag;
   final bool dragActive;
@@ -26,7 +29,7 @@ class _SeatGrid extends StatelessWidget {
 
   /// A pending rider dragged from the dock was dropped on a seat.
   final void Function(String passengerId, String seatId)
-      onPendingRiderDroppedToSeat;
+  onPendingRiderDroppedToSeat;
 
   /// Long-press an EMPTY seat → open its Hold/Premium flag sheet. Booked seats
   /// keep long-press = drag; they reach the flag sheet via the occupant menu.
@@ -40,6 +43,7 @@ class _SeatGrid extends StatelessWidget {
     required this.currentPassengerId,
     required this.onTap,
     required this.busName,
+    required this.tileMemo,
     required this.enableDrag,
     required this.dragActive,
     required this.canDragSeat,
@@ -75,6 +79,52 @@ class _SeatGrid extends StatelessWidget {
     };
     final canExpand = l.totalCells > 0;
 
+    // The full tile subtree for one seat (see [SeatTileMemo]).
+    Widget buildTile(SeatCell cell, List<Passenger> occ, bool isMine) {
+      final tile = SeatChartTile(
+        cell: cell,
+        occupants: occ,
+        groupColors: resolver,
+        // [occ] is berth-accurate (one entry per assignment), so a
+        // half-taken double sofa renders split (filled + empty) instead
+        // of reading as fully booked.
+        markHalfDouble: true,
+        onTapBooked: () => onTap(cell),
+        onTapFree: () => onTap(cell),
+      );
+      return SizedBox(
+        width: kSeatTileW,
+        height: kSeatTileH,
+        child: RepaintBoundary(
+          child: Stack(
+            children: [
+              tile,
+              // Selection ring marks the seats already held by
+              // the passenger currently being assigned. Kept always
+              // mounted (IgnorePointer + Positioned.fill = zero layout
+              // impact) so its opacity can ease in/out as [isMine]
+              // flips, instead of popping.
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: isMine ? 1.0 : 0.0,
+                    duration: UgamMotion.sheet,
+                    curve: Curves.easeOutCubic,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(UgamRadius.seat),
+                        border: Border.all(color: c.accent, width: 2.5),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.md),
       child: Stack(
@@ -89,89 +139,52 @@ class _SeatGrid extends StatelessWidget {
           SizedBox(
             height: viewportHeight > 0 ? viewportHeight : null,
             child: UgamPinchZoom(
-            child: Align(
-            alignment: Alignment.topCenter,
-            child: CombinedSeatGrid(
-            layout: l,
-            cellWidth: kSeatTileW,
-            cellHeight: kSeatTileH,
-            colGap: 8,
-            rowGap: 8,
-            driverLabel: tr('tour_seat_assignment.grid_label_driver'),
-            // Reserve a header band so the top-left expand button clears SU1.
-            reserveTopAction: canExpand,
-            // Drag-to-move: a booked seat can be long-pressed onto another. The
-            // grid owns the gesture; the screen owns move/swap (group-safe).
-            enableDrag: enableDrag,
-            dragActive: dragActive,
-            canDragSeat: canDragSeat,
-            dropHighlightFor: dropHighlightFor,
-            dragLabelFor: dragLabelFor,
-            reportRejectedDrops: true,
-            onSeatDragStarted: onSeatDragStarted,
-            onSeatDragEnded: onSeatDragEnded,
-            onSeatDraggedToSeat: onSeatDraggedToSeat,
-            onPendingRiderDroppedToSeat: onPendingRiderDroppedToSeat,
-            onSeatLongPressForFlags: onSeatLongPressForFlags,
-            tileBuilder: (ctx, cell) {
-              final owners = assignmentMap[cell.seatId] ?? const <String>[];
-              final occ = owners
-                  .map((id) => byId[id])
-                  .whereType<Passenger>()
-                  .toList();
-              final isMine =
-                  currentPassengerId != null &&
-                  owners.contains(currentPassengerId);
-              final tile = SeatChartTile(
-                cell: cell,
-                occupants: occ,
-                groupColors: resolver,
-                // [occ] is berth-accurate (one entry per assignment), so a
-                // half-taken double sofa renders split (filled + empty) instead
-                // of reading as fully booked.
-                markHalfDouble: true,
-                onTapBooked: () => onTap(cell),
-                onTapFree: () => onTap(cell),
-              );
-              return SizedBox(
-                width: kSeatTileW,
-                height: kSeatTileH,
-                child: RepaintBoundary(
-                  child: Stack(
-                    children: [
-                      tile,
-                      // Selection ring marks the seats already held by
-                      // the passenger currently being assigned. Kept always
-                      // mounted (IgnorePointer + Positioned.fill = zero layout
-                      // impact) so its opacity can ease in/out as [isMine]
-                      // flips, instead of popping.
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: AnimatedOpacity(
-                            opacity: isMine ? 1.0 : 0.0,
-                            duration: UgamMotion.sheet,
-                            curve: Curves.easeOutCubic,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(
-                                  UgamRadius.seat,
-                                ),
-                                border: Border.all(
-                                  color: c.accent,
-                                  width: 2.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: CombinedSeatGrid(
+                  layout: l,
+                  cellWidth: kSeatTileW,
+                  cellHeight: kSeatTileH,
+                  colGap: 8,
+                  rowGap: 8,
+                  driverLabel: tr('tour_seat_assignment.grid_label_driver'),
+                  // Reserve a header band so the top-left expand button clears SU1.
+                  reserveTopAction: canExpand,
+                  // Drag-to-move: a booked seat can be long-pressed onto another. The
+                  // grid owns the gesture; the screen owns move/swap (group-safe).
+                  enableDrag: enableDrag,
+                  dragActive: dragActive,
+                  canDragSeat: canDragSeat,
+                  dropHighlightFor: dropHighlightFor,
+                  dragLabelFor: dragLabelFor,
+                  reportRejectedDrops: true,
+                  onSeatDragStarted: onSeatDragStarted,
+                  onSeatDragEnded: onSeatDragEnded,
+                  onSeatDraggedToSeat: onSeatDraggedToSeat,
+                  onPendingRiderDroppedToSeat: onPendingRiderDroppedToSeat,
+                  onSeatLongPressForFlags: onSeatLongPressForFlags,
+                  tileBuilder: (ctx, cell) {
+                    final owners =
+                        assignmentMap[cell.seatId] ?? const <String>[];
+                    final occ = owners
+                        .map((id) => byId[id])
+                        .whereType<Passenger>()
+                        .toList();
+                    final isMine =
+                        currentPassengerId != null &&
+                        owners.contains(currentPassengerId);
+                    final seatId = cell.seatId;
+                    if (seatId == null) return buildTile(cell, occ, isMine);
+                    return tileMemo.tile(seatId, [
+                      cell,
+                      isMine,
+                      tour.groups,
+                      c,
+                      ...occ,
+                    ], () => buildTile(cell, occ, isMine));
+                  },
                 ),
-              );
-            },
-            ),
-            ),
+              ),
             ),
           ),
           // Expand to the shared full-screen chart — works in both standalone

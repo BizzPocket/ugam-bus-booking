@@ -369,6 +369,12 @@ class _SeatChartCard extends StatelessWidget {
   final Map<String, List<Passenger>> sheetOccupants;
   final GroupColorResolver groupColors;
 
+  /// Memo-key inputs (see [SeatTileMemo]): the tour's group list (what
+  /// [groupColors] is derived from) and the bus the tap callback captures.
+  final Object groups;
+  final Object bus;
+  final SeatTileMemo tileMemo;
+
   /// Hands the tapped seat's id plus its FULL distinct-occupant list (de-duped,
   /// GO-first) to the read-only sheet — a shared/leg-shared double surfaces BOTH
   /// names, not just the first. This list is the bug-fix surface.
@@ -399,6 +405,9 @@ class _SeatChartCard extends StatelessWidget {
     required this.assignments,
     required this.sheetOccupants,
     required this.groupColors,
+    required this.groups,
+    required this.bus,
+    required this.tileMemo,
     required this.bottomReserve,
     required this.onCreateLayout,
     required this.seatedRiders,
@@ -485,27 +494,37 @@ class _SeatChartCard extends StatelessWidget {
               final occupants = cell.seatId != null
                   ? (assignments[cell.seatId] ?? const <Passenger>[])
                   : const <Passenger>[];
-              return RepaintBoundary(
-                child: SeatChartTile(
-                  cell: cell,
-                  occupants: occupants,
-                  groupColors: groupColors,
-                  markHalfDouble: true,
-                  // Pass ALL occupants (not `.first`) to the read-only sheet so
-                  // a shared / leg-shared double surfaces BOTH names. The
-                  // distinct, GO-first set comes from the shared resolver
-                  // (sheetOccupants), matching what the tile paints.
-                  onTapBooked: occupants.isEmpty
-                      ? null
-                      : () => onSeatTap(
-                          cell.seatId!,
-                          sheetOccupants[cell.seatId] ?? occupants,
-                        ),
-                ),
+              final seatId = cell.seatId;
+              if (seatId == null) return _tile(cell, occupants);
+              return tileMemo.tile(
+                seatId,
+                [cell, groups, bus, UgamColors.of(ctx), ...occupants],
+                () => _tile(cell, occupants),
               );
             },
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _tile(SeatCell cell, List<Passenger> occupants) {
+    return RepaintBoundary(
+      child: SeatChartTile(
+        cell: cell,
+        occupants: occupants,
+        groupColors: groupColors,
+        markHalfDouble: true,
+        // Pass ALL occupants (not `.first`) to the read-only sheet so
+        // a shared / leg-shared double surfaces BOTH names. The
+        // distinct, GO-first set comes from the shared resolver
+        // (sheetOccupants), matching what the tile paints.
+        onTapBooked: occupants.isEmpty
+            ? null
+            : () => onSeatTap(
+                cell.seatId!,
+                sheetOccupants[cell.seatId] ?? occupants,
+              ),
       ),
     );
   }
