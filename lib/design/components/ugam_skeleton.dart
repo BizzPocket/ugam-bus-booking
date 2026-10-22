@@ -52,11 +52,32 @@ class _UgamSkeletonState extends State<UgamSkeleton> {
   // raster-thread spike on low-end GPUs at the exact moment the device is busy
   // fetching data. Now it's one ticker (auto-paused when no skeleton is on
   // screen) and a cheap solid-colour pulse (no shader).
-  late final Animation<double> _pulse = _SkeletonPulse.instance.acquire();
+  late final Animation<double> _pulse = _SkeletonPulse.instance.view;
+
+  // PERF: only a skeleton whose [TickerMode] is ENABLED holds the shared pulse.
+  // The raw app-wide ticker ignores TickerMode, so a skeleton parked in a
+  // hidden shell tab (the IndexedStack keeps visited tabs mounted, with tickers
+  // muted) used to keep the pulse — and a frame every vsync — running forever
+  // while the agent worked on another tab. Hidden skeletons now release it and
+  // re-acquire the moment their tab is shown again; visible ones are untouched.
+  bool _holding = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final enabled = TickerMode.valuesOf(context).enabled;
+    if (enabled && !_holding) {
+      _SkeletonPulse.instance.acquire();
+      _holding = true;
+    } else if (!enabled && _holding) {
+      _SkeletonPulse.instance.release();
+      _holding = false;
+    }
+  }
 
   @override
   void dispose() {
-    _SkeletonPulse.instance.release();
+    if (_holding) _SkeletonPulse.instance.release();
     super.dispose();
   }
 
@@ -91,14 +112,21 @@ class _SkeletonPulse {
   AnimationController? _controller;
   int _refs = 0;
 
-  Animation<double> acquire() {
+  AnimationController get _ctrl => _controller ??= AnimationController(
+        vsync: _GlobalTickerProvider(),
+        duration: UgamMotion.shimmer,
+      );
+
+  /// The shared pulse, without starting it.
+  Animation<double> get view => _ctrl.view;
+
+  /// Whether the shared pulse is currently ticking. Test seam.
+  bool get isAnimating => _controller?.isAnimating ?? false;
+
+  void acquire() {
     _refs++;
-    final ctrl = _controller ??= AnimationController(
-      vsync: _GlobalTickerProvider(),
-      duration: UgamMotion.shimmer,
-    );
+    final ctrl = _ctrl;
     if (!ctrl.isAnimating) ctrl.repeat(reverse: true);
-    return ctrl.view;
   }
 
   void release() {
@@ -109,6 +137,10 @@ class _SkeletonPulse {
     }
   }
 }
+
+/// Whether the app-wide skeleton pulse is ticking right now (test seam).
+@visibleForTesting
+bool debugSkeletonPulseAnimating() => _SkeletonPulse.instance.isAnimating;
 
 /// A minimal app-lifetime [TickerProvider] for the shared shimmer controller.
 class _GlobalTickerProvider implements TickerProvider {
