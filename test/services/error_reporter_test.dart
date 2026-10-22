@@ -165,4 +165,50 @@ void main() {
       expect(priorCalled, 1);
     });
   });
+
+  group('flush bookkeeping', () {
+    test('a partial send keeps the unsent duplicate of a sent row', () async {
+      // Two byte-identical queued rows. The first sends, the second hits the
+      // wall. Removing "sent" rows by string equality dropped BOTH.
+      const row = '{"kind":"test","message":"same"}';
+      SharedPreferences.setMockInitialValues({
+        'client_errors.queue': [row, row],
+      });
+      var n = 0;
+      ErrorReporter.debugSink = (r) async {
+        if (n++ > 0) throw StateError('offline');
+        sent.add(r);
+      };
+
+      await ErrorReporter.flush();
+
+      final after = (await SharedPreferences.getInstance())
+              .getStringList('client_errors.queue') ??
+          [];
+      expect(sent, hasLength(1));
+      expect(after, [row], reason: 'the unsent copy must survive');
+    });
+
+    test('a report enqueued mid-flush is not erased', () async {
+      const first = '{"kind":"test","message":"first"}';
+      SharedPreferences.setMockInitialValues({
+        'client_errors.queue': [first],
+      });
+      ErrorReporter.debugSink = (r) async {
+        // While the send is in flight, a new failure is queued.
+        final prefs = await SharedPreferences.getInstance();
+        final q = prefs.getStringList('client_errors.queue') ?? <String>[];
+        await prefs.setStringList(
+            'client_errors.queue', [...q, '{"kind":"late"}']);
+        sent.add(r);
+      };
+
+      await ErrorReporter.flush();
+
+      final after = (await SharedPreferences.getInstance())
+              .getStringList('client_errors.queue') ??
+          [];
+      expect(after, ['{"kind":"late"}']);
+    });
+  });
 }

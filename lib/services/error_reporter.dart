@@ -14,9 +14,9 @@ import '../config/app_info.dart';
 /// WHAT IT HOOKS
 ///   - `FlutterError.onError`      — framework and build() failures
 ///   - `PlatformDispatcher.onError`— uncaught async errors on the root zone
-///   - `ErrorWidget.builder`       — a build() that threw, reported AND
-///                                   rendered as something other than a raw
-///                                   stack trace
+///
+/// `ErrorWidget.builder` is NOT hooked here: main() installs it, and it calls
+/// [report] (kind `widget_build`) before painting its fallback tile.
 ///
 /// WHAT IT IS NOT
 /// A crash reporter. It cannot see a native SIGSEGV in a plugin and cannot
@@ -201,7 +201,16 @@ class ErrorReporter {
       }
 
       if (sent.isNotEmpty) {
-        final remaining = queue.where((e) => !sent.contains(e)).toList();
+        // [sent] is always a PREFIX of the queue (sends go in order and stop
+        // at the first failure), and the queue is append-only. So drop that
+        // many from the head of the CURRENT queue: filtering by string
+        // equality removed an unsent duplicate along with its sent twin, and
+        // writing back the stale snapshot erased any report enqueued while
+        // this flush was awaiting the network.
+        final current = prefs.getStringList(_queueKey) ?? const <String>[];
+        final remaining = current.length > sent.length
+            ? current.sublist(sent.length)
+            : <String>[];
         await prefs.setStringList(_queueKey, remaining);
       }
     } catch (_) {

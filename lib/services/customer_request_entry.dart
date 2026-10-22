@@ -396,8 +396,10 @@ class CustomerRequestEntry {
 
   /// Decode an `assigned_seats` value from either the local JSON cache or a
   /// Supabase RPC response. The server stores it as `jsonb` so it arrives as a
-  /// list of `{busId, seatId}` maps; older device caches may still hold the
-  /// pre-fix string list ("L1", "L2") — both shapes are accepted.
+  /// list of `{busId, seatId}` maps. Older device caches may still hold the
+  /// pre-fix string list ("L1", "L2"); those entries are tolerated but DROPPED
+  /// (no busId to place them by — the same rule as `Passenger.fromMap`), and
+  /// the next server refresh repopulates the seats.
   static List<SeatAssignment> _parseAssignedSeats(dynamic value) {
     if (value is! List) return const [];
     final out = <SeatAssignment>[];
