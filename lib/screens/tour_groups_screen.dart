@@ -64,6 +64,11 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
 
+  /// The group-name dialog's field. Owned here, not per-dialog: the dialog
+  /// stays mounted through its exit transition after its future completes,
+  /// so a per-dialog controller could only leak or be disposed while in use.
+  final _labelCtrl = TextEditingController();
+
   /// Whether the search pill is revealed under the app bar. Search lives in
   /// the app-bar chrome (a toggle action) — same pattern as the Requests
   /// screen — instead of floating in the middle of the scroll list.
@@ -74,6 +79,7 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _labelCtrl.dispose();
     super.dispose();
   }
 
@@ -180,17 +186,20 @@ class _TourGroupsScreenState extends State<TourGroupsScreen> {
   /// existing group count — no new logic or persistence.
   Future<String?> _promptLabel() {
     final next = _ctrl.groupsForTour(widget.tourId).length + 1;
-    final textCtrl = TextEditingController(
-      text: tr('tour_groups.default_group_name', namedArgs: {'n': '$next'}),
-    );
+    final textCtrl = _labelCtrl
+      ..text = tr('tour_groups.default_group_name', namedArgs: {'n': '$next'});
     return UgamDialog.show<String>(
       context,
       title: tr('tour_groups.name_this_group'),
-      content: UgamInput(
-        controller: textCtrl,
-        hint: tr('tour_groups.name_hint'),
-        autofocus: true,
-        onSubmitted: (v) => Navigator.of(context).pop(v),
+      // Builder: pop with a context INSIDE the dialog route — the screen's
+      // context resolves the screen's navigator, not the dialog's.
+      content: Builder(
+        builder: (fieldCtx) => UgamInput(
+          controller: textCtrl,
+          hint: tr('tour_groups.name_hint'),
+          autofocus: true,
+          onSubmitted: (v) => Navigator.of(fieldCtx).pop(v),
+        ),
       ),
       actions: (dialogCtx) => [
         UgamButton(

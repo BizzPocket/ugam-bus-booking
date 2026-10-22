@@ -199,4 +199,41 @@ void main() {
 
     expect(ctrl.deleteGroupIds, ['g1']);
   });
+
+  // The group-name field's onSubmitted popped `Navigator.of(<screen ctx>)`.
+  // Inside the admin shell the screen lives in a NESTED tab navigator while
+  // the dialog sits on the root one, so pressing Done on the keyboard popped
+  // the screen out from under the dialog instead of submitting the name.
+  testWidgets('keyboard Done on the group-name field submits the dialog',
+      (tester) async {
+    final ctrl = _FakeTourController();
+    Get.put<TourController>(ctrl);
+    ctrl.tours.assignAll([_fakeTour()]);
+
+    await tester.pumpWidget(GetMaterialApp(
+      theme: ThemeData(brightness: Brightness.dark),
+      home: Navigator(
+        onGenerateRoute: (_) => MaterialPageRoute(
+          builder: (_) => const TourGroupsScreen(tourId: 't1'),
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.group_add_rounded)); // enter select
+    await tester.pump();
+    await tester.tap(find.text('Asha'));
+    await tester.tap(find.text('Bharat'));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.group_add_rounded)); // create CTA
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'Patel family');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    expect(ctrl.createGroupLabels, ['Patel family']);
+    expect(find.byType(TourGroupsScreen), findsOneWidget,
+        reason: 'the screen must survive; only the dialog closes');
+  });
 }

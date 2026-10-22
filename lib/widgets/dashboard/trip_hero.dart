@@ -517,8 +517,8 @@ class _HeroAction {
   const _HeroAction(this.label, {required this.urgent});
 }
 
-/// One row in the tour picker sheet — route + phase + the top blocker so the
-/// agent can pick by what's actually pending, not just the passenger count.
+/// One row in the tour picker sheet — route, title + lifecycle step, and the
+/// passenger count.
 class _PickerRow extends StatelessWidget {
   final Tour tour;
   final UgamColorSet c;

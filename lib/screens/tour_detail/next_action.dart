@@ -145,6 +145,7 @@ void _runKind(
         );
         if (ok) {
           final cleared = await ctrl.completeOutboundLeg(tour.id);
+          if (!context.mounted) return;
           AppSnackBar.success(tr('tour_detail.complete_go_done',
               namedArgs: {'count': '$cleared'}));
         }
@@ -168,7 +169,7 @@ void _runKind(
       final ctx = Get.context;
       if (ctx != null) AddReturnTicketSheet.show(ctx, tour);
     case _NextActionKind.allSet:
-      onSwitchTab(3); // jump to activity
+      onSwitchTab(4); // jump to activity (0 Overview … 3 Money, 4 Activity)
   }
 }
 

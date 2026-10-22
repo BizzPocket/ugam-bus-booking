@@ -653,11 +653,14 @@ class _PassengerRow extends StatelessWidget {
   }
 
   String _initials(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
+    final trimmed = name.trim();
+    final parts = trimmed.split(RegExp(r'\s+'));
     if (parts.length >= 2) {
       return '${parts.first.characters.first}${parts.last.characters.first}'.toUpperCase();
     }
-    return name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
+    // Test the TRIMMED name: an all-whitespace name must fall back to '?',
+    // not render a blank avatar.
+    return trimmed.isNotEmpty ? trimmed.characters.first.toUpperCase() : '?';
   }
 
   String _ago(DateTime t) {

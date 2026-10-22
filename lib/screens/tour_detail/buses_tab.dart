@@ -274,9 +274,11 @@ class _BusListItem extends StatelessWidget {
                       UgamReqChip(
                         label: tr('tour_detail.bus_occupancy', namedArgs: {
                           'filled': '$filled',
-                          'total': '${bus.totalSeats}',
+                          // Same leg-aware capacity as the bar beside it, so
+                          // the chip and the bar can never disagree.
+                          'total': '$capacity',
                         }),
-                        variant: bus.totalSeats > 0 && filled >= bus.totalSeats
+                        variant: capacity > 0 && filled >= capacity
                             ? UgamChipVariant.good
                             : (filled > 0
                                 ? UgamChipVariant.warm

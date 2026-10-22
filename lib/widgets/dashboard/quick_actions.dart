@@ -56,7 +56,7 @@ class DashboardQuickActions extends StatelessWidget {
             label: tr('dashboard.qa_requests'),
             icon: Icons.person_add_alt_1_rounded,
             c: c,
-            onTap: () => shell.switchTab(3),
+            onTap: () => shell.onTabTapped(3),
           ),
         ),
         const SizedBox(width: UgamSpacing.md),
