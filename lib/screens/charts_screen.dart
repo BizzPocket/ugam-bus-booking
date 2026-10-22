@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 
 import '../components/combined_seat_grid.dart';
 import '../components/seat_chart_tile.dart';
+import '../components/seat_tile_memo.dart';
 import '../controllers/tour_controller.dart';
 import '../design/group_color.dart';
 import '../design/ugam.dart';
@@ -48,6 +49,11 @@ class ChartsScreen extends StatefulWidget {
 }
 
 class _ChartsScreenState extends State<ChartsScreen> {
+  /// Per-seat tile memo — this tab stays mounted in the shell and its Obx
+  /// re-runs on every `tours` change, so without it every realtime event
+  /// rebuilt every tile of the shown bus. See [SeatTileMemo].
+  final _tileMemo = SeatTileMemo();
+
   final tourCtrl = Get.find<TourController>();
 
   /// The agent's current tour pick. Null until a first pick is resolved (or
@@ -362,6 +368,9 @@ class _ChartsScreenState extends State<ChartsScreen> {
                         assignments: assignments,
                         sheetOccupants: sheetOccupants,
                         groupColors: groupColors,
+                        groups: tour.groups,
+                        bus: bus,
+                        tileMemo: _tileMemo,
                         // Only a rendered grid sits under the floating pill, so
                         // only a rendered grid reserves room for it.
                         bottomReserve: chartLayout == null ? 0 : fabReserve,

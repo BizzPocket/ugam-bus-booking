@@ -6,6 +6,7 @@ import 'package:get/get.dart';
 import 'fullscreen_chart_screen.dart';
 import '../components/combined_seat_grid.dart';
 import '../components/seat_chart_tile.dart';
+import '../components/seat_tile_memo.dart';
 import '../design/ugam.dart';
 import '../controllers/pickup_controller.dart';
 import '../controllers/tour_controller.dart';
@@ -347,7 +348,7 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   // highlight callbacks consult at call time, the viewport height, and the
   // locale (tr() inside the grid holds no Localizations dependency).
   /// Per-seat tile memo: when ONE seat changes, only that tile rebuilds.
-  final _tileMemo = _SeatTileMemo();
+  final _tileMemo = SeatTileMemo();
 
   /// Seat tap against the LIVE tour + selected bus (see [_SeatGrid.onTap]).
   void _onLiveSeatTapped(SeatCell cell) {

@@ -2,32 +2,6 @@ part of '../tour_seat_assignment_screen.dart';
 
 // ─── Seat grid card ────────────────────────────────────────────────────
 
-/// PERF: per-seat memo of the built tile subtree. A seat tap or realtime event
-/// hands the grid a fresh [Tour], which used to rebuild every tile (19-74, each
-/// running resolveSeatRender + name layout). Unchanged passengers keep their
-/// instance across a controller update, so a tile whose [key] parts are all
-/// IDENTICAL to last time (cell, occupant instances, selection, group palette,
-/// theme colours) is returned as the same widget and Flutter skips it.
-class _SeatTileMemo {
-  final Map<String, (List<Object?>, Widget)> _bySeat = {};
-
-  Widget tile(String seatId, List<Object?> key, Widget Function() build) {
-    final hit = _bySeat[seatId];
-    if (hit != null && _same(hit.$1, key)) return hit.$2;
-    final w = build();
-    _bySeat[seatId] = (key, w);
-    return w;
-  }
-
-  static bool _same(List<Object?> a, List<Object?> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (!identical(a[i], b[i])) return false;
-    }
-    return true;
-  }
-}
-
 class _SeatGrid extends StatelessWidget {
   /// Visible scroll-area height. The in-place pinch-zoom box is bounded to it
   /// so the constrained [InteractiveViewer] (inside [UgamPinchZoom]) has finite
@@ -40,8 +14,8 @@ class _SeatGrid extends StatelessWidget {
   final ValueChanged<SeatCell> onTap;
   final String busName;
 
-  /// Owned by the screen state so it survives rebuilds; see [_SeatTileMemo].
-  final _SeatTileMemo tileMemo;
+  /// Owned by the screen state so it survives rebuilds; see [SeatTileMemo].
+  final SeatTileMemo tileMemo;
 
   // ── Drag-to-move hooks ────────────────────────────────────────────────────
   final bool enableDrag;
@@ -105,7 +79,7 @@ class _SeatGrid extends StatelessWidget {
     };
     final canExpand = l.totalCells > 0;
 
-    // The full tile subtree for one seat (see [_SeatTileMemo]).
+    // The full tile subtree for one seat (see [SeatTileMemo]).
     Widget buildTile(SeatCell cell, List<Passenger> occ, bool isMine) {
       final tile = SeatChartTile(
         cell: cell,
