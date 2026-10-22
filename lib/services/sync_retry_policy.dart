@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'sync_service.dart' show RpcUnavailableException;
@@ -62,6 +63,13 @@ bool isRetryable(Object e, {required bool retryOnTimeout}) {
 
   if (e is SocketException) return true;
   if (e is HttpException) return true;
+  // package:http's IOClient re-throws dart:io's HttpException ("Connection
+  // closed before full header was received", "Connection closed while
+  // receiving data") as a PLAIN ClientException — the commonest failure on a
+  // lossy 2G link, and it was being classified as terminal, so every read and
+  // idempotent write gave up on the first dropped connection. Classified by
+  // type, like everything else here.
+  if (e is http.ClientException) return true;
   // Unknown exception type ⇒ terminal (no message sniffing).
   return false;
 }
