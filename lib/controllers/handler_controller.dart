@@ -448,7 +448,30 @@ class HandlerController extends GetxController {
   /// resume: the optimistic local patch already made the UI feel instant, and
   /// this confirms it against the server rather than trusting the cache
   /// forever.
-  void reconcile() => unawaited(load(kind: HandlerLoadKind.silent));
+  ///
+  /// Coalesced: while one reconcile is on the wire, further calls queue ONE
+  /// follow-up instead of each starting a fresh seven-read load. "Board all"
+  /// at a six-rider stop used to fire six full reloads back to back over 2G —
+  /// every one but the last discarded by the load token after paying for it.
+  void reconcile() {
+    if (_reconcileInFlight) {
+      _reconcileQueued = true;
+      return;
+    }
+    _reconcileInFlight = true;
+    unawaited(
+      load(kind: HandlerLoadKind.silent).whenComplete(() {
+        _reconcileInFlight = false;
+        if (_reconcileQueued && !isClosed) {
+          _reconcileQueued = false;
+          reconcile();
+        }
+      }),
+    );
+  }
+
+  bool _reconcileInFlight = false;
+  bool _reconcileQueued = false;
 
   Future<void> load({HandlerLoadKind kind = HandlerLoadKind.initial}) async {
     final token = ++_loadToken;
@@ -458,24 +481,28 @@ class HandlerController extends GetxController {
     }
     try {
       final read = manifestReader ?? _store.handlerTourManifest;
-      final fresh = await read(requestId);
       // These ride alongside the manifest rather than inside it (its live body
       // has drifted from the files, so it is never rewritten). All best-effort:
       // a handler whose backend predates any of these RPCs still gets a working
       // board, just without that affordance.
-      final freshHandovers = await _safe(
-        () => _store.handlerBusHandovers(requestId),
-      );
-      final freshLegState = await _safe(
-        () => _store.handlerBusLegState(requestId),
-      );
-      final freshTrip = await _safe(
-        () => _store.handlerBusTripState(requestId),
-      );
-      final freshReports = await _safe(() => _store.handlerReports(requestId));
-      final freshClaims = await _safe(
-        () => _store.handlerPaymentClaims(requestId),
-      );
+      //
+      // Issued TOGETHER with the manifest. They only need the request id, and
+      // awaiting them one after another made a board load six serial round
+      // trips on the handler's phone — on a bus, on 2G, that is the difference
+      // between a few seconds and most of a minute. Each is [_safe], so none
+      // can fail unobserved if the manifest read throws first.
+      final manifestF = read(requestId);
+      final handoversF = _safe(() => _store.handlerBusHandovers(requestId));
+      final legStateF = _safe(() => _store.handlerBusLegState(requestId));
+      final tripF = _safe(() => _store.handlerBusTripState(requestId));
+      final reportsF = _safe(() => _store.handlerReports(requestId));
+      final claimsF = _safe(() => _store.handlerPaymentClaims(requestId));
+      final fresh = await manifestF;
+      final freshHandovers = await handoversF;
+      final freshLegState = await legStateF;
+      final freshTrip = await tripF;
+      final freshReports = await reportsF;
+      final freshClaims = await claimsF;
       final scheduleTourId = _tourIdOf(fresh);
       final freshSchedule = await _safe(
         () => (scheduleReader ?? _store.tourSchedule)(scheduleTourId),
