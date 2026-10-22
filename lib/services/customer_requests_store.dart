@@ -36,6 +36,11 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   factory CustomerRequestsStore() => _instance;
   CustomerRequestsStore._internal();
 
+  /// Test seam: a client wired to a fake HTTP transport. Null in the app.
+  static SupabaseClient? debugClient;
+
+  SupabaseClient get _client => debugClient ?? Supabase.instance.client;
+
   Future<List<CustomerRequestEntry>> list() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_key);
@@ -93,7 +98,7 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   /// propagate — the caller must not read a failed lookup as "no hold", because
   /// that would resurrect the very bug this exists to fix.
   Future<ChartHoldSnapshot?> _lookupHold(String requestId) async {
-    final result = await Supabase.instance.client.rpc(
+    final result = await _client.rpc(
       'chart_hold_status_lookup',
       params: {
         'p_request_ids': [requestId],
@@ -120,7 +125,7 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   Future<CustomerRequestEntry?> refresh(String id) async {
     final existing = await get(id);
     if (existing == null) return null;
-    final client = Supabase.instance.client;
+    final client = _client;
     final result = await client.rpc(
       'booking_request_status_lookup',
       params: {'p_id': id},
@@ -202,10 +207,12 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   /// server-confirmed cancel it marks the local entry 'cancelled' and clears any
   /// stale seat data. Returns the updated entry, or null when the server refused
   /// (already confirmed/seated) or the row is gone — the caller surfaces that.
+  /// A transport failure (timeout / no signal) THROWS, so the caller can say
+  /// "check your connection" rather than "blocked".
   Future<CustomerRequestEntry?> cancel(String id) async {
     final existing = await get(id);
     if (existing == null) return null;
-    final client = Supabase.instance.client;
+    final client = _client;
     final ok = await client.rpc(
       'booking_request_customer_cancel',
       params: {'p_id': id},
@@ -234,16 +241,21 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   Future<CustomerRequestEntry?> requestCancellation(String id) async {
     final existing = await get(id);
     if (existing == null) return null;
-    final client = Supabase.instance.client;
+    final client = _client;
     try {
       final ok = await client.rpc(
         'booking_request_customer_request_cancel',
         params: {'p_id': id},
       );
       if (ok != true) return null;
-    } catch (_) {
+    } on PostgrestException {
+      // The SERVER answered (refused, or the function is missing): that is a
+      // genuine "not allowed", which the caller shows as blocked.
       return null;
     }
+    // Anything else — a timeout, a dropped socket — propagates. Collapsing it
+    // to null told a rider on a bad link "cancellation is blocked" when the
+    // request simply never arrived, and they stopped trying.
     final updated = existing.copyWith(
       cancelRequestedAt: DateTime.now(),
       lastRefreshedAt: DateTime.now(),
@@ -271,7 +283,7 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
     final inline = row['tour_locked'];
     if (inline is bool) return inline;
     try {
-      final result = await Supabase.instance.client.rpc(
+      final result = await _client.rpc(
         'booking_request_tour_locked',
         params: {'p_id': requestId},
       );
@@ -301,7 +313,7 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   /// customer's request. Customers are anonymous and can't `select` from
   /// `buses` directly, so this goes through a SECURITY DEFINER RPC.
   Future<List<Bus>> busLayoutsForRequest(String requestId) async {
-    final client = Supabase.instance.client;
+    final client = _client;
     final result = await client.rpc(
       'bus_layouts_for_request',
       params: {'p_id': requestId},
@@ -323,7 +335,7 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   /// where a rider must not see co-travellers.
   Future<List<({String busId, String seatId, String name, String phone})>>
   seatRosterForRequest(String requestId) async {
-    final client = Supabase.instance.client;
+    final client = _client;
     final result = await client.rpc(
       'bus_roster_for_request',
       params: {'p_id': requestId},
@@ -370,7 +382,7 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   /// server-side, so +91 / spaces never cause a miss. Goes through the
   /// `seat_lookup_by_phone` SECURITY DEFINER RPC (customers are anonymous).
   Future<List<SeatTicket>> seatsByPhone(String phone) async {
-    final client = Supabase.instance.client;
+    final client = _client;
     final result = await client.rpc(
       'seat_lookup_by_phone',
       params: {'p_phone': phone},
@@ -390,7 +402,7 @@ class CustomerRequestsStore with _CustomerRequestsHandlerRpcs {
   /// SECURITY DEFINER RPC (handlers are anonymous). Tours whose handler has no
   /// booking_request aren't returned (they can't be managed via that flow).
   Future<List<HandlerTourRef>> handlerRequestsByPhone(String phone) async {
-    final client = Supabase.instance.client;
+    final client = _client;
     final result = await client.rpc(
       'handler_requests_by_phone',
       params: {'p_phone': phone},
