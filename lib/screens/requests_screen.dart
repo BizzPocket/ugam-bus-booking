@@ -149,14 +149,21 @@ class _RequestsScreenState extends State<RequestsScreen> {
   // list retracts it behind the dock; scrolling back up — or any state change
   // that re-frames the list — brings it home. The bulk-action bar is exempt:
   // it is the only way out of a multi-select, so it never hides.
-  bool _barShown = true;
+  //
+  // PERF: held in a ValueNotifier so a scroll-direction flip repaints ONLY the
+  // bar ([_RetractingBar] listens below) instead of setState-ing the whole
+  // screen — which re-ran the roster split/sort and rebuilt every visible card
+  // mid-fling. Writes inside other setState calls still land in that rebuild.
+  final _barShownN = ValueNotifier<bool>(true);
+  bool get _barShown => _barShownN.value;
+  set _barShown(bool v) => _barShownN.value = v;
 
   bool _onUserScroll(UserScrollNotification n) {
     if (_selectionMode || n.metrics.axis != Axis.vertical) return false;
     if (n.direction == ScrollDirection.reverse && _barShown) {
-      setState(() => _barShown = false);
+      _barShown = false;
     } else if (n.direction == ScrollDirection.forward && !_barShown) {
-      setState(() => _barShown = true);
+      _barShown = true;
     }
     return false;
   }
@@ -224,6 +231,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   void dispose() {
     _tabReentryWorker?.dispose();
     _searchCtrl.dispose();
+    _barShownN.dispose();
     super.dispose();
   }
 
@@ -455,10 +463,15 @@ class _RequestsScreenState extends State<RequestsScreen> {
                   // Lifted clear of the shell's floating dock instead of
                   // stacking on top of it (see _kBarLift).
                   bottom: _kBarLift,
-                  child: _RetractingBar(
-                    // The bulk bar owns the edge outright while selecting; only
-                    // the Seats CTA gets out of the way on a downward scroll.
-                    shown: _selectionMode || _barShown,
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _barShownN,
+                    builder: (_, barShown, bar) => _RetractingBar(
+                      // The bulk bar owns the edge outright while selecting;
+                      // only the Seats CTA gets out of the way on a downward
+                      // scroll.
+                      shown: _selectionMode || barShown,
+                      child: bar!,
+                    ),
                     child: _selectionMode
                       ? _BulkActionBar(
                           c: c,
