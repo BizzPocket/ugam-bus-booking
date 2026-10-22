@@ -204,7 +204,10 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
         .toList();
     try {
       await _ctrl.assignSeats(widget.tourId, occ.id, next);
-    } catch (_) {}
+    } catch (_) {
+      // Not silent: the controller's _write already re-read the tour (undoing
+      // the optimistic free) and showed the error toast before rethrowing.
+    }
   }
 
   /// Open the full edit-request sheet for this occupant so the agent can fix

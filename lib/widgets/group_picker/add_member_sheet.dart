@@ -49,7 +49,14 @@ class _AddMemberToGroupSheetState extends State<AddMemberToGroupSheet> {
   }
 
   Future<void> _add(Passenger p) async {
-    await _ctrl.setPassengerGroup(widget.tourId, p.id, widget.groupId);
+    try {
+      await _ctrl.setPassengerGroup(widget.tourId, p.id, widget.groupId);
+    } catch (_) {
+      // The controller's _write already rolled back and showed the error
+      // toast; swallow the rethrow so it is not an unhandled async error and
+      // no false "added" toast follows it.
+      return;
+    }
     AppSnackBar.success(
       tr('tour_groups.member_added', namedArgs: {'name': _displayName(p)}),
     );

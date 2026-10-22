@@ -40,14 +40,25 @@ class AssignGroupSheet extends StatelessWidget {
 
   Future<void> _assign(
       BuildContext context, PassengerGroup g, Passenger p) async {
-    await _ctrl.setPassengerGroup(tourId, passengerId, g.id);
+    try {
+      await _ctrl.setPassengerGroup(tourId, passengerId, g.id);
+    } catch (_) {
+      // The controller's _write already rolled back and showed the error
+      // toast; swallow the rethrow so it is not an unhandled async error, and
+      // keep the sheet open so the agent can retry.
+      return;
+    }
     if (context.mounted) Navigator.of(context).pop();
     AppSnackBar.success(tr('tour_groups.assigned',
         namedArgs: {'name': _displayName(p), 'group': _label(g)}));
   }
 
   Future<void> _remove(BuildContext context, Passenger p) async {
-    await _ctrl.setPassengerGroup(tourId, passengerId, null);
+    try {
+      await _ctrl.setPassengerGroup(tourId, passengerId, null);
+    } catch (_) {
+      return; // Error already surfaced by the controller (see _assign).
+    }
     if (context.mounted) Navigator.of(context).pop();
     AppSnackBar.success(
         tr('tour_groups.removed', namedArgs: {'name': _displayName(p)}));
