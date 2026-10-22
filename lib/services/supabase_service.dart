@@ -8,7 +8,10 @@ class SupabaseService {
   static SupabaseService get instance => _instance;
   SupabaseService._internal();
 
-  SupabaseClient get client => Supabase.instance.client;
+  /// Test seam: a client wired to a fake HTTP transport. Null in the app.
+  static SupabaseClient? debugClient;
+
+  SupabaseClient get client => debugClient ?? Supabase.instance.client;
 
   /// Verifies the project is reachable. Throws on network/auth failure.
   /// Uses a tiny `select` against booking_requests. The anon role's RLS

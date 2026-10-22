@@ -114,11 +114,14 @@ extension _SyncServerWrites on SyncService {
         break;
       case 'update':
         final updateData = Map<String, dynamic>.from(clean)..remove('id');
+        // `select('id')`, not `select()`: the answer is only checked for
+        // emptiness, and a bare select() echoed the WHOLE row back — for a bus
+        // that is its layout jsonb, kilobytes downloaded on every save over 2G.
         final res = await _client
             .from(table)
             .update(updateData)
             .eq('id', entityId)
-            .select();
+            .select('id');
         if ((res as List).isEmpty) {
           // Row missing — fall back to insert.
           await _client.from(table).insert(clean);
@@ -139,7 +142,7 @@ extension _SyncServerWrites on SyncService {
             .from(table)
             .update(patchData)
             .eq('id', entityId)
-            .select();
+            .select('id'); // emptiness check only — see 'update' above
         if ((patched as List).isEmpty) {
           throw StateError(
             'patch $table/$entityId matched no row — refusing to insert a '
