@@ -346,6 +346,18 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
   // identity is compared), the active passenger, every drag/relocate field the
   // highlight callbacks consult at call time, the viewport height, and the
   // locale (tr() inside the grid holds no Localizations dependency).
+  /// Per-seat tile memo: when ONE seat changes, only that tile rebuilds.
+  final _tileMemo = _SeatTileMemo();
+
+  /// Seat tap against the LIVE tour + selected bus (see [_SeatGrid.onTap]).
+  void _onLiveSeatTapped(SeatCell cell) {
+    final tour = _tour;
+    if (tour == null) return;
+    final bus = _selectedBus(tour);
+    if (bus == null) return;
+    _onSeatTapped(cell, bus, tour);
+  }
+
   _SeatGrid? _gridMemo;
   List<Object?>? _gridMemoKey;
 
@@ -652,8 +664,11 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
                                     tour: tour,
                                     assignmentMap: assignmentMap,
                                     currentPassengerId: passenger?.id,
-                                    onTap: (cell) =>
-                                        _onSeatTapped(cell, bus, tour),
+                                    // Resolved at TAP time, not captured:
+                                    // memoized tiles outlive this build, and
+                                    // must act on the live tour/bus.
+                                    onTap: _onLiveSeatTapped,
+                                    tileMemo: _tileMemo,
                                     busName: bus.name,
                                     // Drag-to-move is always live now that the
                                     // edit-flags mode is gone.

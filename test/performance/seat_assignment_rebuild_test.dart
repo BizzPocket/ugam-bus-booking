@@ -108,6 +108,41 @@ void main() {
     expect(_rebuilt(before, afterExpand), 0);
   });
 
+  testWidgets('BENCH frame cost: full chart rebuild vs memo hit',
+      (tester) async {
+    final ctrl = await pump(tester);
+    Future<double> avg(void Function() mutate) async {
+      final sw = Stopwatch();
+      for (var i = 0; i < 30; i++) {
+        mutate();
+        sw.start();
+        await tester.pump();
+        sw.stop();
+      }
+      return sw.elapsedMicroseconds / 30;
+    }
+
+    // Same Tour instance re-notified: the Obx rebuilds, the grid memo hits.
+    final hit = await avg(() => ctrl.tours.refresh());
+    // A fresh Tour whose passengers are unchanged instances (a typical local
+    // seat write): the grid rebuilds but every tile memo hits.
+    final tour = await avg(() {
+      ctrl.tours[0] = ctrl.tours[0].copyWith();
+      ctrl.tours.refresh();
+    });
+    // Every passenger re-instanced (e.g. a full re-fetch): every tile rebuilds.
+    final full = await avg(() {
+      final t = ctrl.tours[0];
+      ctrl.tours[0] =
+          t.copyWith(passengers: [for (final p in t.passengers) p.copyWith()]);
+      ctrl.tours.refresh();
+    });
+    // ignore: avoid_print
+    print('BENCH seat workbench frame: grid-memo hit ${hit.toStringAsFixed(0)}us, '
+        'new tour/tiles memo hit ${tour.toStringAsFixed(0)}us, '
+        'every tile rebuilt ${full.toStringAsFixed(0)}us');
+  });
+
   testWidgets('a tour change (seat assigned) still repaints the chart',
       (tester) async {
     final ctrl = await pump(tester);
@@ -136,7 +171,9 @@ void main() {
     print('PERF tour change: ${_rebuilt(before, after)}/${after.length} tiles '
         'rebuilt, ${debugWordFitMeasureCount - measuredBefore} name measures');
     expect(debugWordFitMeasureCount - measuredBefore, lessThanOrEqualTo(1));
-    expect(_rebuilt(before, after), greaterThan(0));
+    // Only the seat whose occupant changed rebuilds; the 12 untouched booked
+    // tiles and every free tile are reused as-is.
+    expect(_rebuilt(before, after), 1);
     // The newly seated rider shows on the chart (memo invalidated).
     final seated = after.where(
       (w) => w.cell.seatId == ids[12] && w.occupants.any((p) => p.id == 'q0'),
