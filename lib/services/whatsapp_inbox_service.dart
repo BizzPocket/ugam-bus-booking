@@ -92,8 +92,13 @@ class WhatsAppInboxService {
       return Future.value(null);
     }
     // Concurrent bubbles for the same path share one request.
-    return _signedUrlInFlight[mediaPath] ??= _mintSignedUrl(mediaPath)
-        .whenComplete(() => _signedUrlInFlight.remove(mediaPath));
+    // Block body on purpose: `remove` returns the removed Future, and a
+    // whenComplete callback that returns a Future is AWAITED — this one would
+    // wait on itself forever.
+    return _signedUrlInFlight[mediaPath] ??=
+        _mintSignedUrl(mediaPath).whenComplete(() {
+      _signedUrlInFlight.remove(mediaPath);
+    });
   }
 
   /// How long a failed signed-URL mint is remembered before it is retried.
