@@ -456,6 +456,7 @@ class Tour {
     bool clearReturnDate = false,
     bool clearReturnTime = false,
     bool clearDescription = false,
+    bool clearHandlerId = false,
   }) {
     return Tour(
       id: id,
@@ -472,7 +473,7 @@ class Tour {
       status: status ?? this.status,
       ownerId: ownerId ?? this.ownerId,
       busId: busId ?? this.busId,
-      handlerId: handlerId ?? this.handlerId,
+      handlerId: clearHandlerId ? null : handlerId ?? this.handlerId,
       createdBy: createdBy ?? this.createdBy,
       isPublic: isPublic ?? this.isPublic,
       bookingMode: bookingMode ?? this.bookingMode,

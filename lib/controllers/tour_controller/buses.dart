@@ -45,24 +45,41 @@ mixin _TourBuses on _TourSeatSwaps {
     );
   }
 
-  Future<void> removeHandler(String tourId) => _write(
-    optimistic: () => _updateTourLocal(tourId, (t) {
-      final updatedPassengers = t.passengers
-          .map((p) => p.isHandler ? p.copyWith(isHandler: false) : p)
-          .toList();
-      return t.copyWith(handlerId: null, passengers: updatedPassengers);
-    }),
-    persist: () async {
-      final tour = getTour(tourId);
-      if (tour == null) return;
-      await _sync.smartUpdate(
-        table: 'tours',
-        entityId: tourId,
-        data: tour.toMap(),
-      );
-    },
-    failure: tr('errors.remove_handler'),
-  );
+  Future<void> removeHandler(String tourId) {
+    // Who held the flag before — the only passenger rows that flip.
+    final handlerIdsBefore = {
+      for (final p in getTour(tourId)?.passengers ?? const <Passenger>[])
+        if (p.isHandler) p.id,
+    };
+    return _write(
+      optimistic: () => _updateTourLocal(tourId, (t) {
+        final updatedPassengers = t.passengers
+            .map((p) => p.isHandler ? p.copyWith(isHandler: false) : p)
+            .toList();
+        return t.copyWith(clearHandlerId: true, passengers: updatedPassengers);
+      }),
+      persist: () async {
+        final tour = getTour(tourId);
+        if (tour == null) return;
+        // `Tour.toMap()` omits a null handler_id, so a whole-row write could
+        // never clear it. Patch the one column with an explicit null.
+        await _sync.updatePatch(
+          table: 'tours',
+          entityId: tourId,
+          fields: {'handler_id': null},
+        );
+        for (final p in tour.passengers) {
+          if (!handlerIdsBefore.contains(p.id)) continue;
+          await _sync.smartUpdate(
+            table: 'passengers',
+            entityId: p.id,
+            data: p.toMap(),
+          );
+        }
+      },
+      failure: tr('errors.remove_handler'),
+    );
+  }
 
   // Per-bus handler (F3)
   //
@@ -202,6 +219,7 @@ mixin _TourBuses on _TourSeatSwaps {
         }).toList();
         return t.copyWith(
           handlerId: nextTourHandlerId,
+          clearHandlerId: nextTourHandlerId == null,
           buses: nextBuses,
           passengers: nextPassengers,
         );
@@ -218,10 +236,12 @@ mixin _TourBuses on _TourSeatSwaps {
             fields: {'handler_passenger_id': bus.handlerPassengerId},
           );
         }
-        await _sync.smartUpdate(
+        // Patch the legacy pointer alone: `Tour.toMap()` omits a null
+        // handler_id, so a whole-row write could never clear it.
+        await _sync.updatePatch(
           table: 'tours',
           entityId: tourId,
-          data: t.toMap(),
+          fields: {'handler_id': t.handlerId},
         );
         if (!stillHandlesOther) {
           final p =
