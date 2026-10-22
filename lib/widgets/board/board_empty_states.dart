@@ -102,9 +102,10 @@ enum BoardEmptyKind {
 ///  * [createGroup] → `AppRoutes.tourGroups` today. Once spec §7's long-press
 ///    multi-select lands, the Board makes groups itself and this becomes an
 ///    in-Board hint rather than a push.
-///  * [placeRiders] → `AppRoutes.seatAssignment` with `{tourId, busId}`, or —
-///    preferably, once the assignment walk is wired — the Board's own
-///    "next empty berth" advance (spec §4).
+///  * [placeRiders] → `AppRoutes.seatGrid` with `{tourId, busId}` — never
+///    `AppRoutes.seatAssignment`, which resolves back to the Board while it
+///    replaces the chart. Once the assignment walk is wired, the Board's own
+///    "next empty berth" advance (spec §4) is preferred.
 ///  * [previewExpected] → in-Board: switch to [BoardLensId.occupancy], which
 ///    shows exactly who is on the bus without leaving the canvas. No push.
 ///  * [reviewCollection] → `AppRoutes.tourMoney` (`TourMoneyBoardScreen`).

@@ -558,34 +558,41 @@ class _PassengerSheetState extends State<PassengerSheet> {
           // Strike ONE leg from THIS berth. Seat-scoped so a party keeps the
           // seats it is still travelling on; the gate is shared with the seat
           // chart's occupant sheet so both offer the same thing here.
-          if (widget.onCancelSeatLeg != null && p != null) ...[
-            if (_strikeable(p).ret)
-              _ActionRow(
-                icon: Icons.event_busy_rounded,
-                label: tr('tour_detail.cancel_return_seat'),
-                danger: true,
-                onTap: _busy
-                    ? null
-                    : () {
-                        Navigator.of(context).maybePop();
-                        widget.onCancelSeatLeg!(p, TripType.returnOnly);
-                      },
-              ),
-            if (_strikeable(p).go)
-              _ActionRow(
-                icon: Icons.logout_rounded,
-                label: tr('tour_detail.cancel_go_seat'),
-                danger: true,
-                onTap: _busy
-                    ? null
-                    : () {
-                        Navigator.of(context).maybePop();
-                        widget.onCancelSeatLeg!(p, TripType.outboundOnly);
-                      },
-              ),
-          ],
+          if (widget.onCancelSeatLeg != null && p != null)
+            ..._legStrikeRows(context, p),
         ],
       ),
     );
+  }
+
+  /// The strike-one-leg rows for [p] — [_strikeable] evaluated ONCE.
+  List<Widget> _legStrikeRows(BuildContext context, Passenger p) {
+    final strikeable = _strikeable(p);
+    return [
+      if (strikeable.ret)
+        _ActionRow(
+          icon: Icons.event_busy_rounded,
+          label: tr('tour_detail.cancel_return_seat'),
+          danger: true,
+          onTap: _busy
+              ? null
+              : () {
+                  Navigator.of(context).maybePop();
+                  widget.onCancelSeatLeg!(p, TripType.returnOnly);
+                },
+        ),
+      if (strikeable.go)
+        _ActionRow(
+          icon: Icons.logout_rounded,
+          label: tr('tour_detail.cancel_go_seat'),
+          danger: true,
+          onTap: _busy
+              ? null
+              : () {
+                  Navigator.of(context).maybePop();
+                  widget.onCancelSeatLeg!(p, TripType.outboundOnly);
+                },
+        ),
+    ];
   }
 }
