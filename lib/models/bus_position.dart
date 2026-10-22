@@ -59,7 +59,9 @@ class LocationFix {
       lng: p.longitude,
       accuracyM: p.accuracy >= 0 ? p.accuracy : null,
       speedKmh: p.speed >= 0 ? p.speed * 3.6 : null,
-      headingDeg: p.heading >= 0 ? p.heading : null,
+      // A heading is only meaningful while moving; parked GPS heading is noise
+      // (and Android reports 0.0 = "due north" when it has none).
+      headingDeg: p.heading >= 0 && p.speed > 0.5 ? p.heading : null,
       leg: leg,
       recordedAt: recordedAt,
       trackingState: trackingState,

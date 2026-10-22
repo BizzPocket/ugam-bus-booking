@@ -104,8 +104,12 @@ dependencies:
   # background updates — so no separate foreground-task package is needed.
   geolocator: ^14.0.2
 
-  # Admin live map. Map loads on the mobile SDKs are not billed.
-  google_maps_flutter: ^2.18.0
+  # Live bus maps (admin fleet map + handler's own-bus card). OpenStreetMap
+  # tiles: free, no API key, no billing account. Tiles are cached on disk by
+  # flutter_map's built-in caching, which also keeps us inside the OSM tile
+  # usage policy.
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 
 dev_dependencies:
   flutter_test:

@@ -56,13 +56,6 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="booking_requests" />
-        <!-- Google Maps key for the admin live map. Injected from
-             android/local.properties (gitignored) by build.gradle.kts, mirroring
-             the key.properties signing pattern. Empty in a fresh clone: the map
-             renders grey rather than failing the build. -->
-        <meta-data
-            android:name="com.google.android.geo.API_KEY"
-            android:value="${mapsApiKey}" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

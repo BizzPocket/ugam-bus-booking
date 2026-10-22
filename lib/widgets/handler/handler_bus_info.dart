@@ -1,17 +1,18 @@
 // Departure line, driver contact card and the live own-bus map.
 
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 import '../../design/ugam.dart';
 import '../../models/bus_details.dart';
 import '../../services/whatsapp_service.dart';
 import '../../utils/app_snackbar.dart';
 import '../../utils/time_format.dart';
+import '../osm_map_layers.dart';
 import 'handler_atoms.dart';
 
 // ─── Bus departure header ──────────────────────────────────────────────
@@ -190,9 +191,10 @@ class HandlerDriverContact extends StatelessWidget {
 
 /// A small "yes, your dot is moving" confirmation for the handler.
 ///
-/// Lite mode renders a static bitmap rather than a live vector map: this sits
-/// on a phone that is already running GPS for hours, and a full map would cost
-/// battery and memory for no added information at this size.
+/// Non-interactive on purpose: this sits on a phone that is already running
+/// GPS for hours, and pan/zoom gestures would cost battery and fight the
+/// page's own scroll for no added information at this size. Tiles come from
+/// the on-disk cache after the first draw.
 ///
 /// Reads its own position stream rather than the tracker's buffer — the buffer
 /// drains on every upload, so it is not a source of "where am I now".
@@ -206,6 +208,8 @@ class HandlerOwnBusMap extends StatefulWidget {
 class _HandlerOwnBusMapState extends State<HandlerOwnBusMap> {
   Position? _me;
   StreamSubscription<Position>? _sub;
+  final _map = MapController();
+  bool _mapReady = false;
 
   @override
   void initState() {
@@ -218,7 +222,12 @@ class _HandlerOwnBusMapState extends State<HandlerOwnBusMap> {
           ),
         ).listen(
           (p) {
-            if (mounted) setState(() => _me = p);
+            if (!mounted) return;
+            setState(() => _me = p);
+            // Follow the bus by moving the camera, not by rebuilding the map.
+            if (_mapReady) {
+              _map.move(LatLng(p.latitude, p.longitude), _map.camera.zoom);
+            }
           },
           // A failure here costs a reassurance map, nothing more. The upload
           // path has its own stream and its own error reporting.
@@ -229,6 +238,7 @@ class _HandlerOwnBusMapState extends State<HandlerOwnBusMap> {
   @override
   void dispose() {
     _sub?.cancel();
+    _map.dispose();
     super.dispose();
   }
 
@@ -241,12 +251,39 @@ class _HandlerOwnBusMapState extends State<HandlerOwnBusMap> {
       borderRadius: BorderRadius.circular(UgamRadius.card),
       child: SizedBox(
         height: 160,
-        child: GoogleMap(
-          initialCameraPosition: CameraPosition(target: here, zoom: 14),
-          liteModeEnabled: Platform.isAndroid,
-          myLocationButtonEnabled: false,
-          zoomControlsEnabled: false,
-          markers: {Marker(markerId: const MarkerId('me'), position: here)},
+        child: FlutterMap(
+          mapController: _map,
+          options: MapOptions(
+            initialCenter: here,
+            initialZoom: 15,
+            interactionOptions: const InteractionOptions(
+              flags: InteractiveFlag.none,
+            ),
+            onMapReady: () => _mapReady = true,
+          ),
+          children: [
+            osmTileLayer(context),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: here,
+                  width: 28,
+                  height: 28,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: UgamColors.of(context).good,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: UgamColors.of(context).card,
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const OsmAttribution(alignment: Alignment.bottomRight),
+          ],
         ),
       ),
     );

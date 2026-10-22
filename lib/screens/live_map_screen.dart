@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
@@ -10,6 +12,7 @@ import '../models/bus_details.dart';
 import '../models/bus_position.dart';
 import '../services/bus_positions_repository.dart';
 import '../utils/phone_dialer.dart';
+import '../widgets/osm_map_layers.dart';
 
 /// Every bus on one tour, moving. Admin-only — 047's RLS has no anon policy,
 /// so a customer could not read these rows even if this screen were reachable.
@@ -39,12 +42,28 @@ class LiveMapScreen extends StatefulWidget {
 /// points past it and costs nothing but a slightly tighter fit.
 const double _kStripReserve = 60;
 
-class _LiveMapScreenState extends State<LiveMapScreen> {
+/// How often the screen re-reads `bus_live_positions` on its own. Realtime is
+/// the fast path; this is the floor under it. A socket that died while the
+/// phone slept, or a publication that never carried the table, used to leave
+/// the map frozen on its first read with nothing on screen saying so.
+const Duration _kPollEvery = Duration(seconds: 60);
+
+/// How often "last seen" and the stale flag are re-evaluated. Without it the
+/// map only redrew on an incoming row — so a bus whose phone died kept saying
+/// "Moving · 54 km/h · now" indefinitely, which is exactly the bus the office
+/// needs to notice.
+const Duration _kClockEvery = Duration(seconds: 30);
+
+class _LiveMapScreenState extends State<LiveMapScreen>
+    with WidgetsBindingObserver {
   final _repo = BusPositionsRepository();
+  final _map = MapController();
 
   List<BusPosition> _positions = const [];
   StreamSubscription<BusPosition>? _sub;
-  GoogleMapController? _map;
+  Timer? _poll;
+  Timer? _clock;
+  bool _mapReady = false;
   bool _loading = true;
 
   /// The initial read threw. Distinct from "nobody has reported yet": an
@@ -61,6 +80,10 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _clock = Timer.periodic(_kClockEvery, (_) {
+      if (mounted) setState(() {});
+    });
     final seeded = widget.initialPositions;
     if (seeded != null) {
       _positions = seeded;
@@ -68,6 +91,16 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
       return;
     }
     _load();
+  }
+
+  /// Back from the background: the realtime socket may have been torn down
+  /// while the phone slept. Re-read now and reopen the channel.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (widget.initialPositions != null || _loading) return;
+    unawaited(_refresh());
+    _subscribe();
   }
 
   Future<void> _load() async {
@@ -94,6 +127,28 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
     }
 
     _subscribe();
+    _poll?.cancel();
+    _poll = Timer.periodic(_kPollEvery, (_) => unawaited(_refresh()));
+  }
+
+  /// Quiet re-read. Merged row by row so an out-of-order poll can never rewind
+  /// a dot realtime already moved; a failure keeps what is on screen.
+  Future<void> _refresh() async {
+    try {
+      final rows = await _repo.fetchForTour(widget.tourId);
+      if (!mounted) return;
+      setState(() {
+        var next = _positions;
+        for (final p in rows) {
+          next = BusPositionsRepository.mergePositions(next, p);
+        }
+        _positions = next;
+        _failed = false;
+      });
+      _fitCamera();
+    } catch (_) {
+      // Offline. The clock tick will age the dots into "not reporting".
+    }
   }
 
   void _subscribe() {
@@ -120,8 +175,12 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _clock?.cancel();
+    _poll?.cancel();
     _sub?.cancel();
     _repo.dispose();
+    _map.dispose();
     super.dispose();
   }
 
@@ -141,33 +200,29 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
     return null;
   }
 
+  /// Room the fitted camera leaves around the fleet: clear of the bus strip
+  /// and the floating dock below, and of the attribution above.
+  static const EdgeInsets _fitPadding = EdgeInsets.fromLTRB(
+    56,
+    56,
+    56,
+    UgamSpacing.dockClearance + _kStripReserve + 40,
+  );
+
   void _fitCamera() {
-    if (_fitted || _map == null || _positions.isEmpty) return;
+    if (_fitted || !_mapReady || _positions.isEmpty) return;
     _fitted = true;
-    if (_positions.length == 1) {
-      _map!.animateCamera(
-        CameraUpdate.newLatLngZoom(
-          LatLng(_positions.first.lat, _positions.first.lng),
-          13,
-        ),
-      );
+    final points = [for (final p in _positions) LatLng(p.lat, p.lng)];
+    if (points.length == 1) {
+      _map.move(points.first, 13);
       return;
     }
-    final lats = _positions.map((p) => p.lat);
-    final lngs = _positions.map((p) => p.lng);
-    _map!.animateCamera(
-      CameraUpdate.newLatLngBounds(
-        LatLngBounds(
-          southwest: LatLng(
-            lats.reduce((a, b) => a < b ? a : b),
-            lngs.reduce((a, b) => a < b ? a : b),
-          ),
-          northeast: LatLng(
-            lats.reduce((a, b) => a > b ? a : b),
-            lngs.reduce((a, b) => a > b ? a : b),
-          ),
-        ),
-        64,
+    _map.fitCamera(
+      CameraFit.coordinates(
+        coordinates: points,
+        padding: _fitPadding,
+        // Two buses parked side by side must not zoom to street-furniture level.
+        maxZoom: 15,
       ),
     );
   }
@@ -180,16 +235,12 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
     _fitCamera();
   }
 
-  /// Centre on one bus and pop its callout — the bus strip's tap action.
+  /// Centre on one bus — the bus strip's tap action.
   void _focus(BusPosition p) {
-    final map = _map;
-    if (map == null) return;
+    if (!_mapReady) return;
     // The agent has now chosen a camera; an auto-fit must not steal it back.
     _fitted = true;
-    map.animateCamera(
-      CameraUpdate.newLatLngZoom(LatLng(p.lat, p.lng), 14),
-    );
-    map.showMarkerInfoWindow(MarkerId(p.busId));
+    _map.move(LatLng(p.lat, p.lng), 14);
   }
 
   /// What the bus is doing, in three words. Stale wins over speed: a bus that
@@ -210,24 +261,20 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
     return p.isStale ? UgamStatusTone.warm : UgamStatusTone.good;
   }
 
-  Set<Marker> get _markers => _positions.map((p) {
-    return Marker(
-      markerId: MarkerId(p.busId),
-      position: LatLng(p.lat, p.lng),
-      rotation: p.headingDeg ?? 0,
-      // A bus that stopped reporting must not read like a running one.
-      icon: BitmapDescriptor.defaultMarkerWithHue(
-        p.isStale ? BitmapDescriptor.hueOrange : BitmapDescriptor.hueGreen,
+  List<Marker> get _markers => [
+    for (final p in _positions)
+      Marker(
+        point: LatLng(p.lat, p.lng),
+        width: _BusPin.width,
+        height: _BusPin.height,
+        child: _BusPin(
+          name: _busName(p.busId),
+          position: p,
+          semanticLabel: '${_busName(p.busId)} · ${_detailFor(p)}',
+          onTap: () => _openBusSheet(p),
+        ),
       ),
-      infoWindow: InfoWindow(
-        title: _busName(p.busId),
-        snippet:
-            '${_detailFor(p)} · '
-            '${tr('tracking.map_last_seen', namedArgs: {'n': agoLabelLocal(p.recordedAt)})}',
-        onTap: () => _openBusSheet(p),
-      ),
-    );
-  }).toSet();
+  ];
 
   void _openBusSheet(BusPosition p) {
     final bus = _busFor(p.busId);
@@ -352,24 +399,28 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
     return Stack(
       children: [
         Positioned.fill(
-          child: GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: LatLng(_positions.first.lat, _positions.first.lng),
-              zoom: 11,
+          child: FlutterMap(
+            mapController: _map,
+            options: MapOptions(
+              initialCenter: LatLng(
+                _positions.first.lat,
+                _positions.first.lng,
+              ),
+              initialZoom: 11,
+              // A rotated map is a lost map for this audience; north stays up.
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+              ),
+              onMapReady: () {
+                _mapReady = true;
+                _fitCamera();
+              },
             ),
-            markers: _markers,
-            myLocationButtonEnabled: false,
-            // Keeps Google's own chrome (logo, zoom controls) — and the camera
-            // fit — clear of the floating dock this screen sits under AND of
-            // the bus strip above it. Without it the fitted bounds put half the
-            // fleet behind the dock on a two-bus tour.
-            padding: const EdgeInsets.only(
-              bottom: UgamSpacing.dockClearance + _kStripReserve,
-            ),
-            onMapCreated: (c) {
-              _map = c;
-              _fitCamera();
-            },
+            children: [
+              osmTileLayer(context),
+              MarkerLayer(markers: _markers),
+              const OsmAttribution(),
+            ],
           ),
         ),
         Positioned(
@@ -477,6 +528,99 @@ class _LiveMapScreenState extends State<LiveMapScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// One bus on the map: its name above a round badge.
+///
+/// Moving with a known heading → an arrow pointing the way it is going.
+/// Parked → a bus glyph. Not reporting → the same glyph in the warm tone, so a
+/// dead phone never reads like a running bus. The badge sits exactly on the
+/// bus's coordinate (the box is symmetric about it).
+class _BusPin extends StatelessWidget {
+  static const double width = 148;
+  static const double height = 96;
+  static const double _badge = 36;
+  static const double _label = 26;
+
+  final String name;
+  final BusPosition position;
+  final String semanticLabel;
+  final VoidCallback onTap;
+
+  const _BusPin({
+    required this.name,
+    required this.position,
+    required this.semanticLabel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = UgamColors.of(context);
+    final p = position;
+    final tone = p.isStale ? c.warm : c.good;
+    final heading = p.headingDeg;
+    final showArrow = !p.isStale && p.isMoving && heading != null;
+
+    return UgamTappable(
+      onTap: onTap,
+      semanticLabel: semanticLabel,
+      pressedScale: 0.92,
+      child: Column(
+        children: [
+          SizedBox(
+            height: _label,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: c.card,
+                  borderRadius: BorderRadius.circular(UgamRadius.row),
+                  border: Border.all(color: c.border),
+                ),
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: UgamText.caption.copyWith(
+                    color: c.ink,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: (height - _badge) / 2 - _label),
+          Container(
+            width: _badge,
+            height: _badge,
+            decoration: BoxDecoration(
+              color: tone,
+              shape: BoxShape.circle,
+              border: Border.all(color: c.card, width: 3),
+              boxShadow: const [
+                BoxShadow(blurRadius: 6, color: Color(0x40000000)),
+              ],
+            ),
+            child: showArrow
+                ? Transform.rotate(
+                    angle: heading * math.pi / 180,
+                    child: Icon(
+                      Icons.navigation_rounded,
+                      size: 20,
+                      color: c.card,
+                    ),
+                  )
+                : Icon(
+                    Icons.directions_bus_rounded,
+                    size: 18,
+                    color: c.card,
+                  ),
+          ),
+        ],
       ),
     );
   }

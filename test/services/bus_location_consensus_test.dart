@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:occubusbooking/models/bus_position.dart';
 import 'package:occubusbooking/services/bus_location_consensus.dart';
 
 BusLocationSample sample({
@@ -139,5 +140,92 @@ void main() {
       now: now,
     );
     expect(picked!.busId, 'today-many');
+  });
+
+  group('only phones still reporting vote', () {
+    test('three phones that went quiet at a stop cannot hold the bus there', () {
+      // Real case: passengers' apps closed at a dhaba 8 minutes ago (still
+      // inside the 10-minute window). The handler's phone has driven 6 km on.
+      final t = DateTime.utc(2026, 9, 23, 10, 5);
+      final dhaba = t.subtract(const Duration(minutes: 8));
+      final fix = consensusPosition([
+        sample(id: 'p1', lat: 23.00, at: dhaba, speedKmh: 0),
+        sample(id: 'p2', lat: 23.0001, at: dhaba, speedKmh: 0),
+        sample(id: 'p3', lat: 22.9999, at: dhaba, speedKmh: 0),
+        sample(id: 'handler', lat: 23.055, at: t, speedKmh: 58),
+      ], now: t);
+      expect(fix!.lat, 23.055);
+      expect(fix.speedKmh, 58);
+      expect(fix.recordedAt, t);
+    });
+
+    test('a phone two minutes behind (between uploads) still votes', () {
+      final t = DateTime.utc(2026, 9, 23, 10, 5);
+      final fix = consensusPosition([
+        sample(id: 'a', lat: 23.0300, at: t),
+        sample(id: 'b', lat: 23.0300,
+            at: t.subtract(const Duration(minutes: 2))),
+        sample(id: 'c', lat: 23.0600, at: t),
+      ], now: t);
+      // a+b outvote c only if b still counts.
+      expect(fix!.lat, closeTo(23.03, 0.0001));
+    });
+
+    test('speed comes from a phone that measured it, not the finest one', () {
+      final t = DateTime.utc(2026, 9, 23, 10, 5);
+      final fix = consensusPosition([
+        sample(id: 'fine-no-speed', lat: 23.0300, accuracyM: 5, at: t),
+        sample(id: 'coarse', lat: 23.0301, accuracyM: 30, at: t, speedKmh: 47),
+      ], now: t);
+      expect(fix!.speedKmh, 47);
+      expect(fix.accuracyM, greaterThanOrEqualTo(5));
+    });
+  });
+
+  group('deriveMotion', () {
+    final t0 = DateTime.utc(2026, 10, 17, 9);
+    LocationFix f(double lat, DateTime at, {double? speed, double acc = 10}) =>
+        LocationFix(
+          lat: lat,
+          lng: 72.5,
+          accuracyM: acc,
+          speedKmh: speed,
+          recordedAt: at,
+        );
+
+    test('a moving bus whose chip reports 0 km/h gets a real speed', () {
+      // ~500 m north in 30 s = 60 km/h.
+      final prev = f(23.0, t0);
+      final next = f(23.0045, t0.add(const Duration(seconds: 30)), speed: 0);
+      final out = deriveMotion(next, prev);
+      expect(out.speedKmh, closeTo(60, 1.5));
+      expect(out.headingDeg, closeTo(0, 1)); // due north
+    });
+
+    test('a reported speed is never overwritten', () {
+      final prev = f(23.0, t0);
+      final next = f(23.0045, t0.add(const Duration(seconds: 30)), speed: 42);
+      expect(deriveMotion(next, prev).speedKmh, 42);
+    });
+
+    test('GPS wander around a parked bus stays parked', () {
+      // 15 m drift with 10 m accuracy on each end — inside the error.
+      final prev = f(23.0, t0);
+      final next = f(23.000135, t0.add(const Duration(seconds: 30)), speed: 0);
+      expect(deriveMotion(next, prev).speedKmh, 0);
+    });
+
+    test('a GPS jump is not read as 400 km/h', () {
+      final prev = f(23.0, t0);
+      final next = f(23.1, t0.add(const Duration(seconds: 30)), speed: 0);
+      expect(deriveMotion(next, prev).speedKmh, 0);
+    });
+
+    test('coarse cell-tower fixes do not invent speed', () {
+      final prev = f(23.0, t0, acc: 400);
+      final next =
+          f(23.0045, t0.add(const Duration(seconds: 30)), speed: null, acc: 400);
+      expect(deriveMotion(next, prev).speedKmh, isNull);
+    });
   });
 }

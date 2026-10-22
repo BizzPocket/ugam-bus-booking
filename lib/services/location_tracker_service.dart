@@ -9,6 +9,7 @@ import 'package:get/get.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/bus_position.dart';
+import 'bus_location_consensus.dart' show deriveMotion;
 import 'error_reporter.dart';
 import 'location_fix_buffer.dart';
 import 'sync_retry_policy.dart';
@@ -76,6 +77,10 @@ class LocationTrackerService extends GetxService {
   Duration _backoff = _minBackoff;
 
   StreamSubscription<Position>? _positionSub;
+
+  /// The previous GPS sample, so a fix the chip reported without a speed can
+  /// have one derived from the distance travelled. See [deriveMotion].
+  LocationFix? _lastStreamFix;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   Timer? _flushTimer;
 
@@ -187,6 +192,7 @@ class LocationTrackerService extends GetxService {
   /// once permission has resolved to live or foregroundOnly.
   void startStream() {
     _positionSub?.cancel();
+    _lastStreamFix = null;
     _positionSub =
         Geolocator.getPositionStream(
           locationSettings: buildLocationSettings(
@@ -195,9 +201,14 @@ class LocationTrackerService extends GetxService {
             notificationText: tr('tracking.notification_text'),
           ),
         ).listen(
-          (p) => record(
-            LocationFix.fromPosition(p, leg: leg, now: DateTime.now()),
-          ),
+          (p) {
+            final fix = deriveMotion(
+              LocationFix.fromPosition(p, leg: leg, now: DateTime.now()),
+              _lastStreamFix,
+            );
+            _lastStreamFix = fix;
+            record(fix);
+          },
           onError: (Object e, StackTrace st) {
             ErrorReporter.report(kind: 'location_stream', error: e, stack: st);
           },

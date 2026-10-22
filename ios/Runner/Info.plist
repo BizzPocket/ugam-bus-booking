@@ -51,10 +51,6 @@
 		<string>remote-notification</string>
 		<string>location</string>
 	</array>
-	<!-- Populated from ios/Flutter/Secrets.xcconfig (git-ignored) and read in
-	     AppDelegate. Empty in a fresh clone: the map renders grey. -->
-	<key>MAPS_API_KEY</key>
-	<string>$(MAPS_API_KEY)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
