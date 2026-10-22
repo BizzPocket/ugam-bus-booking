@@ -3,6 +3,7 @@ import 'dart:developer' as dev;
 import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:get/get.dart';
 
 import '../models/collection.dart';
@@ -51,6 +52,47 @@ class MoneyController extends _MoneyControllerBase
 
   @override
   final LedgerMoneySource _ledgerSource;
+
+  Worker? _onlineWorker;
+  Timer? _reconnectDebounce;
+
+  /// How long an online edge waits before re-reading a failed money board, so a
+  /// flapping signal collapses into one reload.
+  @visibleForTesting
+  static Duration reconnectReloadDelay = const Duration(milliseconds: 1500);
+
+  @override
+  void onInit() {
+    super.onInit();
+    if (!Get.isRegistered<SyncService>()) return;
+    // A money board that failed to load (offline / timed out) used to stay on
+    // its retry state until the agent tapped Retry — even after the signal came
+    // back. Self-heal on the online edge, exactly like TourController and
+    // CustomerMemoryController, but ONLY when the last load failed: a board
+    // that loaded fine is not re-read on every connectivity flap.
+    _onlineWorker = ever(_sync.isOnline, (online) {
+      if (online) scheduleReconnectReload();
+    });
+  }
+
+  /// Re-read the loaded tour's money after a reconnect, if its last load failed.
+  @visibleForTesting
+  void scheduleReconnectReload() {
+    _reconnectDebounce?.cancel();
+    _reconnectDebounce = Timer(reconnectReloadDelay, () {
+      final tourId = _loadedTourId;
+      if (isClosed || tourId == null || !loadFailed.value) return;
+      // ignore: unawaited_futures
+      refreshForTour(tourId);
+    });
+  }
+
+  @override
+  void onClose() {
+    _onlineWorker?.dispose();
+    _reconnectDebounce?.cancel();
+    super.onClose();
+  }
 }
 
 /// Per-bus money board state, driving the attention ring on the tour money
