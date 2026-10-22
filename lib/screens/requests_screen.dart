@@ -594,13 +594,16 @@ class _RequestsScreenState extends State<RequestsScreen> {
           const SizedBox(height: UgamSpacing.xs),
           UgamSelectorPills(
             currentIndex: _selectedTourIndex,
-            onChanged: (i) => setState(() {
-              _selectedTourIndex = i;
-              _autoFilter = true;
-              _expandedId = null;
-              _barShown = true;
+            onChanged: (i) {
+              setState(() {
+                _selectedTourIndex = i;
+                _autoFilter = true;
+                _expandedId = null;
+                _barShown = true;
+              });
+              // Its own setState — never nest one inside another's callback.
               _exitSelection();
-            }),
+            },
             items: [
               for (final tour in activeTours)
                 UgamSelectorItem(label: tour.title),

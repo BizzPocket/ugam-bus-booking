@@ -201,9 +201,11 @@ class _CustomerTourDetailScreenState extends State<CustomerTourDetailScreen> {
                   if (busesLoading)
                     const _BusCardSkeleton()
                   else
-                    for (final bus in _summary.buses) ...[
-                      _BusCard(bus: bus, c: c),
-                      if (bus != _summary.buses.last)
+                    // By index: two equal bus summaries (== by value) made
+                    // `bus != last` false for both, dropping a gap.
+                    for (var i = 0; i < _summary.buses.length; i++) ...[
+                      _BusCard(bus: _summary.buses[i], c: c),
+                      if (i < _summary.buses.length - 1)
                         const SizedBox(height: UgamSpacing.sm),
                     ],
                 ],

@@ -621,9 +621,12 @@ class _CustomerMyRequestsScreenState extends State<CustomerMyRequestsScreen> {
   }
 }
 
-/// A request is truly PENDING (and self-cancellable): still 'pending', not
-/// organiser-confirmed, no seats yet. Mirrors [CustomerRequestEntry.canCancel].
-/// A booking still waiting on someone to act.
+/// A booking still waiting on someone to act: still 'pending' (or held), not
+/// organiser-confirmed, no seats yet.
+///
+/// This is the Pending FILTER, not the self-cancel gate — it deliberately no
+/// longer mirrors [CustomerRequestEntry.canCancel], because it also counts
+/// held bookings.
 ///
 /// `held` belongs here: the seats ARE blocked on the chart and the booking is
 /// live, it is simply waiting on the customer's advance. Leaving it out stranded

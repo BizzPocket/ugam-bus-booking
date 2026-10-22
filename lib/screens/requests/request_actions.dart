@@ -444,7 +444,9 @@ class _CardActions extends StatelessWidget {
       ];
     } else if (isConfirmed) {
       // CONFIRMED (no seats yet) — push straight to seat assignment; the circle
-      // resends the seat_allotment confirmation WhatsApp.
+      // re-runs _confirm (an idempotent setConfirmed(true)) and resends the
+      // `seat_allocation` confirmation WhatsApp — not `seat_allotment`, which
+      // needs seats.
       primaryLabel = tr('requests.action.assign_seats');
       primaryIcon = Icons.grid_view_rounded;
       primaryAction = _openAssignment;
