@@ -159,7 +159,11 @@ extension _NotifySendFlow on _NotifyScreenState {
     } catch (e) {
       if (mounted && dialogOpen) Navigator.of(context, rootNavigator: true).pop();
       progress.dispose();
-      if (mounted) AppSnackBar.error(tr('notify.alloc_failed_body'));
+      // Keep the reason: a bare "couldn't send" left the agent guessing.
+      if (mounted) {
+        AppSnackBar.error(
+            '${tr('notify.alloc_failed_body')}${waThrownAppendix(e)}');
+      }
       return;
     }
     if (mounted && dialogOpen) Navigator.of(context, rootNavigator: true).pop();

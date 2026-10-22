@@ -102,3 +102,14 @@ String waFailureAppendix(WaSendResult result) {
   final summary = waFailureSummary(result);
   return summary.isEmpty ? '' : '\n\n$summary';
 }
+
+/// The [waFailureAppendix] equivalent for a send that THREW instead of
+/// returning a [WaSendResult]: the thrown text is classified like any other
+/// failure, so the agent reads a cause and a fix, plus the raw text only when
+/// the cause is unmapped. Never empty — a throw is always a failure.
+String waThrownAppendix(Object error) {
+  final info = WaError.classify(message: error.toString());
+  final raw = info.cause == WaErrorCause.unknown ? info.rawMessage : '';
+  return '\n\n${waCauseText(info.cause)}\n${waFixText(info.cause)}'
+      '${raw.isEmpty ? '' : '\n$raw'}';
+}

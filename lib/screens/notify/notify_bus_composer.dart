@@ -120,7 +120,8 @@ class _BusMessageComposerState extends State<_BusMessageComposer> {
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       if (mounted) setState(() => _sending = false);
-      AppSnackBar.error('${tr('bus_message.failed_body')}\n$e');
+      // Classified cause + fix, never the raw exception's toString().
+      AppSnackBar.error('${tr('bus_message.failed_body')}${waThrownAppendix(e)}');
     }
   }
 

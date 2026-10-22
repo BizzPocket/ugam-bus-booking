@@ -210,7 +210,8 @@ class WhatsAppService {
       '📅 ${_dateRange(tour)}',
       '',
       '👤 *Name:* $customerName',
-      '💺 *Seats:* ${seatParts.join(' + ')}',
+      // No sofa counts (e.g. a seater-only party) → no empty "Seats:" line.
+      if (seatParts.isNotEmpty) '💺 *Seats:* ${seatParts.join(' + ')}',
       tripLine,
       if (pickupLocation != null && pickupLocation.trim().isNotEmpty)
         '🚏 *${tr('pickup.reflect_label')}:* ${pickupLocation.trim()}',
@@ -286,7 +287,8 @@ class WhatsAppService {
       '📅 ${_dateRange(tour)}',
       '',
       '👤 *Name:* $customerName',
-      '💺 *Seats:* ${seatParts.join(' + ')}',
+      // No sofa counts (e.g. a seater-only party) → no empty "Seats:" line.
+      if (seatParts.isNotEmpty) '💺 *Seats:* ${seatParts.join(' + ')}',
       if (seatIds.isNotEmpty) '🔢 *Seat numbers:* ${seatIds.join(', ')}',
       tripLine,
       if (pickupLocation != null && pickupLocation.trim().isNotEmpty)
