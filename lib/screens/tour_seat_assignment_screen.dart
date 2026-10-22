@@ -62,8 +62,9 @@ part 'tour_seat_assignment/empty_states.dart';
 ///     tour.handlerId != null`.
 ///
 /// Sacred business logic preserved:
-///   * `_pendingLines`, `_berthsForFreeCell`, `_onSeatTapped`,
-///     `_drainPending`, `_findCell`, `_lockTour`. (Handler assignment is now
+///   * `_pendingLines`, `_berthsForFreeCell`, `_onSeatTapped`, `_findCell`.
+///     (Draining is now `seat_fit.dart`'s shared helper, and locking lives on
+///     the Notify screen's `_lockTour`.) (Handler assignment is now
 ///     per-bus — picked on the Manage Buses screen — so the old tour-wide
 ///     handler toggle has been removed from this screen.)
 class TourSeatAssignmentScreen extends StatefulWidget {
