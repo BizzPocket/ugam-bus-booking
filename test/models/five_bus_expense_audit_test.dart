@@ -81,23 +81,24 @@ void main() {
   const totalGround = 36200.0; // 8200+6500+7250+8400+5850
 
   // Per-bus COST under the pakku-bhadu rule (every bus defaults to
-  // rentIncludesFuel): diesel + driver are INSIDE the rent — they only reduce
-  // what is owed to the owner; toll / food / misc stay ON TOP.
-  //   bus1  max(40000, 5000 drv + 3200 fuel)   + 0 on top             = 40000
+  // rentIncludesFuel): diesel is INSIDE the rent — it only reduces what is
+  // owed to the owner; driver / toll / food / misc stay ON TOP (owner's rule
+  // 2026-10-25: every driver cost is extra).
+  //   bus1  max(40000, 3200 fuel)              + 5000 drv             = 45000
   //   bus2  max(35000, 0)                      + 1500+4100+900 = 6500 = 41500
   //   bus3  max(52000, 7250 fuel)              + 0                    = 52000
-  //   bus4  max(28000, 6400 drv)               + 2000 toll            = 30000
+  //   bus4  max(28000, 0)                      + 2000 toll + 6400 drv = 36400
   //   bus5  max(61000, 1750 fuel)              + 3300+800 = 4100      = 65100
   const costExpectedByBus = <String, double>{
-    'bus1': 40000,
+    'bus1': 45000,
     'bus2': 41500,
     'bus3': 52000,
-    'bus4': 30000,
+    'bus4': 36400,
     'bus5': 65100,
   };
-  // Σ = 228600 = rents 216000 + on-top 12600 (= ground 36200 − absorbed
-  // 23600, absorbed = 3200+5000+7250+6400+1750).
-  const totalCost = 228600.0;
+  // Σ = 240000 = rents 216000 + on-top 24000 (= ground 36200 − absorbed
+  // 12200, absorbed = diesel only: 3200+7250+1750).
+  const totalCost = 240000.0;
 
   List<BusMoneySummary> summarise() => [
         for (final id in busIds)
@@ -136,8 +137,8 @@ void main() {
         expect(
           s.expensesTotal,
           costExpectedByBus[s.busId],
-          reason: '${s.busId} expensesTotal != own rent (incl. diesel + '
-              'driver) + own on-top rows',
+          reason: '${s.busId} expensesTotal != own rent (incl. diesel) + '
+              'own on-top rows (incl. driver)',
         );
       }
     });
@@ -235,8 +236,8 @@ void main() {
 
     test('orphan money stays INSIDE the trip total (never silently dropped)',
         () {
-      // Visible buses 228600 (the orphan row is on no visible bus) + the
-      // orphan 9999 → 238599.
+      // Visible buses 240000 (the orphan row is on no visible bus) + the
+      // orphan 9999 → 249999.
       expect(orphanTrip().totalExpenses, totalCost + 9999);
     });
 

@@ -8,19 +8,27 @@ import 'trip_pnl.dart';
 
 /// How logged expenses roll into bus bhadu / Malik settlement and P&L.
 ///
-/// THE RULE (user-confirmed, "in bus rent the diesel and the driver is added
-/// like in total we have to give 40k"): on a pakku-bhadu bus
-/// ([rentIncludesFuel]) the agreed rent is the WHOLE bus cost. Diesel
-/// ([ExpenseCategory.fuel]), driver pay ([ExpenseCategory.driver]) and owner
-/// advances ([ExpenseCategory.busOwner]) paid on the trip are PART of that
-/// rent: they never add to the trip cost, they only shrink what is still owed
-/// to the owner. Food, toll and everything else stays ON TOP.
+/// THE RULE (user-confirmed 2026-10-25, the owner's own formula sheet:
+/// Kharch = A1 bus bhadu + A2 driver food + A3 other; diesel and advance are
+/// paid OUT of A1): on a pakku-bhadu bus ([rentIncludesFuel]) the agreed rent
+/// is the WHOLE bus cost. Diesel ([ExpenseCategory.fuel]) and owner advances
+/// ([ExpenseCategory.busOwner]) paid on the trip are PART of that rent: they
+/// never add to the trip cost, they only shrink what is still owed to the
+/// owner. EVERY driver cost ([ExpenseCategory.driver] — pay or food) is extra,
+/// ON TOP of the rent, like food, toll and everything else.
 ///
-/// Rent 40,000 · diesel 3,200 · driver 5,000 →
-///   bus cost 40,000 · owner still owed 40,000 − 3,200 − 5,000 = 31,800.
+/// Rent 50,000 · diesel 35,000 · advance 5,000 · driver food 500 · other 500 →
+///   bus cost 50,000 · owner still owed 50,000 − 35,000 − 5,000 = 10,000
+///   · trip kharch 50,000 + 500 + 500 = 51,000.
 ///
-/// When the rent does NOT include fuel, diesel and driver are on top (folded
-/// into [otherExpensesTotal]) and only advances reduce the owed rent.
+/// (Superseded 2026-10-15 rule: driver pay was inside the rent. The owner
+/// asked explicitly — "All driver cost extra".)
+///
+/// When the rent does NOT include fuel, diesel is on top too (folded into
+/// [otherExpensesTotal]) and only advances reduce the owed rent.
+///
+/// [driverTotal] and the `driver` parameters stay for API stability and are
+/// always 0 inside the rent now.
 class BusExpenseRollup {
   const BusExpenseRollup({
     required this.fuelTotal,
@@ -93,7 +101,8 @@ class BusExpenseRollup {
     required bool rentIncludesFuel,
   }) {
     final f = rentIncludesFuel ? fuel : 0.0;
-    final d = rentIncludesFuel ? driver : 0.0;
+    // Driver cost is never inside the rent — it stays in [ground] as on-top.
+    const d = 0.0;
     final other = (ground - f - d - ownerAdvance).clamp(0.0, double.infinity);
     final cost = busCost(
       busRent: busRent,
@@ -132,19 +141,17 @@ class BusExpenseRollup {
       switch (e.category) {
         case ExpenseCategory.fuel:
           fuel += e.amount;
-        case ExpenseCategory.driver:
-          driver += e.amount;
         case ExpenseCategory.busOwner:
           ownerAdvance += e.amount;
         default:
+          // Includes ExpenseCategory.driver: every driver cost is on top.
           other += e.amount;
       }
     }
 
     if (!rentIncludesFuel) {
-      other += fuel + driver;
+      other += fuel;
       fuel = 0;
-      driver = 0;
     }
 
     final effectiveBusCost = busCost(

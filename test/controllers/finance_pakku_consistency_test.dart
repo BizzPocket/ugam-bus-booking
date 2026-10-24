@@ -1,8 +1,9 @@
 // Settings → Finance, the Trip P&L and the money board must print the SAME
 // profit for the same trip. Finance used to fold `ground + rent` per bus (every
 // rupee on top of the rent) while the board applied the pakku-bhadu rule
-// (diesel + driver + advances INSIDE the rent), so a pakku bus with diesel and
-// driver paid read as a bigger loss on Finance than on the trip's own P&L.
+// (diesel + advances INSIDE the rent), so a pakku bus with diesel paid read as
+// a bigger loss on Finance than on the trip's own P&L. Owner's rule
+// 2026-10-25: every driver cost is on top of the rent, on every surface.
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
@@ -28,11 +29,11 @@ void main() {
     // Rent 40000 (pakku). On the trip: diesel 3200, driver 5000, toll 600.
     // Collected 50000 cash, income 1000.
     //   ground (ledger)  = 3200 + 5000 + 600 = 8800
-    //   bus cost         = max(40000, 3200 + 5000) = 40000
-    //   on top           = 8800 − 8200 = 600
-    //   trip expenses    = 40600     (old Finance fold: 8800 + 40000 = 48800)
-    //   net              = 50000 + 1000 − 40600 = 10400
-    //   owner still owed = 40000 − 3200 − 5000 = 31800
+    //   bus cost         = max(40000, 3200) = 40000   (diesel inside)
+    //   on top           = 8800 − 3200 = 5600         (driver + toll)
+    //   trip expenses    = 45600     (old Finance fold: 8800 + 40000 = 48800)
+    //   net              = 50000 + 1000 − 45600 = 5400
+    //   owner still owed = 40000 − 3200 = 36800
     final expenseRows = <Map<String, dynamic>>[
       {
         'id': 'e1', 'tour_id': _tourId, 'bus_id': 'b1',
@@ -115,13 +116,13 @@ void main() {
         .financesFor(FinancePeriod.allTime)
         .singleWhere((f) => f.tourId == _tourId);
 
-    expect(bus.expensesTotal, 40600);
-    expect(bus.busMalikPayable, 31800);
-    expect(trip.totalExpenses, 40600);
-    expect(trip.totalNet, 10400);
+    expect(bus.expensesTotal, 45600);
+    expect(bus.busMalikPayable, 36800);
+    expect(trip.totalExpenses, 45600);
+    expect(trip.totalNet, 5400);
 
-    expect(row.expenses, 40600, reason: 'Finance must not stack diesel/driver');
-    expect(row.cashSoFar, 10400);
+    expect(row.expenses, 45600, reason: 'Finance must not stack diesel');
+    expect(row.cashSoFar, 5400);
     expect(row.cashSoFar, trip.totalNet, reason: 'Finance == Trip P&L / board');
     expect(row.cashSoFar, bus.netCollected);
     expect(row.tripProfit, trip.totalNetBilled);

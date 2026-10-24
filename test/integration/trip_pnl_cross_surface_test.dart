@@ -19,18 +19,19 @@
 // numbers actually reach the screen.
 //
 // Fixture (rupees):
-//   b1  pakku-bhadu, rent 40,000. Diesel 3,200 + driver 5,000 sit INSIDE the
-//       rent; food 1,500 on top → costs 41,500. Billed 60,000. Riders paid
+//   b1  pakku-bhadu, rent 40,000. Diesel 3,200 sits INSIDE the rent; driver
+//       5,000 + food 1,500 are on top (owner's rule 2026-10-25: every driver
+//       cost is extra) → costs 46,500. Billed 60,000. Riders paid
 //       2,000 cash, 2,000 by UPI online, 1,000 cash (partial). Cabin income 800.
 //   b2  rent EXCLUDES fuel, rent 30,000. Diesel 4,000 + driver 2,000 + toll 700
 //       all on top → costs 36,700. Billed 45,000. Riders paid 20,000 + 5,000.
 //   +   a waitlisted rider's 1,500 UPI advance — no seat, no collection row,
 //       only on the ledger's bank.gateway (finance_tour_summary).
 //
-//   billed 105,000 · cash 28,000 · online 3,500 · income 800 · costs 78,200
-//   Trip profit = 105,000 + 800 − 78,200            =  27,600
-//   Cash so far = 28,000 + 3,500 + 800 − 78,200     = −45,900
-//   (076 view not deployed → online = Σ amount_online = 2,000 → −47,400)
+//   billed 105,000 · cash 28,000 · online 3,500 · income 800 · costs 83,200
+//   Trip profit = 105,000 + 800 − 83,200            =  22,600
+//   Cash so far = 28,000 + 3,500 + 800 − 83,200     = −50,900
+//   (076 view not deployed → online = Σ amount_online = 2,000 → −52,400)
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -265,29 +266,29 @@ void main() {
   test('TripPnl: one formula — billed vs received, income in both, '
       'handover-free', () {
     const p = TripPnl(
-        billed: 105000, cash: 28000, online: 3500, income: 800, costs: 78200);
+        billed: 105000, cash: 28000, online: 3500, income: 800, costs: 83200);
     expect(p.received, 31500);
-    expect(p.tripProfit, 27600);
-    expect(p.cashSoFar, -45900);
-    expect(TripPnl.sum([p, p]).tripProfit, 55200);
+    expect(p.tripProfit, 22600);
+    expect(p.cashSoFar, -50900);
+    expect(TripPnl.sum([p, p]).tripProfit, 45200);
   });
 
-  test('ledger view deployed: every surface shows 27,600 / −45,900', () async {
+  test('ledger view deployed: every surface shows 22,600 / −50,900', () async {
     final s = await _computeSurfaces(viewDeployed: true);
-    _expectAllEqual(s, profit: 27600, cash: -45900);
+    _expectAllEqual(s, profit: 22600, cash: -50900);
     // Online UPI counted exactly once: the 2,000 slice is NOT in cash.
     expect(s.tripPnl.cash, 28000);
     expect(s.tripPnl.online, 3500);
     expect(s.financeRow.online, 3500);
-    // Pakku rule on b1, everything on top on b2.
-    expect(s.tripPnl.costs, 78200);
-    expect(s.financeRow.costs, 78200);
+    // Pakku rule on b1 (diesel inside, driver on top), everything on top on b2.
+    expect(s.tripPnl.costs, 83200);
+    expect(s.financeRow.costs, 83200);
   });
 
   test('076 not deployed: both pipelines fall back to Σ amount_online '
       '(and still agree)', () async {
     final s = await _computeSurfaces(viewDeployed: false);
-    _expectAllEqual(s, profit: 27600, cash: -47400);
+    _expectAllEqual(s, profit: 22600, cash: -52400);
   });
 
   test('archived trip (roster not in memory): Finance still costs the '
@@ -296,7 +297,7 @@ void main() {
       viewDeployed: true,
       financeRosterLoaded: false,
     );
-    _expectAllEqual(s, profit: 27600, cash: -45900);
+    _expectAllEqual(s, profit: 22600, cash: -50900);
   });
 
   group('rendered', () {
@@ -343,8 +344,8 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
 
       expect(find.text('Trip profit'), findsOneWidget);
-      expect(find.text('₹27,600'), findsOneWidget);
-      expect(find.text('Cash so far -₹45,900'), findsOneWidget);
+      expect(find.text('₹22,600'), findsOneWidget);
+      expect(find.text('Cash so far -₹50,900'), findsOneWidget);
     });
   });
 }

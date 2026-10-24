@@ -189,14 +189,17 @@ void main() {
     });
   });
 
-  group('Pakku-bhadu rule on the money board (diesel + driver inside rent)', () {
+  // Owner's rule 2026-10-25: only diesel + owner advances come out of the
+  // bhadu; every driver cost is on top.
+  group('Pakku-bhadu rule on the money board (diesel + advances inside rent, '
+      'driver on top)', () {
     Map<String, dynamic> expense(String id, String bus, String cat, num amt) =>
         {
           'id': id, 'tour_id': _tourId, 'bus_id': bus,
           'category': cat, 'label': cat, 'amount': amt,
         };
 
-    test('ledger path: owner remaining subtracts diesel + driver + advances',
+    test('ledger path: owner remaining subtracts diesel + advances, not driver',
         () async {
       addTearDown(Get.reset);
       // Rent 40000. On the trip: diesel 3200, driver 5000, advance 2000,
@@ -217,15 +220,15 @@ void main() {
       );
 
       final s = money.summaryForBus('b1');
-      // Owner remaining = 40000 − 3200 − 5000 − 2000 = 29800.
-      expect(s.busMalikPayable, 29800);
+      // Owner remaining = 40000 − 3200 − 2000 = 34800.
+      expect(s.busMalikPayable, 34800);
       expect(s.fuelTotal, 3200);
-      expect(s.driverTotal, 5000);
+      expect(s.driverTotal, 0);
       expect(s.ownerAdvanceTotal, 2000);
-      // On top = ground − absorbed = 11000 − 10200 = 800 (food only).
-      expect(s.otherExpensesTotal, 800);
-      // Bus cost = max(40000, 10200) = 40000; trip cost = 40000 + 800.
-      expect(s.expensesTotal, 40800);
+      // On top = ground − absorbed = 11000 − 5200 = 5800 (driver + food).
+      expect(s.otherExpensesTotal, 5800);
+      // Bus cost = max(40000, 5200) = 40000; trip cost = 40000 + 5800.
+      expect(s.expensesTotal, 45800);
       // Handler handover still deducts EVERY rupee they paid: 11000.
       expect(s.groundExpenses, 11000);
     });
@@ -243,8 +246,9 @@ void main() {
         rollups: [_rollup('b1', ground: 820000, rent: 4000000)],
       );
       final s = money.summaryForBus('b1');
-      expect(s.expensesTotal, 40000, reason: 'bus cost is the rent, 40000');
-      expect(s.busMalikPayable, 31800, reason: '40000 − 3200 − 5000');
+      expect(s.expensesTotal, 45000,
+          reason: 'rent 40000 + driver 5000 on top');
+      expect(s.busMalikPayable, 36800, reason: '40000 − 3200 diesel');
     });
 
     test('groundExpensesTotal: rent 30000 + diesel 4000 does not overstate '
