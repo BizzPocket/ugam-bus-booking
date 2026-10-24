@@ -56,6 +56,23 @@ class _TourMoneyTabState extends State<TourMoneyTab> {
       // the money board does. `isLoading` is read first so this Obx re-runs
       // when the load starts and lands (`loadedTourId` itself is not Rx).
       final loading = money.isLoading.value;
+      // A first read that FAILED holds nothing for this tour, and the summary
+      // below would print ₹0 expected / ₹0 collected — "this tour has no
+      // money". Say it could not load instead. A failed RE-read keeps the rows
+      // already held (loadedOnce), so those still render.
+      if (money.loadedTourId == tour.id &&
+          !loading &&
+          money.loadFailed.value &&
+          !money.loadedOnce.value) {
+        return SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.only(top: UgamSpacing.lg),
+            child: UgamEmpty.error(
+              onRetry: () => money.loadForTour(tour.id),
+            ),
+          ),
+        );
+      }
       if (money.loadedTourId != tour.id ||
           (loading && !money.loadedOnce.value)) {
         return const SliverToBoxAdapter(

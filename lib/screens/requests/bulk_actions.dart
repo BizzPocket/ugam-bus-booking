@@ -3,6 +3,11 @@ part of '../requests_screen.dart';
 // ─── Bulk selection actions ───────────────────────────────────────────
 
 extension _RequestsBulkActions on _RequestsScreenState {
+  /// Runs one bulk [action] for [tour], dropping any tap that arrives while an
+  /// earlier bulk action on the same tour is still running.
+  Future<void> _bulkOnce(Tour tour, Future<void> Function() action) =>
+      InFlight.run('requests-bulk:${tour.id}', action);
+
   Future<void> _bulkWaitlist(Tour tour) async {
     final ids = List<String>.from(_selectedIds);
     for (final id in ids) {

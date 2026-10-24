@@ -19,6 +19,7 @@ import '../utils/phone_dialer.dart';
 import '../utils/tour_group_colors.dart';
 import '../widgets/chart_expand_button.dart';
 import '../widgets/occupant_action_sheet.dart';
+import '../widgets/tour_roster_gate.dart';
 import 'add_bus_screen.dart';
 import 'bus_money_screen.dart';
 import 'collection_screen.dart';
@@ -55,7 +56,10 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      Get.find<TourController>().ensureTourReadyForSeating(widget.tourId);
+      // A failure is surfaced by the body's [TourRosterGate] retry state.
+      Get.find<TourController>()
+          .ensureTourReadyForSeating(widget.tourId)
+          .catchError((Object _) {});
     });
   }
 
@@ -69,14 +73,23 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
           final tour = tourCtrl.getTour(widget.tourId);
           final bus = tour?.buses.firstWhereOrNull((b) => b.id == widget.busId);
           if (tour == null || bus == null) {
+            final notFound = UgamEmpty(
+              icon: Icons.directions_bus_filled_outlined,
+              title: tr('bus_status.bus_not_found'),
+            );
             return Column(
               children: [
                 UgamAppBar(title: tr('bus_status.bus_not_found')),
                 Expanded(
-                  child: UgamEmpty(
-                    icon: Icons.directions_bus_filled_outlined,
-                    title: tr('bus_status.bus_not_found'),
-                  ),
+                  // A bus missing from a tour whose roster has not answered yet
+                  // (or failed to) is "loading" / "retry", not "not found".
+                  child: tour == null
+                      ? notFound
+                      : TourRosterGate(
+                          tourId: widget.tourId,
+                          loading: const _StatusLoading(),
+                          empty: notFound,
+                        ),
                 ),
               ],
             );
@@ -367,6 +380,27 @@ class _BusStatusScreenState extends State<BusStatusScreen> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Placeholder while the tour's roster is still on its way — the shape of the
+/// driver card and the chart, so nothing jumps when the bus lands.
+class _StatusLoading extends StatelessWidget {
+  const _StatusLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    // A non-scrolling list, so a short screen clips the placeholder instead of
+    // painting an overflow stripe.
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: UgamSpacing.gutter),
+      children: const [
+        UgamSkeleton(height: 96, radius: UgamRadius.card),
+        SizedBox(height: UgamSpacing.md),
+        UgamSkeleton(height: 320, radius: UgamRadius.card),
+      ],
     );
   }
 }

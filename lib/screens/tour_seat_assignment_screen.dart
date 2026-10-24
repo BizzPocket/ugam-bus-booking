@@ -33,6 +33,7 @@ import '../widgets/chart_expand_button.dart';
 import '../widgets/occupant_action_sheet.dart';
 import '../widgets/chart_footer_sheet.dart';
 import '../widgets/edit_request_sheet.dart';
+import '../widgets/tour_roster_gate.dart';
 import 'add_return_ticket_sheet.dart';
 import 'manage_buses_screen.dart';
 import 'notify_screen.dart';
@@ -172,8 +173,9 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
       Get.find<PickupController>().ensureLoaded();
     }
     // Cold start omits bus layout jsonb — pull it before the agent seats anyone.
+    // A failure is surfaced by the body's [TourRosterGate] retry state.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _ctrl.ensureTourReadyForSeating(widget.tourId);
+      _ctrl.ensureTourReadyForSeating(widget.tourId).catchError((Object _) {});
     });
   }
 
@@ -439,7 +441,19 @@ class _TourSeatAssignmentScreenState extends State<TourSeatAssignmentScreen> {
               );
             }
             if (tour.buses.isEmpty) {
-              return _NoBuses(tourId: widget.tourId);
+              // "No buses" only once the roster has answered — while it is
+              // hydrating, or after it failed, the tour may well have buses.
+              return TourRosterGate(
+                tourId: widget.tourId,
+                loading: ListView(
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(UgamSpacing.gutter),
+                  children: const [
+                    UgamSkeleton(height: 320, radius: UgamRadius.card),
+                  ],
+                ),
+                empty: _NoBuses(tourId: widget.tourId),
+              );
             }
             if (tour.passengers.isEmpty) {
               return _NoPassengers(tourId: widget.tourId);

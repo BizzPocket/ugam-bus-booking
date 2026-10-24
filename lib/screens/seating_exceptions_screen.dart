@@ -12,6 +12,7 @@ import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/stranger_share_seat.dart';
 import '../widgets/edit_request_sheet.dart';
+import '../widgets/tour_roster_gate.dart';
 
 part 'seating_exceptions/seating_exceptions_widgets.dart';
 
@@ -299,14 +300,14 @@ class SeatingExceptionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    // Layouts deferred on cold start — needed before share/hold actions that
-    // open the seat grid.
-    // ignore: unawaited_futures
-    _ctrl.ensureTourReadyForSeating(tourId);
     return UgamScaffold(
       body: SafeArea(
         bottom: false,
-        child: Column(
+        // Layouts deferred on cold start — needed before share/hold actions
+        // that open the seat grid. Fetched once per open, not per rebuild.
+        child: EnsureTourReady(
+          tourId: tourId,
+          child: Column(
           children: [
             UgamAppBar(title: tr('seating_exceptions.title')),
             Expanded(
@@ -332,10 +333,17 @@ class SeatingExceptionsScreen extends StatelessWidget {
                 final exceptions = _ctrl.capacityFor(tour).decisions;
 
                 if (exceptions.isEmpty) {
-                  return UgamEmpty(
-                    icon: Icons.check_circle_outline_rounded,
-                    title: tr('seating_exceptions.all_clear_title'),
-                    body: tr('seating_exceptions.all_clear_body'),
+                  // Same rule as a null tour: an un-hydrated roster (or one
+                  // whose read failed) has no exceptions because it has no
+                  // riders yet — "All clear" would be a lie the agent acts on.
+                  return TourRosterGate(
+                    tourId: tourId,
+                    loading: const _ExceptionsSkeleton(),
+                    empty: UgamEmpty(
+                      icon: Icons.check_circle_outline_rounded,
+                      title: tr('seating_exceptions.all_clear_title'),
+                      body: tr('seating_exceptions.all_clear_body'),
+                    ),
                   );
                 }
 
@@ -370,6 +378,7 @@ class SeatingExceptionsScreen extends StatelessWidget {
               }),
             ),
           ],
+        ),
         ),
       ),
     );

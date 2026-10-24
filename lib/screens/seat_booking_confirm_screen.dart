@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -20,6 +22,86 @@ import '../utils/formatters.dart';
 import '../utils/phone_normalize.dart';
 
 part 'seat_booking_confirm/seat_booking_confirm_form.dart';
+
+/// The ids one checkout ATTEMPT sends, kept stable across retries of the same
+/// content.
+///
+/// On 2G a claim can land on the server and still time out on the phone. A
+/// fresh id per tap made the retry a NEW claim for seats the first one had
+/// just taken — so the rider was told "seats taken" for seats that were theirs,
+/// and no ticket was saved on the phone. Re-sending the SAME ids lets the
+/// server recognise its own landed claim (migration 100) and answer success.
+@visibleForTesting
+class ClaimAttemptIds {
+  /// Everything the claim carries — see [claimSignature].
+  final String signature;
+
+  /// The single-bus request id (and the hold's request id).
+  final String requestId;
+
+  /// The multi-bus party id.
+  final String partyId;
+
+  /// One request id per bus id, for the multi-bus RPCs.
+  final Map<String, String> busRequestIds;
+
+  const ClaimAttemptIds({
+    required this.signature,
+    required this.requestId,
+    required this.partyId,
+    required this.busRequestIds,
+  });
+}
+
+/// The ids for an attempt carrying [signature]: the [pending] attempt's ids
+/// when it carried exactly the same content, else freshly minted ones (one
+/// request id per bus in [busIds]). A changed form is a different booking.
+@visibleForTesting
+ClaimAttemptIds claimIdsFor(
+  ClaimAttemptIds? pending,
+  String signature,
+  List<String> busIds, {
+  String Function()? mint,
+}) {
+  if (pending != null && pending.signature == signature) return pending;
+  final next = mint ?? () => const Uuid().v4();
+  return ClaimAttemptIds(
+    signature: signature,
+    requestId: next(),
+    partyId: next(),
+    busRequestIds: {for (final id in busIds) id: next()},
+  );
+}
+
+/// The content of a checkout, as one comparable string: who, which seats on
+/// which bus (and leg), the boarding point, the note, and whether it holds.
+@visibleForTesting
+String claimSignature({
+  required String tourId,
+  required String phone,
+  required String name,
+  required List<ChartBusSelection> selections,
+  required bool useHold,
+  String? gender,
+  String? note,
+  String? pickupLocationId,
+}) =>
+    jsonEncode({
+      'tour': tourId,
+      'phone': phone,
+      'name': name,
+      'hold': useHold,
+      'gender': gender,
+      'note': note,
+      'pickup': pickupLocationId,
+      'buses': [
+        for (final s in selections)
+          {
+            'bus': s.bus.id,
+            'seats': claimPayload(s.picks),
+          },
+      ],
+    });
 
 /// Passenger details, then the atomic claim, then the advance QR.
 ///
@@ -71,6 +153,11 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
   final _note = TextEditingController();
 
   String? _gender; // 'male' | 'female' | null
+
+  /// The ids of the last attempt that did NOT get a definitive answer (it
+  /// threw — a timeout, a dropped socket). A retry of the same content re-uses
+  /// them; see [ClaimAttemptIds]. Cleared on any definitive server answer.
+  ClaimAttemptIds? _pendingClaim;
   PickupLocation? _pickup;
   bool _saving = false;
   String? _nameError;
@@ -121,17 +208,41 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
   }
 
   Future<void> _confirm() async {
+    // `_saving` disables the button, but only from the next frame.
+    if (_saving) return;
     if (!_validate()) return;
     setState(() => _saving = true);
 
-    final requestId = const Uuid().v4();
     final phone = normalisePhone(_phone.text.trim());
     final name = _name.text.trim();
     final useHold = widget.tour.collectsAdvance;
+    final ids = claimIdsFor(
+      _pendingClaim,
+      claimSignature(
+        tourId: widget.tour.id,
+        phone: phone,
+        name: name,
+        selections: widget.selections,
+        useHold: useHold,
+        gender: _gender,
+        note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+        pickupLocationId: _pickup?.id,
+      ),
+      [for (final s in widget.selections) s.bus.id],
+    );
+    // Held until the server answers — only a THROWN attempt (no answer at all)
+    // leaves it in place for the retry to re-use.
+    _pendingClaim = ids;
+    final requestId = ids.requestId;
 
     try {
       if (widget.isMultiBus) {
-        await _confirmMultiBus(phone: phone, name: name, useHold: useHold);
+        await _confirmMultiBus(
+          phone: phone,
+          name: name,
+          useHold: useHold,
+          ids: ids,
+        );
         return;
       }
 
@@ -150,6 +261,8 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
           pickupLocationName: _pickup?.name,
         );
 
+        // The server answered: whatever it said, the next tap is a new attempt.
+        _pendingClaim = null;
         if (!mounted) return;
 
         if (!hold.ok) {
@@ -233,6 +346,7 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
         pickupLocationName: _pickup?.name,
       );
 
+      _pendingClaim = null;
       if (!mounted) return;
 
       if (!result.ok) {
@@ -305,13 +419,14 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
     required String phone,
     required String name,
     required bool useHold,
+    required ClaimAttemptIds ids,
   }) async {
-    final partyId = const Uuid().v4();
+    final partyId = ids.partyId;
     final buses = [
       for (final s in widget.selections)
         BusClaim(
           busId: s.bus.id,
-          requestId: const Uuid().v4(),
+          requestId: ids.busRequestIds[s.bus.id] ?? const Uuid().v4(),
           picks: s.picks,
         ),
     ];
@@ -330,6 +445,7 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
         pickupLocationId: _pickup?.id,
         pickupLocationName: _pickup?.name,
       );
+      _pendingClaim = null;
       if (!mounted) return;
       if (!held.ok) {
         setState(() => _saving = false);
@@ -392,6 +508,7 @@ class _SeatBookingConfirmScreenState extends State<SeatBookingConfirmScreen> {
       pickupLocationId: _pickup?.id,
       pickupLocationName: _pickup?.name,
     );
+    _pendingClaim = null;
     if (!mounted) return;
     if (!result.ok) {
       setState(() => _saving = false);

@@ -7,6 +7,7 @@ import '../design/components/ugam_tappable.dart';
 import '../design/ugam.dart';
 import '../models/pickup_location.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/in_flight.dart';
 
 part 'pickup_locations/pickup_widgets.dart';
 
@@ -147,12 +148,19 @@ class _PickupLocationsScreenState extends State<PickupLocationsScreen> {
       return;
     }
     if (newName == loc.name && newCode == (loc.code ?? '')) return;
-    try {
-      await _ctrl.updateLocation(loc.id, name: newName, code: newCode);
-    } catch (_) {
-      AppSnackBar.error(tr('settings_pages.save_error'));
-    }
+    await InFlight.run(_rowKey(loc), () async {
+      try {
+        await _ctrl.updateLocation(loc.id, name: newName, code: newCode);
+      } catch (_) {
+        AppSnackBar.error(tr('settings_pages.save_error'));
+      }
+    });
   }
+
+  /// One write per pickup row at a time. A rename, a delete or a hide that is
+  /// still on a slow link must not be raced by a second tap on the same row —
+  /// a doubled delete reported "save failed" for a row that was in fact gone.
+  static String _rowKey(PickupLocation loc) => 'pickup-row:${loc.id}';
 
   Future<void> _confirmDelete(PickupLocation loc) async {
     final ok = await UgamDialog.confirm(
@@ -165,19 +173,23 @@ class _PickupLocationsScreenState extends State<PickupLocationsScreen> {
       confirmIcon: Icons.delete_outline_rounded,
     );
     if (!ok) return;
-    try {
-      await _ctrl.deleteLocation(loc.id);
-    } catch (_) {
-      AppSnackBar.error(tr('settings_pages.save_error'));
-    }
+    await InFlight.run(_rowKey(loc), () async {
+      try {
+        await _ctrl.deleteLocation(loc.id);
+      } catch (_) {
+        AppSnackBar.error(tr('settings_pages.save_error'));
+      }
+    });
   }
 
   Future<void> _toggleActive(PickupLocation loc) async {
-    try {
-      await _ctrl.setActive(loc.id, !loc.isActive);
-    } catch (_) {
-      AppSnackBar.error(tr('settings_pages.save_error'));
-    }
+    await InFlight.run(_rowKey(loc), () async {
+      try {
+        await _ctrl.setActive(loc.id, !loc.isActive);
+      } catch (_) {
+        AppSnackBar.error(tr('settings_pages.save_error'));
+      }
+    });
   }
 
   /// Drag-to-reorder bridge.

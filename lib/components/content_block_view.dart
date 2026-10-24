@@ -1,4 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -199,19 +200,21 @@ class _Banner extends StatelessWidget {
             if (block.imageUrl != null)
               AspectRatio(
                 aspectRatio: 16 / 9,
-                child: Image.network(
-                  block.imageUrl!,
+                // Disk-cached: a banner is fetched once, not on every launch.
+                child: CachedNetworkImage(
+                  imageUrl: block.imageUrl!,
                   fit: BoxFit.cover,
                   // Decode at the width it is shown, never the source's: a
                   // full-size banner decoded on an old 2 GB phone is tens of MB.
-                  cacheWidth: (MediaQuery.sizeOf(context).width *
+                  memCacheWidth: (MediaQuery.sizeOf(context).width *
                           MediaQuery.devicePixelRatioOf(context))
                       .round(),
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
                   // A dead image URL must degrade to nothing, not to a broken
                   // icon on the customer's first screen.
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  loadingBuilder: (ctx, child, progress) =>
-                      progress == null ? child : const SizedBox.shrink(),
+                  errorWidget: (_, _, _) => const SizedBox.shrink(),
+                  placeholder: (_, _) => const SizedBox.shrink(),
                 ),
               ),
             if (block.title != null || block.body != null)

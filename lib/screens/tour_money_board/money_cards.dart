@@ -12,15 +12,21 @@ class _SeatHoldsCard extends StatelessWidget {
     required this.c,
   });
 
+  static String _holdKey(String id) => 'hold-pay-later:$id';
+
+  /// Guarded: a second tap while the finalize is still on a slow link would
+  /// run it twice (two finalize attempts, a false "failed" toast on the loser).
   Future<void> _payLater(Map<String, dynamic> hold) async {
     final id = hold['id']?.toString();
     if (id == null || id.isEmpty) return;
-    try {
-      await money.payLaterFinalizeHold(id);
-      AppSnackBar.success(tr('tour_money_board.holds_finalized'));
-    } catch (_) {
-      AppSnackBar.error(tr('tour_money_board.holds_finalize_failed'));
-    }
+    await InFlight.run(_holdKey(id), () async {
+      try {
+        await money.payLaterFinalizeHold(id);
+        AppSnackBar.success(tr('tour_money_board.holds_finalized'));
+      } catch (_) {
+        AppSnackBar.error(tr('tour_money_board.holds_finalize_failed'));
+      }
+    });
   }
 
   @override
@@ -98,10 +104,15 @@ class _SeatHoldsCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                UgamButton(
-                  label: tr('tour_money_board.holds_pay_later'),
-                  kind: UgamButtonKind.tonal,
-                  onPressed: () => _payLater(hold),
+                Obx(
+                  () => UgamButton(
+                    label: tr('tour_money_board.holds_pay_later'),
+                    kind: UgamButtonKind.tonal,
+                    loading: InFlight.isBusy(
+                      _holdKey(hold['id']?.toString() ?? ''),
+                    ),
+                    onPressed: () => _payLater(hold),
+                  ),
                 ),
               ],
             ),
@@ -139,22 +150,31 @@ class _UpiClaimsCard extends StatelessWidget {
     return tr('tour_money_board.upi_unknown_payer');
   }
 
+  /// ONE key per claim for both buttons: confirm and reject are exclusive, so
+  /// neither may start while the other (or a second copy of itself) is still
+  /// in flight — a double-tapped confirm posted the advance to the ledger twice.
+  static String _claimKey(PaymentClaim claim) => 'upi-claim:${claim.id}';
+
   Future<void> _confirm(PaymentClaim claim) async {
-    try {
-      await money.confirmPaymentClaim(claim.id);
-      AppSnackBar.success(tr('tour_money_board.upi_confirmed'));
-    } catch (_) {
-      AppSnackBar.error(tr('tour_money_board.upi_confirm_failed'));
-    }
+    await InFlight.run(_claimKey(claim), () async {
+      try {
+        await money.confirmPaymentClaim(claim.id);
+        AppSnackBar.success(tr('tour_money_board.upi_confirmed'));
+      } catch (_) {
+        AppSnackBar.error(tr('tour_money_board.upi_confirm_failed'));
+      }
+    });
   }
 
   Future<void> _reject(PaymentClaim claim) async {
-    try {
-      await money.rejectPaymentClaim(claim.id);
-      AppSnackBar.info(tr('tour_money_board.upi_rejected'));
-    } catch (_) {
-      AppSnackBar.error(tr('tour_money_board.upi_reject_failed'));
-    }
+    await InFlight.run(_claimKey(claim), () async {
+      try {
+        await money.rejectPaymentClaim(claim.id);
+        AppSnackBar.info(tr('tour_money_board.upi_rejected'));
+      } catch (_) {
+        AppSnackBar.error(tr('tour_money_board.upi_reject_failed'));
+      }
+    });
   }
 
   @override
@@ -198,16 +218,24 @@ class _UpiClaimsCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                UgamButton(
-                  label: tr('tour_money_board.upi_confirm'),
-                  kind: UgamButtonKind.goodTonal,
-                  onPressed: () => _confirm(claim),
+                Obx(
+                  () => UgamButton(
+                    label: tr('tour_money_board.upi_confirm'),
+                    kind: UgamButtonKind.goodTonal,
+                    loading: InFlight.isBusy(_claimKey(claim)),
+                    onPressed: () => _confirm(claim),
+                  ),
                 ),
                 const SizedBox(width: UgamSpacing.sm),
-                UgamButton(
-                  label: tr('tour_money_board.upi_reject'),
-                  kind: UgamButtonKind.ghost,
-                  onPressed: () => _reject(claim),
+                Obx(
+                  () => UgamButton(
+                    label: tr('tour_money_board.upi_reject'),
+                    kind: UgamButtonKind.ghost,
+                    // Disabled (not spinning) while its sibling confirms.
+                    onPressed: InFlight.isBusy(_claimKey(claim))
+                        ? null
+                        : () => _reject(claim),
+                  ),
                 ),
               ],
             ),

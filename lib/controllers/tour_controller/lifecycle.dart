@@ -60,6 +60,9 @@ mixin _TourLifecycle on _TourHydration {
       // to server truth, which drops the phantom (it was never persisted).
       optimistic: () {
         tours.add(tour);
+        // A tour created on this device has no roster to fetch: "no buses"
+        // is already the truth, not a hydrate still in flight.
+        _hydratedTourIds.add(tour.id);
         tours.refresh();
       },
       persist: () =>
@@ -285,9 +288,19 @@ mixin _TourLifecycle on _TourHydration {
   /// [SyncService.smartFetch] returns `[]` on any error or a missing table, so
   /// an un-applied migration yields an empty list rather than a crash — the
   /// history view degrades to its live-chart fallback.
-  Future<List<TourSeatSnapshot>> loadSeatSnapshots(String tourId) async {
+  Future<List<TourSeatSnapshot>> loadSeatSnapshots(String tourId) async =>
+      (await loadSeatSnapshotsResult(tourId)).snapshots;
+
+  /// [loadSeatSnapshots] plus whether the read FAILED.
+  ///
+  /// Only a successful read is cached. A failed one (2G timeout, offline) used
+  /// to be cached as `[]` for the life of the controller, so every later open of
+  /// the history screen answered "no snapshot" without ever asking again and
+  /// fell back to the LIVE chart — which, for a past tour whose GO seats were
+  /// recycled for the return leg, is the wrong chart.
+  Future<SeatSnapshotLoad> loadSeatSnapshotsResult(String tourId) async {
     final cached = _seatSnapshots[tourId];
-    if (cached != null) return cached;
+    if (cached != null) return (snapshots: cached, failed: false);
 
     final result = await _sync.smartFetch(
       table: 'tour_seat_snapshots',
@@ -296,11 +309,10 @@ mixin _TourLifecycle on _TourHydration {
       orderBy: 'captured_at',
       maxAge: 120000,
     );
-    // History is best-effort: a failed/missing-table read degrades to the live
-    // chart fallback, so we just take whatever rows came back.
     final snapshots = result.rows.map(TourSeatSnapshot.fromMap).toList();
+    if (result.failed) return (snapshots: snapshots, failed: true);
     _seatSnapshots[tourId] = snapshots;
-    return snapshots;
+    return (snapshots: snapshots, failed: false);
   }
 
   /// GO-only passengers still active (not yet cleared by [completeOutboundLeg]).

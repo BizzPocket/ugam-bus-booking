@@ -57,6 +57,23 @@ part 'tour_controller/buses.dart';
 part 'tour_controller/groups.dart';
 part 'tour_controller/sync.dart';
 
+/// Whether a tour's roster (passengers / buses / groups) can be believed — see
+/// [TourController.rosterStateOf]. Only [ready] lets a screen say "no buses".
+enum TourRosterState {
+  /// Fetched (or already held in memory): an empty bus list is the truth.
+  ready,
+
+  /// The on-demand hydrate has not answered yet — show the skeleton.
+  loading,
+
+  /// The hydrate gave up — show the retry state, never "Add bus".
+  failed,
+}
+
+/// Result of [TourController.loadSeatSnapshotsResult]: the snapshots read, and
+/// whether the read FAILED (so `[]` means "couldn't read", not "none taken").
+typedef SeatSnapshotLoad = ({List<TourSeatSnapshot> snapshots, bool failed});
+
 /// What a seat move actually did — the honest answer a caller needs before it
 /// tells the operator "moved" and puts the relocate banner away.
 ///

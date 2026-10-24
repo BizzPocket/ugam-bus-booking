@@ -277,15 +277,18 @@ class _PhotoBannerState extends State<_PhotoBanner> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          Image.network(
-            tour.broadcastImageUrl!.trim(),
+          // Disk-cached across cold starts (the URL is the cache key): the
+          // list used to re-download every poster on every launch.
+          CachedNetworkImage(
+            imageUrl: tour.broadcastImageUrl!.trim(),
             fit: BoxFit.cover,
             // Posters put faces at the top; a centre crop cut them off.
             alignment: Alignment.topCenter,
-            cacheWidth: widget.decodeWidth,
-            loadingBuilder: (ctx, child, progress) =>
-                progress == null ? child : loading,
-            errorBuilder: (_, _, _) {
+            memCacheWidth: widget.decodeWidth,
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
+            placeholder: (_, _) => loading,
+            errorWidget: (_, _, _) {
               // Swap to the route board after this frame — the error arrives
               // mid-build, where setState is not allowed.
               WidgetsBinding.instance.addPostFrameCallback((_) {

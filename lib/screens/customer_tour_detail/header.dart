@@ -73,22 +73,25 @@ class _Header extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              Image.network(
-                tour.broadcastImageUrl!.trim(),
+              // Disk-cached: the poster is the same file on every cold start,
+              // and re-downloading it each launch cost a 2G rider ~seconds of
+              // backdrop before the photo — the URL is the cache key.
+              CachedNetworkImage(
+                imageUrl: tour.broadcastImageUrl!.trim(),
                 fit: BoxFit.cover,
                 // Tour posters put people/deities at the top; centre-cropping
                 // a 200px strip cut faces off at the forehead.
                 alignment: Alignment.topCenter,
-                cacheWidth: _decodeWidth(context),
+                memCacheWidth: _decodeWidth(context),
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
                 // While loading, or if the object is missing, fall back to the
                 // backdrop so the strip never flashes raw or broken.
-                loadingBuilder: (ctx, child, progress) => progress == null
-                    ? child
-                    : UgamBusBackdrop(
-                        seed: tour.id,
-                        label: customerRouteInitials(tour.fromCity, tour.toCity),
-                      ),
-                errorBuilder: (_, _, _) => UgamBusBackdrop(
+                placeholder: (_, _) => UgamBusBackdrop(
+                  seed: tour.id,
+                  label: customerRouteInitials(tour.fromCity, tour.toCity),
+                ),
+                errorWidget: (_, _, _) => UgamBusBackdrop(
                   seed: tour.id,
                   label: customerRouteInitials(tour.fromCity, tour.toCity),
                 ),
