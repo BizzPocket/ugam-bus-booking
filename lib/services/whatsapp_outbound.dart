@@ -16,6 +16,14 @@ import 'wa_template_catalog.dart';
 import 'wa_template_params.dart';
 import 'whatsapp_cloud_service.dart';
 
+/// Renders a recipient's seat-chart PNG(s) — [SeatChartPdf.buildPassengerChartImages]
+/// in production.
+typedef PassengerChartImagesBuilder = Future<List<Uint8List>> Function({
+  required Tour tour,
+  required Passenger passenger,
+  required ChartFooter footer,
+});
+
 /// High-level WhatsApp Cloud API actions for the tour lifecycle:
 ///   * the PRE-LOCK greeting ([sendSeatConfirmed] / [sendConfirmed]) — the
 ///     `seat_allocation` template (body {{1}} = name, {{2}} = tour title),
@@ -27,7 +35,38 @@ import 'whatsapp_cloud_service.dart';
 /// [WhatsAppCloudConfig]) and routes it through [WhatsAppCloudService] →
 /// the `quick-action` Edge Function.
 class WhatsAppOutbound {
-  final WhatsAppCloudService _cloud = WhatsAppCloudService();
+  WhatsAppOutbound({
+    @visibleForTesting WhatsAppCloudService? cloud,
+    @visibleForTesting PassengerChartImagesBuilder? chartImages,
+  })  : _cloud = cloud ?? WhatsAppCloudService(),
+        _chartImages = chartImages ?? _defaultChartImages;
+
+  final WhatsAppCloudService _cloud;
+
+  /// Renders one recipient's chart PNG(s). A seam so tests can count how many
+  /// renders are in flight at once without a real rasteriser.
+  final PassengerChartImagesBuilder _chartImages;
+
+  /// Only the FIRST image is ever attached, so render no more than that.
+  static Future<List<Uint8List>> _defaultChartImages({
+    required Tour tour,
+    required Passenger passenger,
+    required ChartFooter footer,
+  }) =>
+      SeatChartPdf.buildPassengerChartImages(
+        tour: tour,
+        passenger: passenger,
+        footer: footer,
+        maxImages: 1,
+      );
+
+  /// How many per-rider chart renders [sendSeatAllocations] runs at once.
+  ///
+  /// Each render rasterises an A4 page at 150 dpi — an ~8.7 MB ARGB bitmap the
+  /// Android plugin allocates twice (Bitmap + ByteBuffer) — so 5 at a time
+  /// peaked above 80 MB, enough to OOM a 2–3 GB phone mid-send. Two keeps the
+  /// peak near 35 MB and still overlaps one render with one upload.
+  static const int defaultChartConcurrency = 2;
 
   static const _months = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -103,7 +142,7 @@ class WhatsAppOutbound {
     required Tour tour,
     Iterable<String>? onlyPassengerIds,
     void Function(int done, int total)? onProgress,
-    int concurrency = 5,
+    int concurrency = defaultChartConcurrency,
   }) async {
     if (tour.buses.isEmpty || tour.passengers.isEmpty) {
       debugPrint('[WA] sendSeatAllocations early-return: '
@@ -251,7 +290,7 @@ class WhatsAppOutbound {
     try {
       // Every recipient — handler included — gets THEIR OWN bus chart with
       // their seats highlighted (one image per occupied bus; we send the first).
-      final images = await SeatChartPdf.buildPassengerChartImages(
+      final images = await _chartImages(
         tour: tour,
         passenger: p,
         footer: footer,

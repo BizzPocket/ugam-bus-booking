@@ -15,6 +15,13 @@ class _PassengersTab extends StatefulWidget {
 class _PassengersTabState extends State<_PassengersTab> {
   TravelerFilter _filter = TravelerFilter.all;
   String _query = '';
+  final _searchDebounce = SearchDebouncer();
+
+  @override
+  void dispose() {
+    _searchDebounce.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,7 +72,10 @@ class _PassengersTabState extends State<_PassengersTab> {
         const SizedBox(height: UgamSpacing.sm),
         UgamSearchField(
           hint: tr('tour_detail.search_travelers_hint'),
-          onChanged: (v) => setState(() => _query = v),
+          // Debounced only for a big roster (> 50); see [SearchDebouncer].
+          onChanged: (v) => _searchDebounce.run(v, all.length, (q) {
+            if (mounted) setState(() => _query = q);
+          }),
         ),
         const SizedBox(height: UgamSpacing.sm),
         SingleChildScrollView(

@@ -111,6 +111,7 @@ mixin _MoneyLoad on _MoneySettlement {
     _ledgerReady = false;
     _ledgerByBus.clear();
     _ledgerOnline = null;
+    _invalidateSummaries();
   }
 
   /// Returns false when the ledger views could not be read.
@@ -133,6 +134,7 @@ mixin _MoneyLoad on _MoneySettlement {
             if (r.busId != null && r.busId!.isNotEmpty) MapEntry(r.busId!, r),
         ]);
       _ledgerReady = true;
+      _invalidateSummaries();
       return true;
     } catch (e, st) {
       if (_loadedTourId != tourId) return false;

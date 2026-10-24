@@ -143,38 +143,24 @@ class TourCacheStore {
   /// unreadable, or it was written by a different schema version.
   ///
   /// Never throws. A corrupt file is DELETED rather than retried forever.
+  ///
+  /// The read + JSON decode + model build runs on a background isolate
+  /// ([compute]): a cached graph of a few full trips is ~0.5 MB of JSON, which
+  /// is tens of milliseconds of main-thread jank on a 2–3 GB phone at the exact
+  /// moment the first frame is trying to paint. The result comes back by
+  /// [Isolate.exit] (no copy). Deleting a refused file stays here.
   Future<TourGraphSnapshot?> read(String scopeKey) =>
       _serialised<TourGraphSnapshot>(() async {
         final file = await _fileFor(scopeKey);
         if (file == null || !await file.exists()) return null;
-        try {
-          final decoded = jsonDecode(await file.readAsString());
-          if (decoded is! Map) throw const FormatException('not an object');
-          final map = Map<String, dynamic>.from(decoded);
-          if (map['schema'] != schemaVersion) {
-            await file.delete();
-            return null;
-          }
-          if (map['scope'] != scopeKey) {
-            // Sanitised-filename collision, or a hand-edited file. Refuse it —
-            // serving another admin's tours is worse than serving none.
-            await file.delete();
-            return null;
-          }
-          return TourGraphSnapshot(
-            scopeKey: scopeKey,
-            savedAt: DateTime.tryParse('${map['saved_at']}') ?? DateTime.now(),
-            tours: [
-              for (final t in (map['tours'] as List? ?? const []))
-                if (t is Map) decodeTour(Map<String, dynamic>.from(t)),
-            ],
-            layoutKnownNullBusIds: {
-              for (final id in (map['layout_known_null'] as List? ?? const []))
-                if (id is String) id,
-            },
-          );
-        } catch (e, st) {
-          dev.log('cache unreadable, dropping: $e\n$st', name: 'TourCacheStore');
+        final parsed = await compute(
+          _parseSnapshotFile,
+          (path: file.path, scopeKey: scopeKey),
+        );
+        if (parsed.snapshot != null) return parsed.snapshot;
+        if (parsed.error != null) {
+          dev.log('cache unreadable, dropping: ${parsed.error}',
+              name: 'TourCacheStore');
           try {
             await file.delete();
           } catch (_) {
@@ -182,6 +168,11 @@ class TourCacheStore {
           }
           return null;
         }
+        // Wrong schema version, or a sanitised-filename collision / hand-edited
+        // file (scope mismatch). Refuse it — serving another admin's tours is
+        // worse than serving none.
+        await file.delete();
+        return null;
       });
 
   /// Replaces the cached graph for [TourGraphSnapshot.scopeKey].
@@ -191,20 +182,18 @@ class TourCacheStore {
   /// cold start reads as "no cache" — which is survivable — or, worse, as a
   /// short list of tours, which is not: a half-written graph rendered as if it
   /// were the whole graph is data loss the operator cannot see.
+  ///
+  /// The encode + write runs on a background isolate ([compute]) — the
+  /// debounced save fires 1.2 s after every change, so a main-isolate encode
+  /// was a recurring frame drop on a low-end phone mid-interaction.
   Future<void> write(TourGraphSnapshot snapshot) =>
       _serialisedVoid(() async {
         final file = await _fileFor(snapshot.scopeKey, create: true);
         if (file == null) return;
-        final payload = jsonEncode({
-          'schema': schemaVersion,
-          'scope': snapshot.scopeKey,
-          'saved_at': snapshot.savedAt.toIso8601String(),
-          'layout_known_null': snapshot.layoutKnownNullBusIds.toList(),
-          'tours': [for (final t in snapshot.tours) encodeTour(t)],
-        });
-        final tmp = File('${file.path}.tmp');
-        await tmp.writeAsString(payload, flush: true);
-        await tmp.rename(file.path);
+        await compute(
+          _encodeAndWriteSnapshot,
+          (path: file.path, snapshot: snapshot),
+        );
       });
 
   /// Drops EVERY cached scope, not just one.
@@ -219,6 +208,61 @@ class TourCacheStore {
         if (dir == null || !await dir.exists()) return;
         await dir.delete(recursive: true);
       });
+}
+
+/// Background-isolate body of [TourCacheStore.read]. Pure: reads [path] and
+/// parses it; never deletes. `snapshot` set = usable; `error` set = unreadable
+/// (corrupt / not JSON / bad shape); neither = refused (schema or scope
+/// mismatch). Both non-null outcomes mean the caller deletes the file.
+Future<({TourGraphSnapshot? snapshot, String? error})> _parseSnapshotFile(
+  ({String path, String scopeKey}) args,
+) async {
+  try {
+    final decoded = jsonDecode(await File(args.path).readAsString());
+    if (decoded is! Map) throw const FormatException('not an object');
+    final map = Map<String, dynamic>.from(decoded);
+    if (map['schema'] != TourCacheStore.schemaVersion) {
+      return (snapshot: null, error: null);
+    }
+    if (map['scope'] != args.scopeKey) {
+      return (snapshot: null, error: null);
+    }
+    return (
+      snapshot: TourGraphSnapshot(
+        scopeKey: args.scopeKey,
+        savedAt: DateTime.tryParse('${map['saved_at']}') ?? DateTime.now(),
+        tours: [
+          for (final t in (map['tours'] as List? ?? const []))
+            if (t is Map) decodeTour(Map<String, dynamic>.from(t)),
+        ],
+        layoutKnownNullBusIds: {
+          for (final id in (map['layout_known_null'] as List? ?? const []))
+            if (id is String) id,
+        },
+      ),
+      error: null,
+    );
+  } catch (e, st) {
+    return (snapshot: null, error: '$e\n$st');
+  }
+}
+
+/// Background-isolate body of [TourCacheStore.write]: encode, write a sibling
+/// temp file, rename it into place (atomic replace — see [TourCacheStore.write]).
+Future<void> _encodeAndWriteSnapshot(
+  ({String path, TourGraphSnapshot snapshot}) args,
+) async {
+  final snapshot = args.snapshot;
+  final payload = jsonEncode({
+    'schema': TourCacheStore.schemaVersion,
+    'scope': snapshot.scopeKey,
+    'saved_at': snapshot.savedAt.toIso8601String(),
+    'layout_known_null': snapshot.layoutKnownNullBusIds.toList(),
+    'tours': [for (final t in snapshot.tours) encodeTour(t)],
+  });
+  final tmp = File('${args.path}.tmp');
+  await tmp.writeAsString(payload, flush: true);
+  await tmp.rename(args.path);
 }
 
 /// The tour graph as it was when it was last known FRESH, plus the one piece of

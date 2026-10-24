@@ -22,6 +22,7 @@ import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/in_flight.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/search_debounce.dart';
 import '../utils/tour_detail_cockpit.dart';
 import '../widgets/tour_detail/tour_money_tab.dart';
 import '../widgets/tour_detail/tour_overview_cockpit.dart';

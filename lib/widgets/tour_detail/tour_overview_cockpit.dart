@@ -80,21 +80,31 @@ class TourOverviewVitals extends StatelessWidget {
     VoidCallback? goTab(int i) =>
         onSwitchTab == null ? null : () => onSwitchTab!(i);
 
-    String moneyDueLabel = '—';
-    String moneySub = '';
-    // The money controller holds ONE tour's rows at a time (often the
-    // dashboard hero's). Only read its summary when that tour is THIS one —
-    // otherwise another trip's money would show here; '—' is the honest
-    // "not loaded" state (same guard as the dashboard trip hero).
-    if (Get.isRegistered<MoneyController>()) {
-      final money = Get.find<MoneyController>();
-      if (money.loadedTourId == tour.id) {
-        final summary = money.tourSummary();
-        moneyDueLabel = Formatters.formatMoneyInr(summary.totalToCollect);
-        moneySub = tr('tour_detail.vitals_collected', namedArgs: {
-          'amount': Formatters.formatMoneyInr(summary.totalCollected),
-        });
+    Widget moneyVital() {
+      String moneyDueLabel = '—';
+      String moneySub = '';
+      // The money controller holds ONE tour's rows at a time (often the
+      // dashboard hero's). Only read its summary when that tour is THIS one —
+      // otherwise another trip's money would show here; '—' is the honest
+      // "not loaded" state (same guard as the dashboard trip hero).
+      if (Get.isRegistered<MoneyController>()) {
+        final money = Get.find<MoneyController>();
+        if (money.loadedTourId == tour.id) {
+          final summary = money.tourSummary();
+          moneyDueLabel = Formatters.formatMoneyInr(summary.totalToCollect);
+          moneySub = tr('tour_detail.vitals_collected', namedArgs: {
+            'amount': Formatters.formatMoneyInr(summary.totalCollected),
+          });
+        }
       }
+      return _VitalCard(
+        c: c,
+        label: tr('tour_detail.vitals_money_due'),
+        value: moneyDueLabel,
+        accent: false,
+        sub: moneySub.isEmpty ? null : moneySub,
+        onTap: goTab(3),
+      );
     }
 
     return Column(
@@ -116,14 +126,20 @@ class TourOverviewVitals extends StatelessWidget {
             ),
             const SizedBox(width: UgamSpacing.sm),
             Expanded(
-              child: _VitalCard(
-                c: c,
-                label: tr('tour_detail.vitals_money_due'),
-                value: moneyDueLabel,
-                accent: false,
-                sub: moneySub.isEmpty ? null : moneySub,
-                onTap: goTab(3),
-              ),
+              // Reactive on the money controller's own state: a collection,
+              // expense or ledger reload repaints this card by itself instead
+              // of waiting for some unrelated tour change to rebuild the tab.
+              // `isLoading`/`loadedOnce` are read explicitly because the ledger
+              // rollups (not Rx) land inside a load, which ends by flipping
+              // `isLoading` — that is the signal a ledger-only change emits.
+              child: Get.isRegistered<MoneyController>()
+                  ? Obx(() {
+                      final money = Get.find<MoneyController>();
+                      money.isLoading.value;
+                      money.loadedOnce.value;
+                      return moneyVital();
+                    })
+                  : moneyVital(),
             ),
           ],
         ),

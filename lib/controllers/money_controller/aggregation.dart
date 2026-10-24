@@ -82,7 +82,28 @@ mixin _MoneyAggregation on _MoneyControllerBase {
     );
   }
 
+  /// BILLED revenue for ONE bus — exactly the [_billedRevenues] entry for
+  /// [busId] (same fold, same order, so the same double), without pricing
+  /// every other bus of the tour to read one value.
+  double _billedRevenueFor(String busId) {
+    final tour = _loadedTour();
+    if (tour == null) return 0;
+    // Last match wins, mirroring the map literal [_billedRevenues] builds.
+    final bus = tour.buses.where((b) => b.id == busId).lastOrNull;
+    if (bus == null) return 0;
+    return tour.passengers.fold(0.0, (sum, p) => sum + bus.amountDueFor(p));
+  }
+
+  /// Memoized — see [_syncSummaryMemo] for the invalidation key. The result is
+  /// the same object until any money / ledger / tour input changes.
   BusMoneySummary summaryForBus(String busId) {
+    _syncSummaryMemo();
+    final cached = _busSummaryMemo[busId];
+    if (cached != null) return cached;
+    return _busSummaryMemo[busId] = _computeSummaryForBus(busId);
+  }
+
+  BusMoneySummary _computeSummaryForBus(String busId) {
     final bus = _busById()[busId];
     final rent = bus?.busPrice ?? _busRents()[busId] ?? 0;
     final includesFuel = bus?.rentIncludesFuel ?? true;
@@ -95,7 +116,7 @@ mixin _MoneyAggregation on _MoneyControllerBase {
       incomes: incomes.toList(),
       busRent: rent,
       rentIncludesFuel: includesFuel,
-      revenueBilled: _billedRevenues()[busId] ?? 0,
+      revenueBilled: _billedRevenueFor(busId),
       passengers: _tourPassengers(),
       dueForSeat: bus?.amountDueForSeat,
     );
@@ -165,7 +186,13 @@ mixin _MoneyAggregation on _MoneyControllerBase {
     return computed();
   }
 
+  /// Memoized — see [_syncSummaryMemo] for the invalidation key.
   TourMoneySummary tourSummary() {
+    _syncSummaryMemo();
+    return _tourSummaryMemo ??= _computeTourSummary();
+  }
+
+  TourMoneySummary _computeTourSummary() {
     if (_ledgerReady) {
       final busById = _busById();
       final knownIds = busById.keys.toSet();

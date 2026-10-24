@@ -200,5 +200,39 @@ void main() {
       expect(find.text('tour_detail.vitals_collected'), findsOneWidget);
       expect(find.text('—'), findsNothing);
     });
+
+    testWidgets(
+        'money due repaints on a money change with NO parent rebuild '
+        '(no stale money)', (tester) async {
+      useTallSurface(tester);
+      Get.put<TourController>(_FakeTourController());
+      final money = Get.put<MoneyController>(_moneyHoldingTourA());
+      final tourA = _tour('tA');
+      (Get.find<TourController>()).tours.assignAll([tourA]);
+
+      await tester.pumpWidget(
+        _boxHost(TourOverviewVitals(tour: tourA, c: UgamColors.dark)),
+      );
+      await tester.pump();
+      expect(find.text('₹1,500'), findsNothing);
+
+      // A rider pays ₹500 of ₹2,000: ₹1,500 still to collect. Nothing above
+      // the vitals rebuilds — only the money controller moved.
+      money.collections.add(Collection(
+        tourId: 'tA',
+        busId: 'b-tA',
+        passengerId: 'p2',
+        seatId: 'A2',
+        amountDue: 2000,
+        amountReceived: 500,
+      ));
+      await tester.pump();
+      expect(find.text('₹1,500'), findsOneWidget);
+
+      // And back: the collection is removed, the due goes with it.
+      money.collections.removeLast();
+      await tester.pump();
+      expect(find.text('₹1,500'), findsNothing);
+    });
   });
 }

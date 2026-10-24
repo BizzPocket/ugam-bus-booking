@@ -26,9 +26,9 @@ mixin _TourDiskCache on _TourCapacity {
 
   /// Coalesces cache writes. A single load fires phase-2 and then N layout
   /// merges; without this each one would re-encode and re-write the WHOLE
-  /// graph. Deliberately main-isolate: encoding ~100 kB of JSON costs a few ms,
-  /// where spawning an isolate to do it costs tens of ms on the low-end devices
-  /// this is meant to help.
+  /// graph. The encode itself runs off the main isolate ([TourCacheStore.write]):
+  /// a graph of a few full trips is ~0.5 MB of JSON, tens of ms on a low-end
+  /// phone, and the spawn happens off the UI thread.
   Timer? _cacheSaveDebounce;
 
   /// Scope key for the on-disk graph: the ADMIN's id, or null when there is no
