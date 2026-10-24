@@ -29,6 +29,7 @@ import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
+import '../utils/search_debounce.dart';
 import '../utils/tour_capacity.dart';
 import '../utils/wa_error_text.dart';
 import '../widgets/booking_capture_form.dart';
@@ -86,6 +87,11 @@ class _RequestsScreenState extends State<RequestsScreen> {
   bool _autoFilter = true;
   bool _searchVisible = false;
   String _query = '';
+
+  /// Search debounced only when the list being searched is big (> 50 rows);
+  /// [_searchableRows] is that list's size as of the last build.
+  final _searchDebounce = SearchDebouncer();
+  int _searchableRows = 0;
 
   // Which request row is expanded (single-open accordion). Null = all collapsed.
   String? _expandedId;
@@ -231,6 +237,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   void dispose() {
     _tabReentryWorker?.dispose();
     _searchCtrl.dispose();
+    _searchDebounce.dispose();
     _barShownN.dispose();
     super.dispose();
   }
@@ -249,6 +256,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
       _searchVisible = !_searchVisible;
       if (!_searchVisible) {
         _searchCtrl.clear();
+        _searchDebounce.cancel();
         _query = '';
       }
     });
@@ -438,9 +446,17 @@ class _RequestsScreenState extends State<RequestsScreen> {
                               hint: tr('requests.search_hint'),
                               controller: _searchCtrl,
                               autofocus: true,
-                              onChanged: (v) =>
-                                  setState(() => _query = v.trim()),
-                              onClear: () => setState(() => _query = ''),
+                              onChanged: (v) => _searchDebounce.run(
+                                v.trim(),
+                                _searchableRows,
+                                (q) {
+                                  if (mounted) setState(() => _query = q);
+                                },
+                              ),
+                              onClear: () {
+                                _searchDebounce.cancel();
+                                setState(() => _query = '');
+                              },
                             ),
                           )
                         : const SizedBox.shrink(),
@@ -589,6 +605,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
       _RequestFilter.assigned => assignedList,
     };
 
+    _searchableRows = base.length;
     final q = _query.toLowerCase();
     final filtered = q.isEmpty
         ? base
