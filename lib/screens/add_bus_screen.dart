@@ -558,9 +558,22 @@ class _AddBusScreenState extends State<AddBusScreen> {
     // Capacity advances only when the layout is buildable. The invalid
     // state is shown inline under the single-sofa stepper.
     1 => !_singleSofaInvalid,
-    2 => true,
+    2 => _bandsCoverEveryRow,
     _ => false,
   };
+
+  /// A bus is priced EITHER uniformly OR by bands, never a mix (owner,
+  /// 2026-10-25). In bands mode every row must sit in a band — a gap would
+  /// otherwise be priced from a leftover per-seat value (₹0.14 on one live
+  /// bus). Unknown layout (editing a bus whose grid has not loaded) can't be
+  /// checked here; [_save] re-checks once it has the real row count.
+  bool get _bandsCoverEveryRow {
+    if (_priceMode != _PriceMode.bands) return true;
+    if (_priceBands.isEmpty) return false;
+    final rows = _previewLayout?.rows;
+    if (rows == null) return true;
+    return PriceBand.uncoveredRows(_priceBands, rows).isEmpty;
+  }
 
   /// Pick this bus's departure time. Mirrors the tour-level time picker — the
   /// chosen [TimeOfDay] is held in [_departureTime] and serialized to canonical

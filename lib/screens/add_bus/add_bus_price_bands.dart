@@ -34,7 +34,7 @@ extension _PriceBandsEditor on _Step3PriceState {
         if (_uncoveredRowsLabel() case final gaps?) ...[
           const SizedBox(height: UgamSpacing.md),
           UgamCaveat(
-            tone: UgamCaveatTone.warm,
+            tone: UgamCaveatTone.danger,
             message: tr('add_bus.bands.uncovered', namedArgs: {'rows': gaps}),
           ),
         ],
@@ -50,17 +50,13 @@ extension _PriceBandsEditor on _Step3PriceState {
   }
 
   /// 1-based "3, 7–9" list of rows NO band covers, or null when every row is
-  /// banded (or the bus has no layout yet / no bands at all). Those rows fall
-  /// back to the uniform per-seat price, which bands mode no longer shows.
+  /// banded (or the bus has no layout yet). Bands mode cannot be saved while
+  /// this is non-null — see [PriceBand.uncoveredRows] and the Step-3 gate.
   String? _uncoveredRowsLabel() {
     final rows = _rowCount;
-    if (rows == null || rows <= 0 || _bands.isEmpty) return null;
-    final covered = List<bool>.filled(rows, false);
-    for (final b in _bands) {
-      for (var r = b.fromRow; r <= b.toRow; r++) {
-        if (r >= 0 && r < rows) covered[r] = true;
-      }
-    }
+    if (rows == null || rows <= 0) return null;
+    final gaps = PriceBand.uncoveredRows(_bands, rows).toSet();
+    final covered = [for (var r = 0; r < rows; r++) !gaps.contains(r)];
     final parts = <String>[];
     var r = 0;
     while (r < rows) {

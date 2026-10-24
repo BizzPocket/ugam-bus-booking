@@ -135,6 +135,12 @@ extension _AddBusSave on _AddBusScreenState {
         }
 
         final rowCount = newLayout?.rows ?? rearRowsRaw;
+        final bandsOnly = _priceMode == _PriceMode.bands;
+        if (bandsOnly && !_bandsCover(newLayout?.rows)) {
+          _update(() => _saving = false);
+          _forceRegenerate = false;
+          return;
+        }
         final rearRows = rearRowsRaw.clamp(0, rowCount);
         final updated = source.copyWith(
           name: slotLabel,
@@ -154,6 +160,9 @@ extension _AddBusSave on _AddBusScreenState {
           priceBands: _sanitizedBands(rowCount),
           layout: newLayout,
           totalSeatsLegacy: structuralChange ? _totalSeats : null,
+          // Bands mode prices by bands ALONE — no leftover per-type value may
+          // survive to price a row (EITHER uniform OR bands, never a mix).
+          clearSeatTypePrices: bandsOnly,
         );
         // `regenerate` is the editor's own record of whether it built a fresh
         // grid this save. Handing it to the controller keeps the "reused
@@ -174,8 +183,14 @@ extension _AddBusSave on _AddBusScreenState {
       }
 
       final layout = _generateLayout();
+      final bandsOnly = _priceMode == _PriceMode.bands;
+      if (bandsOnly && !_bandsCover(layout.rows)) {
+        _update(() => _saving = false);
+        _forceRegenerate = false;
+        return;
+      }
 
-      final rearRows = rearRowsRaw.clamp(0, layout.rows);
+      final rearRows = bandsOnly ? 0 : rearRowsRaw.clamp(0, layout.rows);
 
       final bus = Bus(
         name: slotLabel,
@@ -190,8 +205,8 @@ extension _AddBusSave on _AddBusScreenState {
         pricePerSeat: pricePerSeat,
         busPrice: busPrice,
         rentIncludesFuel: _rentIncludesFuel,
-        singleSofaPrice: singleSofaPrice,
-        doubleSofaPrice: doubleSofaPrice,
+        singleSofaPrice: bandsOnly ? null : singleSofaPrice,
+        doubleSofaPrice: bandsOnly ? null : doubleSofaPrice,
         rearRows: rearRows,
         rearPrice: rearRows == 0 ? null : rearPrice,
         priceBands: _sanitizedBands(layout.rows),
@@ -212,6 +227,21 @@ extension _AddBusSave on _AddBusScreenState {
       _forceRegenerate = false;
       if (mounted) _update(() => _saving = false);
     }
+  }
+
+  /// The save-time twin of [_bandsCoverEveryRow], against the layout the save
+  /// will actually write. False (with a toast) when bands mode leaves a row
+  /// unpriced or has no band at all.
+  bool _bandsCover(int? rows) {
+    final gaps = _priceBands.isEmpty
+        ? const [0]
+        : rows == null
+            ? const <int>[]
+            : PriceBand.uncoveredRows(_sanitizedBands(rows), rows);
+    if (gaps.isEmpty) return true;
+    _update(() => _currentStep = 2);
+    AppSnackBar.error(tr('add_bus.bands.must_cover_all'));
+    return false;
   }
 
   /// Clean the edited bands for persistence: drop bands with no price, normalise

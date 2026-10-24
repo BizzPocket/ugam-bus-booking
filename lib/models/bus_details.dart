@@ -40,6 +40,16 @@ class PriceBand {
     return row >= lo && row <= hi;
   }
 
+  /// 0-based rows of a [rowCount]-row bus that NO band in [bands] covers, in
+  /// order. A bus is priced EITHER from one uniform per-seat price OR by
+  /// bands — never a mix (owner, 2026-10-25) — so a bands-mode bus must leave
+  /// this empty before it can be saved; any row listed here would otherwise
+  /// fall back to a leftover per-seat price.
+  static List<int> uncoveredRows(Iterable<PriceBand> bands, int rowCount) => [
+        for (var r = 0; r < rowCount; r++)
+          if (!bands.any((b) => b.covers(r))) r,
+      ];
+
   Map<String, dynamic> toMap() => {
         'label': label,
         'fromRow': fromRow,
@@ -407,6 +417,10 @@ class Bus {
     BusLayout? layout,
     // `??` can't null a field — set this to drop the bus's handler pointer.
     bool clearHandlerPassengerId = false,
+    // Drops the per-seat-TYPE prices (single / double / seater) and the legacy
+    // rear zone: a bands-mode bus is priced by its bands alone, so leftover
+    // values from the uniform mode must not survive to price any row.
+    bool clearSeatTypePrices = false,
   }) {
     return Bus(
       id: id,
@@ -429,11 +443,15 @@ class Bus {
       rentIncludesFuel: rentIncludesFuel ?? this.rentIncludesFuel,
       boardingPoint: boardingPoint ?? this.boardingPoint,
       departureTime: departureTime ?? this.departureTime,
-      singleSofaPrice: singleSofaPrice ?? this.singleSofaPrice,
-      doubleSofaPrice: doubleSofaPrice ?? this.doubleSofaPrice,
-      seaterPrice: seaterPrice ?? this.seaterPrice,
-      rearRows: rearRows ?? this.rearRows,
-      rearPrice: rearPrice ?? this.rearPrice,
+      singleSofaPrice: clearSeatTypePrices
+          ? null
+          : singleSofaPrice ?? this.singleSofaPrice,
+      doubleSofaPrice: clearSeatTypePrices
+          ? null
+          : doubleSofaPrice ?? this.doubleSofaPrice,
+      seaterPrice: clearSeatTypePrices ? null : seaterPrice ?? this.seaterPrice,
+      rearRows: clearSeatTypePrices ? 0 : rearRows ?? this.rearRows,
+      rearPrice: clearSeatTypePrices ? null : rearPrice ?? this.rearPrice,
       priceBands: priceBands ?? this.priceBands,
       notes: notes ?? this.notes,
       layout: layout ?? this.layout,

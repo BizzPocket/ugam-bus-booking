@@ -847,7 +847,8 @@
       "add": "Add price band",
       "remove_semantic": "Remove price band",
       "rows_clamped_note": "Rows are clamped to the bus once it is built.",
-      "uncovered": "Row {rows} is in no band — it will use the plain per-seat price. Add a band to price it."
+      "uncovered": "Row {rows} is in no band. Every row needs a band before you can save — add one, or switch to one price for the whole bus.",
+      "must_cover_all": "Every row needs a price band. Add a band for the missing rows, or switch to one price for the whole bus."
     },
     "band_sheet": {
       "title_add": "Add price band",
@@ -882,7 +883,7 @@
       "same_label": "Same for all",
       "bands_label": "Price bands",
       "same_body": "Every seat costs the same. Single / double sofa prices are pre-filled from the base — change them only if those seats cost differently.",
-      "bands_body": "Charge specific rows a different per-person price. Any row without a band uses the per-seat price above."
+      "bands_body": "Price the bus by rows, per person. Every row must be in a band — a bus uses either one price or bands, never both."
     },
     "per_seat": {
       "auto_note": "Auto-filled from full bus price ÷ {seats} seats — tap to set your own."
