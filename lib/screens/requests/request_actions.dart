@@ -10,6 +10,10 @@ class _RequestActions {
 
   TourController get _tc => Get.find<TourController>();
 
+  /// In-flight key for [action] on THIS passenger. This class is rebuilt with
+  /// the row, so it cannot hold a `_busy` flag itself — see [InFlight].
+  String _key(String action) => 'request-$action:${passenger.id}';
+
   void openAssignment() {
     Get.toNamed(
       AppRoutes.seatAssignment,
@@ -21,14 +25,22 @@ class _RequestActions {
   /// fire the confirmation WhatsApp in the background. Per user request it no
   /// longer auto-navigates — it confirms + messages and stays on the list.
   Future<void> confirmAndSeat() async {
-    HapticFeedback.lightImpact();
-    await _tc.setConfirmed(tour.id, passenger.id, true);
-    unawaited(sendConfirmationMessage());
+    // A second Accept while the first confirm is still on the wire is dropped;
+    // the send below carries its own guard, so a tap that lands AFTER the
+    // confirm but during the send cannot fire a second message either.
+    await InFlight.run(_key('confirm'), () async {
+      HapticFeedback.lightImpact();
+      await _tc.setConfirmed(tour.id, passenger.id, true);
+      unawaited(sendConfirmationMessage());
+    });
   }
 
   /// Fires the Cloud `seat_allocation` confirmation template and toasts the
   /// outcome (surfacing Meta's rejection reason when the send fails).
-  Future<void> sendConfirmationMessage() async {
+  Future<void> sendConfirmationMessage() =>
+      InFlight.run(_key('confirm-wa'), _sendConfirmationMessage);
+
+  Future<void> _sendConfirmationMessage() async {
     try {
       final result = await WhatsAppOutbound().sendConfirmed(
         tour: tour,
@@ -66,7 +78,9 @@ class _RequestActions {
   /// Re-notify a passenger over WhatsApp: the full seat-allotment once seats are
   /// final, the lighter greeting before that, or the request-received deep-link
   /// when no seats exist yet.
-  Future<void> sendAck() async {
+  Future<void> sendAck() => InFlight.run(_key('ack'), _sendAck);
+
+  Future<void> _sendAck() async {
     if (passenger.assignedSeats.isNotEmpty) {
       try {
         final result =
@@ -173,6 +187,20 @@ class _RequestActions {
     required String bodyKey,
     required String titleKey,
     required String waFailedKey,
+  }) =>
+      InFlight.run(
+        _key('remove'),
+        () => _removeAndNotifyOnce(
+          bodyKey: bodyKey,
+          titleKey: titleKey,
+          waFailedKey: waFailedKey,
+        ),
+      );
+
+  Future<void> _removeAndNotifyOnce({
+    required String bodyKey,
+    required String titleKey,
+    required String waFailedKey,
   }) async {
     await _tc.removePassenger(tour.id, passenger.id);
     var waFailed = false;
@@ -252,8 +280,10 @@ class _CardActions extends StatelessWidget {
   /// the dedicated confirm template — NOT the assign-stage `seat_allotment`
   /// "seat confirmed" message that _sendAck sends once seats exist.
   Future<void> _confirm() async {
-    await _ctrl.setConfirmed(tour.id, passenger.id, true);
-    await _sendConfirmationMessage();
+    await InFlight.run(_act._key('confirm'), () async {
+      await _ctrl.setConfirmed(tour.id, passenger.id, true);
+      await _sendConfirmationMessage();
+    });
   }
 
   Future<void> _sendConfirmationMessage() => _act.sendConfirmationMessage();

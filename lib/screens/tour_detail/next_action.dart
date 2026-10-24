@@ -132,8 +132,11 @@ void _runKind(
           builder: (context) => NotifyScreen(tourId: tour.id),
         ),
       );
+    // Both completions are guarded across the confirm dialog AND the write: a
+    // second tap while a slow 2G write is still running used to open a second
+    // dialog and run the completion (snapshot, archive, notify) twice.
     case _NextActionKind.completeGoLeg:
-      () async {
+      InFlight.run('tour-complete-go:${tour.id}', () async {
         final ctrl = Get.find<TourController>();
         final n = ctrl.outboundOnlyActiveCount(tour.id);
         final ok = await UgamDialog.confirm(
@@ -149,9 +152,9 @@ void _runKind(
           AppSnackBar.success(tr('tour_detail.complete_go_done',
               namedArgs: {'count': '$cleared'}));
         }
-      }();
+      });
     case _NextActionKind.markCompleted:
-      () async {
+      InFlight.run('tour-complete:${tour.id}', () async {
         final ok = await UgamDialog.confirm(
           context,
           title: tr('tour_detail.complete_confirm_title'),
@@ -162,7 +165,7 @@ void _runKind(
         if (ok) {
           await Get.find<TourController>().completeTour(tour.id);
         }
-      }();
+      });
     case _NextActionKind.addReturnTicket:
       // Return phase: book a new return-only ticket past the lock gate. Uses the
       // overlay context since this dispatcher is a top-level function.

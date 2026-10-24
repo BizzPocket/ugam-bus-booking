@@ -147,6 +147,11 @@ class OccupantActionSheet extends StatefulWidget {
 
 class _OccupantActionSheetState extends State<OccupantActionSheet> {
   int _idx = 0;
+
+  /// A priority / handler toggle is in flight. The sheet stays open across the
+  /// write, so a second tap on a slow link used to flip it straight back (or
+  /// stack set-handler behind remove-handler).
+  bool _busy = false;
   TourController get _ctrl => Get.find<TourController>();
   Passenger get _occ => widget.occupants[_idx];
 
@@ -228,33 +233,45 @@ class _OccupantActionSheetState extends State<OccupantActionSheet> {
   /// first (reuses the shared priority alert); turning it OFF is direct. The
   /// sheet stays open and re-renders the new state via [setState].
   Future<void> _togglePriority() async {
-    final occ = _liveOcc;
-    final approved = occ.isPriorityApproved;
-    if (!approved) {
-      final ok = await UgamDialog.confirm(
-        context,
-        title: tr('priority.alert_title'),
-        message: tr('priority.alert_msg'),
-        cancelLabel: tr('app.action.cancel'),
-        confirmLabel: tr('priority.alert_confirm'),
-        confirmIcon: Icons.star_rounded,
-      );
-      if (!ok) return;
+    if (_busy) return;
+    _busy = true;
+    try {
+      final occ = _liveOcc;
+      final approved = occ.isPriorityApproved;
+      if (!approved) {
+        final ok = await UgamDialog.confirm(
+          context,
+          title: tr('priority.alert_title'),
+          message: tr('priority.alert_msg'),
+          cancelLabel: tr('app.action.cancel'),
+          confirmLabel: tr('priority.alert_confirm'),
+          confirmIcon: Icons.star_rounded,
+        );
+        if (!ok) return;
+      }
+      await _ctrl.setPassengerPriority(widget.tourId, occ.id, !approved);
+    } finally {
+      _busy = false;
+      if (mounted) setState(() {});
     }
-    await _ctrl.setPassengerPriority(widget.tourId, occ.id, !approved);
-    if (mounted) setState(() {});
   }
 
   /// Make this occupant the handler of the bus the seat sits on, or step them
   /// down if they already handle it. The sheet stays open and re-renders.
   Future<void> _toggleHandler() async {
-    final occ = _occ;
-    if (_isHandlerOfThisBus) {
-      await _ctrl.removeBusHandler(widget.tourId, widget.busId);
-    } else {
-      await _ctrl.setBusHandler(widget.tourId, widget.busId, occ.id);
+    if (_busy) return;
+    _busy = true;
+    try {
+      final occ = _occ;
+      if (_isHandlerOfThisBus) {
+        await _ctrl.removeBusHandler(widget.tourId, widget.busId);
+      } else {
+        await _ctrl.setBusHandler(widget.tourId, widget.busId, occ.id);
+      }
+    } finally {
+      _busy = false;
+      if (mounted) setState(() {});
     }
-    if (mounted) setState(() {});
   }
 
   /// Close this sheet, then hand control to [then] (the caller's flow).

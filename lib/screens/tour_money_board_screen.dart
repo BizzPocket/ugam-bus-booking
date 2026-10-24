@@ -14,6 +14,7 @@ import '../models/tour.dart';
 import '../services/chart_hold_status.dart';
 import '../utils/app_snackbar.dart';
 import '../utils/formatters.dart';
+import '../utils/in_flight.dart';
 import '../widgets/cash_so_far_line.dart';
 import '../widgets/money_loading_skeleton.dart';
 import 'bus_money_screen.dart';
