@@ -46,8 +46,11 @@ class _BusMoneyRow extends StatelessWidget {
         // has to work. A handover still DUE keeps the rose `warm` tint: that
         // is an open obligation on the operator, attention without alarm.
         hasHandoverDue ? UgamCardTone.warm : UgamCardTone.none,
+        // "Still to hand over", not "Handover": the stat box below already
+        // says "Handover" for what HAS been handed over, and the two numbers
+        // under one label read as a contradiction.
         hasHandoverDue
-            ? tr('tour_money_board.handover')
+            ? tr('tour_money_board.outstanding_handover')
             : tr('tour_money_board.to_collect'),
         hasHandoverDue ? summary.outstandingHandover : summary.toCollectTotal,
         hasHandoverDue ? c.warm : c.ink,
