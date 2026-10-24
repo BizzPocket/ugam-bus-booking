@@ -244,10 +244,16 @@ class SeatChartPdf {
   /// Feature 2: for each bus this passenger occupies, build a single-bus page
   /// with their seats highlighted and rasterise it to a PNG (~150 dpi). Returns
   /// one PNG per occupied bus (usually one).
+  ///
+  /// [maxImages] stops once that many PNGs exist — the WhatsApp send attaches
+  /// only the FIRST, so rasterising a second bus's ~8.7 MB bitmap for it was
+  /// pure peak memory on a low-end phone. The images returned are the same
+  /// leading ones a full render would produce.
   static Future<List<Uint8List>> buildPassengerChartImages({
     required Tour tour,
     required Passenger passenger,
     required ChartFooter footer,
+    int? maxImages,
   }) async {
     // Group the passenger's assigned seats by bus.
     final seatsByBus = <String, Set<String>>{};
@@ -263,6 +269,7 @@ class SeatChartPdf {
 
     final images = <Uint8List>[];
     for (final busId in seatsByBus.keys) {
+      if (maxImages != null && images.length >= maxImages) break;
       // Skip buses no longer on the tour (stale assignment).
       if (!tour.buses.any((b) => b.id == busId)) continue;
 
