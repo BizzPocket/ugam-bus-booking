@@ -16,15 +16,25 @@ class _OverviewTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final action = _nextActionFor(tour);
+    final card = _NextActionCard(
+      tour: tour,
+      action: action,
+      c: c,
+      onSwitchTab: onSwitchTab,
+    );
 
     return SliverList(
       delegate: SliverChildListDelegate.fixed([
-        _NextActionCard(
-          tour: tour,
-          action: action,
-          c: c,
-          onSwitchTab: onSwitchTab,
-        ),
+        // An un-hydrated tour has no buses yet — its "Add a bus" next step is
+        // only true once the roster has answered.
+        if (action.kind == _NextActionKind.addBus)
+          TourRosterGate(
+            tourId: tour.id,
+            loading: const UgamSkeleton(height: 120, radius: UgamRadius.card),
+            empty: card,
+          )
+        else
+          card,
         const SizedBox(height: UgamSpacing.lg),
         TourOverviewVitals(tour: tour, c: c, onSwitchTab: onSwitchTab),
         const SizedBox(height: UgamSpacing.lg),

@@ -14,7 +14,18 @@ class _BusesTab extends StatelessWidget {
       return SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.only(top: UgamSpacing.lg),
-          child: UgamEmpty(
+          // "No buses" only once the roster has actually answered: an archived
+          // tour still hydrating (or whose hydrate failed) is not empty.
+          child: TourRosterGate(
+            tourId: tour.id,
+            loading: const Column(
+              children: [
+                UgamSkeleton(height: 72, radius: UgamRadius.card),
+                SizedBox(height: UgamSpacing.md),
+                UgamSkeleton(height: 96, radius: UgamRadius.card),
+              ],
+            ),
+            empty: UgamEmpty(
             icon: Icons.directions_bus_outlined,
             title: tr('tour_detail.no_buses_title'),
             body: tr('tour_detail.no_buses_body'),
@@ -26,6 +37,7 @@ class _BusesTab extends StatelessWidget {
                   builder: (context) => AddBusScreen(tourId: tour.id),
                 ),
               ),
+            ),
             ),
           ),
         ),

@@ -11,11 +11,13 @@ import '../models/passenger.dart';
 import '../models/tour.dart';
 import '../models/tour_status.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/in_flight.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/time_format.dart';
 import '../utils/admin_handler_operate.dart';
 import '../utils/tour_capacity.dart';
+import '../widgets/tour_roster_gate.dart';
 import 'add_bus_screen.dart';
 import 'bus_status_screen.dart';
 
@@ -204,13 +206,18 @@ class ManageBusesScreen extends StatelessWidget {
                 onTap: () async {
                   Navigator.of(ctx).pop();
                   if (isCurrent) return;
-                  await _tourCtrl.setBusHandler(tour.id, bus.id, p.id);
-                  AppSnackBar.success(
-                    tr(
-                      'bus_handler.set_done',
-                      namedArgs: {'name': p.displayName},
-                    ),
-                  );
+                  // One handler write per bus at a time: the sheet closes on
+                  // tap, so a re-opened picker must not stack a second write
+                  // behind a slow first one.
+                  await InFlight.run('bus-handler:${bus.id}', () async {
+                    await _tourCtrl.setBusHandler(tour.id, bus.id, p.id);
+                    AppSnackBar.success(
+                      tr(
+                        'bus_handler.set_done',
+                        namedArgs: {'name': p.displayName},
+                      ),
+                    );
+                  });
                 },
               );
             }),
@@ -223,8 +230,10 @@ class ManageBusesScreen extends StatelessWidget {
                 expand: true,
                 onPressed: () async {
                   Navigator.of(ctx).pop();
-                  await _tourCtrl.removeBusHandler(tour.id, bus.id);
-                  AppSnackBar.success(tr('bus_handler.remove_done'));
+                  await InFlight.run('bus-handler:${bus.id}', () async {
+                    await _tourCtrl.removeBusHandler(tour.id, bus.id);
+                    AppSnackBar.success(tr('bus_handler.remove_done'));
+                  });
                 },
               ),
             ],
@@ -261,13 +270,15 @@ class ManageBusesScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = UgamColors.of(context);
-    // Layouts deferred on cold start for 2G — coalesced / idempotent.
-    // ignore: unawaited_futures
-    _tourCtrl.ensureTourReadyForSeating(tourId);
 
     return UgamScaffold(
       body: SafeArea(
-        child: Obx(() {
+        // Roster + layouts (deferred on cold start for 2G), fetched ONCE per
+        // open. It used to be fired from this build, so a failed read re-sent
+        // itself on every rebuild.
+        child: EnsureTourReady(
+          tourId: tourId,
+          child: Obx(() {
           final tour = _tourCtrl.getTour(tourId);
 
           // The app bar is rendered on EVERY path now. It used to be inside the
@@ -339,7 +350,13 @@ class ManageBusesScreen extends StatelessWidget {
               const SizedBox(height: UgamSpacing.sm),
               Expanded(
                 child: tour.buses.isEmpty
-                    ? UgamEmpty(
+                    // "No buses · Add bus" only once the roster has answered —
+                    // while hydrating, or after it failed, this tour may well
+                    // have buses, and the CTA would add a duplicate.
+                    ? TourRosterGate(
+                        tourId: tourId,
+                        loading: const _BusListSkeleton(),
+                        empty: UgamEmpty(
                         icon: Icons.directions_bus_outlined,
                         title: tr('manage_buses.empty_title'),
                         body: tr('manage_buses.empty_body'),
@@ -353,6 +370,7 @@ class ManageBusesScreen extends StatelessWidget {
                                 onPressed: () => _openAddBus(context),
                               )
                             : null,
+                      ),
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(
@@ -394,6 +412,7 @@ class ManageBusesScreen extends StatelessWidget {
             ],
           );
         }),
+        ),
       ),
       // Add-bus CTA — hidden once the tour is locked/completed (seats still
       // editable elsewhere; bus layout is frozen) and while the list is empty,

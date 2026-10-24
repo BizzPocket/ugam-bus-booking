@@ -183,28 +183,38 @@ class _BoardScreenState extends State<BoardScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      // Layouts are lazily fetched (a whole-row write once nulled them), so the
-      // Board asks for them explicitly rather than assuming the tour it was
-      // handed is chart-ready.
-      final tourCtrl = _tours;
-      final moneyCtrl = _money;
-      final hydrate = <Future<void>>[
-        if (tourCtrl != null) tourCtrl.ensureTourReadyForSeating(widget.tourId),
-        if (moneyCtrl != null) moneyCtrl.loadForTour(widget.tourId),
-      ];
-      unawaited(
-        Future.wait(hydrate)
-            // A FAILED load still ends the wait. The controllers surface their
-            // own error; all this flag decides is whether the Board is still
-            // expecting an answer, and a dropped connection that pinned it on
-            // the skeleton forever would be a worse lie than the empty state.
-            .catchError((Object _) => <void>[])
-            .whenComplete(() {
-              if (!mounted) return;
-              setState(() => _hydrating = false);
-            }),
-      );
+      _hydrate();
     });
+  }
+
+  /// Layouts are lazily fetched (a whole-row write once nulled them), so the
+  /// Board asks for them explicitly rather than assuming the tour it was
+  /// handed is chart-ready. Also the retry behind [_failed].
+  void _hydrate() {
+    final tourCtrl = _tours;
+    final moneyCtrl = _money;
+    final hydrate = <Future<void>>[
+      if (tourCtrl != null) tourCtrl.ensureTourReadyForSeating(widget.tourId),
+      if (moneyCtrl != null) moneyCtrl.loadForTour(widget.tourId),
+    ];
+    unawaited(
+      Future.wait(hydrate)
+          // A FAILED load still ends the wait. All this flag decides is whether
+          // the Board is still expecting an answer; a failed roster read is
+          // told apart from a genuinely empty tour by the controller's
+          // [TourController.rosterStateOf], so it lands on the retry state —
+          // never on "no bus · Add bus".
+          .catchError((Object _) => <void>[])
+          .whenComplete(() {
+            if (!mounted) return;
+            setState(() => _hydrating = false);
+          }),
+    );
+  }
+
+  void _retryHydrate() {
+    setState(() => _hydrating = true);
+    _hydrate();
   }
 
   @override
@@ -456,11 +466,17 @@ class _BoardScreenState extends State<BoardScreen> {
           // an unresolved tour (or a tour whose buses have not arrived) is a
           // skeleton, never the error-shaped empty state.
           if (tour == null) {
-            return _hydrating ? _loading(null) : _empty(_EmptyKind.noTour, null);
+            if (_hydrating) return _loading(null);
+            // The tour list itself failed to load: "no such tour" is not the
+            // answer, "couldn't load" is.
+            return _tours?.hasError.value == true
+                ? _failed(null)
+                : _empty(_EmptyKind.noTour, null);
           }
           if (tour.buses.isEmpty) {
-            return _hydrating
-                ? _loading(tour)
+            if (_hydrating) return _loading(tour);
+            return _tours?.rosterStateOf(tour.id) == TourRosterState.failed
+                ? _failed(tour)
                 : _empty(_EmptyKind.noBus, tour);
           }
 
@@ -716,6 +732,24 @@ class _BoardScreenState extends State<BoardScreen> {
               ),
             ),
           ),
+        ),
+      ),
+    ],
+  );
+
+  /// The roster (or the tour list) could not be read. Same chrome as the empty
+  /// state, with the shared retry in place of the verdict.
+  Widget _failed(Tour? tour) => Column(
+    children: [
+      UgamAppBar(
+        title: tour?.title ?? tr('board_screen.title'),
+        eyebrow: tour == null ? null : tr('board_screen.title'),
+      ),
+      Expanded(
+        child: UgamEmpty.error(
+          onRetry: tour == null
+              ? () => _tours?.refreshTours()
+              : _retryHydrate,
         ),
       ),
     ],

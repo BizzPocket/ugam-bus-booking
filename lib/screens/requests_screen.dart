@@ -27,6 +27,7 @@ import '../services/whatsapp_outbound.dart';
 import '../services/whatsapp_service.dart';
 import '../utils/app_nav.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/in_flight.dart';
 import '../utils/passenger_display.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/tour_capacity.dart';
@@ -439,11 +440,31 @@ class _RequestsScreenState extends State<RequestsScreen> {
                   ),
                   Expanded(
                     child: activeTours.isEmpty
-                        ? UgamEmpty(
-                            icon: Icons.chat_bubble_outline_rounded,
-                            title: tr('requests.empty_no_tours.title'),
-                            body: tr('requests.empty_no_tours.body'),
-                          )
+                        // "No tours" is a verdict only once the list has
+                        // answered: on a first load, or after it failed, the
+                        // agent's tours are simply not here YET.
+                        ? (tourCtrl.isLoading.value
+                            ? ListView(
+                                physics: const NeverScrollableScrollPhysics(),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: UgamSpacing.gutter,
+                                ),
+                                children: [
+                                  for (var i = 0; i < 5; i++) ...[
+                                    const UgamSkeleton.row(),
+                                    const SizedBox(height: UgamSpacing.sm),
+                                  ],
+                                ],
+                              )
+                            : tourCtrl.hasError.value
+                                ? UgamEmpty.error(
+                                    onRetry: () => tourCtrl.refreshTours(),
+                                  )
+                                : UgamEmpty(
+                                    icon: Icons.chat_bubble_outline_rounded,
+                                    title: tr('requests.empty_no_tours.title'),
+                                    body: tr('requests.empty_no_tours.body'),
+                                  ))
                         : _buildBody(activeTours, selectedTour!, c),
                   ),
                 ],
@@ -479,11 +500,19 @@ class _RequestsScreenState extends State<RequestsScreen> {
                           // passenger back to Confirmed where decline lives.
                           canDecline:
                               _filter != _RequestFilter.assigned,
-                          onWaitlist: () => _bulkWaitlist(selectedTour),
-                          onPromote: () => _bulkPromote(selectedTour),
-                          onConfirm: () => _bulkConfirm(selectedTour),
-                          onSendWA: () => _bulkSendWA(selectedTour),
-                          onDecline: () => _bulkDecline(selectedTour),
+                          // ONE bulk action per tour at a time: a second tap
+                          // on a slow link re-ran the whole loop — a second
+                          // confirmation WhatsApp to every selected rider.
+                          onWaitlist: () => _bulkOnce(
+                              selectedTour, () => _bulkWaitlist(selectedTour)),
+                          onPromote: () => _bulkOnce(
+                              selectedTour, () => _bulkPromote(selectedTour)),
+                          onConfirm: () => _bulkOnce(
+                              selectedTour, () => _bulkConfirm(selectedTour)),
+                          onSendWA: () => _bulkOnce(
+                              selectedTour, () => _bulkSendWA(selectedTour)),
+                          onDecline: () => _bulkOnce(
+                              selectedTour, () => _bulkDecline(selectedTour)),
                           onCancel: _exitSelection,
                         )
                       : (hasRequests

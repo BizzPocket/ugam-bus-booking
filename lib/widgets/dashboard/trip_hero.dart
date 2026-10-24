@@ -33,6 +33,7 @@ class DashboardTripHero extends StatefulWidget {
 class _DashboardTripHeroState extends State<DashboardTripHero> {
   String? _selectedId;
   String? _moneyLoadedFor;
+  String? _readyRequestedFor;
 
   List<Tour> _upcoming(List<Tour> tours) {
     // Active (non-completed) tours, soonest departure first. We don't drop
@@ -66,6 +67,29 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
     });
   }
 
+  /// Layouts deferred on 2G cold start — warm the hero tour so the seat meter
+  /// upgrades from the legacy approximation to the precise grid. Once per
+  /// selected tour and post-frame: this used to run inside the `Obx` on every
+  /// rebuild, so a failed read re-sent itself each time the dashboard ticked.
+  void _ensureReady(String tourId) {
+    if (_readyRequestedFor == tourId) return;
+    _readyRequestedFor = tourId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !Get.isRegistered<TourController>()) return;
+      Get.find<TourController>()
+          .ensureTourReadyForSeating(tourId)
+          .catchError((Object _) {});
+    });
+  }
+
+  /// Re-read the hero tour's money after a failed load. [_ensureMoney] latches
+  /// per tour, so without this the hero kept its failure until a tour switch.
+  void _retryMoney(String tourId) {
+    if (!Get.isRegistered<MoneyController>()) return;
+    // ignore: unawaited_futures
+    Get.find<MoneyController>().loadForTour(tourId);
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = widget.c;
@@ -79,10 +103,7 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
           upcoming.where((t) => t.id == _selectedId).firstOrNull ??
               upcoming.first;
       _ensureMoney(tour.id);
-      // Layouts deferred on 2G cold start — warm the hero tour so the seat
-      // meter upgrades from the legacy approximation to the precise grid.
-      // ignore: unawaited_futures
-      tourCtrl.ensureTourReadyForSeating(tour.id);
+      _ensureReady(tour.id);
       final cap = tourCtrl.capacityFor(tour);
 
       // Picker merged into the hero header — the separate picker card repeated
@@ -106,7 +127,15 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
     final blocker = _topAction(tour, cap);
     final isReturn = tour.isReturnPhase;
     final pnl = _isPnlMode(tour);
-    final m = money.loadedTourId == tour.id ? money.tourSummary() : null;
+    // Only a SUCCESSFUL read is money to show. `loadedTourId` flips to the new
+    // tour before its fetch, so reading the summary on that alone painted a
+    // ₹0 P&L while loading — and kept it after a failed read, for good.
+    final moneyHeld = money.loadedTourId == tour.id && money.loadedOnce.value;
+    final m = moneyHeld ? money.tourSummary() : null;
+    final moneyFailed = !moneyHeld &&
+        money.loadedTourId == tour.id &&
+        money.loadFailed.value &&
+        !money.isLoading.value;
 
     return UgamCard.plain(
       padding: const EdgeInsets.all(UgamSpacing.xl),
@@ -185,7 +214,9 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
           const SizedBox(height: UgamSpacing.md),
           // Lower panel: seat-fill gauge while filling, inline P&L once the
           // tour is locked and its departure date has arrived.
-          if (pnl)
+          if (pnl && moneyFailed)
+            _moneyFailedLine(c, tour)
+          else if (pnl)
             _pnlBreakdown(c, m, tour)
           else
             _seatGauge(c, tour, Get.find<TourController>().seatMeterFor(tour)),
@@ -356,6 +387,32 @@ class _DashboardTripHeroState extends State<DashboardTripHero> {
         Align(
           alignment: Alignment.centerRight,
           child: CashSoFarLine(value: m.totalNet),
+        ),
+      ],
+    );
+  }
+
+  /// The P&L panel when the money read failed: say so and offer the retry,
+  /// instead of a ₹0 revenue / ₹0 profit that reads as "this trip made nothing".
+  Widget _moneyFailedLine(UgamColorSet c, Tour tour) {
+    return Row(
+      children: [
+        Icon(Icons.cloud_off_rounded, size: 16, color: c.ink3),
+        const SizedBox(width: UgamSpacing.sm),
+        Expanded(
+          child: Text(
+            tr('errors.load_failed'),
+            style: UgamText.caption.copyWith(color: c.ink2),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: UgamSpacing.sm),
+        UgamButton(
+          label: tr('actions.retry'),
+          icon: Icons.refresh_rounded,
+          kind: UgamButtonKind.ghost,
+          onPressed: () => _retryMoney(tour.id),
         ),
       ],
     );

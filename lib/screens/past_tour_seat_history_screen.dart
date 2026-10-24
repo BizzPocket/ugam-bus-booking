@@ -53,6 +53,11 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
   bool _loading = true;
   List<TourSeatSnapshot> _snapshots = const [];
 
+  /// The snapshot read failed, or the roster it is drawn on could not be
+  /// hydrated. Either way an empty list here means "couldn't read", and the
+  /// live-chart fallback would show a past tour's RECYCLED seats as history.
+  bool _failed = false;
+
   /// Selected leg when both snapshots exist. Defaults to outbound (GO).
   SnapshotLeg _leg = SnapshotLeg.outbound;
 
@@ -62,29 +67,46 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
     _load();
   }
 
+  Future<void> _retry() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    await _load();
+  }
+
   Future<void> _load() async {
     // An archived tour's roster + bus layouts are not loaded at cold start, and
     // both the snapshot sections (keyed to the live bus layout) and the live
     // fallback chart need them. Loaded alongside the snapshots so a deep link
     // straight here never renders an empty chart for a tour that has one.
     // Best-effort: a failure degrades to whatever is already in memory.
+    var hydrateFailed = false;
     final ready = _ctrl.ensureTourReadyForSeating(widget.tourId).catchError((
       Object e,
       StackTrace st,
     ) {
+      hydrateFailed = true;
       dev.log('past-tour hydrate failed: $e\n$st', name: 'PastTourSeatHistory');
     });
     try {
       await ready;
-      final snaps = await _ctrl.loadSeatSnapshots(widget.tourId);
+      final load = await _ctrl.loadSeatSnapshotsResult(widget.tourId);
       if (!mounted) return;
-      setState(() => _snapshots = snaps);
+      // A hydrate failure only matters when nothing of the roster is held —
+      // a tour already in memory still draws its snapshots.
+      final rosterMissing = hydrateFailed &&
+          _ctrl.rosterStateOf(widget.tourId) != TourRosterState.ready;
+      setState(() {
+        _snapshots = load.snapshots;
+        _failed = (load.failed && load.snapshots.isEmpty) || rosterMissing;
+      });
     } catch (e, st) {
       dev.log(
         'past-tour snapshot load failed: $e\n$st',
         name: 'PastTourSeatHistory',
       );
-      // Fall through to the live/empty fallback in _body with an empty list.
+      if (mounted) setState(() => _failed = true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -118,6 +140,10 @@ class _PastTourSeatHistoryScreenState extends State<PastTourSeatHistoryScreen> {
   Widget _body(UgamColorSet c, Tour? tour) {
     if (_loading) {
       return _loadingSkeleton();
+    }
+
+    if (_failed) {
+      return UgamEmpty.error(onRetry: _retry);
     }
 
     if (tour == null) {

@@ -17,11 +17,11 @@ import 'package:occubusbooking/screens/past_tour_seat_history_screen.dart';
 /// Test double for [TourController] mirroring the screen-test idiom (see
 /// tour_groups_screen_test.dart / seats_screen_test.dart): [onInit] is a no-op
 /// so registering it does NOT start the real `_loadTours` + realtime
-/// subscription, and [loadSeatSnapshots] returns CONTROLLED data instead of
+/// subscription, and [loadSeatSnapshotsResult] returns CONTROLLED data instead of
 /// touching Supabase. The live `Bus` layouts the screen pairs each snapshot bus
 /// to are seeded via `tours` (read back by the real `getTour`).
 class _FakeTourController extends TourController {
-  /// Snapshots [loadSeatSnapshots] hands back, keyed by tourId.
+  /// Snapshots [loadSeatSnapshotsResult] hands back, keyed by tourId.
   final Map<String, List<TourSeatSnapshot>> snapshotsByTour;
 
   _FakeTourController({this.snapshotsByTour = const {}});
@@ -32,9 +32,21 @@ class _FakeTourController extends TourController {
     // Intentionally empty: skip the real network load + realtime wiring.
   }
 
+  /// Tours whose snapshot read should report FAILED (and how many times).
+  final Map<String, int> failReads = {};
+  int reads = 0;
+
+  // The screen reads [loadSeatSnapshotsResult] (which [loadSeatSnapshots]
+  // delegates to), so that is the seam the double controls.
   @override
-  Future<List<TourSeatSnapshot>> loadSeatSnapshots(String tourId) async {
-    return snapshotsByTour[tourId] ?? const [];
+  Future<SeatSnapshotLoad> loadSeatSnapshotsResult(String tourId) async {
+    reads++;
+    final left = failReads[tourId] ?? 0;
+    if (left > 0) {
+      failReads[tourId] = left - 1;
+      return (snapshots: const <TourSeatSnapshot>[], failed: true);
+    }
+    return (snapshots: snapshotsByTour[tourId] ?? const [], failed: false);
   }
 }
 
@@ -184,5 +196,43 @@ void main() {
     expect(find.text('Live Occupant'), findsOneWidget);
     // No toggle in the fallback path.
     expect(find.byType(UgamTabPills), findsNothing);
+  });
+
+  testWidgets(
+      'a FAILED snapshot read shows the retry state, not the live chart, and '
+      'Retry reads again', (tester) async {
+    final seatId = _firstSeatId();
+    // A past tour with a live rider on the seat. Before the fix a failed read
+    // came back as "no snapshot" and painted this LIVE (recycled) seating as
+    // the tour's history — and was cached, so it never asked again.
+    final ctrl = _FakeTourController(snapshotsByTour: {
+      't1': [
+        _snapshot(SnapshotLeg.outbound,
+            seatId: seatId, occupantName: 'Asha Outbound'),
+      ],
+    });
+    ctrl.failReads['t1'] = 1;
+    Get.put<TourController>(ctrl);
+    ctrl.tours.assignAll([
+      _fakeTour(passengers: [
+        _passenger('Live Occupant', 't1', assigned: [
+          SeatAssignment(busId: 'b1', seatId: seatId),
+        ]),
+      ]),
+    ]);
+
+    await tester.pumpWidget(_harness());
+    await tester.pumpAndSettle();
+
+    expect(find.text('actions.retry'), findsOneWidget);
+    expect(find.text('seat_history.fallback_note'), findsNothing);
+    expect(find.text('Live Occupant'), findsNothing);
+
+    await tester.tap(find.text('actions.retry'));
+    await tester.pumpAndSettle();
+
+    expect(ctrl.reads, 2);
+    expect(find.text('Asha Outbound'), findsOneWidget);
+    expect(find.text('actions.retry'), findsNothing);
   });
 }

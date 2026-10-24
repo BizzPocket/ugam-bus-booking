@@ -20,11 +20,13 @@ import '../services/whatsapp_service.dart';
 import '../utils/app_nav.dart';
 import '../utils/formatters.dart';
 import '../utils/app_snackbar.dart';
+import '../utils/in_flight.dart';
 import '../utils/phone_dialer.dart';
 import '../utils/tour_detail_cockpit.dart';
 import '../widgets/tour_detail/tour_money_tab.dart';
 import '../widgets/tour_detail/tour_overview_cockpit.dart';
 import '../widgets/handler_alerts_strip.dart';
+import '../widgets/tour_roster_gate.dart';
 import 'add_bus_screen.dart';
 import 'add_return_ticket_sheet.dart';
 import 'edit_tour_screen.dart';
@@ -111,7 +113,10 @@ class _TourDetailScreenState extends State<TourDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       // Roster + seat layouts (layouts are deferred on cold start for 2G).
-      Get.find<TourController>().ensureTourReadyForSeating(widget.tourId);
+      // A failure is surfaced by the tabs' [TourRosterGate] retry state.
+      Get.find<TourController>()
+          .ensureTourReadyForSeating(widget.tourId)
+          .catchError((Object _) {});
     });
   }
 

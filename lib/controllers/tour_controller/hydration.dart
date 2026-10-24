@@ -7,9 +7,49 @@ mixin _TourHydration on _TourDiskCache {
   final _hydrationsInFlight = <String, Future<void>>{};
   final _layoutFetchesInFlight = <String, Future<void>>{};
 
+  /// Tours whose last on-demand roster hydrate FAILED (and has not since
+  /// succeeded). Reactive, so a screen's `Obx` flips from skeleton to its retry
+  /// state the moment the read gives up — `_hydratedTourIds` is a plain set and
+  /// a failure never touches `tours`, so nothing else would rebuild it.
+  final _hydrationFailedTourIds = <String>{}.obs;
+
   /// True once [tourId]'s roster has actually been fetched. A screen can use
   /// this to show a loading state instead of an empty roster.
   bool isTourHydrated(String tourId) => _hydratedTourIds.contains(tourId);
+
+  /// Whether a screen may believe [tourId]'s roster — and so whether "no
+  /// buses" is a verdict or merely "not loaded yet".
+  ///
+  /// An un-hydrated archived tour arrives with EMPTY passengers and buses, so
+  /// without this the tour detail, Manage buses, seat assignment and Board all
+  /// painted "No buses — Add bus" while the read was in flight and, worse,
+  /// after it had failed — inviting the agent to add a duplicate bus to a tour
+  /// that already has three. Read inside an `Obx`: it touches `tours` and the
+  /// reactive failure set.
+  TourRosterState rosterStateOf(String tourId) {
+    if (_hydratedTourIds.contains(tourId)) return TourRosterState.ready;
+    final local = getTour(tourId);
+    // Same shortcut [ensureTourHydrated] takes: a roster already in memory is
+    // one the agent can act on.
+    if (local != null &&
+        (local.passengers.isNotEmpty || local.buses.isNotEmpty)) {
+      return TourRosterState.ready;
+    }
+    if (_hydrationFailedTourIds.contains(tourId)) return TourRosterState.failed;
+    return TourRosterState.loading;
+  }
+
+  /// Retry surface for [TourRosterState.failed]: re-runs the roster + layout
+  /// read. Never throws — a second failure simply lands back on the retry
+  /// state via [rosterStateOf].
+  Future<void> retryTourHydration(String tourId) async {
+    try {
+      await ensureTourReadyForSeating(tourId);
+    } catch (e, st) {
+      dev.log('hydrate retry failed for $tourId: $e\n$st',
+          name: 'TourController');
+    }
+  }
 
   /// Loads passengers/buses/groups for [tourId] if cold start skipped them.
   ///
@@ -40,7 +80,18 @@ mixin _TourHydration on _TourDiskCache {
     final existing = _hydrationsInFlight[tourId];
     if (existing != null) return existing;
 
-    final future = _hydrateTour(tourId).whenComplete(() {
+    // A new attempt is "loading" again, not still "failed": the retry state
+    // must give way to the skeleton while the read is actually in flight.
+    _hydrationFailedTourIds.remove(tourId);
+    final future = _hydrateTour(tourId).catchError((Object e, StackTrace st) {
+      // Only a roster that never arrived is a failure. The layout read that
+      // follows a successful roster merge can still throw, and that is the
+      // chart's own "loading" problem ([layoutsLoadedFor]), not "no buses".
+      if (!_hydratedTourIds.contains(tourId)) {
+        _hydrationFailedTourIds.add(tourId);
+      }
+      Error.throwWithStackTrace(e, st);
+    }).whenComplete(() {
       _hydrationsInFlight.remove(tourId);
     });
     _hydrationsInFlight[tourId] = future;
