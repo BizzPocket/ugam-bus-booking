@@ -103,6 +103,22 @@ void main() {
         'handlerSummaries=${_avgMicros(50, money.handlerSummaries).toStringAsFixed(0)}us '
         'computeTourCapacity=${_avgMicros(20, () => computeTourCapacity(tour)).toStringAsFixed(0)}us '
         'actualCapacity=${_avgMicros(50, () => computeActualCapacity(tour)).toStringAsFixed(0)}us');
+    // COLD: every call after an input change (the memo is dropped first) — the
+    // cost of the first read after a write, i.e. the un-memoized compute.
+    // ignore: avoid_print
+    print('BENCH cold '
+        'tourSummary=${_avgMicros(50, () {
+          money.collections.refresh();
+          money.tourSummary();
+        }).toStringAsFixed(0)}us '
+        'summariesForBuses=${_avgMicros(50, () {
+          money.collections.refresh();
+          money.summariesForBuses(tour.buses.map((b) => b.id));
+        }).toStringAsFixed(0)}us '
+        'oneBus=${_avgMicros(50, () {
+          money.collections.refresh();
+          money.summaryForBus('b0');
+        }).toStringAsFixed(0)}us');
   });
 }
 

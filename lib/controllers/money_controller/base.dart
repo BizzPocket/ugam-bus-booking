@@ -6,6 +6,18 @@ part of '../money_controller.dart';
 /// mixins (one file per concern under `money_controller/`), each declared
 /// `on` the one before it, so a concern may call anything defined earlier.
 abstract class _MoneyControllerBase extends GetxController {
+  _MoneyControllerBase() {
+    // Every mutation of a money list invalidates the memoized summaries. GetX
+    // notifies listeners synchronously (GetStream), so the very next summary
+    // read after `collections.add(...)` already sees the bumped revision.
+    // Subscribed here, not in onInit, so a controller that is constructed but
+    // never `Get.put` (tests, benches) is just as safe.
+    collections.listen((_) => _invalidateSummaries());
+    expenses.listen((_) => _invalidateSummaries());
+    handovers.listen((_) => _invalidateSummaries());
+    incomes.listen((_) => _invalidateSummaries());
+  }
+
   /// Ledger read seam, injected through [MoneyController]'s constructor.
   LedgerMoneySource get _ledgerSource;
 
@@ -13,6 +25,68 @@ abstract class _MoneyControllerBase extends GetxController {
   final expenses = <Expense>[].obs;
   final handovers = <BusHandover>[].obs;
   final incomes = <IncomeEntry>[].obs;
+
+  // ── Summary memo ──────────────────────────────────────────
+  //
+  // [summaryForBus] / [tourSummary] are pure functions of: the four money
+  // lists, the ledger rollups (+ online figure), which tour is loaded, and the
+  // loaded [Tour] object (buses, fares, passengers, seats). The money board and
+  // Trip P&L read them 2–3× per frame, so they are memoized.
+  //
+  // Invalidation — stale money is worse than slow money, so the key is
+  // deliberately redundant:
+  //  * [_summaryRevision] is bumped by a listener on every money-list change
+  //    and by every ledger write ([_invalidateSummaries]);
+  //  * the loaded [Tour] is compared by IDENTITY — [Tour] and everything it
+  //    holds is immutable and TourController replaces the object on every
+  //    tour/bus/passenger/seat change, so a new object means new inputs;
+  //  * the loaded tour id, ledger-ready flag, ledger online figure and the four
+  //    list lengths are compared too, as a belt-and-braces guard.
+  int _summaryRevision = 0;
+  int _memoRevision = -1;
+  Tour? _memoTour;
+  String? _memoTourId;
+  bool _memoLedgerReady = false;
+  double? _memoLedgerOnline;
+  (int, int, int, int)? _memoLengths;
+  final Map<String, BusMoneySummary> _busSummaryMemo = {};
+  TourMoneySummary? _tourSummaryMemo;
+
+  /// Drops every memoized summary. Called on any money-list change and on any
+  /// write to the ledger rollups.
+  void _invalidateSummaries() {
+    _summaryRevision++;
+    _busSummaryMemo.clear();
+    _tourSummaryMemo = null;
+  }
+
+  /// Makes the memo describe the CURRENT inputs, clearing it when any part of
+  /// the key moved. Call before reading or writing the memo.
+  void _syncSummaryMemo() {
+    final tour = _loadedTour();
+    final lengths = (
+      collections.length,
+      expenses.length,
+      handovers.length,
+      incomes.length,
+    );
+    if (_memoRevision == _summaryRevision &&
+        identical(_memoTour, tour) &&
+        _memoTourId == _loadedTourId &&
+        _memoLedgerReady == _ledgerReady &&
+        _memoLedgerOnline == _ledgerOnline &&
+        _memoLengths == lengths) {
+      return;
+    }
+    _busSummaryMemo.clear();
+    _tourSummaryMemo = null;
+    _memoRevision = _summaryRevision;
+    _memoTour = tour;
+    _memoTourId = _loadedTourId;
+    _memoLedgerReady = _ledgerReady;
+    _memoLedgerOnline = _ledgerOnline;
+    _memoLengths = lengths;
+  }
   final paymentClaims = <PaymentClaim>[].obs;
 
   /// Pending chart soft-holds (advance checkout). Cleared on each tour load.
