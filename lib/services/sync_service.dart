@@ -123,6 +123,18 @@ class SyncService extends GetxService {
 
   SupabaseClient get _client => SupabaseService.instance.client;
 
+  /// The signed-in admin's auth uid, or null when nobody is signed in (or the
+  /// client isn't initialised, e.g. in tests). RLS only lets an admin change
+  /// rows whose `owner_id` is this uid — callers check it up front so a write
+  /// the database would silently skip (0 rows, no error) is refused visibly.
+  String? get currentUserId {
+    try {
+      return _client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Effective per-page read timeout for the current radio.
   @visibleForTesting
   Duration get readTimeout =>

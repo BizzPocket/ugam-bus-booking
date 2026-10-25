@@ -2721,7 +2721,8 @@
     "dismiss_cancel": "Could not dismiss the cancellation request.",
     "save_income": "Could not save income. {e}",
     "delete_income": "Could not delete income. {e}",
-    "no_connection_try_again": "Couldn't reach the server. Check your connection and try again."
+    "no_connection_try_again": "Couldn't reach the server. Check your connection and try again.",
+    "delete_tour_not_owner": "This trip belongs to another admin account, so it can't be deleted from here. Sign in as that admin to delete it."
   },
   "enums": {
     "seat_type": {

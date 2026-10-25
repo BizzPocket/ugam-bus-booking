@@ -108,10 +108,27 @@ mixin _TourLifecycle on _TourHydration {
   }
 
   Future<void> deleteTour(String id) async {
+    final tour = getTour(id);
+
+    // RLS lets an admin archive only tours whose owner_id is their own uid. A
+    // soft delete is an UPDATE with no RETURNING, so on someone else's tour the
+    // database matches 0 rows and reports SUCCESS — the trip vanished from the
+    // screen, then came back on refresh. Refuse it up front, before the
+    // optimistic remove, and say why. (Live: a second admin account owns four
+    // tours the other admin can see but never delete.)
+    final owner = tour?.ownerId;
+    final me = _sync.currentUserId;
+    if (owner != null && me != null && owner != me) {
+      AppSnackBar.error(
+        tr('errors.delete_tour_not_owner'),
+        title: tr('errors.delete_tour'),
+      );
+      return;
+    }
+
     // Snapshot returning-customer memory (priority + travel companions) BEFORE
     // the tour — and its cascade-deleted passenger rows — are gone. Best-effort:
     // never block a delete on the memory write.
-    final tour = getTour(id);
     if (tour != null && Get.isRegistered<CustomerMemoryController>()) {
       try {
         await Get.find<CustomerMemoryController>().captureFromTour(tour);
